@@ -16,6 +16,7 @@ open only the relevant technical page.
 | Accuracy-first NCU protocol | [Declared SM86 NCU accuracy protocol](sm86_ncu_accuracy_protocol_v1.json) · [Protocol schema](sm86_ncu_accuracy_protocol_v1.schema.json) |
 | A8 live-campaign plan | [Accuracy-first A8 plan](../plans/accuracy_first_live_campaign_a8_20261002.md) · [bounded-run schema](sm86_workload_run_v1.schema.json) |
 | Completion frontier program | [Writeback/coherence and native-dispatch plan](../plans/sm86_completion_frontier_and_native_dispatch_20261002.md) |
+| Completion frontier contract | `sm86_completion_frontier_contract_v1.json` · `tools/report_sm86_completion_frontier.py` |
 | NCU identity capture | [Identity schema](sm86_ncu_identity_v1.schema.json) · `tools/capture_sm86_ncu_identity.py` |
 | NCU campaign preflight | [Preflight schema](sm86_ncu_campaign_preflight_v1.schema.json) · `tools/preflight_sm86_ncu_campaign.py` |
 | First accuracy campaign | `sm86_accuracy_campaign_v1_{manifest,predictions_pre_ncu,observations_post_ncu,evaluation_join,repetition_summary}.json` |

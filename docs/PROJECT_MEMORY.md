@@ -279,6 +279,12 @@ open before finite interval coverage is possible. The full 15-row live
 campaign is deferred until a vertical tail-completion case earns a finite
 upper; no native macro dispatch is currently observed.
 
+C0 of that program is complete. `docs/sm86_completion_frontier_contract_v1.json`
+separates issue, SM-active, visibility, writeback, coherence, and NCU
+frontiers; `tools/report_sm86_completion_frontier.py` reports finite eligibility
+only when all declared tails are closed. The A8 vertical report remains open
+for dirty writeback and coherence. C1 is the active next milestone.
+
 ## Retained evidence
 
 The 2026-09-30 cold/warm campaigns completed 15/15 workloads on RTX 3090 Ti / SM86,

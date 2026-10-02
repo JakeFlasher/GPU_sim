@@ -471,3 +471,7 @@ The follow-on completion-frontier program is recorded in
 the broad roster campaign until a live tail-completion case can either earn a
 finite upper or produce a precise refusal, and until the native witness path
 has a real production dispatch falsifier.
+
+C0 of the completion-frontier program is now implemented. The machine-readable
+contract and diagnostic report keep dirty writeback/coherence open and do not
+consume NCU targets; C1 begins the live tail microbenchmark matrix.

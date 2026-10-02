@@ -1,0 +1,59 @@
+{
+  "schema": "sm86_completion_frontier_contract_v1",
+  "status": "active_research_contract",
+  "architecture": "sm_86",
+  "target_endpoint": {
+    "name": "ncu_grid_completion_semaphore",
+    "metric": "gpc__cycles_elapsed.max",
+    "clock_domain": "gpc_cycles",
+    "unit": "cycles",
+    "semantics": "longest_GPC_elapsed_interval_between_profiler_triggers"
+  },
+  "frontiers": [
+    {"name": "issue", "meaning": "last modeled issue or dispatch event"},
+    {"name": "sm_active", "meaning": "architecture_scoped_SM_active_observation_frontier"},
+    {"name": "visibility", "meaning": "defined_fence_atomic_async_wait_or_kernel_boundary_visibility"},
+    {"name": "writeback", "meaning": "dirty_cache_sector_service_completion"},
+    {"name": "coherence", "meaning": "cross_SM_owner_invalidation_service_completion"},
+    {"name": "ncu", "meaning": "declared_NCU_GPC_elapsed_observer_endpoint"}
+  ],
+  "tail_classes": [
+    "reduction_read_modify_write",
+    "dirty_writeback",
+    "coherence",
+    "async_copy_shared_visibility"
+  ],
+  "finite_upper_requirements": [
+    "complete_unsampled_launch_and_block_coverage",
+    "decoded_store_atomic_reduction_addresses_masks_and_multiplicity",
+    "cache_line_generation_and_temporal_fence_order_when_ownership_is_used",
+    "finite_writeback_capacity_service_interval_and_completion_event",
+    "finite_coherence_ownership_service_interval_and_completion_event",
+    "async_copy_commit_wait_and_completion_tokens",
+    "drained_event_response_write_ack_writeback_and_coherence_queues",
+    "explicit_mapping_from_modeled_frontier_to_ncu_endpoint"
+  ],
+  "open_policy": {
+    "unknown_tail": "upper_open",
+    "unknown_ownership": "upper_open",
+    "unknown_order": "upper_open",
+    "unknown_completion_token": "upper_open",
+    "ncu_observation_without_model_upper": "not_finite_interval_coverage"
+  },
+  "measurement_contract": {
+    "replay_mode": "application",
+    "cache_policy": "all",
+    "clock_control": "none",
+    "repetitions": 5,
+    "mechanism_metrics": [
+      "gpu__time_duration",
+      "sm__cycles_active",
+      "sm__inst_executed.sum",
+      "lts__t_sectors_srcunit_tex_op_read.sum",
+      "dram__sectors_read.sum",
+      "dram__sectors_write.sum"
+    ],
+    "ncu_is_independent_target": true,
+    "ncu_values_may_not_tune_same_scored_row": true
+  }
+}

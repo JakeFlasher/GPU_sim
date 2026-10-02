@@ -187,6 +187,11 @@ asynchronous-copy tails before a finite upper or production native dispatch
 is claimed. The broad 15-row campaign is deferred until its vertical
 tail-completion case succeeds.
 
+C0 of that program is complete: the endpoint/tail contract and diagnostic
+frontier report are schema-checked and report the A8 vertical row as open for
+`dirty_writeback` and `coherence`; the NCU target is not consumed. C1 is now
+the active research milestone: live tail microbenchmarks.
+
 The first A5 preflight correctly rejected the dirty checkout; after the
 coherent implementation was committed and rebuilt, independent identity and
 preflight passed. The first collection command retained a historical launch

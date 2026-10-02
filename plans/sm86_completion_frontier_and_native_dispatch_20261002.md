@@ -133,8 +133,8 @@ missing simulator state field for that same row.
 
 | Stage | Focus | Exit evidence | Status |
 |---|---|---|---|
-| C0 | Endpoint and tail contract | A machine-readable contract separates `T_issue`, `T_visibility`, `T_writeback`, `T_coherence`, and `T_ncu`; finite-upper conditions are schema-checked | **active** |
-| C1 | Live tail microbenchmark matrix | Native correctness, NVBit trace, simulator replay, and repeated NCU observations exist for clean stores, dirty stores, atomics/reductions, cross-SM sharing, fences, and async-copy waits | **planned** |
+| C0 | Endpoint and tail contract | A machine-readable contract separates `T_issue`, `T_visibility`, `T_writeback`, `T_coherence`, and `T_ncu`; finite-upper conditions are schema-checked | **complete** |
+| C1 | Live tail microbenchmark matrix | Native correctness, NVBit trace, simulator replay, and repeated NCU observations exist for clean stores, dirty stores, atomics/reductions, cross-SM sharing, fences, and async-copy waits | **active** |
 | C2 | Trace sufficiency and independent witness | NVBit-derived tail facts are independently extracted and every missing ownership/order/completion domain produces an explicit refusal | **planned** |
 | C3 | Writeback/coherence service model | Model-local queues, capacities, service intervals, and completion tokens produce finite bounds only on closed cases and remain open otherwise | **planned** |
 | C4 | Mechanism-local calibration | Service intervals are fitted on a disjoint calibration set using mechanism observations; scored rows never feed their own parameters | **planned** |
@@ -324,9 +324,16 @@ visibility, writeback, coherence, and NCU elapsed-cycle frontiers. The broad
 15-row campaign is intentionally deferred; no new measurements were collected
 in this planning milestone.
 
-### C0 — endpoint and tail contract — active
+### C0 — endpoint and tail contract — complete
 
 The next implementation seam is the machine-readable completion-frontier
 contract and report. Its first live falsifier is a small store/fence or
 async-copy visibility case whose tail can be independently observed before any
 attempt is made to claim dirty-writeback or coherence closure.
+
+Implemented `docs/sm86_completion_frontier_contract_v1.json` and its schema,
+plus `tools/report_sm86_completion_frontier.py`. The diagnostic report for the
+A8 vertical simulator output identifies one open launch with
+`dirty_writeback` and `coherence` dimensions; it does not consume NCU values
+and does not treat the finite GPC envelope field as a finite completion upper.
+Focused report tests pass (`3 passed`). C1 is now active.
