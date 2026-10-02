@@ -93,6 +93,11 @@ R9.1 attempted the guarded witness/dispatcher path. The native canary has no
 complete independent witness, so the run records zero native macro dispatches
 and exact fallback throughout; the positive production fixture remains open.
 
+R9.2 completed the two-pass witness audit negatively: no complete typed
+pre/effect/post pair exists in the bounded canary, so self-derived witness
+construction is rejected. The required positive falsifier is documented in the
+R9 plan and remains open.
+
 ## Retained measurements
 
 2026-09-30 RTX 3090 Ti campaigns used driver 615.71.09, 1350/10501 MHz, P0,

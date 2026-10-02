@@ -110,6 +110,9 @@ from profiler measurements; black-box models are assumptions, not observations.
   complete independent witness, so it records zero macro dispatches and exact
   fallback throughout; a positive production fixture remains the next open
   falsifier.
+- R9.2 completed the two-pass witness audit negatively: no complete typed
+  pre/effect/post pair exists in the bounded canary, so self-derived witness
+  construction is rejected. The required positive falsifier remains open.
 
 ## Next useful work
 

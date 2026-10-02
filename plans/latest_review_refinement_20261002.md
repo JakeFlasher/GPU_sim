@@ -44,9 +44,14 @@ R9.0 is complete: the canary boundary now preserves unresolved owner/queue
 joins as unknown and the bounded executable terminates with exact fallback.
 R8.2 production macro dispatch remains open.
 
-R9.1 is the active loop: the optional witness/dispatcher path may be exercised
-only when a complete independent typed boundary is supplied; ordinary native
-canaries must remain exact fallback with zero dispatches.
+R9.1 and R9.2 are complete negative loops: the optional witness/dispatcher path
+is exercised only when a complete independent typed boundary is supplied; the
+ordinary native canary remains exact fallback with zero dispatches, and no
+complete two-pass witness exists yet.
+
+R9.2 is complete as a negative witness audit: the bounded canary contains no
+complete typed entry/effect/exit pair, so no self-derived witness is admitted.
+The next positive falsifier is explicit and remains open.
 
 ## Stage ledger
 
@@ -61,6 +66,7 @@ canaries must remain exact fallback with zero dispatches.
 | R8.6 | Independent evaluation and paper synchronization | New tests/probes, negative results, novelty/prior-art boundary, histories, memory, status, schemas, and rebuttal all agree; full validation passes | **complete** |
 | R9.0 | Native canary queue/response closure | The bounded reference canary terminates with explicit unknown owner/queue state; complete boundaries and macro dispatch remain zero unless independently closed | **complete** |
 | R9.1 | Production witness dispatch attempt | A complete independent witness reaches the real event loop and proves continuation, or the canary records precise no-witness/refusal evidence without a native claim | **complete: no positive native fixture** |
+| R9.2 | Two-pass witness/continuation audit | A complete independent pre/effect/post witness exists and drives one production dispatch, or the corpus records no eligible pair and exact fallback | **complete: no eligible pair** |
 
 ## R8.1 — immediate soundness guards
 
@@ -401,3 +407,16 @@ and explicit unknowns remain authoritative.
   a complete witness matching a real event must produce one dispatch and an
   identical detailed continuation, while a perturbed witness must fallback
   before mutation.
+
+## R9.2 implementation evidence (complete 2026-10-02; witness blocker)
+
+- The bounded native canary contains no complete typed entry/effect/exit pair.
+  Its front-end/cache/response state remains incomplete, so deriving a witness
+  from the same stream would violate the independent-witness contract.
+- The corrected canary terminates with 10,033 records including its footer,
+  zero complete boundaries, zero dispatches, and exact fallback throughout.
+- The exact positive falsifier is fixed: supply a separately produced complete
+  pre-boundary, internal effect ledger, and region-end boundary whose
+  continuation state matches the real `SmCore` event. One matching event must
+  dispatch once; perturbing any entry/effect/pending/exit field must fallback
+  before mutation. No current artifact satisfies that falsifier.

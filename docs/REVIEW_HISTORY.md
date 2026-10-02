@@ -261,3 +261,8 @@ bounded native canary had no complete independent witness, so the guarded run
 recorded zero native macro dispatches and exact fallback throughout. The
 positive production fixture remains open; the required falsifier is a matching
 complete witness that dispatches once and preserves detailed continuation.
+
+R9.2 audited the two-pass witness requirement. No complete typed
+pre/effect/post pair exists in the bounded canary, so constructing a witness
+from the same detailed stream is rejected as self-certification. The positive
+production falsifier remains explicit and unclaimed.
