@@ -10556,17 +10556,25 @@ impl<'a> SmCore<'a> {
             // sufficient to resume the next issue transition exactly.
             reasons.push("dependency_barrier_ownership".to_owned());
         }
-        if self
-            .immediate_constant_cache
-            .as_ref()
-            .is_some_and(|caches| {
-                caches.iter().any(|cache| {
-                    cache.sets.iter().any(|set| !set.is_empty())
-                        || !cache.pending.is_empty()
-                        || cache.next_service != 0
-                        || !cache.diagnostics.is_empty()
-                })
+        let future_constant_path = self.warps.iter().any(|warp| {
+            warp.insts.get(warp.next..).is_some_and(|remaining| {
+                remaining
+                    .iter()
+                    .any(|instruction| self.is_constant_path_pc(u64::from(instruction.pc)))
             })
+        });
+        if future_constant_path
+            && self
+                .immediate_constant_cache
+                .as_ref()
+                .is_some_and(|caches| {
+                    caches.iter().any(|cache| {
+                        cache.sets.iter().any(|set| !set.is_empty())
+                            || !cache.pending.is_empty()
+                            || cache.next_service != 0
+                            || !cache.diagnostics.is_empty()
+                    })
+                })
         {
             reasons.push("immediate_constant_cache_state".to_owned());
         }

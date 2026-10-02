@@ -9,8 +9,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Completeness, TypedEventBoundaryRecord, TypedEventIdentity, TypedObservationContract,
-    TypedPendingEvent,
+    Completeness, PowerDomainStatus, TypedEventBoundaryRecord, TypedEventIdentity,
+    TypedEventPayload, TypedObservationContract, TypedPendingEvent,
 };
 
 pub const TRANSFORM_SCHEMA_VERSION: u32 = 2;
@@ -200,6 +200,182 @@ pub struct TypedRegionContract {
     pub exit: TypedEventBoundaryRecord,
 }
 
+/// Narrow typed transition used to exercise the native-boundary contract. It
+/// deliberately accepts only a single closed warp with no front-end/cache/
+/// response state, so its exit can be derived without copying a detailed exit.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TypedScalarMacroSpec {
+    pub instruction_count: u64,
+    pub latency_cycles: u64,
+    pub label: String,
+}
+
+pub fn derive_typed_scalar_macro_region(
+    entry: &TypedEventBoundaryRecord,
+    spec: &TypedScalarMacroSpec,
+) -> Result<TypedRegionContract, RegionContractError> {
+    if spec.instruction_count == 0 || spec.latency_cycles == 0 || spec.label.trim().is_empty() {
+        return Err(RegionContractError::UnsupportedScalarMacro {
+            reason: "nonzero_instruction_count_latency_and_label_required".to_owned(),
+        });
+    }
+    entry
+        .validate_structure()
+        .map_err(|error| RegionContractError::Boundary {
+            side: NativeBoundarySide::Summary,
+            error: error.to_string(),
+        })?;
+    if entry.completeness != Completeness::Complete
+        || entry.cores.len() != 1
+        || !entry.queue.pending.is_empty()
+    {
+        return Err(RegionContractError::UnsupportedScalarMacro {
+            reason: "entry_must_have_one_complete_core_and_no_pending_events".to_owned(),
+        });
+    }
+    let mut exit = entry.clone();
+    let duration = spec
+        .instruction_count
+        .checked_mul(spec.latency_cycles)
+        .ok_or(RegionContractError::ScalarMacroArithmeticOverflow)?;
+    let end_time = entry
+        .event
+        .time
+        .checked_add(duration)
+        .ok_or(RegionContractError::ScalarMacroArithmeticOverflow)?;
+    let end_sequence = entry
+        .event
+        .sequence
+        .checked_add(spec.instruction_count + 1)
+        .ok_or(RegionContractError::ScalarMacroArithmeticOverflow)?;
+    let core = exit
+        .cores
+        .first_mut()
+        .ok_or(RegionContractError::UnsupportedScalarMacro {
+            reason: "core_missing".to_owned(),
+        })?;
+    if core.warp_states.len() != 1
+        || core.warp_states[0].done
+        || !core.warp_states[0].instruction_buffer.is_empty()
+        || core.warp_states[0]
+            .barrier_pending
+            .iter()
+            .any(|&pending| pending != 0)
+        || core.outstanding_responses != 0
+        || !core.response_owners.is_empty()
+    {
+        return Err(RegionContractError::UnsupportedScalarMacro {
+            reason: "future_relevant_warp_or_response_state_is_not_closed".to_owned(),
+        });
+    }
+    core.issued = core
+        .issued
+        .checked_add(spec.instruction_count)
+        .ok_or(RegionContractError::ScalarMacroArithmeticOverflow)?;
+    core.cycle = end_time;
+    core.warp_states[0].next_instruction = core.warp_states[0]
+        .next_instruction
+        .checked_add(spec.instruction_count)
+        .ok_or(RegionContractError::ScalarMacroArithmeticOverflow)?;
+    core.warp_states[0].front_end_fetch_cursor = core.warp_states[0]
+        .front_end_fetch_cursor
+        .checked_add(spec.instruction_count)
+        .ok_or(RegionContractError::ScalarMacroArithmeticOverflow)?;
+    core.warp_states[0].eligible = end_time;
+    for domain in &mut exit.power.domains {
+        domain.status = PowerDomainStatus::Clocked;
+        domain.clocked_cycles = domain
+            .clocked_cycles
+            .checked_add(duration)
+            .ok_or(RegionContractError::ScalarMacroArithmeticOverflow)?;
+        domain.completion_events = domain
+            .completion_events
+            .checked_add(spec.instruction_count)
+            .ok_or(RegionContractError::ScalarMacroArithmeticOverflow)?;
+        domain.last_cycle = end_time;
+    }
+    exit.event = TypedEventIdentity {
+        time: end_time,
+        sequence: end_sequence,
+        sequence_span: 1,
+        phase: entry.event.phase,
+        target: entry.event.target,
+        payload: TypedEventPayload::SmWake,
+    };
+    exit.queue.next_event_time = None;
+    exit.queue.next_sequence = Some(
+        end_sequence
+            .checked_add(1)
+            .ok_or(RegionContractError::ScalarMacroArithmeticOverflow)?,
+    );
+    let mut effects = Vec::with_capacity(
+        usize::try_from(spec.instruction_count)
+            .map_err(|_| RegionContractError::ScalarMacroArithmeticOverflow)?,
+    );
+    for index in 1..=spec.instruction_count {
+        effects.push(TypedEventTransition {
+            phase: entry.event.phase,
+            event: TypedEventIdentity {
+                time: entry
+                    .event
+                    .time
+                    .checked_add(
+                        index
+                            .checked_mul(spec.latency_cycles)
+                            .ok_or(RegionContractError::ScalarMacroArithmeticOverflow)?,
+                    )
+                    .ok_or(RegionContractError::ScalarMacroArithmeticOverflow)?,
+                sequence: entry
+                    .event
+                    .sequence
+                    .checked_add(index)
+                    .ok_or(RegionContractError::ScalarMacroArithmeticOverflow)?,
+                sequence_span: 1,
+                phase: entry.event.phase,
+                target: entry.event.target,
+                payload: TypedEventPayload::SmWake,
+            },
+        });
+    }
+    TypedRegionContract::new(
+        entry.contract.clone(),
+        TransformInterval {
+            start_cycle: entry.event.time,
+            end_cycle: end_time,
+            start_sequence: entry.event.sequence,
+            end_sequence,
+            sequence_ordered: true,
+        },
+        entry.clone(),
+        effects,
+        exit.queue.pending.clone(),
+        vec![spec.label.clone()],
+        exit,
+    )
+}
+
+/// Execute the typed scalar macro seam against an independently produced
+/// detailed continuation. The returned path is what a native dispatcher would
+/// consume; callers must use `ExactReplay` for every rejected contract.
+pub fn execute_typed_scalar_macro(
+    entry: &TypedEventBoundaryRecord,
+    spec: &TypedScalarMacroSpec,
+    detailed_effects: &[TypedEventTransition],
+    detailed_labels: &[String],
+    detailed_exit: &TypedEventBoundaryRecord,
+) -> Result<NativeBoundaryExecutionPath, RegionContractError> {
+    let summary = derive_typed_scalar_macro_region(entry, spec)?;
+    let decision = compare_native_region_contract_with_trace(
+        Some(&summary),
+        entry,
+        detailed_effects,
+        detailed_labels,
+        detailed_exit,
+    );
+    Ok(native_boundary_execution_path(&decision))
+}
+
 impl TypedRegionContract {
     pub fn new(
         contract: TypedObservationContract,
@@ -356,6 +532,10 @@ pub enum RegionContractError {
     EffectPayload { sequence: u64, error: String },
     #[error("region pending completion tokens do not equal the exit queue")]
     PendingTokenMismatch,
+    #[error("typed scalar macro is unsupported: {reason}")]
+    UnsupportedScalarMacro { reason: String },
+    #[error("typed scalar macro arithmetic overflowed")]
+    ScalarMacroArithmeticOverflow,
 }
 
 fn boundary_completeness(
@@ -740,8 +920,9 @@ pub enum TransformCheckError {
 mod tests {
     use super::*;
     use crate::{
-        AddressDomain, L2BoundaryState, L2CounterState, L2GeometryState, PowerBoundaryState,
-        QueueBoundaryState, TypedContractKind, TypedCoreBoundaryState, TypedEventPayload,
+        AddressDomain, BlockBoundaryState, L2BoundaryState, L2CounterState, L2GeometryState,
+        PowerBoundaryState, QueueBoundaryState, TypedContractKind, TypedCoreBoundaryState,
+        TypedEventPayload, WarpBoundaryState,
     };
 
     fn boundary(time: u64, sequence: u64, complete: bool) -> TypedEventBoundaryRecord {
@@ -845,6 +1026,52 @@ mod tests {
                 }
             },
         }
+    }
+
+    fn scalar_entry_boundary() -> TypedEventBoundaryRecord {
+        let mut value = boundary(0, 0, true);
+        let core = &mut value.cores[0];
+        core.resident_warps = 1;
+        core.unfinished_warps = 1;
+        core.next_block = 1;
+        core.subcore_warps = vec![vec![0], Vec::new(), Vec::new(), Vec::new()];
+        core.warp_states = vec![WarpBoundaryState {
+            warp_slot: 0,
+            next_instruction: 0,
+            front_end_fetch_cursor: 0,
+            instruction_buffer: Vec::new(),
+            eligible: 0,
+            imc_wait_until: 0,
+            barrier_clear: [0; 6],
+            barrier_pending: [0; 6],
+            block: 0,
+            arrival: 0,
+            at_block_barrier: false,
+            cta_barrier_ready: 0,
+            barrier_pipeline_ready: 0,
+            branch_pipeline_ready: 0,
+            block_barrier_dispatch: None,
+            block_barrier_arrival: None,
+            done: false,
+        }];
+        core.block_states = vec![BlockBoundaryState {
+            unfinished: 1,
+            waiting: 0,
+            warp_count: 1,
+            shared_memory_bytes: 0,
+            warp_slots: vec![0],
+            first_warp: 0,
+            admitted_warps: 1,
+            barrier_generation: 0,
+            barrier_first_dispatch: None,
+            barrier_first_arrival: None,
+            barrier_rearm_ready: 0,
+        }];
+        core.async_copy = vec![None];
+        value
+            .validate_structure()
+            .expect("scalar entry should be closed");
+        value
     }
 
     #[test]
@@ -1150,6 +1377,65 @@ mod tests {
             native_boundary_execution_path(&NativeBoundaryRefinementDecision::Preserve),
             NativeBoundaryExecutionPath::TypedMacro
         );
+    }
+
+    #[test]
+    fn typed_scalar_macro_derives_exit_and_effect_span_independently() {
+        let entry = scalar_entry_boundary();
+        let region = derive_typed_scalar_macro_region(
+            &entry,
+            &TypedScalarMacroSpec {
+                instruction_count: 2,
+                latency_cycles: 3,
+                label: "scalar_macro_v1".to_owned(),
+            },
+        )
+        .expect("closed scalar entry should derive a typed transition");
+        assert_eq!(region.internal_effects.len(), 2);
+        assert_eq!(region.exit.event.time, 6);
+        assert_eq!(region.exit.event.sequence, 3);
+        assert_eq!(region.exit.cores[0].issued, 2);
+        assert_eq!(region.exit.cores[0].warp_states[0].next_instruction, 2);
+        assert!(matches!(
+            compare_native_region_contract_with_trace(
+                Some(&region),
+                &region.entry,
+                &region.internal_effects,
+                &region.observable_labels,
+                &region.exit,
+            ),
+            NativeBoundaryRefinementDecision::Preserve
+        ));
+        assert_eq!(
+            execute_typed_scalar_macro(
+                &entry,
+                &TypedScalarMacroSpec {
+                    instruction_count: 2,
+                    latency_cycles: 3,
+                    label: "scalar_macro_v1".to_owned(),
+                },
+                &region.internal_effects,
+                &region.observable_labels,
+                &region.exit,
+            )
+            .unwrap(),
+            NativeBoundaryExecutionPath::TypedMacro
+        );
+        assert!(matches!(
+            execute_typed_scalar_macro(
+                &entry,
+                &TypedScalarMacroSpec {
+                    instruction_count: 2,
+                    latency_cycles: 3,
+                    label: "scalar_macro_v1".to_owned(),
+                },
+                &[],
+                &region.observable_labels,
+                &region.exit,
+            )
+            .unwrap(),
+            NativeBoundaryExecutionPath::ExactReplay { .. }
+        ));
     }
 
     #[test]

@@ -139,4 +139,7 @@ trace-aware native comparator checks effect/label sequences in addition to
 entry/exit state. Comparator decisions are converted into an explicit
 typed-macro versus exact-replay plan in the opt-in native writer. This improves
 fallback soundness but does not yet consume a nonidentity native macro; the
-retained SM86 canary remains exact-fallback evidence.
+retained SM86 canary remains exact-fallback evidence. A pure-scalar SM86 probe
+now supplies a complete typed pre/post boundary pair; its cold front-end
+transition is intentionally rejected by the strict typed scalar macro executor
+instead of being claimed as preserved.

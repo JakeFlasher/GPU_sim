@@ -1515,6 +1515,7 @@ impl ReferenceTrace {
         pending_l2_ready: &PendingL2Ready,
         power: &PowerBoundaryState,
         dram_server: Option<&DramServer>,
+        boundary_phase: &'static str,
     ) -> Result<(), ReferenceTraceError> {
         let snapshots = cores
             .iter()
@@ -1794,6 +1795,7 @@ impl ReferenceTrace {
             "typed_boundary": typed_boundary,
             "native_boundary_refinement": native_boundary_refinement,
             "native_boundary_execution": native_boundary_execution,
+            "boundary_phase": boundary_phase,
         }))
     }
 
@@ -3514,6 +3516,26 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                 actor_count: cores.len(),
             });
         }
+        #[cfg(feature = "reference")]
+        if let Some(trace) = reference_trace.as_mut() {
+            trace.record_event(
+                ev.time,
+                ev.seq,
+                ev.target.0,
+                reference_event_name,
+                ev.sequence_span.get(),
+                reference_typed_event_payload.clone(),
+                &queue,
+                &staged_l2,
+                &cores,
+                &sm_ids,
+                &response_due,
+                &pending_l2_ready,
+                &power_state,
+                dram_server.as_ref(),
+                "pre",
+            )?;
+        }
         match ev.kind {
             Ev::SmWake => {
                 wake_due.pop_expect("SM wake", sm_ix, ev.time)?;
@@ -4496,6 +4518,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                 &pending_l2_ready,
                 &power_state,
                 dram_server.as_ref(),
+                "post",
             )?;
         }
     }
