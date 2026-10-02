@@ -58,6 +58,10 @@ from profiler measurements; black-box models are assumptions, not observations.
   effects. The pure-scalar SM86 probe has a complete pre/post pair with two
   effects; the opt-in independently derived scalar transition reifies on the
   first effect mismatch (expected 285, observed 568) rather than preserving.
+- The reference `SmCore` issue actor now consumes the comparator-selected
+  typed-macro/exact-replay path; a native issue-model test compares macro entry,
+  exit, and detailed continuation state. The real SM86 reference probe still
+  selects exact replay because its front-end state is open.
 - Service profiles now mark capacity-adjusted throughput slopes and carry
   explicit residual/replacement/independent service roles plus a serial queue
   projection; the v2 probe fitter refuses

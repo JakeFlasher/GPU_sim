@@ -467,7 +467,9 @@ GPU overlap models, skipping refinement, or native trace-driven simulators.
 - The opt-in reference execution path now consumes
   `NativeBoundaryExecutionResult`: a matching transition selects the typed
   macro branch, while a rejected transition carries the detailed exit and
-  exact-replay reason. The real probe selects the latter.
+  exact-replay reason. `SmCore::execute_reference_macro_path` consumes that
+  selected path and the native issue-model test compares macro entry/exit and
+  detailed continuation state; the real probe selects the latter branch.
 - The typed scalar rule now derives first issue from the entry warp readiness
   and can consume a closed front-end instruction-buffer prefix; it still
   refuses absent/noncontiguous buffers and all open pipeline/cache state.

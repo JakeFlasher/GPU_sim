@@ -94,6 +94,8 @@ use sim_mem::{
     MemoryOrigin, decode_async_copy_completion, opcode_head,
 };
 #[cfg(feature = "reference")]
+use sim_semantics::NativeBoundaryExecutionPath;
+#[cfg(feature = "reference")]
 use sim_semantics::{
     AsyncCopyBoundaryState, AsyncCopyBypassObservationState, AsyncCopyCohortBoundaryState,
     AsyncGroupBoundaryState, BlockBoundaryState, BoundarySnapshot, CanonicalLineKey,
@@ -1213,6 +1215,9 @@ pub enum IssueError {
     #[cfg(feature = "reference")]
     #[error("SIM_SM_REFERENCE_MODE must be `event` or `dense`, found {mode:?}")]
     ReferenceModeInvalid { mode: String },
+    #[cfg(feature = "reference")]
+    #[error("reference scalar macro unsupported: {reason}")]
+    ReferenceMacroUnsupported { reason: &'static str },
     #[error(
         "one function declares inconsistent CTA-barrier pipeline configurations: expected {expected:?}, got {got:?}"
     )]
@@ -9525,6 +9530,16 @@ pub(crate) struct AdvanceDiagnostics {
     pub skipped_cycles: u64,
 }
 
+#[cfg(feature = "reference")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ReferenceScalarMacroExecution {
+    pub(crate) warp_slot: i32,
+    pub(crate) first_issue: u64,
+    pub(crate) last_issue: u64,
+    pub(crate) end_cycle: u64,
+    pub(crate) instruction_count: u64,
+}
+
 pub(crate) struct SmCore<'a> {
     schedule: &'a FunctionSchedule,
     /// Static schedule values in PC order. Contiguous binary search avoids a
@@ -10087,6 +10102,174 @@ impl<'a> SmCore<'a> {
     #[cfg(feature = "reference")]
     pub(crate) fn advance_diagnostics(&self) -> AdvanceDiagnostics {
         self.advance_diagnostics
+    }
+
+    /// Install one closed scalar macro into the native model actor. This
+    /// reference-only seam is intentionally narrow: no front-end, memory,
+    /// pipeline, barrier, or completion state may cross the boundary. The
+    /// typed boundary executor independently validates the corresponding
+    /// contract; this method only installs the already-derived state delta and
+    /// then leaves `advance` to execute the continuation.
+    #[cfg(feature = "reference")]
+    pub(crate) fn execute_reference_scalar_macro(
+        &mut self,
+        warp_slot: i32,
+        instruction_count: u64,
+        initiation_interval_cycles: u64,
+    ) -> Result<ReferenceScalarMacroExecution, IssueError> {
+        if instruction_count == 0 || initiation_interval_cycles == 0 {
+            return Err(IssueError::ReferenceMacroUnsupported {
+                reason: "nonzero_count_and_initiation_interval_required",
+            });
+        }
+        if self.instruction_front_end.is_some()
+            || self.memory_issue_pipeline.is_some()
+            || self.scalar_execution_pipeline.is_some()
+            || self.immediate_constant_cache.is_some()
+            || !self.unmodeled_tails.is_empty()
+            || self.outstanding_responses() != 0
+            || self.block_states.iter().any(|block| block.waiting != 0)
+            || self.warps.iter().any(|warp| {
+                warp.at_block_barrier
+                    || warp.barrier_pending.iter().any(|&pending| pending != 0)
+                    || warp.next_slot.is_none() && !warp.done
+            })
+        {
+            return Err(IssueError::ReferenceMacroUnsupported {
+                reason: "future_relevant_native_state_is_not_closed",
+            });
+        }
+        let warp_index = self
+            .warps
+            .iter()
+            .position(|warp| warp.warp_slot == warp_slot)
+            .ok_or(IssueError::ReferenceMacroUnsupported {
+                reason: "warp_slot_not_resident",
+            })?;
+        let (next, inst_len, launch_index) = {
+            let warp = &self.warps[warp_index];
+            (warp.next, warp.insts.len(), warp.launch_index)
+        };
+        let end_index = next
+            .checked_add(usize::try_from(instruction_count).map_err(|_| {
+                IssueError::ReferenceMacroUnsupported {
+                    reason: "instruction_count_out_of_range",
+                }
+            })?)
+            .ok_or(IssueError::ReferenceMacroUnsupported {
+                reason: "instruction_count_overflow",
+            })?;
+        if end_index > inst_len {
+            return Err(IssueError::ReferenceMacroUnsupported {
+                reason: "macro_exceeds_warp_stream",
+            });
+        }
+        for instruction in next..end_index {
+            let slot = lookup_dense(
+                &self.schedule_slots,
+                self.schedule,
+                self.warps[warp_index].insts[instruction].pc,
+                launch_index,
+                warp_slot,
+            )?;
+            if !matches!(slot.pipeline_class, PipelineClass::ScalarAlu { .. })
+                || !matches!(slot.mem_role, MemRole::None)
+                || slot.op_class != OpClass::Other
+                || slot.control.stall() == 0
+                || slot.control.yield_flag()
+                || slot.control.write_barrier().is_some()
+                || slot.control.read_barrier().is_some()
+                || slot.control.wait_mask().bits() != 0
+                || slot.control.reuse() != 0
+            {
+                return Err(IssueError::ReferenceMacroUnsupported {
+                    reason: "scalar_macro_descriptor_not_closed",
+                });
+            }
+        }
+        let subcore = self.warps[warp_index]
+            .warp_slot
+            .rem_euclid(SUB_CORES as i32) as usize;
+        let first_issue = self.t.max(self.warps[warp_index].eligible);
+        let last_issue = first_issue
+            .checked_add(
+                instruction_count
+                    .checked_sub(1)
+                    .and_then(|count| count.checked_mul(initiation_interval_cycles))
+                    .ok_or(IssueError::ReferenceMacroUnsupported {
+                        reason: "macro_timing_overflow",
+                    })?,
+            )
+            .ok_or(IssueError::ReferenceMacroUnsupported {
+                reason: "macro_timing_overflow",
+            })?;
+        let end_cycle = last_issue
+            .checked_add(1)
+            .ok_or(IssueError::ReferenceMacroUnsupported {
+                reason: "macro_end_overflow",
+            })?;
+        self.warps[warp_index].next = end_index;
+        self.warps[warp_index].eligible = end_cycle;
+        self.warps[warp_index].current_since = end_cycle;
+        self.warps[warp_index].next_slot = if end_index < inst_len {
+            Some(lookup_dense(
+                &self.schedule_slots,
+                self.schedule,
+                self.warps[warp_index].insts[end_index].pc,
+                launch_index,
+                warp_slot,
+            )?)
+        } else {
+            None
+        };
+        self.issued =
+            self.issued
+                .checked_add(instruction_count)
+                .ok_or(IssueError::CounterOverflow {
+                    counter: "reference macro issued",
+                })?;
+        self.instructions_per_smsp[subcore] = self.instructions_per_smsp[subcore]
+            .checked_add(instruction_count)
+            .ok_or(IssueError::CounterOverflow {
+                counter: "reference macro SMSP instructions",
+            })?;
+        self.issue_active_cycles_per_smsp[subcore] = self.issue_active_cycles_per_smsp[subcore]
+            .checked_add(instruction_count)
+            .ok_or(IssueError::CounterOverflow {
+                counter: "reference macro SMSP active cycles",
+            })?;
+        self.hold[subcore] = Some(warp_index);
+        self.t = end_cycle;
+        Ok(ReferenceScalarMacroExecution {
+            warp_slot,
+            first_issue,
+            last_issue,
+            end_cycle,
+            instruction_count,
+        })
+    }
+
+    /// Consume the native comparator's selected execution path. Exact replay
+    /// returns no macro transition; the typed-macro branch performs the native
+    /// state mutation and returns its continuation frontier.
+    #[cfg(feature = "reference")]
+    pub(crate) fn execute_reference_macro_path(
+        &mut self,
+        path: &NativeBoundaryExecutionPath,
+        warp_slot: i32,
+        instruction_count: u64,
+        initiation_interval_cycles: u64,
+    ) -> Result<Option<ReferenceScalarMacroExecution>, IssueError> {
+        match path {
+            NativeBoundaryExecutionPath::TypedMacro => self
+                .execute_reference_scalar_macro(
+                    warp_slot,
+                    instruction_count,
+                    initiation_interval_cycles,
+                )
+                .map(Some),
+            NativeBoundaryExecutionPath::ExactReplay { .. } => Ok(None),
+        }
     }
 
     #[cfg(feature = "reference")]
@@ -16879,6 +17062,90 @@ mod tests {
     #[test]
     fn replay_instruction_stays_compact() {
         assert!(std::mem::size_of::<ReplayInst>() <= 24);
+    }
+
+    #[cfg(feature = "reference")]
+    #[test]
+    fn reference_scalar_macro_installs_native_boundary_and_continues_detailed_issue() {
+        let mut scalar = slot(cb(1), OpClass::Other, "IADD3 R1, R1, 1");
+        scalar.pipeline_class = PipelineClass::ScalarAlu {
+            latency_cycles: 1,
+            initiation_interval_cycles: 1,
+            in_flight_capacity: 8,
+        };
+        let schedule = schedule(vec![(0, scalar)]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(0, vec![inst(0), inst(0), inst(0)])],
+        }];
+        let params = params();
+        let mut detailed = SmCore::new_with_residency(
+            &blocks,
+            &schedule,
+            &params,
+            SharedMemoryResidency::unconstrained_fixture(),
+            SmMemMode::Flat,
+        )
+        .unwrap();
+        let mut detailed_requests = Vec::new();
+        assert!(matches!(
+            detailed.advance(ReplayHorizon::Bounded(2), &mut detailed_requests),
+            Ok(Advance::Idle { .. })
+        ));
+
+        let mut macro_core = SmCore::new_with_residency(
+            &blocks,
+            &schedule,
+            &params,
+            SharedMemoryResidency::unconstrained_fixture(),
+            SmMemMode::Flat,
+        )
+        .unwrap();
+        let preserve = sim_semantics::native_boundary_execution_path(
+            &sim_semantics::NativeBoundaryRefinementDecision::Preserve,
+        );
+        let transition = macro_core
+            .execute_reference_macro_path(&preserve, 0, 2, 1)
+            .unwrap()
+            .expect("preserve path must execute a macro");
+        assert_eq!(transition.first_issue, 0);
+        assert_eq!(transition.last_issue, 1);
+        assert_eq!(transition.end_cycle, 2);
+        assert_eq!(detailed.boundary_snapshot(), macro_core.boundary_snapshot());
+
+        let mut detailed_requests = Vec::new();
+        let mut macro_requests = Vec::new();
+        assert!(matches!(
+            detailed.advance(ReplayHorizon::Unbounded, &mut detailed_requests),
+            Ok(Advance::Done)
+        ));
+        assert!(matches!(
+            macro_core.advance(ReplayHorizon::Unbounded, &mut macro_requests),
+            Ok(Advance::Done)
+        ));
+        assert_eq!(detailed.result().instructions_issued, 3);
+        assert_eq!(macro_core.result().instructions_issued, 3);
+        assert_eq!(detailed.result().cycles, macro_core.result().cycles);
+
+        let mut fallback_core = SmCore::new_with_residency(
+            &blocks,
+            &schedule,
+            &params,
+            SharedMemoryResidency::unconstrained_fixture(),
+            SmMemMode::Flat,
+        )
+        .unwrap();
+        let fallback = sim_semantics::native_boundary_execution_path(
+            &sim_semantics::NativeBoundaryRefinementDecision::Reify {
+                reason: sim_semantics::NativeBoundaryReifyReason::ProjectionMismatch,
+            },
+        );
+        assert!(
+            fallback_core
+                .execute_reference_macro_path(&fallback, 0, 2, 1)
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
