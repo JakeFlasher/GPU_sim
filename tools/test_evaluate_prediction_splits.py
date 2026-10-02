@@ -32,13 +32,29 @@ def _observation(workload: str, value: float) -> dict:
     }
 
 
+def _prediction(point: int, lower: int, upper: int | None) -> dict:
+    return {
+        "prediction": {"point": point, "lower": lower, "upper": upper},
+        "point_basis": "declared_observer_projection_lower_bound",
+        "observer_projection": {
+            "target_metric": CONTRACT["metric"],
+            "role": "fixture_observer_projection",
+            "conversion": "fixture_elapsed_cycles",
+            "simulator_lower_cycles": lower,
+            "simulator_upper_cycles": upper,
+            "predicted_lower_cycles": lower,
+            "predicted_upper_cycles": upper,
+        },
+    }
+
+
 def test_ncu_join_happens_after_split_prediction_and_reports_coverage_refusal_and_cost():
     predictions = {
         "schema": "reification_prediction_v2",
         "target_contract": CONTRACT,
         "rows": [
-            {"workload": "cal-a", "family": "cal-family", "split": "calibration", "status": "predicted", "prediction": {"point": 10, "lower": 9, "upper": 11}, "runtime_ms": 2, "memory_bytes": 100, "step_reduction": 3},
-            {"workload": "dev-a", "family": "dev-family", "split": "development", "status": "predicted", "prediction": {"point": 20, "lower": 18, "upper": 22}, "runtime_ms": 3, "memory_bytes": 120, "step_reduction": 2},
+            {"workload": "cal-a", "family": "cal-family", "split": "calibration", "status": "predicted", **_prediction(10, 9, 11), "runtime_ms": 2, "memory_bytes": 100, "step_reduction": 3},
+            {"workload": "dev-a", "family": "dev-family", "split": "development", "status": "predicted", **_prediction(20, 18, 22), "runtime_ms": 3, "memory_bytes": 120, "step_reduction": 2},
             {"workload": "ood-a", "family": "held-family", "split": "held_out", "status": "refused", "reason": "unsupported"},
         ],
     }
@@ -72,7 +88,7 @@ def test_open_upper_interval_is_not_finite_coverage_and_has_no_width():
         {
             "schema": "reification_prediction_v2",
             "target_contract": CONTRACT,
-            "rows": [{"workload": "x", "family": "f", "split": "held_out", "status": "predicted", "prediction": {"point": 10, "lower": 9, "upper": None}}],
+            "rows": [{"workload": "x", "family": "f", "split": "held_out", "status": "predicted", **_prediction(10, 9, None)}],
         },
         {"schema": "ncu_observation_v2", "target_contract": CONTRACT, "rows": [_observation("x", 100)]},
     )
@@ -83,13 +99,35 @@ def test_open_upper_interval_is_not_finite_coverage_and_has_no_width():
     assert held["mean_interval_width"] is None
 
 
+def test_predicted_row_must_bind_interval_to_observer_projection():
+    with pytest.raises(ValueError, match="observer_projection"):
+        evaluate_prediction_splits(
+            {
+                "schema": "reification_prediction_v2",
+                "target_contract": CONTRACT,
+                "rows": [{
+                    "workload": "x",
+                    "family": "f",
+                    "split": "held_out",
+                    "status": "predicted",
+                    "prediction": {"point": 10, "lower": 9, "upper": None},
+                }],
+            },
+            {
+                "schema": "ncu_observation_v2",
+                "target_contract": CONTRACT,
+                "rows": [_observation("x", 100)],
+            },
+        )
+
+
 def test_variant_ranking_is_reported_without_using_observation_error():
     predictions = {
         "schema": "reification_prediction_v2",
         "target_contract": CONTRACT,
         "rows": [
-            {"workload": "x", "family": "f", "split": "held_out", "intervention": "fast", "status": "predicted", "prediction": {"point": 10, "lower": 10, "upper": None}},
-            {"workload": "x", "family": "f", "split": "held_out", "intervention": "slow", "status": "predicted", "prediction": {"point": 20, "lower": 20, "upper": None}},
+            {"workload": "x", "family": "f", "split": "held_out", "intervention": "fast", "status": "predicted", **_prediction(10, 10, None)},
+            {"workload": "x", "family": "f", "split": "held_out", "intervention": "slow", "status": "predicted", **_prediction(20, 20, None)},
         ],
     }
     report = evaluate_prediction_splits(

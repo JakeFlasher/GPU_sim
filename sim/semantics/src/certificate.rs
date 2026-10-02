@@ -52,6 +52,10 @@ pub enum ReifyReason {
     /// No independently derived dependency/effect witness covers the
     /// candidate interval; producer-supplied booleans are insufficient.
     MissingIndependentEvidence,
+    /// The certificate does not bind to the descriptor region presented to
+    /// the executor.  A caller must not install a summary derived for a
+    /// different pipeline, timing tuple, or sequence span.
+    CertificateBinding,
     ArithmeticOverflow,
 }
 
@@ -96,6 +100,18 @@ impl IntervalCertificate {
     }
     pub const fn instruction_count(self) -> u64 {
         self.instruction_count
+    }
+    pub const fn pipeline_key(self) -> u8 {
+        self.pipeline_key
+    }
+    pub const fn latency_cycles(self) -> u64 {
+        self.latency_cycles
+    }
+    pub const fn initiation_interval_cycles(self) -> u64 {
+        self.initiation_interval_cycles
+    }
+    pub const fn in_flight_capacity(self) -> u32 {
+        self.in_flight_capacity
     }
 
     /// Materialize the exact issue/completion frontier for every instruction

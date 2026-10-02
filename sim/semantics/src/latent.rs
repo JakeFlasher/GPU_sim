@@ -75,6 +75,14 @@ pub enum LatentModelError {
     EmptyAssignmentGroup,
     #[error("resource assignment groups exceed total events: groups={groups}, total={total}")]
     AssignmentGroupsExceedTotal { groups: u64, total: u64 },
+    #[error(
+        "resource assignment groups exceed classified events: groups={groups}, classified={classified}, unclassified={unclassified}"
+    )]
+    AssignmentGroupsExceedClassified {
+        groups: u64,
+        classified: u64,
+        unclassified: u64,
+    },
     #[error("resource-demand interval for pool {pool} is inverted: lower={lower}, upper={upper}")]
     InvertedResourceDemand {
         pool: String,
@@ -996,6 +1004,14 @@ impl ResourceDemandEnvelope {
                 total: self.total_events,
             });
         }
+        let classified_events = self.total_events - self.unclassified_events;
+        if grouped_events > classified_events {
+            return Err(LatentModelError::AssignmentGroupsExceedClassified {
+                groups: grouped_events,
+                classified: classified_events,
+                unclassified: self.unclassified_events,
+            });
+        }
         Ok(())
     }
 }
@@ -1134,6 +1150,7 @@ impl ServiceComposition {
         overlap: ServiceOverlapMode,
         role: ServiceStageRole,
     ) -> Result<Self, LatentModelError> {
+        admission.validate()?;
         let completion = match role {
             ServiceStageRole::ReplacementTiming => {
                 service.validate()?;
@@ -1438,6 +1455,9 @@ impl CacheCandidateSummary {
         } else if self.owner.is_unknown()
             || self.read_from.is_unknown()
             || self.hardware_completion.is_unknown()
+            || self.temporal_order.is_unknown()
+            || self.fence_scope.is_unknown()
+            || self.line_generation.is_unknown()
         {
             FrontierBound::lower_bound(0)
         } else {
@@ -1588,7 +1608,8 @@ impl ResourceDemandEnvelope {
         profile: &ServiceRateProfile,
         marginal: &ResourceServiceProjection,
     ) -> Result<(u64, Option<u64>, &'static str), LatentModelError> {
-        if self.assignment_groups.is_empty()
+        if self.unclassified_events != 0
+            || self.assignment_groups.is_empty()
             || self
                 .assignment_groups
                 .iter()
@@ -1679,8 +1700,16 @@ fn service_interval_for_demand(
         ceil_div(upper_work, u64::from(rate.capacity))?
     };
     Ok(ServiceCycleInterval {
-        lower_cycles: lower_service + rate.latency_lower_cycles,
-        upper_cycles: upper_service + rate.latency_upper_cycles,
+        lower_cycles: lower_service
+            .checked_add(rate.latency_lower_cycles)
+            .ok_or_else(|| LatentModelError::ResourceDemandOverflow {
+                pool: pool.to_owned(),
+            })?,
+        upper_cycles: upper_service
+            .checked_add(rate.latency_upper_cycles)
+            .ok_or_else(|| LatentModelError::ResourceDemandOverflow {
+                pool: pool.to_owned(),
+            })?,
     })
 }
 
@@ -2500,6 +2529,67 @@ mod tests {
     }
 
     #[test]
+    fn grouped_assignment_cannot_classify_an_unknown_tail() {
+        let mut demand = ResourceDemandEnvelope::new(
+            2,
+            1,
+            BTreeMap::from([("alu".to_owned(), ResourceDemandInterval::interval(0, 2))]),
+            EvidenceKind::Hypothesis,
+        )
+        .unwrap();
+        demand.assignment_groups = vec![ResourceAssignmentGroup {
+            event_count: 2,
+            candidate_pools: BTreeSet::from(["alu".to_owned()]),
+        }];
+        assert!(matches!(
+            demand.validate(),
+            Err(LatentModelError::AssignmentGroupsExceedClassified {
+                groups: 2,
+                classified: 1,
+                unclassified: 1,
+            })
+        ));
+    }
+
+    #[test]
+    fn grouped_classified_work_with_an_unknown_tail_keeps_queue_upper_open() {
+        let mut demand = ResourceDemandEnvelope::new(
+            2,
+            1,
+            BTreeMap::from([("alu".to_owned(), ResourceDemandInterval::interval(0, 1))]),
+            EvidenceKind::Hypothesis,
+        )
+        .unwrap();
+        demand.assignment_groups = vec![ResourceAssignmentGroup {
+            event_count: 1,
+            candidate_pools: BTreeSet::from(["alu".to_owned()]),
+        }];
+        let profile = ServiceRateProfile {
+            schema_version: RESOURCE_DEMAND_SCHEMA_VERSION,
+            source: "fixture".to_owned(),
+            pools: BTreeMap::from([(
+                "alu".to_owned(),
+                ServiceRate {
+                    capacity: 1,
+                    initiation_interval_cycles: 1,
+                    initiation_interval_upper_cycles: None,
+                    capacity_already_applied: false,
+                    latency_lower_cycles: 1,
+                    latency_upper_cycles: 1,
+                },
+            )]),
+            ncu_start_padding_cycles: None,
+            ncu_end_padding_cycles: None,
+            unmodeled_dimensions: Vec::new(),
+        };
+        let queue = demand
+            .project_service_queue(&profile, FrontierBound::exact(0))
+            .unwrap();
+        assert_eq!(queue.assignment_upper_cycles, None);
+        assert_eq!(queue.completion_frontier.upper, None);
+    }
+
+    #[test]
     fn cache_candidate_summary_keeps_owner_and_completion_unknown() {
         let summary = CacheCandidateSummary::from_topology(4, 2, 1, 0).unwrap();
         assert!(summary.owner.is_unknown());
@@ -2566,6 +2656,29 @@ mod tests {
         assert_ne!(first.line_generation, second.line_generation);
         assert!(first.owner.is_unknown());
         assert!(second.hardware_completion.is_unknown());
+    }
+
+    #[test]
+    fn exact_cache_history_requires_all_temporal_domains() {
+        let known = |value: &str| CandidateDomain::candidate(value).unwrap();
+        let mut summary = CacheCandidateSummary::from_topology_with_witnesses(
+            2,
+            1,
+            1,
+            0,
+            CacheWitnessDomains {
+                temporal_order: known("order"),
+                fence_scope: known("scope"),
+                line_generation: known("generation"),
+            },
+        )
+        .unwrap();
+        summary.owner = known("sm0");
+        summary.read_from = known("prior");
+        summary.hardware_completion = known("complete");
+        assert_eq!(summary.history_frontier(), FrontierBound::exact(0));
+        summary.temporal_order = CandidateDomain::unknown("order lost").unwrap();
+        assert_eq!(summary.history_frontier(), FrontierBound::lower_bound(0));
     }
 
     #[test]

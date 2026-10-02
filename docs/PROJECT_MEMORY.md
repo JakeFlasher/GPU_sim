@@ -74,9 +74,16 @@ from profiler measurements; black-box models are assumptions, not observations.
   aggregate-only identification and requires latency, throughput, and queue
   probe modes; occupancy/contention rows remain explicitly unmodeled.
 - Cache candidates preserve warp-local instrumentation order only when the
-  producer supplies it; cross-warp order, fences, generations, owner/read-from,
-  and completion remain unknown and unresolved cache history widens the
-  separate cache frontier rather than adding a bottleneck claim.
+  producer supplies it; exact cache history now additionally requires temporal
+  order, fence scope, line generation, owner/read-from, and completion.
+  Unresolved domains keep the separate cache frontier lower-only/unknown
+  rather than adding a bottleneck claim.
+- R8.1 immediate soundness guards are complete: model certificates bind to the
+  full consumed descriptor region before mutation; inconsistent grouped queue
+  assignments cannot close an unknown tail; predicted rows must bind their
+  interval to a typed observer projection; replacement admission and service
+  arithmetic are checked; scalar sequence arithmetic checks intermediate
+  additions. These are direct API/projection guards, not native speedup.
 - R6 is complete: `docs/sm86_reification_corpus_v1_20261002.json` defines a
   15-workload, six-family SM86 corpus with no family crossing; prediction,
   observation, and join artifacts are retained under
@@ -107,9 +114,12 @@ a consumed closed native issue-model boundary; full front-end-enabled traces
 still record exact-replay plans. Current rankings, open
 intervals, and descriptor/macro probe remain negative/diagnostic evidence and
 black-box internals are not execution prerequisites. R7 rebuttal/
-claim-discipline is complete; use
+claim-discipline is complete; R8.0 review intake and R8.1 soundness guards are
+complete. R8.2 production native dispatch is next; use
 [`third_round_rebuttal_20261002.md`](../plans/third_round_rebuttal_20261002.md)
-for the evidence map and remaining falsifiers.
+for the prior evidence map and
+[`latest_review_refinement_20261002.md`](../plans/latest_review_refinement_20261002.md)
+for the active stage ledger and remaining falsifiers.
 
 ## Retained evidence
 

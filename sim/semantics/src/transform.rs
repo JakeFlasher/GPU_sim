@@ -290,7 +290,11 @@ pub fn derive_typed_scalar_macro_region(
     let end_sequence = entry
         .event
         .sequence
-        .checked_add(spec.instruction_count + 1)
+        .checked_add(
+            spec.instruction_count
+                .checked_add(1)
+                .ok_or(RegionContractError::ScalarMacroArithmeticOverflow)?,
+        )
         .ok_or(RegionContractError::ScalarMacroArithmeticOverflow)?;
     let core = exit
         .cores

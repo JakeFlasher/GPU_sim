@@ -840,6 +840,53 @@ impl ModelExecutor {
         first: CausalFrontierInstruction,
         certificate: IntervalCertificate,
     ) -> Result<MacroTransition, CausalFrontierError> {
+        self.execute_macro_region(std::slice::from_ref(&first), certificate)
+    }
+
+    /// Consume a certificate only when it is bound to the complete descriptor
+    /// region that it summarizes.  The old first-descriptor-only API remains
+    /// available for single-instruction fixtures, but a multi-instruction
+    /// certificate must use this method so a changed descriptor cannot inherit
+    /// another region's timing/completion state.
+    pub fn execute_macro_region(
+        &mut self,
+        region: &[CausalFrontierInstruction],
+        certificate: IntervalCertificate,
+    ) -> Result<MacroTransition, CausalFrontierError> {
+        let Some(&first) = region.first() else {
+            return Err(CausalFrontierError::MacroTransitionRejected {
+                reason: ReifyReason::CertificateBinding,
+            });
+        };
+        let expected_count = u64::try_from(region.len()).map_err(|_| {
+            CausalFrontierError::MacroTransitionRejected {
+                reason: ReifyReason::CertificateBinding,
+            }
+        })?;
+        let bound = certificate.instruction_count() == expected_count
+            && certificate.first_sequence() == first.sequence
+            && certificate.last_sequence()
+                == region.last().map_or(first.sequence, |item| item.sequence)
+            && region.iter().enumerate().all(|(index, instruction)| {
+                let sequence = first.sequence.checked_add(index as u64);
+                let evidence = instruction.execution_evidence();
+                sequence == Some(instruction.sequence)
+                    && instruction.physical_warp == first.physical_warp
+                    && evidence.pipeline_key == certificate.pipeline_key()
+                    && evidence.latency_cycles == certificate.latency_cycles()
+                    && evidence.initiation_interval_cycles
+                        == certificate.initiation_interval_cycles()
+                    && evidence.in_flight_capacity == certificate.in_flight_capacity()
+                    && evidence.completion_units == 1
+                    && evidence.control_clean
+                    && evidence.dependency_free
+                    && !evidence.external_side_effect
+            });
+        if !bound {
+            return Err(CausalFrontierError::MacroTransitionRejected {
+                reason: ReifyReason::CertificateBinding,
+            });
+        }
         // Descriptor validation already bounded physical_warp before either run.
         let smsp = first.physical_warp as usize % usize::from(SMSP_COUNT);
         let pipe = pipeline_index(first.pipeline);
@@ -878,9 +925,22 @@ impl ModelExecutor {
         first: CausalFrontierInstruction,
         decision: FidelityDecision,
     ) -> Result<ModelDispatch, CausalFrontierError> {
+        self.execute_decision_region(std::slice::from_ref(&first), decision)
+    }
+
+    pub fn execute_decision_region(
+        &mut self,
+        region: &[CausalFrontierInstruction],
+        decision: FidelityDecision,
+    ) -> Result<ModelDispatch, CausalFrontierError> {
+        let Some(&first) = region.first() else {
+            return Err(CausalFrontierError::MacroTransitionRejected {
+                reason: ReifyReason::CertificateBinding,
+            });
+        };
         match decision {
             FidelityDecision::Summary { certificate } => {
-                match self.execute_macro(first, certificate) {
+                match self.execute_macro_region(region, certificate) {
                     Ok(transition) => Ok(ModelDispatch::Macro { transition }),
                     Err(CausalFrontierError::MacroTransitionRejected { reason }) => {
                         self.execute_detailed(first)?;
@@ -1105,7 +1165,7 @@ pub fn summarize_with_residency(
                 } else {
                     certify_interval(evidence, residents_per_smsp[subcore(first.physical_warp)?])
                 };
-                let dispatch = causal.execute_decision(first, decision)?;
+                let dispatch = causal.execute_decision_region(&interval_instructions, decision)?;
                 match dispatch {
                     ModelDispatch::Macro { transition } => {
                         let region = CertifiedRegion {
@@ -1394,11 +1454,55 @@ mod tests {
             FidelityDecision::Reify { reason } => panic!("unexpected refusal: {reason:?}"),
         };
         let mut selective = ModelExecutor::new();
-        let transition = selective.execute_macro(prefix[0], certificate).unwrap();
+        let transition = selective
+            .execute_macro_region(&prefix, certificate)
+            .unwrap();
         selective.execute_detailed(tail).unwrap();
         assert_eq!(transition.effects.len(), 3);
         assert_eq!(transition.first_issue, 0);
         assert_eq!(selective.snapshot(), detailed.snapshot());
+    }
+
+    #[test]
+    fn macro_certificate_binding_rejects_mismatched_region_before_mutation() {
+        let certificate_region = (0..2)
+            .map(|sequence| CausalFrontierInstruction {
+                latency_cycles: 10,
+                initiation_interval_cycles: 2,
+                in_flight_capacity: 2,
+                ..instruction(sequence, false)
+            })
+            .collect::<Vec<_>>();
+        let certificate = match certify_interval(
+            certificate_region
+                .iter()
+                .copied()
+                .map(CausalFrontierInstruction::execution_evidence),
+            1,
+        ) {
+            FidelityDecision::Summary { certificate } => certificate,
+            FidelityDecision::Reify { reason } => panic!("unexpected refusal: {reason:?}"),
+        };
+        let mut executor = ModelExecutor::new();
+        let before = executor.snapshot();
+        let mismatched = CausalFrontierInstruction {
+            latency_cycles: 1,
+            ..certificate_region[0]
+        };
+        assert_eq!(
+            executor.execute_macro_region(&[mismatched, certificate_region[1]], certificate),
+            Err(CausalFrontierError::MacroTransitionRejected {
+                reason: ReifyReason::CertificateBinding,
+            })
+        );
+        assert_eq!(executor.snapshot(), before);
+        assert_eq!(
+            executor.execute_macro(mismatched, certificate),
+            Err(CausalFrontierError::MacroTransitionRejected {
+                reason: ReifyReason::CertificateBinding,
+            })
+        );
+        assert_eq!(executor.snapshot(), before);
     }
 
     #[test]

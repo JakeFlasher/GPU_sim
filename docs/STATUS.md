@@ -27,10 +27,10 @@ are deleted rather than skipped.
 | Reification | Typed region contract and native-boundary comparator preserve only complete exact projections; incomplete canary boundaries fall back to replay |
 | Selective coverage | Multi-warp/order and completion-multiplicity guards refuse conservatively; fast-frontier output includes full-trace candidate/reified/uncovered counts |
 | Model macro seam | `sim-sm::ModelExecutor` consumes a certified scalar `MacroTransition`, emits explicit effects/pending completions, and resumes detailed descriptors; this is model-local |
-| Native refinement | Closed native `SmCore` issue-model seam preserves a two-instruction region and resumes detailed continuation through comparator-selected paths; paired native reference boundaries/effects and exact fallback remain active for front-end-enabled probes |
-| Service composition | Typed residual/replacement/independent-post-replay roles and a serial queue projection are explicit; full-trace demand is currently independent post-replay, so it does not silently alter the observer endpoint |
-| Cache candidates | Warp-local instrumentation order can be observed when decoded identities are complete; cross-warp order, fence scope, line generation, owner/read-from, and hardware completion remain explicit unknowns |
-| Design evaluation | Fifteen-workload, six-family calibration/development/held-out NCU join runs post-prediction; v2 target contracts check metric/endpoint/clock/cache/launch/repetition/GPU identity and family split semantics; finite intervals, open refusals, model-local partial-order ties, and model-only step reduction are reported, while native front-end traces remain exact/refused |
+| Native refinement | Closed native `SmCore` issue-model seam preserves a two-instruction region and resumes detailed continuation through comparator-selected paths; model certificates now bind to every consumed descriptor before mutation; paired native reference boundaries/effects and exact fallback remain active for front-end-enabled probes |
+| Service composition | Typed residual/replacement/independent-post-replay roles and a serial queue projection are explicit; grouped unknown tails keep queue uppers open and replacement admission is validated; full-trace demand is currently independent post-replay, so it does not silently alter the observer endpoint |
+| Cache candidates | Warp-local instrumentation order can be observed when decoded identities are complete; exact history additionally requires temporal order, fence scope, line generation, owner/read-from, and hardware completion, while unresolved domains remain lower-only/unknown |
+| Design evaluation | Fifteen-workload, six-family calibration/development/held-out NCU join runs post-prediction; v2 target contracts check metric/endpoint/clock/cache/launch/repetition/GPU identity and family split semantics, and predicted rows must bind intervals to an explicit observer projection; finite intervals, open refusals, model-local partial-order ties, and model-only step reduction are reported, while native front-end traces remain exact/refused |
 | Payload/value work | Bounded model-local identity, ordering, and conservation checks |
 
 Native replay is unchanged by the predictive flag. Service demand now yields an
@@ -67,6 +67,13 @@ steps, memory, and runtime separately; a passing unit suite is not accuracy
 evidence. The R6 corpus and third-round claim map are in
 [`review_round3_20261002/README.md`](review_round3_20261002/README.md) and
 [`third_round_rebuttal_20261002.md`](../plans/third_round_rebuttal_20261002.md).
+
+The latest independent panel re-review is being addressed by the staged
+[R8 refinement program](../plans/latest_review_refinement_20261002.md).
+R8.0 review intake and R8.1 immediate soundness guards are complete; R8.2
+production native dispatch is the next active milestone. These guards are
+direct refusal/projection checks, not evidence of native speedup or hardware
+causality.
 
 ## Retained measurements
 

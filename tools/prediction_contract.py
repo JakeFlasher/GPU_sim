@@ -170,6 +170,39 @@ def validate_prediction_row(row: Any, index: int) -> None:
         raise ValueError(f"prediction row {index} interval is inverted")
     if point < lower or (upper is not None and point > upper):
         raise ValueError(f"prediction row {index} point is outside its interval")
+    projection = row.get("observer_projection")
+    if not isinstance(projection, dict):
+        raise ValueError(f"predicted row {index} lacks observer_projection")
+    for field in ("target_metric", "role", "conversion"):
+        value = projection.get(field)
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError(f"prediction row {index}.observer_projection.{field} must be nonempty")
+    if projection["target_metric"] != TARGET_METRIC:
+        raise ValueError(
+            f"prediction row {index}.observer_projection.target_metric must be {TARGET_METRIC!r}"
+        )
+    projected_lower = projection.get("predicted_lower_cycles")
+    if isinstance(projected_lower, bool) or not isinstance(projected_lower, int):
+        raise ValueError(
+            f"prediction row {index}.observer_projection.predicted_lower_cycles must be an integer"
+        )
+    projected_upper = projection.get("predicted_upper_cycles")
+    if projected_upper is not None and (
+        isinstance(projected_upper, bool) or not isinstance(projected_upper, int)
+    ):
+        raise ValueError(
+            f"prediction row {index}.observer_projection.predicted_upper_cycles must be an integer or null"
+        )
+    if projected_lower != lower or projected_upper != upper:
+        raise ValueError(
+            f"prediction row {index} interval disagrees with observer_projection"
+        )
+    for field in ("simulator_lower_cycles", "simulator_upper_cycles"):
+        value = projection.get(field)
+        if value is not None and (isinstance(value, bool) or not isinstance(value, int)):
+            raise ValueError(
+                f"prediction row {index}.observer_projection.{field} must be an integer or null"
+            )
     for field in ("runtime_ms", "memory_bytes", "step_reduction"):
         if row.get(field) is not None:
             _finite_number(row[field], f"prediction row {index}.{field}")
