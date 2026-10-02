@@ -18,6 +18,7 @@ open only the relevant technical page.
 | NCU campaign preflight | [Preflight schema](sm86_ncu_campaign_preflight_v1.schema.json) · `tools/preflight_sm86_ncu_campaign.py` |
 | First accuracy campaign | `sm86_accuracy_campaign_v1_{manifest,predictions_pre_ncu,observations_post_ncu,evaluation_join,repetition_summary}.json` |
 | Intervention contrasts | `sm86_ncu_intervention_plan_v1.json` · `sm86_accuracy_intervention_comparison_v1.json` |
+| Real selective-path result | `sm86_accuracy_a7_real_selective_result_v1.json` · [schema](sm86_accuracy_a7_real_selective_result_v1.schema.json) |
 | Third-round result | [R6 corpus and observer evaluation](review_round3_20261002/README.md) · [corpus manifest](sm86_reification_corpus_v1_20261002.json) |
 | R9.0 native boundary probe | [Canary termination and unknown-join result](review_round4_20261002/README.md) |
 | R9.1 production witness attempt | [Negative native-dispatch result](review_round5_20261002/README.md) |

@@ -426,3 +426,15 @@ increased in two; clock-base target cycles increased in both. Simulator
 projections were invariant and every upper remains open, so the result is an
 observational direction/consistency check only. No causal hardware claim or
 finite accuracy claim is made.
+
+## A7 real selective path — 2026-10-02 (complete; negative boundary)
+
+The current release reference path ran on a retained real SM86 embedding trace
+under the verified A5 identity/endpoint contract without a self-derived witness.
+It terminated cleanly with 10,033 records before the footer, 5,016 queue
+events, zero complete typed boundaries, zero native macro dispatches, and exact
+fallback. The result is retained in
+`docs/sm86_accuracy_a7_real_selective_result_v1.json`. The final defensible
+claim is unknown-preserving typed closure with exact fallback, independently
+compared with NCU where the endpoint remains open. Native selective dispatch,
+finite endpoint accuracy, and hardware-causal scheduling remain unclaimed.

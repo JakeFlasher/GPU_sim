@@ -868,3 +868,23 @@ identity/endpoint contract, keeping every contrast separate from baseline.
 
 The next active goal is A7: attempt a real selective path only with a complete
 independent witness, otherwise retain exact fallback as the result.
+
+### A7 implementation evidence (complete 2026-10-02)
+
+- The current release reference path was run on the retained real SM86
+  embedding trace under the verified A5 identity/endpoint contract, with no
+  self-derived witness. It terminated with exit code 0 after 10,033 records
+  before the footer (10,034 including footer), 5,016 queue events, and a
+  11,920-cycle queue clock gap.
+- The result had zero complete typed boundaries and zero native macro
+  dispatches; exact replay remained authoritative throughout. The retained
+  result is `docs/sm86_accuracy_a7_real_selective_result_v1.json`.
+- This is the required real-path falsifier: the corpus still lacks a complete
+  independent witness and closed front-end/cache/response continuation. The
+  synthetic P2 fixture is not upgraded to native evidence. No finite hardware
+  accuracy, native speedup, or causal scheduler claim is made.
+
+The reviewed accuracy/refinement program is complete at the narrow claim:
+unknown-preserving typed closure with exact fallback, independently compared
+against NCU where the endpoint is open. Remaining native selective dispatch and
+finite endpoint accuracy are explicit future research falsifiers.

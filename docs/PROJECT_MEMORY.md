@@ -242,6 +242,14 @@ and all intervals remain open. Cache-none lower consistency was
 0.000/1.000/0.625 and clock-base was 1.000 for its two rows. No causal claim
 was made. A7 is next: real selective-path witness attempt.
 
+A7 is complete: the current release reference path ran on a retained real
+SM86 trace under the verified identity/endpoint contract without a self-derived
+witness. It terminated with 10,033 records before the footer, zero complete
+typed boundaries, zero native macro dispatches, and exact fallback. The retained
+result is `docs/sm86_accuracy_a7_real_selective_result_v1.json`. The final
+claim remains unknown-preserving typed closure with exact fallback; real native
+selective dispatch and finite hardware accuracy remain explicit falsifiers.
+
 ## Retained evidence
 
 The 2026-09-30 cold/warm campaigns completed 15/15 workloads on RTX 3090 Ti / SM86,

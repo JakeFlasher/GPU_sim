@@ -160,7 +160,9 @@ is complete: cache `all→none` (15 workloads × five repetitions) and clock
 `none→base` (two workloads × five repetitions) contrasts preserve separate
 prediction/observation joins and matching mechanism counters. Simulator
 projections were invariant; directions remain observational-only and all
-uppers remain open. A7 is next: real selective-path witness attempt. The primary outcome is NCU
+uppers remain open. A7 is complete: the retained real SM86 trace produced
+zero complete typed boundaries, zero native macro dispatches, and exact
+fallback under the verified identity/endpoint contract. The primary outcome is NCU
 accuracy; simulator wall-clock runtime remains secondary, with no
 compression/speedup metric.
 
