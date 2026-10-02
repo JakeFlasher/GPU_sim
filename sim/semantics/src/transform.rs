@@ -294,6 +294,30 @@ pub fn derive_typed_scalar_macro_region(
         .ok_or(RegionContractError::UnsupportedScalarMacro {
             reason: "core_missing".to_owned(),
         })?;
+    let l1_open = core.l1.as_ref().is_some_and(|l1| {
+        !l1.line_fills.is_empty()
+            || !l1.sector_fills.is_empty()
+            || l1.active_lookup_batch.is_some()
+            || l1.min_fill_due.is_some()
+    });
+    let memory_pipeline_open = core.memory_pipeline.as_ref().is_some_and(|pipeline| {
+        pipeline
+            .queue_release_times
+            .iter()
+            .any(|queue| !queue.is_empty())
+            || pipeline
+                .local_completion_ready
+                .iter()
+                .any(|&ready| ready > core.cycle)
+            || pipeline.shared_accept_ready > core.cycle
+    });
+    let scalar_pipeline_open = core.scalar_pipeline.as_ref().is_some_and(|pipeline| {
+        pipeline.release_times.iter().any(|queue| !queue.is_empty())
+            || pipeline
+                .next_service
+                .iter()
+                .any(|&ready| ready > core.cycle)
+    });
     if core.warp_states.len() != 1
         || core.warp_states[0].done
         || core.warp_states[0]
@@ -307,9 +331,9 @@ pub fn derive_typed_scalar_macro_region(
         || core.block_states.iter().any(|block| block.waiting != 0)
         || core.outstanding_responses != 0
         || !core.response_owners.is_empty()
-        || core.l1.is_some()
-        || core.memory_pipeline.is_some()
-        || core.scalar_pipeline.is_some()
+        || l1_open
+        || memory_pipeline_open
+        || scalar_pipeline_open
         || core.async_copy.iter().any(Option::is_some)
     {
         return Err(RegionContractError::UnsupportedScalarMacro {
