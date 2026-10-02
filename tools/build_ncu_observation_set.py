@@ -47,6 +47,7 @@ def build_observation_set(
     campaign_root: Path,
     *,
     source: str = "ncu_csv",
+    identity: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if manifest.get("schema") != "reification_prediction_manifest_v1":
         raise ValueError("manifest schema must be reification_prediction_manifest_v1")
@@ -58,6 +59,19 @@ def build_observation_set(
     # The CSV parser observes values, not GPU UUID/driver/clock provenance.
     # There is intentionally no caller-selectable "verified" status.
     identity_status = "manifest_labeled_historical"
+    if identity is not None:
+        if identity.get("schema") != "sm86_ncu_identity_v1" or not identity.get("eligible_for_accuracy"):
+            raise ValueError("identity artifact is not eligible for independently verified observations")
+        measurement = identity.get("measurement_contract", {})
+        for field in ("target_metric", "endpoint", "clock_domain", "cache_policy", "launch_identity", "repetitions"):
+            expected = contract["metric"] if field == "target_metric" else contract[field]
+            if measurement.get(field) != expected:
+                raise ValueError(f"identity measurement contract mismatches target_contract.{field}")
+        hardware = identity.get("hardware", {})
+        target_hardware = contract["hardware"]
+        if any(hardware.get(field) != target_hardware[field] for field in ("gpu_uuid", "compute_capability", "device_index")):
+            raise ValueError("identity hardware does not match target_contract")
+        identity_status = "independently_verified"
     rows = manifest.get("rows")
     if not isinstance(rows, list) or not rows:
         raise ValueError("manifest rows must be nonempty")
@@ -129,12 +143,14 @@ def main() -> int:
     parser.add_argument("manifest", type=Path)
     parser.add_argument("--campaign-root", type=Path, required=True)
     parser.add_argument("--source", default="ncu_csv")
+    parser.add_argument("--identity", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     document = build_observation_set(
         json.loads(args.manifest.read_text()),
         args.campaign_root,
         source=args.source,
+        identity=json.loads(args.identity.read_text()) if args.identity else None,
     )
     args.output.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n")
     print(args.output)

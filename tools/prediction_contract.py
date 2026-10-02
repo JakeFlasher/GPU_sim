@@ -17,6 +17,7 @@ SPLITS = {"calibration", "development", "held_out"}
 OBSERVATION_IDENTITY_STATUSES = {
     "manifest_labeled_historical",
     "caller_labeled_unverified",
+    "independently_verified",
 }
 PREDICTION_STATUSES = {"predicted", "refused"}
 REQUIRED_CONTRACT_FIELDS = {
@@ -384,7 +385,7 @@ def validate_observation_document(document: Any, *, allow_empty: bool = False) -
     identity_status = document.get("identity_status")
     if identity_status not in OBSERVATION_IDENTITY_STATUSES:
         raise ValueError(
-            "observation identity_status must be manifest_labeled_historical or caller_labeled_unverified"
+            "observation identity_status must be manifest_labeled_historical, caller_labeled_unverified, or independently_verified"
         )
     rows = document.get("rows")
     if not isinstance(rows, list) or (not rows and not allow_empty):

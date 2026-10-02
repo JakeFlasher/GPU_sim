@@ -6,7 +6,7 @@
   "required": ["schema", "identity_status", "target_contract", "rows"],
   "properties": {
     "schema": {"const": "ncu_observation_v2"},
-    "identity_status": {"enum": ["manifest_labeled_historical", "caller_labeled_unverified"]},
+    "identity_status": {"enum": ["manifest_labeled_historical", "caller_labeled_unverified", "independently_verified"]},
     "source": {"type": "string", "minLength": 1},
     "target_contract": {"$ref": "#/$defs/target_contract"},
     "rows": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/row"}}
@@ -50,7 +50,7 @@
         "hardware": {"$ref": "#/$defs/hardware"},
         "source_binding": {"$ref": "#/$defs/source_binding"},
         "source": {"type": "string", "minLength": 1},
-        "identity_status": {"enum": ["manifest_labeled_historical", "caller_labeled_unverified"]}
+        "identity_status": {"enum": ["manifest_labeled_historical", "caller_labeled_unverified", "independently_verified"]}
       },
       "additionalProperties": false
     },

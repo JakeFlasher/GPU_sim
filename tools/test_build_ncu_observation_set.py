@@ -72,3 +72,33 @@ def test_builder_rejects_wrong_repetition_count(tmp_path: Path):
             },
             tmp_path,
         )
+
+
+def test_builder_can_label_independently_verified_identity(tmp_path: Path):
+    workload = tmp_path / "w"
+    workload.mkdir()
+    (workload / "ncu_0_csv.stdout").write_text(_csv(17))
+    (workload / "ncu_1_csv.stdout").write_text(_csv(19))
+    identity = {
+        "schema": "sm86_ncu_identity_v1",
+        "eligible_for_accuracy": True,
+        "measurement_contract": {
+            "target_metric": CONTRACT["metric"],
+            "endpoint": CONTRACT["endpoint"],
+            "clock_domain": CONTRACT["clock_domain"],
+            "cache_policy": CONTRACT["cache_policy"],
+            "launch_identity": CONTRACT["launch_identity"],
+            "repetitions": CONTRACT["repetitions"],
+        },
+        "hardware": CONTRACT["hardware"],
+    }
+    document = build_observation_set(
+        {
+            "schema": "reification_prediction_manifest_v1",
+            "target_contract": CONTRACT,
+            "rows": [{"workload": "w", "family": "f", "split": "held_out"}],
+        },
+        tmp_path,
+        identity=identity,
+    )
+    assert document["identity_status"] == "independently_verified"
