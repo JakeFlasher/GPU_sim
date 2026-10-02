@@ -79,8 +79,9 @@ vocabulary, and split/NCU identity checks. R2 made a nonidentity macro
 decision operational and resumes detailed replay; that model-local seam now
 exists, but native `SmCore` remains untouched. R3 is separating witness
 extraction from descriptor eligibility and now refuses stale/self-witnesses;
-R4 now separates service roles and queue/assignment uncertainty. R5 must
-validate a native boundary; until then, current rankings, open
+R4 now separates service roles and queue/assignment uncertainty. R5 currently
+checks effect-span/label refinement and records exact-replay plans, but must
+still validate a consumed native boundary; until then, current rankings, open
 intervals, and descriptor/macro probe remain negative/diagnostic evidence and
 black-box internals are not execution prerequisites.
 

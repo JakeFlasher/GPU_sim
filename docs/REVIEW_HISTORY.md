@@ -131,3 +131,12 @@ than pretending their presence identifies a parameter, and retains a
 lower/upper initiation-interval envelope. Grouped assignment envelopes are
 preserved when supplied; the native metrics path remains marginal without a
 per-record route witness. R5 is now active on native state refinement.
+
+## Second-round R5 native refinement — 2026-10-01 (active)
+
+The typed region validator now checks internal effect payload spans, and the
+trace-aware native comparator checks effect/label sequences in addition to
+entry/exit state. Comparator decisions are converted into an explicit
+typed-macro versus exact-replay plan in the opt-in native writer. This improves
+fallback soundness but does not yet consume a nonidentity native macro; the
+retained SM86 canary remains exact-fallback evidence.

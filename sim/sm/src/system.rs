@@ -142,7 +142,7 @@ use sim_semantics::{
     TypedAdmissionWitness, TypedCoreBoundaryState, TypedEventBoundaryRecord, TypedEventIdentity,
     TypedEventPayload, TypedFillIdentity, TypedL2Source, TypedMemoryOperation, TypedMemoryOrigin,
     TypedMemoryRequest, TypedObservationContract, TypedPendingEvent, TypedResponseIdentity,
-    TypedResponseKind, compare_native_region_contract,
+    TypedResponseKind, compare_native_region_contract, native_boundary_execution_path,
 };
 
 /// Stable response identity used only at the typed boundary. The process-local
@@ -1780,6 +1780,7 @@ impl ReferenceTrace {
         // does not alter replay or become an execution prerequisite.
         let native_boundary_refinement =
             compare_native_region_contract(None, &typed_boundary, &typed_boundary);
+        let native_boundary_execution = native_boundary_execution_path(&native_boundary_refinement);
         // `typed_boundary` is the canonical state. The old formatted core/L2
         // projections were diagnostic duplicates and made every boundary much
         // larger; the versioned root retains all typed fields and the legacy
@@ -1792,6 +1793,7 @@ impl ReferenceTrace {
             "event": event,
             "typed_boundary": typed_boundary,
             "native_boundary_refinement": native_boundary_refinement,
+            "native_boundary_execution": native_boundary_execution,
         }))
     }
 

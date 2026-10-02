@@ -244,7 +244,7 @@ are distinguishable.
 - The composed completion frontier is the only service quantity passed to the
   observer projection, with an explicit model policy.
 
-## R5 — native state refinement
+## R5 — native state refinement (current stage)
 
 ### Goal
 
@@ -435,3 +435,20 @@ GPU overlap models, skipping refinement, or native trace-driven simulators.
   envelopes when a producer supplies them; the native metrics path does not yet
   extract such groups, so its reports remain marginal. No service-rate or queue
   result is a silicon timing claim.
+
+## R5 progress (active)
+
+- `TypedRegionContract::validate` now validates every internal effect payload
+  and rejects malformed sequence spans. The native comparator has a trace-aware
+  entry point that compares internal effects and observable labels in addition
+  to typed entry/exit projections.
+- A `NativeBoundaryExecutionPath` converts the comparator decision into an
+  explicit typed-macro versus exact-replay plan. The opt-in native writer
+  records that plan, but still leaves replay unchanged because no native
+  nonidentity macro transition is installed yet.
+- Synthetic complete boundaries now preserve only when effect spans and labels
+  match; endpoint-equal contracts with missing/duplicated/malformed effects
+  force exact fallback. The retained SM86 canary remains fallback-only.
+- The decisive remaining R5 check is a real nonidentity native macro whose
+  exit/effects/pending-token mapping are independently derived and consumed by
+  continuation execution; until then this stage is not complete.

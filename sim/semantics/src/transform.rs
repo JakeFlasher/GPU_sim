@@ -147,6 +147,11 @@ pub enum NativeBoundaryReifyReason {
         reason: String,
     },
     ProjectionMismatch,
+    InternalEffectMismatch {
+        expected: usize,
+        observed: usize,
+    },
+    ObservableLabelMismatch,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -154,6 +159,29 @@ pub enum NativeBoundaryReifyReason {
 pub enum NativeBoundaryRefinementDecision {
     Preserve,
     Reify { reason: NativeBoundaryReifyReason },
+}
+
+/// Execution path selected from a native boundary decision. The current
+/// native replay writer only records this plan; it never replaces `SmCore`
+/// execution without a complete macro implementation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "path")]
+pub enum NativeBoundaryExecutionPath {
+    TypedMacro,
+    ExactReplay { reason: NativeBoundaryReifyReason },
+}
+
+pub fn native_boundary_execution_path(
+    decision: &NativeBoundaryRefinementDecision,
+) -> NativeBoundaryExecutionPath {
+    match decision {
+        NativeBoundaryRefinementDecision::Preserve => NativeBoundaryExecutionPath::TypedMacro,
+        NativeBoundaryRefinementDecision::Reify { reason } => {
+            NativeBoundaryExecutionPath::ExactReplay {
+                reason: reason.clone(),
+            }
+        }
+    }
 }
 
 /// State-complete region contract. A scalar cycle recurrence is not enough to
@@ -237,6 +265,13 @@ impl TypedRegionContract {
         }
         let mut previous = None;
         for effect in &self.internal_effects {
+            effect
+                .event
+                .sequence_end()
+                .map_err(|error| RegionContractError::EffectPayload {
+                    sequence: effect.event.sequence,
+                    error: error.to_string(),
+                })?;
             let key = (effect.event.time, effect.phase, effect.event.sequence);
             if effect.phase != effect.event.phase {
                 return Err(RegionContractError::EffectPhaseMismatch {
@@ -317,6 +352,8 @@ pub enum RegionContractError {
     EffectOutsideInterval { sequence: u64 },
     #[error("region internal effects are not in engine order at sequence {sequence}")]
     EffectOrder { sequence: u64 },
+    #[error("region effect payload is malformed at sequence {sequence}: {error}")]
+    EffectPayload { sequence: u64, error: String },
     #[error("region pending completion tokens do not equal the exit queue")]
     PendingTokenMismatch,
 }
@@ -397,6 +434,19 @@ pub fn compare_native_region_contract(
     detailed_entry: &TypedEventBoundaryRecord,
     detailed_exit: &TypedEventBoundaryRecord,
 ) -> NativeBoundaryRefinementDecision {
+    compare_native_region_contract_with_trace(summary, detailed_entry, &[], &[], detailed_exit)
+}
+
+/// Compare a macro contract against the independently observed internal event
+/// span and labels as well as both typed boundaries. Endpoint equality alone
+/// is not transition refinement.
+pub fn compare_native_region_contract_with_trace(
+    summary: Option<&TypedRegionContract>,
+    detailed_entry: &TypedEventBoundaryRecord,
+    detailed_effects: &[TypedEventTransition],
+    detailed_labels: &[String],
+    detailed_exit: &TypedEventBoundaryRecord,
+) -> NativeBoundaryRefinementDecision {
     let Some(summary) = summary else {
         return NativeBoundaryRefinementDecision::Reify {
             reason: NativeBoundaryReifyReason::SummaryStructure {
@@ -415,6 +465,19 @@ pub fn compare_native_region_contract(
         compare_native_boundary_projection(&summary.entry, detailed_entry, &summary.contract)
     {
         return NativeBoundaryRefinementDecision::Reify { reason };
+    }
+    if summary.internal_effects != detailed_effects {
+        return NativeBoundaryRefinementDecision::Reify {
+            reason: NativeBoundaryReifyReason::InternalEffectMismatch {
+                expected: summary.internal_effects.len(),
+                observed: detailed_effects.len(),
+            },
+        };
+    }
+    if summary.observable_labels != detailed_labels {
+        return NativeBoundaryRefinementDecision::Reify {
+            reason: NativeBoundaryReifyReason::ObservableLabelMismatch,
+        };
     }
     compare_native_boundary_projection(&summary.exit, detailed_exit, &summary.contract)
 }
@@ -999,6 +1062,93 @@ mod tests {
                     error: "model_macro_typed_region_contract_missing".to_owned(),
                 },
             }
+        );
+    }
+
+    #[test]
+    fn malformed_internal_effect_payload_forces_exact_replay() {
+        let entry = boundary(0, 0, true);
+        let mut malformed = boundary(1, 1, true).event;
+        malformed.sequence_span = 0;
+        let result = TypedRegionContract::new(
+            TypedObservationContract::cycle_exact_power(),
+            TransformInterval {
+                start_cycle: 0,
+                end_cycle: 1,
+                start_sequence: 0,
+                end_sequence: 1,
+                sequence_ordered: false,
+            },
+            entry,
+            vec![TypedEventTransition {
+                phase: 0,
+                event: malformed,
+            }],
+            Vec::new(),
+            Vec::new(),
+            boundary(1, 1, true),
+        );
+        assert!(matches!(
+            result,
+            Err(RegionContractError::EffectPayload { .. })
+        ));
+    }
+
+    #[test]
+    fn native_region_comparator_checks_internal_effects_and_labels() {
+        let entry = boundary(0, 0, true);
+        let exit = boundary(1, 1, true);
+        let effect = TypedEventTransition {
+            phase: 0,
+            event: exit.event.clone(),
+        };
+        let region = TypedRegionContract::new(
+            TypedObservationContract::cycle_exact_power(),
+            TransformInterval {
+                start_cycle: 0,
+                end_cycle: 1,
+                start_sequence: 0,
+                end_sequence: 1,
+                sequence_ordered: false,
+            },
+            entry.clone(),
+            vec![effect.clone()],
+            Vec::new(),
+            vec!["scalar_completion".to_owned()],
+            exit.clone(),
+        )
+        .unwrap();
+        assert!(matches!(
+            compare_native_region_contract_with_trace(
+                Some(&region),
+                &entry,
+                &[],
+                &["scalar_completion".to_owned()],
+                &exit,
+            ),
+            NativeBoundaryRefinementDecision::Reify {
+                reason: NativeBoundaryReifyReason::InternalEffectMismatch { .. }
+            }
+        ));
+        assert_eq!(
+            compare_native_region_contract_with_trace(
+                Some(&region),
+                &entry,
+                &[effect],
+                &["scalar_completion".to_owned()],
+                &exit,
+            ),
+            NativeBoundaryRefinementDecision::Preserve
+        );
+        assert!(matches!(
+            native_boundary_execution_path(&NativeBoundaryRefinementDecision::Reify {
+                reason: NativeBoundaryReifyReason::ProjectionMismatch,
+            }),
+            NativeBoundaryExecutionPath::ExactReplay { .. }
+        ));
+        assert_eq!(
+            native_boundary_execution_path(&NativeBoundaryRefinementDecision::Preserve),
+            NativeBoundaryExecutionPath::TypedMacro
         );
     }
 

@@ -51,12 +51,14 @@ pub use state::{
     TypedResponseIdentity, TypedResponseKind,
 };
 pub use transform::{
-    ExternalInputFrontier, IdentityBoundaryTransformer, NativeBoundaryRefinementDecision,
-    NativeBoundaryReifyReason, NativeBoundarySide, ObservationDelta, RegionContractError,
-    StateTransformer, SummaryProof, TRANSFORM_SCHEMA_VERSION, TransformCheckError, TransformError,
-    TransformInput, TransformInterval, TransformIntervalError, TransformReifyReason,
-    TransformerDecision, TransformerOutput, TypedEventTransition, TypedRegionContract, check_proof,
+    ExternalInputFrontier, IdentityBoundaryTransformer, NativeBoundaryExecutionPath,
+    NativeBoundaryRefinementDecision, NativeBoundaryReifyReason, NativeBoundarySide,
+    ObservationDelta, RegionContractError, StateTransformer, SummaryProof,
+    TRANSFORM_SCHEMA_VERSION, TransformCheckError, TransformError, TransformInput,
+    TransformInterval, TransformIntervalError, TransformReifyReason, TransformerDecision,
+    TransformerOutput, TypedEventTransition, TypedRegionContract, check_proof,
     compare_native_boundary_projection, compare_native_region_contract,
+    compare_native_region_contract_with_trace, native_boundary_execution_path,
 };
 
 pub const SCHEMA_VERSION: u32 = 1;
