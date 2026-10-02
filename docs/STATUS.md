@@ -110,6 +110,11 @@ repetitions. Writeback completion remains explicitly unavailable/open; no
 parameter fit, native dispatch, or speedup claim is made. See
 [the writeback result](review_round8_20261002/README.md).
 
+R10.2 completed a live cache-policy contrast on two large cases with three
+fresh `cache-control=none` repetitions after the all-cache measurements. The
+contrast is observational only; no fitting, cache-causality, or speedup claim
+is made. See [the contrast result](review_round9_20261002/README.md).
+
 ## Retained measurements
 
 2026-09-30 RTX 3090 Ti campaigns used driver 615.71.09, 1350/10501 MHz, P0,

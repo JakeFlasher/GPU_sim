@@ -289,3 +289,11 @@ observer uppers remained open. Mean lower-point APE was 32.936%, open
 lower-bound consistency was 1.0, and native/analyzer dispatch counts were zero.
 This live campaign strengthens the negative tail boundary without fitting a
 writeback parameter or claiming hardware scheduler behavior.
+
+## R10.2 live cache-policy contrast — 2026-10-02 (complete)
+
+Two large development cases received three fresh `cache-control=none` NCU
+repetitions after their all-cache post-prediction measurements. The observed
+median shifts were -158 GPC cycles for the read case and +567 cycles for the
+atomic case, with different repeatability ranges. This is an intervention
+observation, not a cache-causality proof, model-fitting input, or speedup claim.

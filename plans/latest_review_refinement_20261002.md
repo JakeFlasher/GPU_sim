@@ -58,6 +58,10 @@ R10.1 is the live writeback loop: dirty-stream footprints target the unresolved
 terminal service tail, with fresh post-prediction NCU repetitions and no
 writeback fitting.
 
+R10.2 is complete for a two-case live cache-policy contrast: fresh
+`cache-control=none` repetitions were collected after the all-cache
+post-prediction condition; the contrast is observational only.
+
 ## Stage ledger
 
 | Stage | Focus | Exit evidence | Status |
@@ -74,6 +78,7 @@ writeback fitting.
 | R9.2 | Two-pass witness/continuation audit | A complete independent pre/effect/post witness exists and drives one production dispatch, or the corpus records no eligible pair and exact fallback | **complete: no eligible pair** |
 | R10.0 | Live SM86 campaign | A bounded live host run records host identity, native/NCU/trace/replay termination, prediction-before-post-observation artifacts, open/refused strata, and no unsupported speedup claim | **complete: 10-case large development probe** |
 | R10.1 | Live writeback campaign | Large dirty streams complete native/trace/replay/NCU runs, preserve writeback tails as unknown/unavailable, and make no speedup or fitted-hardware claim | **complete: 2-case large writeback probe** |
+| R10.2 | Live cache-policy contrast | Fresh none-cache repetitions compare against all-cache observations without fitting or cache-causality claims | **complete: 2-case contrast** |
 
 ## R8.1 — immediate soundness guards
 

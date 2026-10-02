@@ -123,6 +123,10 @@ from profiler measurements; black-box models are assumptions, not observations.
   repetitions. Writeback completion remains open/unavailable; no fitting or
   native speedup claim is made. Aggregate result:
   `docs/review_round8_20261002/`.
+- R10.2 completed a live cache-policy contrast on two large cases with three
+  fresh `cache-control=none` repetitions after all-cache measurements. It is
+  observational only; no fitting, cache-causality, or speedup claim is made.
+  Result: `docs/review_round9_20261002/`.
 
 ## Next useful work
 

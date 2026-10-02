@@ -1,0 +1,50 @@
+{
+  "host": "RTX 3090 Ti SM86 current host",
+  "limitations": [
+    "two cases only",
+    "development intervention not held-out accuracy",
+    "identity caller-labeled unverified",
+    "no model fitting or native speedup claim"
+  ],
+  "repetitions": 3,
+  "role": "development_post_prediction_ncu_intervention",
+  "rows": [
+    {
+      "all_median": 4654.0,
+      "all_range": 42.0,
+      "cache_all_cycles": [
+        4640.0,
+        4682.0,
+        4654.0
+      ],
+      "cache_none_cycles": [
+        4484.0,
+        4496.0,
+        4680.0
+      ],
+      "case": "large_read_0",
+      "none_median": 4496.0,
+      "none_minus_all": -158.0,
+      "none_range": 196.0
+    },
+    {
+      "all_median": 15100.0,
+      "all_range": 732.0,
+      "cache_all_cycles": [
+        15770.0,
+        15038.0,
+        15100.0
+      ],
+      "cache_none_cycles": [
+        15667.0,
+        15685.0,
+        15536.0
+      ],
+      "case": "large_atom_2",
+      "none_median": 15667.0,
+      "none_minus_all": 567.0,
+      "none_range": 149.0
+    }
+  ],
+  "schema": "sm86_live_cache_policy_contrast_v1"
+}
