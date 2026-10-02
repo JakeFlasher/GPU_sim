@@ -10290,6 +10290,7 @@ impl<'a> SmCore<'a> {
     /// caller-supplied count, supplies the warp and effect cardinality used by
     /// the native actor transition.
     #[cfg(feature = "reference")]
+    #[allow(dead_code)]
     pub(crate) fn execute_reference_boundary_result(
         &mut self,
         result: &NativeBoundaryExecutionResult,
