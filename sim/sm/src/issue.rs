@@ -10205,6 +10205,32 @@ impl<'a> SmCore<'a> {
                 reason: "macro_exceeds_warp_stream",
             });
         }
+        if self.instruction_front_end.is_some() {
+            let count = usize::try_from(instruction_count).map_err(|_| {
+                IssueError::ReferenceMacroUnsupported {
+                    reason: "instruction_count_out_of_range",
+                }
+            })?;
+            if self.warps[warp_index].instruction_buffer.len() < count {
+                return Err(IssueError::ReferenceMacroUnsupported {
+                    reason: "instruction_buffer_does_not_close_macro_entry",
+                });
+            }
+            if !self.warps[warp_index]
+                .instruction_buffer
+                .iter()
+                .take(count)
+                .enumerate()
+                .all(|(index, buffered)| buffered.instruction == next + index)
+            {
+                return Err(IssueError::ReferenceMacroUnsupported {
+                    reason: "instruction_buffer_not_contiguous_at_macro_entry",
+                });
+            }
+            for _ in 0..count {
+                self.warps[warp_index].instruction_buffer.pop_front();
+            }
+        }
         for instruction in next..end_index {
             let slot = lookup_dense(
                 &self.schedule_slots,
