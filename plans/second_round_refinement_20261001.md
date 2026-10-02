@@ -468,6 +468,9 @@ GPU overlap models, skipping refinement, or native trace-driven simulators.
   `NativeBoundaryExecutionResult`: a matching transition selects the typed
   macro branch, while a rejected transition carries the detailed exit and
   exact-replay reason. The real probe selects the latter.
+- The typed scalar rule now derives first issue from the entry warp readiness
+  and can consume a closed front-end instruction-buffer prefix; it still
+  refuses absent/noncontiguous buffers and all open pipeline/cache state.
 - The decisive remaining R5 check is a real nonidentity native macro whose
   exit/effects/pending-token mapping are independently derived and consumed by
   continuation execution; until then this stage is not complete.
