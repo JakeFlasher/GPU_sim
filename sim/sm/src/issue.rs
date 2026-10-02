@@ -93,6 +93,8 @@ use sim_mem::{
     L1WriteLookupObserver, L1WriteLookupObserverPlan, L2OpClass, L2Source, LdgstsL1Policy, MemRole,
     MemoryOrigin, decode_async_copy_completion, opcode_head,
 };
+#[cfg(all(feature = "reference", test))]
+use sim_semantics::NativeBoundaryExecutionPath;
 #[cfg(feature = "reference")]
 use sim_semantics::{
     AsyncCopyBoundaryState, AsyncCopyBypassObservationState, AsyncCopyCohortBoundaryState,
@@ -102,8 +104,6 @@ use sim_semantics::{
     L2RequestOwner, L2RequestState, MemoryPipelineBoundaryState, ScalarPipelineBoundaryState,
     TypedResponseKind, WarpBoundaryState,
 };
-#[cfg(feature = "reference")]
-use sim_semantics::{NativeBoundaryExecutionPath, NativeBoundaryExecutionResult};
 
 use crate::control_bits::{ControlDomainError, DepBarrier, WaitMask};
 use crate::metrics::{SmActivity, WarpLifetime};
@@ -9530,9 +9530,9 @@ pub(crate) struct AdvanceDiagnostics {
     pub skipped_cycles: u64,
 }
 
-#[cfg(feature = "reference")]
+#[cfg(all(feature = "reference", test))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ReferenceScalarMacroExecution {
+struct ReferenceScalarMacroExecution {
     pub(crate) warp_slot: i32,
     pub(crate) first_issue: u64,
     pub(crate) last_issue: u64,
@@ -10124,8 +10124,8 @@ impl<'a> SmCore<'a> {
     /// typed boundary executor independently validates the corresponding
     /// contract; this method only installs the already-derived state delta and
     /// then leaves `advance` to execute the continuation.
-    #[cfg(feature = "reference")]
-    pub(crate) fn execute_reference_scalar_macro(
+    #[cfg(all(feature = "reference", test))]
+    fn execute_reference_scalar_macro(
         &mut self,
         warp_slot: i32,
         instruction_count: u64,
@@ -10305,29 +10305,6 @@ impl<'a> SmCore<'a> {
             .ok_or(IssueError::CounterOverflow {
                 counter: "reference macro SMSP active cycles",
             })?;
-        for offset in 0..instruction_count {
-            let issue = first_issue
-                .checked_add(offset.checked_mul(initiation_interval_cycles).ok_or(
-                    IssueError::ReferenceMacroUnsupported {
-                        reason: "macro_effect_timing_overflow",
-                    },
-                )?)
-                .ok_or(IssueError::ReferenceMacroUnsupported {
-                    reason: "macro_effect_timing_overflow",
-                })?;
-            self.reference_issue_effects.push((
-                issue,
-                u64::try_from(warp_index).unwrap_or(u64::MAX),
-                u32::try_from(
-                    next + usize::try_from(offset).map_err(|_| {
-                        IssueError::ReferenceMacroUnsupported {
-                            reason: "macro_effect_index_out_of_range",
-                        }
-                    })?,
-                )
-                .unwrap_or(u32::MAX),
-            ));
-        }
         self.hold[subcore] = Some(warp_index);
         self.t = end_cycle;
         Ok(ReferenceScalarMacroExecution {
@@ -10342,8 +10319,8 @@ impl<'a> SmCore<'a> {
     /// Consume the native comparator's selected execution path. Exact replay
     /// returns no macro transition; the typed-macro branch performs the native
     /// state mutation and returns its continuation frontier.
-    #[cfg(feature = "reference")]
-    pub(crate) fn execute_reference_macro_path(
+    #[cfg(all(feature = "reference", test))]
+    fn execute_reference_macro_path(
         &mut self,
         path: &NativeBoundaryExecutionPath,
         warp_slot: i32,
@@ -10360,51 +10337,6 @@ impl<'a> SmCore<'a> {
                 .map(Some),
             NativeBoundaryExecutionPath::ExactReplay { .. } => Ok(None),
         }
-    }
-
-    /// Consume the full typed comparator result directly. The contract, not a
-    /// caller-supplied count, supplies the warp and effect cardinality used by
-    /// the native actor transition.
-    #[cfg(feature = "reference")]
-    #[allow(dead_code)]
-    pub(crate) fn execute_reference_boundary_result(
-        &mut self,
-        result: &NativeBoundaryExecutionResult,
-    ) -> Result<Option<ReferenceScalarMacroExecution>, IssueError> {
-        let NativeBoundaryExecutionResult::TypedMacro { contract } = result else {
-            return Ok(None);
-        };
-        let core = contract
-            .entry
-            .cores
-            .first()
-            .ok_or(IssueError::ReferenceMacroUnsupported {
-                reason: "typed_macro_core_missing",
-            })?;
-        let warp = core
-            .warp_states
-            .first()
-            .ok_or(IssueError::ReferenceMacroUnsupported {
-                reason: "typed_macro_warp_missing",
-            })?;
-        let count = u64::try_from(contract.internal_effects.len()).map_err(|_| {
-            IssueError::ReferenceMacroUnsupported {
-                reason: "typed_macro_effect_count_out_of_range",
-            }
-        })?;
-        let interval = contract
-            .internal_effects
-            .windows(2)
-            .next()
-            .and_then(|effects| effects[1].event.time.checked_sub(effects[0].event.time))
-            .unwrap_or(1)
-            .max(1);
-        self.execute_reference_macro_path(
-            &NativeBoundaryExecutionPath::TypedMacro,
-            warp.warp_slot,
-            count,
-            interval,
-        )
     }
 
     #[cfg(feature = "reference")]

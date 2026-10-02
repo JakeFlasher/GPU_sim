@@ -276,7 +276,7 @@ result showing why the current typed boundary cannot close it.
 ### Goal
 
 Measure the actual observer projection and real execution path over a broader,
-identity-checked corpus.
+document-identity-consistent corpus.
 
 ### Work packages
 
@@ -367,7 +367,7 @@ GPU overlap models, skipping refinement, or native trace-driven simulators.
   cache-causality, and native-speedup claims.
 - The claim map distinguishes descriptor equivalence (level 1), executable
   model transition equivalence (level 2), the closed native issue-model seam
-  (level 3), and the identity-checked post-prediction NCU comparison (level 4).
+  (level 3), and the document-identity-consistent post-prediction NCU comparison (level 4).
 - The R6 15-workload result is reported as a negative/diagnostic outcome:
   all native uppers are open, finite coverage is not applicable, and no native
   macro dispatch or runtime/step benefit is claimed.
@@ -389,7 +389,7 @@ GPU overlap models, skipping refinement, or native trace-driven simulators.
 | R3 | **complete (2026-10-01)** | Eligibility requires a separate fact-complete witness with an allowed origin; stale/producer-premise facts reify, and multi-warp/same-cycle order remains explicit refusal or engine-order checked. |
 | R4 | **complete (2026-10-01)** | Service roles, serial queue/frontier semantics, grouped assignment lower/upper envelopes, unknown/zero-demand handling, occupancy/contention labeling, and throughput interval endpoints are implemented and tested. Native metrics remain marginal where no per-record route witness exists. |
 | R5 | **complete (2026-10-02)** | A closed two-instruction native `SmCore` scalar region derives a typed entry/exit, validates effects/pending state, consumes typed-macro/exact-replay decisions, matches detailed continuation state, and falls back on every unsupported boundary. Full front-end-enabled SM86 traces remain exact fallback. |
-| R6 | **complete (2026-10-02)** | 15-workload, six-family, identity-checked pre-NCU/post-NCU evaluation is materialized; all native rows remain open/exact fallback and no compression claim is made. |
+| R6 | **complete (2026-10-02)** | 15-workload, six-family, document-identity-consistent pre-NCU/post-NCU evaluation is materialized; all native rows remain open/exact fallback and no compression claim is made. |
 | R7 | **complete (2026-10-02)** | Claim map, falsifiers, novelty boundary, negative R6 result, and repository-wide terminology/docs/config synchronization are committed in the third-round rebuttal. |
 
 ## Continuity rules
@@ -479,10 +479,10 @@ GPU overlap models, skipping refinement, or native trace-driven simulators.
   queue depth, open completion uppers, and the unresolved marginal-pool
   assignment semantics. It is a model-local queue envelope, not a GPU
   scheduler trace.
-- The v2 fitter now requires only latency/throughput/queue probes for the
-  fitted rate equation. Occupancy/contention rows are retained as explicitly
-  unmodeled dimensions and changing only those values leaves fitted rates
-  unchanged; holdout reports them as unmodeled.
+- The v2 fitter requires explicit dependent latency and independent throughput;
+  queue-depth/capacity probes are retained as interventions but no queue
+  equation is fitted, so `queue_depth`, occupancy, and contention remain
+  explicitly unmodeled.
 - Throughput profiles now retain a lower/upper initiation-interval envelope;
   the projection widens only the service upper under that uncertainty.
 - Grouped alternative assignment domains now preserve lower/upper assignment
@@ -491,6 +491,12 @@ GPU overlap models, skipping refinement, or native trace-driven simulators.
   result is a silicon timing claim.
 
 ## R5 implementation evidence (complete for closed native issue-model seam)
+
+**Latest-panel correction:** the seam below is a direct/test helper result, not
+production comparator-selected event-loop dispatch. A bounded native canary
+exposed a response-owner/queue join failure before a macro could be consumed;
+R8.2 is reopened and the retained front-end-enabled path remains exact
+fallback. The helper evidence is retained at its narrower evidence level.
 
 - `TypedRegionContract::validate` now validates every internal effect payload
   and rejects malformed sequence spans. The native comparator has a trace-aware

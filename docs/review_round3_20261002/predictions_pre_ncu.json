@@ -396,6 +396,128 @@
     }
   ],
   "schema": "reification_prediction_v2",
+  "source_bindings": [
+    {
+      "arch_card": "arch_profiles/cards/sm_86.json",
+      "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__embedding_gather_int32_sm80/control.json",
+      "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+      "pchase_card": "data/pchase/sm_86_static_card.json",
+      "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__embedding_gather_int32_sm80/trace",
+      "workload": "base__embedding_gather_int32_sm80"
+    },
+    {
+      "arch_card": "arch_profiles/cards/sm_86.json",
+      "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__flash_attn_fwd_bf16_sm80/control.json",
+      "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+      "pchase_card": "data/pchase/sm_86_static_card.json",
+      "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__flash_attn_fwd_bf16_sm80/trace",
+      "workload": "base__flash_attn_fwd_bf16_sm80"
+    },
+    {
+      "arch_card": "arch_profiles/cards/sm_86.json",
+      "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_hmma_bf16_sm80/control.json",
+      "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+      "pchase_card": "data/pchase/sm_86_static_card.json",
+      "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_hmma_bf16_sm80/trace",
+      "workload": "base__gemm_hmma_bf16_sm80"
+    },
+    {
+      "arch_card": "arch_profiles/cards/sm_86.json",
+      "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_imma_int8_sm80/control.json",
+      "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+      "pchase_card": "data/pchase/sm_86_static_card.json",
+      "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_imma_int8_sm80/trace",
+      "workload": "base__gemm_imma_int8_sm80"
+    },
+    {
+      "arch_card": "arch_profiles/cards/sm_86.json",
+      "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_sparse_2to4_bf16_sm80/control.json",
+      "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+      "pchase_card": "data/pchase/sm_86_static_card.json",
+      "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_sparse_2to4_bf16_sm80/trace",
+      "workload": "base__gemm_sparse_2to4_bf16_sm80"
+    },
+    {
+      "arch_card": "arch_profiles/cards/sm_86.json",
+      "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__layernorm_fwd_bf16_sm80/control.json",
+      "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+      "pchase_card": "data/pchase/sm_86_static_card.json",
+      "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__layernorm_fwd_bf16_sm80/trace",
+      "workload": "base__layernorm_fwd_bf16_sm80"
+    },
+    {
+      "arch_card": "arch_profiles/cards/sm_86.json",
+      "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__rmsnorm_fwd_bf16_sm80/control.json",
+      "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+      "pchase_card": "data/pchase/sm_86_static_card.json",
+      "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__rmsnorm_fwd_bf16_sm80/trace",
+      "workload": "base__rmsnorm_fwd_bf16_sm80"
+    },
+    {
+      "arch_card": "arch_profiles/cards/sm_86.json",
+      "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__silu_fwd_bf16_sm80/control.json",
+      "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+      "pchase_card": "data/pchase/sm_86_static_card.json",
+      "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__silu_fwd_bf16_sm80/trace",
+      "workload": "base__silu_fwd_bf16_sm80"
+    },
+    {
+      "arch_card": "arch_profiles/cards/sm_86.json",
+      "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__conv2d_implicit_gemm_bf16_sm80/control.json",
+      "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+      "pchase_card": "data/pchase/sm_86_static_card.json",
+      "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__conv2d_implicit_gemm_bf16_sm80/trace",
+      "workload": "large__conv2d_implicit_gemm_bf16_sm80"
+    },
+    {
+      "arch_card": "arch_profiles/cards/sm_86.json",
+      "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__cross_entropy_fwd_fp32_sm80/control.json",
+      "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+      "pchase_card": "data/pchase/sm_86_static_card.json",
+      "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__cross_entropy_fwd_fp32_sm80/trace",
+      "workload": "large__cross_entropy_fwd_fp32_sm80"
+    },
+    {
+      "arch_card": "arch_profiles/cards/sm_86.json",
+      "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__flash_attn_bwd_bf16_sm80/control.json",
+      "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+      "pchase_card": "data/pchase/sm_86_static_card.json",
+      "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__flash_attn_bwd_bf16_sm80/trace",
+      "workload": "large__flash_attn_bwd_bf16_sm80"
+    },
+    {
+      "arch_card": "arch_profiles/cards/sm_86.json",
+      "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__gemm_hmma_fp16_sm80/control.json",
+      "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+      "pchase_card": "data/pchase/sm_86_static_card.json",
+      "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__gemm_hmma_fp16_sm80/trace",
+      "workload": "large__gemm_hmma_fp16_sm80"
+    },
+    {
+      "arch_card": "arch_profiles/cards/sm_86.json",
+      "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__rmsnorm_bwd_bf16_sm80/control.json",
+      "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+      "pchase_card": "data/pchase/sm_86_static_card.json",
+      "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__rmsnorm_bwd_bf16_sm80/trace",
+      "workload": "large__rmsnorm_bwd_bf16_sm80"
+    },
+    {
+      "arch_card": "arch_profiles/cards/sm_86.json",
+      "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__softmax_safe_bf16_sm80/control.json",
+      "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+      "pchase_card": "data/pchase/sm_86_static_card.json",
+      "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__softmax_safe_bf16_sm80/trace",
+      "workload": "large__softmax_safe_bf16_sm80"
+    },
+    {
+      "arch_card": "arch_profiles/cards/sm_86.json",
+      "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__swiglu_fwd_bf16_sm80_n1048576/control.json",
+      "launch_identity": "full_3090ti_20260930_temporal_cold_live2",
+      "pchase_card": "data/pchase/sm_86_static_card.json",
+      "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__swiglu_fwd_bf16_sm80_n1048576/trace",
+      "workload": "large__swiglu_fwd_bf16_sm80_n1048576"
+    }
+  ],
   "step_reduction_basis": "not_available_native_frontend_exact_fallback",
   "target_contract": {
     "cache_policy": "all",

@@ -4,7 +4,7 @@
 The command reads only profiler CSVs and a workload roster.  It does not read
 predictions and cannot influence prediction materialization or model choice.
 Prediction and observation documents therefore remain separate artifacts until
-``evaluate_prediction_splits.py`` performs the explicit identity-checked join.
+``evaluate_prediction_splits.py`` performs the explicit document-identity-consistent join.
 """
 
 from __future__ import annotations
@@ -43,7 +43,10 @@ def _numeric_values(path: Path, metric: str) -> list[float]:
 
 
 def build_observation_set(
-    manifest: dict[str, Any], campaign_root: Path, *, source: str = "ncu_csv"
+    manifest: dict[str, Any],
+    campaign_root: Path,
+    *,
+    source: str = "ncu_csv",
 ) -> dict[str, Any]:
     if manifest.get("schema") != "reification_prediction_manifest_v1":
         raise ValueError("manifest schema must be reification_prediction_manifest_v1")
@@ -52,6 +55,9 @@ def build_observation_set(
     )
     if contract["metric"] != TARGET_METRIC:
         raise ValueError(f"observation metric must be {TARGET_METRIC!r}")
+    # The CSV parser observes values, not GPU UUID/driver/clock provenance.
+    # There is intentionally no caller-selectable "verified" status.
+    identity_status = "manifest_labeled_historical"
     rows = manifest.get("rows")
     if not isinstance(rows, list) or not rows:
         raise ValueError("manifest rows must be nonempty")
@@ -91,11 +97,13 @@ def build_observation_set(
                     "clock_domain": contract["clock_domain"],
                     "hardware": contract["hardware"],
                     "source": source,
+                    "identity_status": identity_status,
                 }
             )
     document = {
         "schema": "ncu_observation_v2",
         "source": source,
+        "identity_status": identity_status,
         "target_contract": contract,
         "rows": observations,
     }
@@ -110,7 +118,9 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     document = build_observation_set(
-        json.loads(args.manifest.read_text()), args.campaign_root, source=args.source
+        json.loads(args.manifest.read_text()),
+        args.campaign_root,
+        source=args.source,
     )
     args.output.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n")
     print(args.output)

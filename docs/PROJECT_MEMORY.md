@@ -55,17 +55,13 @@ from profiler measurements; black-box models are assumptions, not observations.
   supplies residency only and therefore refuses rather than self-certifying.
   Multi-warp/global-order cases remain conservative refusal, and same-cycle
   effect ordering is checked independently of global sequence monotonicity.
-- R5 is complete for the closed native issue-model seam: native `SmCore`
-  reference tests consume typed-macro/exact-replay decisions, compare macro
-  entry/exit with detailed replay, and resume a detailed suffix. R5 also
-  captures native reference pre/post typed boundaries and detailed issue
-  effects. The pure-scalar SM86 probe has a complete pre/post pair with two
-  effects; the strict independently derived scalar transition rejects the
-  front-end state as not closed and therefore preserves exact fallback.
-- The reference `SmCore` issue actor now consumes the comparator-selected
-  typed-macro/exact-replay path; a native issue-model test compares macro entry,
-  exit, and detailed continuation state. The real SM86 reference probe still
-  selects exact replay because its front-end state is open.
+- R5 is complete for a closed native issue-model helper seam only: tests
+  compare a scalar macro entry/exit with detailed replay, but production
+  comparator-selected event-loop dispatch remains unestablished after a
+  bounded native queue/response-owner join failure. The pure-scalar SM86 probe
+  rejects front-end state as not closed and remains exact fallback.
+- The reference issue actor has a test-only typed-macro helper seam; the real
+  SM86 reference probe and production event loop still select exact replay.
 - The closed native issue-model seam is exercised with a two-instruction scalar
   macro and detailed suffix; front-end-enabled launches remain exact fallback.
 - Service profiles now mark capacity-adjusted throughput slopes and carry
@@ -86,25 +82,26 @@ from profiler measurements; black-box models are assumptions, not observations.
   interval to a typed observer projection; replacement admission and service
   arithmetic are checked; scalar sequence arithmetic checks intermediate
   additions. These are direct API/projection guards, not native speedup.
-- R8.2 is complete for a narrow independently witnessed issue-model seam. The
-  reference event loop consumes a validated `TypedMacro`/`ExactReplay` result
-  at `Ev::SmWake`, arms the next wake, resumes a detailed suffix, and refuses
-  before mutation when the typed contract/effect ledger is perturbed. The
-  retained front-end-enabled corpus has no such witness and remains exact
-  fallback; dispatch counters in the reference footer are not speedup.
-- R8.3 is complete as a conservative native closure rule: the dispatcher
-  exact-falls back for non-unit completion tails, pending tokens, or changes in
-  scalar/memory/cache/front-end/response/barrier/local-completion state that
-  its actor does not install. Model-local latency certificates remain valid at
-  their own evidence level; native latency/completion modeling is not claimed.
+- R8.2 production native dispatch is reopened. A synthetic helper seam was
+  attempted, but a bounded native canary exposed a response-owner/queue join
+  failure before a production macro could be consumed; the helper is not
+  production evidence. The retained front-end-enabled corpus remains exact
+  fallback.
+- R8.3 is complete as a conservative typed eligibility rule: latency >1,
+  pending queue tokens, front-end/scalar-pipeline state, and nonempty
+  instruction buffers refuse before any issue-only summary is treated as
+  native. Model-local latency certificates remain valid at their own evidence
+  level; native latency/completion modeling is not claimed.
 - R6 is complete: `docs/sm86_reification_corpus_v1_20261002.json` defines a
   15-workload, six-family SM86 corpus with no family crossing; prediction,
   observation, and join artifacts are retained under
   `docs/review_round3_20261002/`. The pre-observation output uses the declared
   observer projection, records detailed replay plus a latent sidecar, and
   reports zero native macro dispatches/step reduction. The post-prediction join
-  enforces row-level metric/endpoint/clock/hardware identity and reports open
-  intervals separately from finite coverage.
+  enforces row-level metric/endpoint/clock/declared-hardware identity and
+  reports open intervals separately from finite coverage. Observation rows are
+  explicitly `manifest_labeled_historical`; the builder does not independently
+  verify live GPU identity.
 
 ## Next useful work
 
@@ -128,8 +125,9 @@ still record exact-replay plans. Current rankings, open
 intervals, and descriptor/macro probe remain negative/diagnostic evidence and
 black-box internals are not execution prerequisites. R7 rebuttal/
 claim-discipline is complete; R8.0 review intake, R8.1 soundness guards, and
-R8.2 witnessed production reference dispatch and R8.3 native state closure are
-complete. R8.4 service identifiability is next; use
+R8.2 production dispatch is reopened; R8.3 native eligibility, R8.4 service
+identifiability, R8.5 measurement identity/cost utility, and R8.6
+synchronization are complete; use
 [`third_round_rebuttal_20261002.md`](../plans/third_round_rebuttal_20261002.md)
 for the prior evidence map and
 [`latest_review_refinement_20261002.md`](../plans/latest_review_refinement_20261002.md)

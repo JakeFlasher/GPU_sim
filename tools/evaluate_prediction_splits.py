@@ -93,7 +93,12 @@ def evaluate_prediction_splits(predictions: dict[str, Any], observations: dict[s
     validate_observation_workloads(observation_rows, {key for key, _ in predictions_by_key})
     observations_by_key: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for index, row in enumerate(observation_rows):
-        validate_observation_row(row, index, observation_contract)
+        validate_observation_row(
+            row,
+            index,
+            observation_contract,
+            observations.get("identity_status"),
+        )
         key = row["workload"]
         observations_by_key[key].append({
             "value": _finite(row.get("value"), f"observation row {index}.value"),
@@ -149,6 +154,7 @@ def evaluate_prediction_splits(predictions: dict[str, Any], observations: dict[s
             "observation_endpoint": observation["endpoint"],
             "observation_clock_domain": observation["clock_domain"],
             "observation_hardware": observation["hardware"],
+            "observation_identity_status": observations.get("identity_status"),
             # Coverage is defined only for finite intervals.  For an open
             # upper, retain a separate lower-bound consistency diagnostic so
             # it cannot be mistaken for calibrated interval coverage.

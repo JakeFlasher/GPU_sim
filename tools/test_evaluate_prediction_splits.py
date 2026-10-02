@@ -29,6 +29,7 @@ def _observation(workload: str, value: float) -> dict:
         "endpoint": CONTRACT["endpoint"],
         "clock_domain": CONTRACT["clock_domain"],
         "hardware": CONTRACT["hardware"],
+        "identity_status": "manifest_labeled_historical",
     }
 
 
@@ -60,6 +61,7 @@ def test_ncu_join_happens_after_split_prediction_and_reports_coverage_refusal_an
     }
     observations = {
         "schema": "ncu_observation_v2",
+        "identity_status": "manifest_labeled_historical",
         "target_contract": CONTRACT,
         "rows": [_observation("cal-a", 10), _observation("dev-a", 21)],
     }
@@ -79,7 +81,7 @@ def test_prediction_cannot_smuggle_an_observed_target_into_the_feature_document(
                 "target_contract": CONTRACT,
                 "rows": [{"workload": "x", "family": "f", "split": "held_out", "observed": 7}],
             },
-            {"schema": "ncu_observation_v2", "target_contract": CONTRACT, "rows": []},
+            {"schema": "ncu_observation_v2", "identity_status": "manifest_labeled_historical", "target_contract": CONTRACT, "rows": []},
         )
 
 
@@ -90,7 +92,7 @@ def test_open_upper_interval_is_not_finite_coverage_and_has_no_width():
             "target_contract": CONTRACT,
             "rows": [{"workload": "x", "family": "f", "split": "held_out", "status": "predicted", **_prediction(10, 9, None)}],
         },
-        {"schema": "ncu_observation_v2", "target_contract": CONTRACT, "rows": [_observation("x", 100)]},
+        {"schema": "ncu_observation_v2", "identity_status": "manifest_labeled_historical", "target_contract": CONTRACT, "rows": [_observation("x", 100)]},
     )
     held = report["split_reports"]["held_out"]
     assert held["interval_coverage"] is None
@@ -115,6 +117,7 @@ def test_predicted_row_must_bind_interval_to_observer_projection():
             },
             {
                 "schema": "ncu_observation_v2",
+                "identity_status": "manifest_labeled_historical",
                 "target_contract": CONTRACT,
                 "rows": [_observation("x", 100)],
             },
@@ -132,7 +135,7 @@ def test_variant_ranking_is_reported_without_using_observation_error():
     }
     report = evaluate_prediction_splits(
         predictions,
-        {"schema": "ncu_observation_v2", "target_contract": CONTRACT, "rows": [_observation("x", 100)]},
+        {"schema": "ncu_observation_v2", "identity_status": "manifest_labeled_historical", "target_contract": CONTRACT, "rows": [_observation("x", 100)]},
     )
     assert report["split_reports"]["held_out"]["variant_rankings"] == {
         "x": {"ordered_pairs": [], "indeterminate_pairs": [["fast", "slow"]]}
@@ -150,7 +153,7 @@ def test_family_cannot_cross_splits():
                     {"workload": "b", "family": "same", "split": "held_out", "status": "refused", "reason": "unsupported"},
                 ],
             },
-            {"schema": "ncu_observation_v2", "target_contract": CONTRACT, "rows": []},
+            {"schema": "ncu_observation_v2", "identity_status": "manifest_labeled_historical", "target_contract": CONTRACT, "rows": []},
         )
 
 
@@ -162,7 +165,7 @@ def test_observation_identity_is_required_and_unknown_workloads_are_rejected():
                 "target_contract": CONTRACT,
                 "rows": [{"workload": "x", "family": "f", "split": "held_out", "status": "refused", "reason": "unsupported"}],
             },
-            {"schema": "ncu_observation_v2", "target_contract": CONTRACT, "rows": [{"workload": "x", "value": 1}]},
+            {"schema": "ncu_observation_v2", "identity_status": "manifest_labeled_historical", "target_contract": CONTRACT, "rows": [{"workload": "x", "value": 1}]},
         )
     with pytest.raises(ValueError, match="absent from predictions"):
         evaluate_prediction_splits(
@@ -171,7 +174,7 @@ def test_observation_identity_is_required_and_unknown_workloads_are_rejected():
                 "target_contract": CONTRACT,
                 "rows": [{"workload": "x", "family": "f", "split": "held_out", "status": "refused", "reason": "unsupported"}],
             },
-            {"schema": "ncu_observation_v2", "target_contract": CONTRACT, "rows": [_observation("other", 1)]},
+            {"schema": "ncu_observation_v2", "identity_status": "manifest_labeled_historical", "target_contract": CONTRACT, "rows": [_observation("other", 1)]},
         )
 
 
@@ -185,5 +188,5 @@ def test_target_contract_mismatch_is_rejected_before_join():
                 "target_contract": CONTRACT,
                 "rows": [{"workload": "x", "family": "f", "split": "held_out", "status": "refused", "reason": "unsupported"}],
             },
-            {"schema": "ncu_observation_v2", "target_contract": observation_contract, "rows": []},
+            {"schema": "ncu_observation_v2", "identity_status": "manifest_labeled_historical", "target_contract": observation_contract, "rows": []},
         )

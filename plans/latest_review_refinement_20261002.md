@@ -39,11 +39,11 @@ verified device identity.
 |---|---|---|---|
 | R8.0 | Review intake and executable plan | This plan maps every critical/major/open finding to a code seam, test, falsifier, and claim boundary | **complete** |
 | R8.1 | Immediate soundness guards | Mismatched certificates, inconsistent grouped queues, missing observer projections, incomplete cache domains, and unchecked arithmetic refuse before mutation or finite projection | **complete** |
-| R8.2 | Production native decision path | A comparator-selected closed fixture reaches the real event loop, increments a dispatch counter, installs effects/pending state, resumes a detailed suffix, and falls back before mutation when one field is perturbed | **complete** |
+| R8.2 | Production native decision path | A comparator-selected closed fixture reaches the real event loop, increments a dispatch counter, installs effects/pending state, resumes a detailed suffix, and falls back before mutation when one field is perturbed | **reopened: production path unestablished** |
 | R8.3 | Native state closure and independent refinement | Nonzero scalar latency/completion/front-end state is either consumed and compared against an independently captured boundary or conservatively refused; self-match tests are not the sole evidence | **complete** |
 | R8.4 | Service/queue semantics and identifiability | Queue unknowns cannot close spuriously; residual/replacement roles have explicit equations and a held-out intervention, or the profile is clearly sidecar-only; latency, throughput, and queue parameters are separately identified | **complete** |
-| R8.5 | Measurement identity and cost utility | NCU observations are explicitly verified or labeled as manifest-labeled historical data; source/trace/control/card/launch identity is bound; parser/planner/effect/compare/RSS/wall-time cost and accepted/refused coverage are reported without speedup overclaim | pending |
-| R8.6 | Independent evaluation and paper synchronization | New tests/probes, negative results, novelty/prior-art boundary, histories, memory, status, schemas, and rebuttal all agree; full validation passes | pending |
+| R8.5 | Measurement identity and cost utility | NCU observations are explicitly verified or labeled as manifest-labeled historical data; source/trace/control/card/launch identity is bound; parser/planner/effect/compare/RSS/wall-time cost and accepted/refused coverage are reported without speedup overclaim | **complete** |
+| R8.6 | Independent evaluation and paper synchronization | New tests/probes, negative results, novelty/prior-art boundary, histories, memory, status, schemas, and rebuttal all agree; full validation passes | **complete** |
 
 ## R8.1 — immediate soundness guards
 
@@ -100,8 +100,9 @@ verified device identity.
 
 ### Acceptance and falsifiers
 
-- The production fixture reports one native typed-macro dispatch and a
-  detailed suffix with the same declared continuation state as exact replay.
+- A future production fixture must report one native typed-macro dispatch and a
+  detailed suffix with the same declared continuation state as exact replay;
+  the current helper fixture is not sufficient.
 - Perturbing entry, effect, pending, exit, or continuation state selects exact
   fallback and does not mutate the native core.
 - A real front-end-enabled SM86 canary remains exact fallback unless all
@@ -132,32 +133,20 @@ verified device identity.
 - A fabricated equal endpoint with empty effects is rejected.
 - A front-end cursor mismatch refuses before mutation.
 
-## R8.2 implementation evidence (complete 2026-10-02; narrow witness seam)
+## R8.2 attempted implementation and falsifying result (reopened 2026-10-02)
 
 - The reference trace accepts an optional, separately produced typed witness
   (`SIM_SM_REFERENCE_TYPED_SCALAR_WITNESS`). At a pre-event boundary it runs
   `execute_typed_scalar_macro` against that witness's detailed effects/labels/
   exit, stores the resulting `TypedMacro` or `ExactReplay`, and exposes the
   decision in the trace. No witness means no macro plan.
-- The event loop now consumes that result at the actual `Ev::SmWake` branch.
-  `dispatch_reference_macro_event` validates the typed contract and nonempty
-  effect ledger before mutation, calls `SmCore::execute_reference_boundary_result`,
-  arms the next wake, and then resumes detailed execution. `ExactReplay`, an
-  invalid/perturbed effect ledger, or an unsupported actor returns to the
-  ordinary detailed path without mutating the core.
-- Post-event reference records use a distinct region-end identity only when
-  the witness plan is active and the queue ordering remains structurally valid;
-  ordinary open multi-SM boundaries retain their original queue identity and
-  continue to refuse. This avoids inventing a global sequence order for a
-  local actor that ran ahead of other queued events.
-- The native actor records issue effects for macro instructions, and the
-  footer reports `native_macro_dispatches` and `native_macro_fallbacks`.
-- Reference-feature tests exercise a validated two-instruction scalar macro
-  through the event-branch dispatcher, schedule a wake, resume a detailed
-  suffix, and verify exact fallback/no mutation for both an explicit
-  `ExactReplay` result and a perturbed empty effect ledger. This is a closed
-  issue-model/native event-loop seam, not a claim that real front-end SM86
-  launches are currently compressible.
+- A prototype was wired through the intended event-loop seam and passed a
+  synthetic helper test, but the first bounded native canary exposed a
+  response-owner/queue join failure before a production macro could be
+  consumed. The prototype is not retained as production dispatch; the direct
+  issue-model helper remains a test seam only.
+- The native canary therefore has no dispatch counter or runtime benefit, and
+  the pre/post reference pairing remains a diagnostic exact-fallback stream.
 
 The retained SM86 front-end canary still selects exact fallback: its complete
 fetch/cache/response state and independent witness are absent. The witness
@@ -189,26 +178,20 @@ run artifact, target label, provenance gate, or silicon oracle.
 - Changing an independent-post-replay profile changes only its sidecar unless
   a declared residual/replacement role is selected.
 
-## R8.3 implementation evidence (complete 2026-10-02; conservative native scope)
+## R8.3 implementation evidence (complete 2026-10-02; conservative eligibility scope)
 
-- The production native dispatcher validates the complete typed region before
-  calling `SmCore`. It requires a nonempty effect ledger, rejects any pending
-  completion token, and checks that scalar/memory pipeline, L1/front-end,
-  async-copy, response-owner, block/barrier, local-completion, and unprojected
-  timing state is unchanged across the typed boundary. These are exactly the
-  state classes the current actor does not install in its macro method.
-- The current native issue actor therefore supports only a unit completion
-  tail: the exit must be one cycle after the last declared issue effect. A
-  latency-10 or otherwise longer completion tail exact-falls back before core
-  mutation. Model-local certificates may still represent larger latency; that
-  is not silently upgraded to a native transition.
+- The typed scalar eligibility rule now refuses latency >1, any pending queue
+  token, front-end/scalar-pipeline state, and nonempty instruction buffers.
+  These are state classes not represented by the issue-only transition. A
+  latency-10 or otherwise longer completion tail is therefore a typed
+  fallback, not a native transition.
 - The optional witness carries a separately supplied detailed effect ledger,
   observable labels, and detailed exit. The comparator consumes those fields
-  before the dispatcher; the positive event-branch fixture is built from an
+  at the model/native test seam; the positive helper fixture is built from an
   independently constructed entry/exit/effect region, while perturbed,
-  empty-effect, pending/tail, and exact-replay results all refuse without
-  mutation.
-- Front-end buffer/cursor checks remain in `SmCore::execute_reference_scalar_macro`.
+  empty-effect, pending/tail, and exact-replay cases refuse. This is not
+  production dispatch evidence.
+- Front-end buffer/cursor state remains outside the accepted issue-only rule.
   The retained front-end-enabled SM86 traces still lack a closed witness and
   remain exact fallback; no self-match or synthetic endpoint is called native
   completion.
@@ -286,6 +269,31 @@ service profile into a calibrated silicon model.
 - Commit only coherent changes; leave the pre-existing untracked review corpus
   untouched.
 
+## R8.5 implementation evidence (complete 2026-10-02; historical identity and full-cost scope)
+
+- The default NCU CSV builder now emits `identity_status=manifest_labeled_historical`
+  on the document and every row. It does not offer a caller-selected verified
+  status or claim live-device proof; the standalone CSV adapter uses the more
+  explicit `caller_labeled_unverified` status. The observation schema and join
+  validator require status consistency.
+- Pre-observation predictions now carry semantic source bindings for each
+  workload's trace directory, control sidecar, architecture card, pchase card,
+  and declared launch identity. These are ordinary input paths, not hashes,
+  receipts, provenance gates, or execution prerequisites.
+- `evaluate_reification_design.py` reports accepted/summarized versus
+  reified/uncovered record fractions, child wall-clock/peak-RSS deltas, and an
+  explicit cost-component scope covering parse, replay, planning, effect
+  materialization, boundary comparison, and output. It sets
+  `native_speedup_claimed=false`; dispatch/step ratios remain model-local
+  counters rather than runtime speedups.
+- The corrected R6 observation artifact is revalidated under the updated schema.
+  A forged manifest identity is now visibly historical/unverified rather than
+  being described as independent host verification.
+
+This closes the identity wording and utility-accounting finding. It does not
+create a live device verifier, and it does not compare against prior-art
+simulator cost numbers that were not measured under the same input contract.
+
 ## Stop/claim discipline
 
 If a stage cannot demonstrate its acceptance evidence, it is not complete.
@@ -324,4 +332,27 @@ Focused evidence: `sim-semantics` 130 tests passed; reference `sim-sm` 503
 tests passed; prediction/evaluation/schema Python tests 11 passed; formatting
 and diff checks passed. This closes direct API/projection soundness findings,
 not the production native event-loop, latency/completion closure, service
-identifiability, or independent host-identity findings scheduled for R8.2+.
+identifiability, or independent host-identity findings scheduled for R8.2/R8.5.
+
+## R8.6 implementation evidence (complete 2026-10-02)
+
+- All current docs agree that R8.2 production dispatch is reopened after the
+  bounded native queue/response-owner join failure; the helper fixture is not
+  production evidence. R8.3 is typed eligibility/refusal, R8.4 is explicit
+  service composition with an unmodeled queue equation, and R8.5 labels
+  historical observation identity and full-cost scope.
+- The committed R6 observation artifact is schema-valid with
+  `manifest_labeled_historical`; the prediction artifact has semantic source
+  bindings and no target values. Revised schemas and Python validators reject
+  status/row mismatches and preserve open intervals.
+- Validation passed: `cargo fmt --all -- --check`; full Cargo workspace (all
+  tests passed, with only existing ignored machine-local tests); focused Python
+  calibration/evaluation/schema/reference suites (41 passed); JSON Schema
+  self-validation and committed prediction/observation artifact validation.
+  The pre-existing untracked `research_audit_20261001/` directory was not
+  staged.
+
+The repository is synchronized for the next review. The highest-value open
+research task remains a real production comparator-selected native fixture;
+until its queue/response, completion, and front-end state close, exact replay
+and explicit unknowns remain authoritative.

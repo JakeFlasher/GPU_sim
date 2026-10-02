@@ -52,10 +52,13 @@ For raw NCU CSV output, create the observation document first with
 
 The evaluator rejects observed fields inside predictions, requires a declared
 v2 target contract (metric, endpoint, clock domain, cache policy, launch
-identity, repetitions, and GPU identity), checks that families do not cross
-splits, and reports finite-interval coverage/width separately from open-tail
-refusal, error, runtime, memory, and actual step-reduction metrics. An open
-interval is not counted as calibrated coverage.
+identity, repetitions, and declared GPU identity), checks that families do not
+cross splits, and reports finite-interval coverage/width separately from
+open-tail refusal, error, runtime, memory, and actual step-reduction metrics.
+Observation documents are labeled `manifest_labeled_historical` unless an
+external adapter independently parses device metadata; the default CSV path
+does not prove live host identity. An open interval is not counted as
+calibrated coverage.
 
 For multiple current trace families, use `tools/run_prediction_manifest.py` to
 materialize the calibration/development/held-out prediction document before

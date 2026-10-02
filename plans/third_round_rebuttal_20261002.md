@@ -25,7 +25,7 @@ claims. The revision now separates them everywhere:
    `SmCore` issue-model seam only when its entry, effects, pending state, exit,
    and continuation are closed; otherwise the native path is exact replay.
 4. **Independent hardware comparison:** predictions are materialized before an
-   identity-checked NCU join. This compares a declared model-local observer
+   document-identity-consistent, manifest-historical NCU join. This compares a declared model-local observer
    candidate with measurements; it does not upgrade levels 1–3 into a silicon
    proof.
 
@@ -52,11 +52,11 @@ finite or precise summary by assumption.
   emits `MacroEffect`/pending completion state, and resumes a detailed suffix.
   The model-only probe observes one macro dispatch for a 16-step witnessed
   region; this is not native timing.
-- Native reference `SmCore` now consumes comparator-selected typed-macro versus
-  exact-replay decisions at the closed issue-model seam. A two-instruction
-  scalar macro matches detailed entry/exit and detailed suffix continuation.
-  Real front-end-enabled probes select exact replay because fetch/cache and
-  other future-relevant state is open.
+- A narrow native issue-model helper fixture compares a two-instruction scalar
+  macro with detailed continuation, but the production reference event loop
+  does not yet consume comparator-selected macros. A bounded native canary
+  exposed a response-owner/queue join failure before dispatch; real
+  front-end-enabled probes therefore remain exact replay.
 - Eligibility requires independently originated contiguous witnesses. The
   compact native candidate path supplies residency only; it cannot certify its
   own dependency-free premise. Cross-warp order, same-cycle ambiguity, and
@@ -286,7 +286,7 @@ closed, and does it consume a closed transition without changing the declared
 continuation state?** The answer is yes for the model executor and the closed
 native issue-model seam, and no unsupported claim is made for full
 front-end-enabled SM86 launches. The 15-workload R6 corpus demonstrates that
-identity-checked independent evaluation can be run without target leakage, but
+document-identity-consistent independent evaluation can be run without target leakage, but
 also demonstrates why the real native traces remain open/exact fallback.
 
 ## Latest-panel addendum (R8.1–R8.4)
@@ -297,16 +297,23 @@ which are now addressed in the active R8 plan:
 - model certificates bind to the full consumed descriptor region before any
   state mutation; grouped unknown service tails, missing observer projections,
   and incomplete cache-history domains cannot acquire finite precision;
-- an optional independently witnessed typed boundary is consumed by the real
-  reference `SmWake` event branch. A validated fixture dispatches a two-
-  instruction unit-tail macro and resumes a detailed suffix; invalid/empty
-  effects, exact-replay decisions, pending tokens, non-unit completion tails,
-  and untouched future state fall back before mutation;
+- an optional independently witnessed typed boundary is exercised at a narrow
+  issue-model helper seam. A validated fixture matches a two-instruction
+  unit-tail macro with a detailed suffix; production event-loop dispatch is
+  reopened after the queue/response-owner failure. Invalid/empty effects,
+  exact-replay decisions, pending tokens, non-unit completion tails, and
+  untouched future state remain conservative fallback conditions;
 - the service fitter requires explicit dependent latency and independent
   throughput. Queue-depth/capacity interventions are retained but declared
   unmodeled because no queue equation is fit. `sim-run` exposes explicit
   independent-sidecar, residual, and replacement roles; only the latter two
   activate the model-local resource completion requirement.
+- the NCU CSV builder now labels copied campaign metadata
+  `manifest_labeled_historical` (and the standalone adapter labels caller
+  identity unverified); it does not claim live-device verification. Prediction
+  documents retain semantic trace/control/card/launch bindings, and design
+  evaluation reports full child parse/replay/planning/effect/compare/output
+  cost plus accepted/refused fractions without calling dispatch ratios speedup.
 
 These changes strengthen refusal and composition semantics; they do not upgrade
 the R6 rows to hardware accuracy, native speedup, or a recovered GPU scheduler.

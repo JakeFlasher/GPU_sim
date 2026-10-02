@@ -43,6 +43,11 @@ def test_builder_keeps_two_repetitions_and_row_identity(tmp_path: Path):
     )
     assert [row["value"] for row in document["rows"]] == [17.0, 19.0]
     assert all(row["hardware"] == CONTRACT["hardware"] for row in document["rows"])
+    assert document["identity_status"] == "manifest_labeled_historical"
+    assert all(
+        row["identity_status"] == "manifest_labeled_historical"
+        for row in document["rows"]
+    )
 
 
 def test_builder_rejects_wrong_repetition_count(tmp_path: Path):

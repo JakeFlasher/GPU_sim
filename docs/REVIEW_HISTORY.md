@@ -196,7 +196,7 @@ does not produce a front-end-enabled native macro or a finite silicon observer
 upper. R7 now maps every paper/rebuttal claim to its evidence level and
 falsifier.
 
-## Latest panel re-review R8.0/R8.1/R8.2/R8.3 — 2026-10-02 (R8.3 complete; R8.4 active)
+## Latest panel re-review R8.0/R8.1/R8.2/R8.3 — 2026-10-02 (R8.2 reopened; R8.5 active)
 
 The latest independent panel re-review found that the previous R7 wording was
 still too strong in three places: the native decision was serialized but not
@@ -213,22 +213,15 @@ fence, generation, owner/read-from, and completion domains; replacement
 admission and service arithmetic are checked. Adversarial tests verify
 no-mutation refusal and open queue/cache uppers.
 
-R8.2 adds a narrow, optional independently witnessed native event-loop seam.
-The reference trace accepts a typed detailed effect/exit witness, runs the
-comparator before mutation, and passes `TypedMacro` or `ExactReplay` to the
-actual `Ev::SmWake` branch. A validated two-instruction scalar fixture now
-dispatches through that branch, schedules the next wake, resumes a detailed
-suffix, and exact-falls back before mutation for a rejected or perturbed
-contract. Macro issue effects and dispatch/fallback counters are recorded.
-The retained front-end-enabled SM86 corpus has no closed witness and remains
-exact fallback; this is not native speedup or silicon causality. R8.3 is now
-complete on latency/completion/front-end state closure and independently
-derived effect refinement. The dispatcher exact-falls back for non-unit
-completion tails, pending tokens, or any scalar/memory/cache/front-end/
-response/barrier/local-completion state it does not install. A latency-10
-variant and perturbed/empty-effect ledgers are rejected before mutation. The
-validated positive fixture remains a unit-tail issue-model transition; model
-latency summaries are not native completion.
+R8.2 attempted a narrow, optional independently witnessed native event-loop
+seam. A synthetic helper fixture passed, but a bounded native canary exposed a
+response-owner/queue join failure before a production macro could be consumed.
+The prototype is not treated as production dispatch; the retained corpus
+remains exact fallback and no native speedup is claimed. R8.3 instead closes
+the typed eligibility boundary: latency >1, pending tokens,
+front-end/scalar-pipeline state, and nonempty instruction buffers refuse before
+an issue-only summary can be called native. Model-local latency summaries are
+not native completion.
 
 R8.4 closes the service/queue wording boundary. The v2 fitter now requires an
 explicit dependent-chain latency and never infers it from aggregate
@@ -241,3 +234,12 @@ role activates the resource-service completion requirement. A direct model
 fixture shows both the tail-dominated unchanged candidate and a stressed
 replacement lower-endpoint shift without reading NCU targets. R8.5 is active
 on measurement identity and end-to-end cost.
+
+R8.5 closes the measurement and utility wording boundary. The default CSV
+observation builder labels copied campaign metadata
+`manifest_labeled_historical`; the standalone adapter labels caller-supplied
+identity `caller_labeled_unverified`. Neither claims live-device verification.
+Prediction artifacts now retain semantic trace/control/card/launch bindings.
+The design evaluator reports accepted/refused coverage and full child
+wall-clock/peak-RSS scope (parse, replay, planning, effect materialization,
+comparison, and output), while explicitly setting native speedup to false.

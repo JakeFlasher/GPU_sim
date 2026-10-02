@@ -71,6 +71,9 @@ def test_selective_coverage_reports_zero_compression_without_fabricating_ratio()
     assert coverage["summarized_fraction"] == 0.0
     assert "compression_ratio" not in coverage
     assert coverage["step_reduction"] is None
+    assert coverage["accepted_records"] == 0
+    assert coverage["refused_records"] == 54
+    assert coverage["cost_basis"] == "dispatch_counts_are_not_runtime_speedup"
 
 
 def test_selective_coverage_separates_record_coverage_from_execution_step_reduction():
@@ -91,3 +94,18 @@ def test_selective_coverage_separates_record_coverage_from_execution_step_reduct
 
     assert coverage["macro_dispatches"] == 1
     assert coverage["macro_execution_observed"] is True
+    assert coverage["accepted_fraction"] == 1.0
+
+
+def test_design_report_cost_scope_and_native_speedup_claim_are_explicit():
+    detailed = _document(785, 0)
+    detailed["__evaluation_runtime_ms"] = 10.0
+    detailed["__evaluation_memory_bytes"] = 1000
+    variant = _document(785, 100, 150)
+    variant["__evaluation_runtime_ms"] = 12.0
+    variant["__evaluation_memory_bytes"] = 1200
+    report = summarize_design_runs(detailed, [("variant", variant)])
+    assert report["native_speedup_claimed"] is False
+    assert report["detailed_cost"]["scope"].startswith("child_wall_clock")
+    assert report["variants"][0]["runtime_delta_ms_vs_detailed"] == 2.0
+    assert report["variants"][0]["memory_delta_bytes_vs_detailed"] == 200

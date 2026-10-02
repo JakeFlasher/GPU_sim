@@ -14,6 +14,10 @@ from typing import Any, Iterable
 
 TARGET_METRIC = "gpc__cycles_elapsed.max"
 SPLITS = {"calibration", "development", "held_out"}
+OBSERVATION_IDENTITY_STATUSES = {
+    "manifest_labeled_historical",
+    "caller_labeled_unverified",
+}
 PREDICTION_STATUSES = {"predicted", "refused"}
 REQUIRED_CONTRACT_FIELDS = {
     "metric",
@@ -214,6 +218,20 @@ def validate_prediction_document(document: Any) -> dict[str, Any]:
     if not isinstance(document, dict) or document.get("schema") != "reification_prediction_v2":
         raise ValueError("prediction document schema must be reification_prediction_v2")
     validate_target_contract(document.get("target_contract"), "prediction", require_hardware=True)
+    bindings = document.get("source_bindings")
+    if bindings is not None:
+        if not isinstance(bindings, list):
+            raise ValueError("prediction source_bindings must be an array")
+        seen_bindings: set[str] = set()
+        for index, binding in enumerate(bindings):
+            if not isinstance(binding, dict):
+                raise ValueError(f"prediction source binding {index} must be an object")
+            for field in ("workload", "trace", "control", "arch_card", "pchase_card", "launch_identity"):
+                if not isinstance(binding.get(field), str) or not binding[field].strip():
+                    raise ValueError(f"prediction source binding {index}.{field} must be nonempty")
+            if binding["workload"] in seen_bindings:
+                raise ValueError(f"prediction repeats source binding {binding['workload']!r}")
+            seen_bindings.add(binding["workload"])
     rows = document.get("rows")
     validate_split_roster(rows, "prediction")
     identities: set[tuple[str, str]] = set()
@@ -227,7 +245,10 @@ def validate_prediction_document(document: Any) -> dict[str, Any]:
 
 
 def validate_observation_row(
-    row: Any, index: int, target_contract: dict[str, Any]
+    row: Any,
+    index: int,
+    target_contract: dict[str, Any],
+    identity_status: str,
 ) -> None:
     """Require row-level observer and hardware identity, not caller discipline."""
 
@@ -242,6 +263,8 @@ def validate_observation_row(
             raise ValueError(f"observation row {index}.{field} disagrees with target_contract")
     if row.get("hardware") != target_contract["hardware"]:
         raise ValueError(f"observation row {index}.hardware disagrees with target_contract")
+    if row.get("identity_status") != identity_status:
+        raise ValueError(f"observation row {index}.identity_status disagrees with document")
     _finite_number(row.get("value"), f"observation row {index}.value")
 
 
@@ -253,11 +276,16 @@ def validate_observation_document(document: Any, *, allow_empty: bool = False) -
     target_contract = validate_target_contract(
         document.get("target_contract"), "observation", require_hardware=True
     )
+    identity_status = document.get("identity_status")
+    if identity_status not in OBSERVATION_IDENTITY_STATUSES:
+        raise ValueError(
+            "observation identity_status must be manifest_labeled_historical or caller_labeled_unverified"
+        )
     rows = document.get("rows")
     if not isinstance(rows, list) or (not rows and not allow_empty):
         raise ValueError("observation rows must be a nonempty array")
     for index, row in enumerate(rows):
-        validate_observation_row(row, index, target_contract)
+        validate_observation_row(row, index, target_contract, identity_status)
     return document
 
 

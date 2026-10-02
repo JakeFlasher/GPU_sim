@@ -153,6 +153,18 @@ def summarize_selective_coverage(summary: dict[str, Any]) -> dict[str, Any]:
         "step_reduction": step_reduction,
         "macro_dispatches": macro_dispatches,
         "macro_execution_observed": macro_dispatches is not None and macro_dispatches > 0,
+        "accepted_records": coverage["summarized_records"],
+        "refused_records": coverage["reified_records"] + coverage["uncovered_records"],
+        "accepted_fraction": (
+            coverage["summarized_records"] / coverage["trace_records"]
+            if coverage["trace_records"] else 0.0
+        ),
+        "refusal_fraction": (
+            (coverage["reified_records"] + coverage["uncovered_records"])
+            / coverage["trace_records"]
+            if coverage["trace_records"] else 0.0
+        ),
+        "cost_basis": "dispatch_counts_are_not_runtime_speedup",
     }
 
 
@@ -192,6 +204,21 @@ def summarize_design_runs(
         if not isinstance(rows_fast, list) or not rows_fast or not isinstance(rows_fast[0], dict):
             raise ValueError("fast-frontier report has no launch summary")
         selective_coverage = summarize_selective_coverage(rows_fast[0].get("summary", {}))
+    detailed_runtime = detailed.get("__evaluation_runtime_ms")
+    detailed_memory = detailed.get("__evaluation_memory_bytes")
+    for row in rows:
+        runtime = row.get("runtime_ms")
+        memory = row.get("memory_bytes")
+        row["runtime_delta_ms_vs_detailed"] = (
+            runtime - detailed_runtime
+            if isinstance(runtime, (int, float)) and isinstance(detailed_runtime, (int, float))
+            else None
+        )
+        row["memory_delta_bytes_vs_detailed"] = (
+            memory - detailed_memory
+            if isinstance(memory, (int, float)) and isinstance(detailed_memory, (int, float))
+            else None
+        )
     return {
         "schema": "sm86_reification_design_evaluation_v2",
         "classification": "model_local_service_intervention",
@@ -208,6 +235,20 @@ def summarize_design_runs(
             "indeterminate_pairs": relations["indeterminate_pairs"],
         },
         "variants": rows,
+        "detailed_cost": {
+            "runtime_ms": detailed_runtime,
+            "memory_bytes": detailed_memory,
+            "scope": "child_wall_clock_and_peak_rss_include_parse_replay_planning_effect_compare_output",
+        },
+        "cost_components": [
+            "trace_parse",
+            "detailed_replay",
+            "candidate_planning",
+            "effect_materialization",
+            "boundary_compare",
+            "report_output",
+        ],
+        "native_speedup_claimed": False,
         "selective_coverage": selective_coverage,
         "hardware_comparison": "not_run_ncu_remains_independent_target",
         "runtime_measurement": "wall_clock_child_process",

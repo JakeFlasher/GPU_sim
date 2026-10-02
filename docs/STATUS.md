@@ -23,14 +23,14 @@ are deleted rather than skipped.
 | Custom frontends | Bounded functional/resource experiments, separate from native timing |
 | Predictive extension | Opt-in resource/service intervals composed into a model-local frontier, cache-topology candidates, NCU candidate projection |
 | Calibration | Profile loader and offline fitter exist; v2 requires explicit dependent latency and independent throughput, retains queue-depth/capacity interventions without fitting a queue equation, retains throughput interval endpoints, and records queue/occupancy/contention as explicitly unmodeled dimensions; supplied rates remain uncalibrated |
-| Accuracy | R6 has an identity-checked six-family holdout join; all 15 native intervals are open, so finite coverage is not applicable and no hardware-accuracy claim is made |
+| Accuracy | R6 has a document-identity-consistent six-family holdout join labeled manifest-historical; live host identity is not independently verified; all 15 native intervals are open, so finite coverage is not applicable and no hardware-accuracy claim is made |
 | Reification | Typed region contract and native-boundary comparator preserve only complete exact projections; incomplete canary boundaries fall back to replay |
 | Selective coverage | Multi-warp/order and completion-multiplicity guards refuse conservatively; fast-frontier output includes full-trace candidate/reified/uncovered counts |
 | Model macro seam | `sim-sm::ModelExecutor` consumes a certified scalar `MacroTransition`, emits explicit effects/pending completions, and resumes detailed descriptors; this is model-local |
-| Native refinement | Closed native `SmCore` issue-model seam preserves a two-instruction region and resumes detailed continuation through comparator-selected paths; model certificates now bind to every consumed descriptor before mutation; paired native reference boundaries/effects and exact fallback remain active for front-end-enabled probes |
+| Native refinement | A closed two-instruction `SmCore` helper seam remains test evidence only; production comparator-selected event-loop dispatch is reopened after a native queue/response-owner join failure; model certificates bind to every consumed descriptor before mutation and front-end probes remain exact fallback |
 | Service composition | Typed residual/replacement/independent-post-replay roles and a serial queue projection are explicit; grouped unknown tails keep queue uppers open and replacement admission is validated; full-trace demand is currently independent post-replay, so it does not silently alter the observer endpoint |
 | Cache candidates | Warp-local instrumentation order can be observed when decoded identities are complete; exact history additionally requires temporal order, fence scope, line generation, owner/read-from, and hardware completion, while unresolved domains remain lower-only/unknown |
-| Design evaluation | Fifteen-workload, six-family calibration/development/held-out NCU join runs post-prediction; v2 target contracts check metric/endpoint/clock/cache/launch/repetition/GPU identity and family split semantics, and predicted rows must bind intervals to an explicit observer projection; finite intervals, open refusals, model-local partial-order ties, and model-only step reduction are reported, while native front-end traces remain exact/refused |
+| Design evaluation | Fifteen-workload, six-family calibration/development/held-out NCU join runs post-prediction; v2 target contracts check metric/endpoint/clock/cache/launch/repetition and declared GPU identity plus family split semantics; observations are labeled manifest-historical unless metadata is independently parsed; predicted rows bind intervals to an explicit observer projection; finite intervals, open refusals, model-local partial-order ties, and model-only step reduction are reported, while native front-end traces remain exact/refused |
 | Payload/value work | Bounded model-local identity, ordering, and conservation checks |
 
 Native replay is unchanged by the predictive flag. Service demand now yields an
@@ -70,14 +70,15 @@ evidence. The R6 corpus and third-round claim map are in
 
 The latest independent panel re-review is being addressed by the staged
 [R8 refinement program](../plans/latest_review_refinement_20261002.md).
-R8.0 review intake, R8.1 immediate soundness guards, R8.2 production
-reference-event dispatch, R8.3 conservative native state closure, and R8.4
-service/queue identifiability are complete; R8.5 measurement identity is the
-next active milestone. R8.2 is a
-narrow independently witnessed issue-model seam: the retained front-end-enabled
-SM86 corpus still exact-falls back, and no native speedup or hardware causality
-is claimed. R8.3 exact-falls back for non-unit completion tails, pending tokens,
-or untouched future-relevant state rather than calling the scalar recurrence
+R8.0 review intake, R8.1 immediate soundness guards, R8.3 conservative native
+eligibility, R8.4 service/queue identifiability, R8.5 measurement identity and
+cost utility, and R8.6 synchronization are complete. R8.2 production native
+dispatch is **reopened**: a synthetic helper seam exists in history, but a
+bounded native canary exposed a response-owner/queue join failure before any
+production macro could be consumed. The retained front-end-enabled SM86
+corpus remains exact fallback, with no native speedup or hardware causality
+claim. R8.3 exact-falls back for non-unit completion tails, pending tokens, or
+untouched future-relevant state rather than calling the scalar recurrence
 state-complete. R8.4 adds explicit residual/replacement service roles and a
 model-local intervention test; the independent-post-replay default remains a
 sidecar and queue-depth observations remain unmodeled.

@@ -15,7 +15,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from prediction_contract import TARGET_METRIC, validate_target_contract
+from prediction_contract import TARGET_METRIC, validate_observation_document, validate_target_contract
 
 
 def parse_ncu_csv(
@@ -78,8 +78,9 @@ def parse_ncu_csv(
             f"NCU metric {metric!r} has {len(values)} numeric rows, "
             f"but target contract declares {repetitions} repetitions"
         )
-    return {
+    return validate_observation_document({
         "schema": "ncu_observation_v2",
+        "identity_status": "caller_labeled_unverified",
         "target_contract": target_contract,
         "source": source,
         "rows": [
@@ -91,10 +92,11 @@ def parse_ncu_csv(
                 "clock_domain": target_contract["clock_domain"],
                 "hardware": target_contract["hardware"],
                 "source": source,
+                "identity_status": "caller_labeled_unverified",
             }
             for value in values
         ],
-    }
+    })
 
 
 def main() -> int:

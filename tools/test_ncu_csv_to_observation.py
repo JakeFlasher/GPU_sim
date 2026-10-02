@@ -42,4 +42,5 @@ def test_ncu_csv_adapter_skips_profiler_preamble_and_units(tmp_path: Path):
             "device_index": 0,
         },
         "source": "ncu_test",
+        "identity_status": "caller_labeled_unverified",
     }]

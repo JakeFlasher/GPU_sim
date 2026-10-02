@@ -149,6 +149,17 @@ def run_manifest(manifest: dict[str, Any], sim_run: Path, profile: Path, timeout
         "execution_path": "native_detailed_replay_with_model_local_latent_sidecar",
         "macro_execution_observed": False,
         "step_reduction_basis": "not_available_native_frontend_exact_fallback",
+        "source_bindings": [
+            {
+                "workload": row["workload"],
+                "trace": str(Path(row["trace"])),
+                "control": str(Path(row["control"])),
+                "arch_card": str(Path(row["arch_card"])),
+                "pchase_card": str(Path(row["pchase_card"])),
+                "launch_identity": target_contract["launch_identity"],
+            }
+            for row in validated_rows
+        ],
         "target_contract": target_contract,
         "rows": predictions,
     }

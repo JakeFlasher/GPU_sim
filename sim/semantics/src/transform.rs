@@ -248,12 +248,15 @@ pub fn derive_typed_scalar_macro_region(
             side: NativeBoundarySide::Summary,
             error: error.to_string(),
         })?;
-    let pending_macro_safe = entry.queue.pending.iter().all(|pending| {
-        matches!(
-            pending.payload,
-            TypedEventPayload::SmWake | TypedEventPayload::AtomicCompletion
-        )
-    });
+    // This issue-only rule installs neither completion tokens nor pipeline
+    // release state. Reject latency > 1 even on an initially empty pipeline:
+    // incoming emptiness says nothing about outgoing completion obligations.
+    if spec.latency_cycles != 1 {
+        return Err(RegionContractError::UnsupportedScalarMacro {
+            reason: "scalar_latency_completion_state_not_implemented".to_owned(),
+        });
+    }
+    let pending_macro_safe = entry.queue.pending.is_empty();
     if entry.completeness != Completeness::Complete || entry.cores.len() != 1 || !pending_macro_safe
     {
         return Err(RegionContractError::UnsupportedScalarMacro {
@@ -302,6 +305,11 @@ pub fn derive_typed_scalar_macro_region(
         .ok_or(RegionContractError::UnsupportedScalarMacro {
             reason: "core_missing".to_owned(),
         })?;
+    if core.front_end.is_some() || core.scalar_pipeline.is_some() {
+        return Err(RegionContractError::UnsupportedScalarMacro {
+            reason: "front_end_or_scalar_pipeline_transition_not_implemented".to_owned(),
+        });
+    }
     let l1_open = core.l1.as_ref().is_some_and(|l1| {
         !l1.line_fills.is_empty()
             || !l1.sector_fills.is_empty()
@@ -348,28 +356,9 @@ pub fn derive_typed_scalar_macro_region(
             reason: "future_relevant_warp_or_response_state_is_not_closed".to_owned(),
         });
     }
-    let buffer_count = usize::try_from(spec.instruction_count)
-        .map_err(|_| RegionContractError::ScalarMacroArithmeticOverflow)?;
-    if core.front_end.is_some() {
-        if core.warp_states[0].instruction_buffer.len() < buffer_count {
-            return Err(RegionContractError::UnsupportedScalarMacro {
-                reason: "instruction_buffer_does_not_close_macro_entry".to_owned(),
-            });
-        }
-        let expected_start = core.warp_states[0].next_instruction;
-        if !core.warp_states[0].instruction_buffer[..buffer_count]
-            .iter()
-            .enumerate()
-            .all(|(index, &(instruction, _))| instruction == expected_start + index as u64)
-        {
-            return Err(RegionContractError::UnsupportedScalarMacro {
-                reason: "instruction_buffer_not_contiguous_at_macro_entry".to_owned(),
-            });
-        }
-        core.warp_states[0].instruction_buffer.drain(..buffer_count);
-    } else if !core.warp_states[0].instruction_buffer.is_empty() {
+    if !core.warp_states[0].instruction_buffer.is_empty() {
         return Err(RegionContractError::UnsupportedScalarMacro {
-            reason: "instruction_buffer_present_without_front_end_state".to_owned(),
+            reason: "instruction_buffer_transition_not_implemented".to_owned(),
         });
     }
     core.issued = core
@@ -1512,7 +1501,7 @@ mod tests {
             &entry,
             &TypedScalarMacroSpec {
                 instruction_count: 2,
-                latency_cycles: 3,
+                latency_cycles: 1,
                 initiation_interval_cycles: 3,
                 label: "scalar_macro_v1".to_owned(),
             },
@@ -1538,7 +1527,7 @@ mod tests {
                 &entry,
                 &TypedScalarMacroSpec {
                     instruction_count: 2,
-                    latency_cycles: 3,
+                    latency_cycles: 1,
                     initiation_interval_cycles: 3,
                     label: "scalar_macro_v1".to_owned(),
                 },
@@ -1554,7 +1543,7 @@ mod tests {
                 &entry,
                 &TypedScalarMacroSpec {
                     instruction_count: 2,
-                    latency_cycles: 3,
+                    latency_cycles: 1,
                     initiation_interval_cycles: 3,
                     label: "scalar_macro_v1".to_owned(),
                 },
@@ -1571,7 +1560,7 @@ mod tests {
     fn typed_scalar_macro_refuses_pending_response_barrier_and_unknown_tail_entries() {
         let spec = TypedScalarMacroSpec {
             instruction_count: 1,
-            latency_cycles: 2,
+            latency_cycles: 1,
             initiation_interval_cycles: 2,
             label: "scalar_macro_v1".to_owned(),
         };
@@ -1619,6 +1608,56 @@ mod tests {
             Err(RegionContractError::Boundary { .. })
                 | Err(RegionContractError::UnsupportedScalarMacro { .. })
         ));
+    }
+
+    #[test]
+    fn typed_scalar_latency_and_same_cycle_wakes_are_not_closed_by_empty_state() {
+        let entry = scalar_entry_boundary();
+        let spec = TypedScalarMacroSpec {
+            instruction_count: 2,
+            latency_cycles: 10,
+            initiation_interval_cycles: 1,
+            label: "issue_only".to_owned(),
+        };
+        assert!(matches!(
+            derive_typed_scalar_macro_region(&entry, &spec),
+            Err(RegionContractError::UnsupportedScalarMacro { reason })
+                if reason == "scalar_latency_completion_state_not_implemented"
+        ));
+        let mut queued = entry.clone();
+        queued.queue.pending.push(TypedPendingEvent {
+            time: 0,
+            sequence: 1,
+            phase: 0,
+            sequence_span: 1,
+            target: 0,
+            payload: TypedEventPayload::SmWake,
+        });
+        queued.queue.depth = 1;
+        queued.queue.next_sequence = Some(2);
+        queued.queue.next_event_time = Some(0);
+        queued.validate_structure().unwrap();
+        assert!(matches!(
+            derive_typed_scalar_macro_region(
+                &queued,
+                &TypedScalarMacroSpec {
+                    latency_cycles: 1,
+                    ..spec.clone()
+                }
+            ),
+            Err(RegionContractError::UnsupportedScalarMacro { .. })
+        ));
+        assert_eq!(
+            derive_typed_scalar_macro_region(
+                &entry,
+                &TypedScalarMacroSpec {
+                    instruction_count: u64::MAX,
+                    latency_cycles: 1,
+                    ..spec
+                }
+            ),
+            Err(RegionContractError::ScalarMacroArithmeticOverflow)
+        );
     }
 
     #[test]

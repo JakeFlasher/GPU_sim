@@ -63,8 +63,8 @@ Second-round R1 adds an explicit active/inactive completion requirement witness:
 an entirely unknown field is inactive only when it is outside the declared
 projection; an active unknown service/visibility/writeback/cache/tail field
 keeps the observer upper open. The v2 prediction/observation documents carry
-the metric, endpoint, clock, cache, launch, repetition, and independently
-checked GPU identity. Finite interval coverage is reported separately from
+the metric, endpoint, clock, cache, launch, repetition, and declared
+historical GPU identity. Finite interval coverage is reported separately from
 open-tail refusal, and record coverage is not called execution compression.
 
 The reference-feature native lane now has an explicit optional witness input
@@ -72,12 +72,13 @@ The reference-feature native lane now has an explicit optional witness input
 [`reification_native_macro_witness_v1.schema.json`](reification_native_macro_witness_v1.schema.json)).
 The witness contains a separately produced detailed effect/exit record. The
 reference writer derives a typed scalar summary from the pre-event boundary,
-runs the comparator before mutating `SmCore`, and hands `TypedMacro` or
-`ExactReplay` to the real `SmWake` event branch. A selected macro schedules the
-next wake and resumes the detailed suffix; a comparator rejection takes the
-ordinary detailed path. The witness is a narrow issue-model experiment, not a
-hardware oracle or a mandatory execution artifact. Without it, front-end and
-unresolved-state cases continue to serialize exact fallback.
+runs the comparator before any issue-only helper mutation, and records a
+`TypedMacro` or `ExactReplay` decision. A narrow two-instruction helper fixture
+matches a detailed suffix; production event-loop dispatch remains reopened
+after a bounded native queue/response-owner join failure. The witness is a
+narrow issue-model experiment, not a hardware oracle or a mandatory execution
+artifact. Without it, front-end and unresolved-state cases continue to
+serialize exact fallback.
 
 The native dispatcher is narrower than the model certificate: it requires a
 nonempty effect ledger, no pending completion tokens, a one-cycle completion
