@@ -144,4 +144,6 @@ now supplies a complete typed pre/post boundary pair; its cold front-end
 transition is intentionally rejected by the strict typed scalar macro executor
 instead of being claimed as preserved. The reference trace now retains paired
 pre/post boundaries and explicit issue-effect spans, making that rejection a
-transition-level check rather than endpoint-only telemetry.
+transition-level check rather than endpoint-only telemetry. The reference
+execution path consumes `NativeBoundaryExecutionResult`; the bounded probe
+selects its exact-replay branch because the front-end state is not closed.
