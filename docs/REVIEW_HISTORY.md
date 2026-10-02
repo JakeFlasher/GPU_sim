@@ -132,7 +132,7 @@ lower/upper initiation-interval envelope. Grouped assignment envelopes are
 preserved when supplied; the native metrics path remains marginal without a
 per-record route witness. R5 is now active on native state refinement.
 
-## Second-round R5 native refinement — 2026-10-01 (active)
+## Second-round R5 native refinement — 2026-10-01/02 (complete for closed issue-model seam; R6 active)
 
 The typed region validator now checks internal effect payload spans, and the
 trace-aware native comparator checks effect/label sequences in addition to
@@ -146,4 +146,9 @@ instead of being claimed as preserved. The reference trace now retains paired
 pre/post boundaries and explicit issue-effect spans, making that rejection a
 transition-level check rather than endpoint-only telemetry. The reference
 execution path consumes `NativeBoundaryExecutionResult`; the bounded probe
-selects its exact-replay branch because the front-end state is not closed.
+selects its exact-replay branch because the front-end state is not closed. The
+native issue-model differential consumes the comparator-selected path for a
+two-instruction scalar macro, matches detailed entry/exit state and terminal
+cycles, resumes a detailed suffix, and verifies that exact replay is
+non-mutating. Full front-end-enabled launches remain conservative fallback;
+R6 expands preserved-region coverage rather than weakening this boundary.

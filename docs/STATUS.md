@@ -27,7 +27,7 @@ are deleted rather than skipped.
 | Reification | Typed region contract and native-boundary comparator preserve only complete exact projections; incomplete canary boundaries fall back to replay |
 | Selective coverage | Multi-warp/order and completion-multiplicity guards refuse conservatively; fast-frontier output includes full-trace candidate/reified/uncovered counts |
 | Model macro seam | `sim-sm::ModelExecutor` consumes a certified scalar `MacroTransition`, emits explicit effects/pending completions, and resumes detailed descriptors; this is model-local and not yet wired into native `SmCore` |
-| Native refinement | Reference writer captures paired pre/post typed boundaries and detailed issue effects; `NativeBoundaryExecutionResult` selects typed-macro or exact-replay paths, and the reference `SmCore` seam consumes both branches with continuation tests; a closed native issue-model fixture preserves, while real front-end-enabled probes select exact fallback |
+| Native refinement | Closed native `SmCore` scalar seam preserves a two-instruction region and resumes detailed continuation through comparator-selected paths; paired native reference boundaries/effects and exact fallback remain active for front-end-enabled probes |
 | Service composition | Typed residual/replacement/independent-post-replay roles and a serial queue projection are explicit; full-trace demand is currently independent post-replay, so it does not silently alter the observer endpoint |
 | Cache candidates | Warp-local instrumentation order can be observed when decoded identities are complete; cross-warp order, fence scope, line generation, owner/read-from, and hardware completion remain explicit unknowns |
 | Design evaluation | Three-family calibration/development/held-out NCU join runs post-prediction; v2 target contracts check metric/endpoint/clock/cache/launch/repetition/GPU identity and family split semantics; finite intervals, open refusals, model-local partial-order ties, and 16:1 witnessed descriptor-step reduction are reported, while native memory-heavy families remain exact/refused |
@@ -48,8 +48,9 @@ The active second-round program is the
 [second-round refinement plan](../plans/second_round_refinement_20261001.md),
 with **R1 semantic closure and evidence hygiene complete**, **R2 executable
 macro transition seam complete**, and **R3 independent witness/order closure
-complete**, **R4 service/queue semantics complete**, and **R5 native state
-refinement active**. R1 removed unsound finite bounds and evaluator ambiguities. R2 now
+complete**, **R4 service/queue semantics complete**, **R5 native state
+refinement complete for the closed issue-model seam**, and **R6 evaluation
+active**. R1 removed unsound finite bounds and evaluator ambiguities. R2 now
 executes a model-local nonidentity transition and exact continuation, while
 R5 still requires a native-preserved region; until R5, model-local descriptor
 reduction and exact fallback are the only supported native compression

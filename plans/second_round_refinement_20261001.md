@@ -244,7 +244,7 @@ are distinguishable.
 - The composed completion frontier is the only service quantity passed to the
   observer projection, with an explicit model policy.
 
-## R5 — native state refinement (current stage)
+## R5 — native state refinement (complete for the closed native issue-model seam)
 
 ### Goal
 
@@ -334,8 +334,8 @@ GPU overlap models, skipping refinement, or native trace-driven simulators.
 | R2 | **complete (2026-10-01)** | `ModelExecutor::execute_decision` consumes Summary/Reify decisions, installs a nonidentity scalar macro or exact fallback, emits effects/pending completions, resumes detailed descriptors, and exposes macro dispatch counters. |
 | R3 | **complete (2026-10-01)** | Eligibility requires a separate fact-complete witness with an allowed origin; stale/producer-premise facts reify, and multi-warp/same-cycle order remains explicit refusal or engine-order checked. |
 | R4 | **complete (2026-10-01)** | Service roles, serial queue/frontier semantics, grouped assignment lower/upper envelopes, unknown/zero-demand handling, occupancy/contention labeling, and throughput interval endpoints are implemented and tested. Native metrics remain marginal where no per-record route witness exists. |
-| R5 | **active** | Validate one nontrivial native macro boundary with internal effects/pending tokens and exact fallback. |
-| R6 | queued | Depends on an actual macro path and observer contract. |
+| R5 | **complete (2026-10-02)** | A closed two-instruction native `SmCore` scalar region derives a typed entry/exit, validates effects/pending state, consumes typed-macro/exact-replay decisions, matches detailed continuation state, and falls back on every unsupported boundary. Full front-end-enabled SM86 traces remain exact fallback. |
+| R6 | **active** | Expand native-preserved regions and evaluate independent corpus/observer behavior without weakening fallback. |
 | R7 | queued | Final claim discipline after evidence is complete. |
 
 ## Continuity rules
@@ -436,7 +436,7 @@ GPU overlap models, skipping refinement, or native trace-driven simulators.
   extract such groups, so its reports remain marginal. No service-rate or queue
   result is a silicon timing claim.
 
-## R5 progress (active)
+## R5 implementation evidence (complete for closed native issue-model seam)
 
 - `TypedRegionContract::validate` now validates every internal effect payload
   and rejects malformed sequence spans. The native comparator has a trace-aware
@@ -491,6 +491,11 @@ GPU overlap models, skipping refinement, or native trace-driven simulators.
 - The typed scalar rule now derives first issue from the entry warp readiness
   and can consume a closed front-end instruction-buffer prefix; it still
   refuses absent/noncontiguous buffers and all open pipeline/cache state.
-- The decisive remaining R5 check is a real nonidentity native macro whose
-  exit/effects/pending-token mapping are independently derived and consumed by
-  continuation execution; until then this stage is not complete.
+- A two-instruction scalar region in the native `SmCore` actor now consumes the
+  comparator-selected typed-macro path, matches detailed entry/exit boundary
+  state, and resumes a detailed suffix with identical terminal cycles and
+  instruction count. The companion `Reify` path performs no macro mutation.
+- Completion scope is explicit: this is a closed native issue-model region.
+  Front-end-enabled full SM86 launch traces still select exact replay because
+  their entry contains unresolved fetch/cache continuation state; that is the
+  required conservative fallback, not an R5 failure.

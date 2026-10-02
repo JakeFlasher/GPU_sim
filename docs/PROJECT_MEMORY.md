@@ -54,7 +54,10 @@ from profiler measurements; black-box models are assumptions, not observations.
   supplies residency only and therefore refuses rather than self-certifying.
   Multi-warp/global-order cases remain conservative refusal, and same-cycle
   effect ordering is checked independently of global sequence monotonicity.
-- R5 now captures native reference pre/post typed boundaries and detailed issue
+- R5 is complete for the closed native issue-model seam: native `SmCore`
+  reference tests consume typed-macro/exact-replay decisions, compare macro
+  entry/exit with detailed replay, and resume a detailed suffix. R5 also
+  captures native reference pre/post typed boundaries and detailed issue
   effects. The pure-scalar SM86 probe has a complete pre/post pair with two
   effects; the opt-in independently derived scalar transition reifies on the
   first effect mismatch (expected 285, observed 568) rather than preserving.
@@ -82,16 +85,17 @@ The active second-round program is
 [`second_round_refinement_20261001.md`](../plans/second_round_refinement_20261001.md),
 with **R1 semantic closure and evidence hygiene complete**, **R2 executable
 macro transition seam complete**, and **R3 independent witness/order closure
-complete**, **R4 service/queue semantics complete**, and **R5 native state
-refinement active**. R1 repaired unknown/zero-demand service
+complete**, **R4 service/queue semantics complete**, **R5 native state
+refinement complete for the closed issue-model seam**, and **R6 corpus/observer
+evaluation active**. R1 repaired unknown/zero-demand service
 arithmetic, explicit-endpoint propagation, event ordering, compression
 vocabulary, and split/NCU identity checks. R2 made a nonidentity macro
 decision operational and resumes detailed replay; that model-local seam now
 exists, but native `SmCore` remains untouched. R3 is separating witness
 extraction from descriptor eligibility and now refuses stale/self-witnesses;
-R4 now separates service roles and queue/assignment uncertainty. R5 currently
-checks effect-span/label refinement and records exact-replay plans, but must
-still validate a consumed native boundary; until then, current rankings, open
+R4 now separates service roles and queue/assignment uncertainty. R5 validates
+a consumed closed native issue-model boundary; full front-end-enabled traces
+still record exact-replay plans. Current rankings, open
 intervals, and descriptor/macro probe remain negative/diagnostic evidence and
 black-box internals are not execution prerequisites.
 
