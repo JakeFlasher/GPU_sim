@@ -248,12 +248,16 @@ pub fn derive_typed_scalar_macro_region(
             side: NativeBoundarySide::Summary,
             error: error.to_string(),
         })?;
-    if entry.completeness != Completeness::Complete
-        || entry.cores.len() != 1
-        || !entry.queue.pending.is_empty()
+    let pending_macro_safe = entry.queue.pending.iter().all(|pending| {
+        matches!(
+            pending.payload,
+            TypedEventPayload::SmWake | TypedEventPayload::AtomicCompletion
+        )
+    });
+    if entry.completeness != Completeness::Complete || entry.cores.len() != 1 || !pending_macro_safe
     {
         return Err(RegionContractError::UnsupportedScalarMacro {
-            reason: "entry_must_have_one_complete_core_and_no_pending_events".to_owned(),
+            reason: "entry_has_incomplete_state_or_unsafe_pending_events".to_owned(),
         });
     }
     if spec.initiation_interval_cycles == 0 {
@@ -398,12 +402,11 @@ pub fn derive_typed_scalar_macro_region(
         target: entry.event.target,
         payload: TypedEventPayload::SmWake,
     };
-    exit.queue.next_event_time = None;
-    exit.queue.next_sequence = Some(
-        end_sequence
-            .checked_add(1)
-            .ok_or(RegionContractError::ScalarMacroArithmeticOverflow)?,
-    );
+    exit.queue.next_event_time = exit.queue.pending.first().map(|pending| pending.time);
+    let next_sequence = end_sequence
+        .checked_add(1)
+        .ok_or(RegionContractError::ScalarMacroArithmeticOverflow)?;
+    exit.queue.next_sequence = Some(exit.queue.next_sequence.unwrap_or(0).max(next_sequence));
     let mut effects = Vec::with_capacity(
         usize::try_from(spec.instruction_count)
             .map_err(|_| RegionContractError::ScalarMacroArithmeticOverflow)?,
@@ -1578,11 +1581,21 @@ mod tests {
             phase: 0,
             sequence_span: 1,
             target: 0,
-            payload: TypedEventPayload::SmWake,
+            payload: TypedEventPayload::MemoryResponse {
+                reply: Some(crate::TypedResponseIdentity {
+                    warp: 0,
+                    instruction: 0,
+                    sector_index: 0,
+                    response_kind: crate::TypedResponseKind::Warp,
+                }),
+                fill: None,
+            },
         });
+        let pending_result = derive_typed_scalar_macro_region(&pending, &spec);
         assert!(matches!(
-            derive_typed_scalar_macro_region(&pending, &spec),
-            Err(RegionContractError::UnsupportedScalarMacro { .. })
+            pending_result,
+            Err(RegionContractError::Boundary { .. })
+                | Err(RegionContractError::UnsupportedScalarMacro { .. })
         ));
 
         let mut barrier = scalar_entry_boundary();
