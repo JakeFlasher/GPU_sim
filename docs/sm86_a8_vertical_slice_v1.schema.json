@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpu-simulator.local/schemas/sm86_a8_vertical_slice_v1.schema.json",
+  "title": "SM86 A8 live vertical slice",
+  "type": "object",
+  "required": [
+    "schema", "status", "workload", "binary", "control", "arch_card",
+    "pchase_card", "identity", "correctness", "nvbit", "simulator",
+    "prediction", "ncu", "evaluation", "interpretation"
+  ],
+  "properties": {
+    "schema": {"const": "sm86_a8_vertical_slice_v1"},
+    "status": {"const": "complete"},
+    "workload": {"type": "string", "minLength": 1},
+    "binary": {"type": "string", "minLength": 1},
+    "control": {"type": "string", "minLength": 1},
+    "arch_card": {"type": "string", "minLength": 1},
+    "pchase_card": {"type": "string", "minLength": 1},
+    "identity": {"type": "string", "minLength": 1},
+    "correctness": {
+      "type": "object",
+      "required": ["status", "run", "shape", "seed", "warmup", "repetitions", "max_abs_error"],
+      "properties": {
+        "status": {"const": "passed"}, "run": {"type": "string"},
+        "shape": {"type": "string"}, "seed": {"type": "integer"},
+        "warmup": {"type": "integer", "minimum": 0},
+        "repetitions": {"type": "integer", "minimum": 1},
+        "max_abs_error": {"type": "number", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "nvbit": {
+      "type": "object",
+      "required": ["status", "run", "trace", "dynamic_trace_bytes", "payload_file_count", "payload_bytes", "stats_rows", "total_instructions", "trace_printer_parsed", "active_launches", "blocks"],
+      "properties": {
+        "status": {"const": "passed"}, "run": {"type": "string"}, "trace": {"type": "string"},
+        "dynamic_trace_bytes": {"type": "integer", "minimum": 1},
+        "payload_file_count": {"type": "integer", "minimum": 1},
+        "payload_bytes": {"type": "integer", "minimum": 1},
+        "stats_rows": {"type": "integer", "minimum": 1},
+        "total_instructions": {"type": "integer", "minimum": 1},
+        "trace_printer_parsed": {"const": true},
+        "active_launches": {"type": "integer", "minimum": 1},
+        "blocks": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": false
+    },
+    "simulator": {
+      "type": "object",
+      "required": ["status", "run", "output", "records_seen", "blocks_observed", "terminal_modeled_event_cycles", "gpc_lower_bound_cycles", "gpc_envelope_cycles", "completion_status", "unmodeled_tails"],
+      "properties": {
+        "status": {"const": "passed"}, "run": {"type": "string"}, "output": {"type": "string"},
+        "records_seen": {"type": "integer", "minimum": 1}, "blocks_observed": {"type": "integer", "minimum": 1},
+        "terminal_modeled_event_cycles": {"type": "integer", "minimum": 0},
+        "gpc_lower_bound_cycles": {"type": "integer", "minimum": 0},
+        "gpc_envelope_cycles": {"type": "integer", "minimum": 0},
+        "completion_status": {"type": "string", "minLength": 1},
+        "unmodeled_tails": {"type": "object", "additionalProperties": {"type": "boolean"}}
+      },
+      "additionalProperties": false
+    },
+    "prediction": {
+      "type": "object",
+      "required": ["document", "prediction_stage", "ncu_values_present", "lower_cycles", "upper_cycles", "native_macro_dispatches"],
+      "properties": {
+        "document": {"type": "string"}, "prediction_stage": {"const": "pre_observation"},
+        "ncu_values_present": {"const": false}, "lower_cycles": {"type": "integer", "minimum": 0},
+        "upper_cycles": {"type": ["integer", "null"], "minimum": 0},
+        "native_macro_dispatches": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "ncu": {
+      "type": "object",
+      "required": ["status", "raw_root", "repetitions", "target_metric", "endpoint", "replay_mode", "launch_skip", "cache_control", "clock_control", "target_cycles", "median_cycles", "q1_cycles", "q3_cycles", "mechanism_metrics"],
+      "properties": {
+        "status": {"const": "passed"}, "raw_root": {"type": "string"}, "repetitions": {"const": 5},
+        "target_metric": {"const": "gpc__cycles_elapsed.max"}, "endpoint": {"type": "string"},
+        "replay_mode": {"const": "application"}, "launch_skip": {"const": 0},
+        "cache_control": {"const": "all"}, "clock_control": {"const": "none"},
+        "target_cycles": {"type": "array", "minItems": 5, "maxItems": 5, "items": {"type": "number", "minimum": 0}},
+        "median_cycles": {"type": "number", "minimum": 0}, "q1_cycles": {"type": "number", "minimum": 0}, "q3_cycles": {"type": "number", "minimum": 0},
+        "mechanism_metrics": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "number", "minimum": 0}}}
+      },
+      "additionalProperties": false
+    },
+    "evaluation": {
+      "type": "object",
+      "required": ["document", "split", "finite_interval_coverage", "open_interval_rows", "open_lower_bound_consistency", "selection_used_observation_error"],
+      "properties": {
+        "document": {"type": "string"}, "split": {"enum": ["calibration", "development", "held_out"]},
+        "finite_interval_coverage": {"type": ["number", "null"]}, "open_interval_rows": {"type": "integer", "minimum": 0},
+        "open_lower_bound_consistency": {"type": ["number", "null"]}, "selection_used_observation_error": {"const": false}
+      },
+      "additionalProperties": false
+    },
+    "interpretation": {"type": "string", "minLength": 1}
+  },
+  "additionalProperties": false
+}

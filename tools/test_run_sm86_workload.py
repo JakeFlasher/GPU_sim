@@ -71,3 +71,33 @@ def test_timeout_terminates_the_process_group(tmp_path: Path):
     assert result["status"] == "timeout"
     assert result["timed_out"] is True
     assert result["process_group_cleanup"] is True
+
+
+def test_low_free_memory_is_reported_before_launch(tmp_path: Path):
+    fake_smi = tmp_path / "nvidia-smi"
+    fake_smi.write_text(
+        "#!/bin/sh\nprintf '%s\\n' '0,Fake GPU,GPU-fixture,8192,100,8092'\n"
+    )
+    fake_smi.chmod(0o755)
+    result = run_workload(
+        _python("raise SystemExit('must not launch')"),
+        workload_id="fixture_memory_low",
+        output_dir=tmp_path / "memory_low",
+        timeout_seconds=5,
+        expected_device_memory_mib=512,
+        reserve_free_memory_mib=1024,
+        nvidia_smi=str(fake_smi),
+    )
+    assert result["status"] == "preflight_memory_low"
+    assert result["returncode"] is None
+
+
+def test_missing_child_is_launcher_error(tmp_path: Path):
+    result = run_workload(
+        [str(tmp_path / "does-not-exist")],
+        workload_id="fixture_launcher_error",
+        output_dir=tmp_path / "launcher_error",
+        timeout_seconds=5,
+        skip_gpu_preflight=True,
+    )
+    assert result["status"] == "launcher_error"

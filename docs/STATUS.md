@@ -166,6 +166,20 @@ fallback under the verified identity/endpoint contract. The primary outcome is N
 accuracy; simulator wall-clock runtime remains secondary, with no
 compression/speedup metric.
 
+The A8 live-campaign foundation is complete under
+[`accuracy_first_live_campaign_a8_20261002.md`](../plans/accuracy_first_live_campaign_a8_20261002.md).
+A8.0–A8.3 are complete: the bounded runner classifies OOM/OOD/timeout and
+launcher failures, all 15 portable-LCD binaries were rebuilt from source, and
+all 15 correctness smoke rows passed without silent shape substitution. A8.4
+and A8.5 are complete for one fresh `gemm_hmma_bf16_sm80` slice: native
+correctness, NVBit trace, simulator replay, prediction-before-observation,
+independently identified five-repetition NCU, and schema/contract validation
+all pass. The prediction lower is 3023 cycles with an open upper; NCU target
+cycles are 5684/5490/5514/5524/5517 (median 5517), so finite interval coverage
+and point error are not applicable. Simulator dirty-writeback/coherence tails
+remain open and native macro dispatch is zero. A8.6 handoff synchronization is
+complete; A8 is complete and A9 is the next phase (not started).
+
 The first A5 preflight correctly rejected the dirty checkout; after the
 coherent implementation was committed and rebuilt, independent identity and
 preflight passed. The first collection command retained a historical launch

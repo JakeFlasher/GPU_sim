@@ -250,6 +250,27 @@ result is `docs/sm86_accuracy_a7_real_selective_result_v1.json`. The final
 claim remains unknown-preserving typed closure with exact fallback; real native
 selective dispatch and finite hardware accuracy remain explicit falsifiers.
 
+A8.0–A8.5 of the accuracy-first live-campaign foundation are complete. The
+new bounded workload runner (`tools/run_sm86_workload.py`) records explicit
+pass/OOM/OOD/timeout/launcher outcomes, performs a free-memory preflight, and
+terminates child process groups. Its seven focused tests pass. All 15 active
+portable-LCD binaries were rebuilt from current source; the retired
+`--enable-cupti-activity` interface is absent from rebuilt binary help, and
+the architecture/SASS roster verifier passes. All 15 correctness smoke rows
+passed sequentially with no OOM/OOD/timeout or silent shape substitution.
+
+The fresh A8 vertical slice (`docs/sm86_a8_vertical_slice_v1.json`) completed
+native correctness, NVBit tracing, simulator replay, prediction-before-NCU,
+and five independently identified NCU repetitions. The trace has four CTA
+payloads and 1,272 instructions; simulator replay sees 556 modeled records
+and leaves dirty-writeback/coherence tails open. NCU GPC cycles are
+5684/5490/5514/5524/5517 (median 5517); mechanism counters are retained
+separately. The prediction contains no NCU values, has lower 3023 cycles and
+an open upper, and the post-prediction join reports lower consistency 1.0 with
+finite coverage not applicable. A8.6 handoff synchronization is complete; A8
+is complete and A9 is not started. Real native dispatch and finite hardware
+accuracy remain falsifiers.
+
 ## Retained evidence
 
 The 2026-09-30 cold/warm campaigns completed 15/15 workloads on RTX 3090 Ti / SM86,

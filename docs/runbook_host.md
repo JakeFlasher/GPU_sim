@@ -30,6 +30,28 @@ Replay the release binary directly after a change and inspect its JSON and
 stderr. Run a package-specific test only when the changed behavior needs a
 contract check.
 
+## Bounded workload execution (A8)
+
+Use the shared launcher for live workload runs. It records stdout/stderr,
+checks free GPU memory, terminates the complete child process group after a
+deadline, and distinguishes OOM, out-of-domain shape/device, timeout, and
+ordinary runtime failure. It never silently changes the requested shape:
+
+```bash
+.venv/bin/python tools/run_sm86_workload.py \
+  --workload-id gemm_hmma_bf16_sm80 \
+  --output-dir results/alpha/run/gemm_hmma_bf16_sm80 \
+  --timeout-seconds 120 \
+  --expected-device-memory-mib 512 \
+  --reserve-free-memory-mib 1024 -- \
+  workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run \
+  --correctness_shape --seed 42 --warmup 1 --reps 2 \
+  --output_dir results/alpha/run/gemm_hmma_bf16_sm80/workload
+```
+
+The result document is `run.json`; a non-passing status is a recorded
+experiment outcome, not permission to substitute another workload.
+
 ## Build the NVBit tracer
 
 The repository includes the NVBit source drop and enhanced protobuf sources.

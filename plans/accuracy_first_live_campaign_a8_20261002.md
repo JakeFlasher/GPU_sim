@@ -44,9 +44,9 @@ selective dispatch or finite hardware accuracy.
 | A8.1 | Bounded workload runner | Unit tests cover pass, OOM, OOD, timeout, memory preflight, and launcher failure; output is schema-valid | **complete** |
 | A8.2 | Source/binary cleanup | Retired CUPTI flags are absent from current sources and rebuilt binaries; all active rows build from source | **complete** |
 | A8.3 | Roster smoke campaign | Every active row runs correctness mode or records a typed, reproducible failure; no silent substitution | **complete** |
-| A8.4 | Vertical live slice | One row completes correctness, NVBit trace, simulator replay, prediction-before-NCU, and five NCU repetitions | **active** |
-| A8.5 | Cross-artifact validation | Trace, control, simulator, NCU, identity, and evaluation artifacts validate together without NCU leakage |
-| A8.6 | A8 handoff | Results, remaining failures, and next A9 work are synchronized in status/memory/history; raw data is preserved |
+| A8.4 | Vertical live slice | One row completes correctness, NVBit trace, simulator replay, prediction-before-NCU, and five NCU repetitions | **complete** |
+| A8.5 | Cross-artifact validation | Trace, control, simulator, NCU, identity, and evaluation artifacts validate together without NCU leakage | **complete** |
+| A8.6 | A8 handoff | Results, remaining failures, and next A9 work are synchronized in status/memory/history; raw data is preserved | **complete** |
 
 ## A8.1 — bounded workload execution
 
@@ -204,7 +204,7 @@ and a built NVBit tracer. No workload data was changed in this milestone.
 ### A8.1 — bounded workload runner — complete
 
 Implemented `tools/run_sm86_workload.py`, its schema, and focused tests. The
-tests pass (`4 passed`), the protocol/preflight regression tests also pass
+tests pass (`7 passed`), the protocol/preflight regression tests also pass
 (`16 passed` in the combined run), and the new JSON Schema validates under
 Draft 2020-12. The first implementation probe found and fixed a missing
 stderr file binding before any live run.
@@ -233,3 +233,54 @@ is retained under `results/alpha/a8_smoke_20261002/` (ignored runtime data,
 not a tracked claim artifact).
 
 A8.4 is now the active milestone: one fresh live trace/replay/profile slice.
+
+### A8.4 — vertical live slice — complete
+
+The rebuilt `gemm_hmma_bf16_sm80` correctness workload completed successfully
+with maximum absolute error `0.0055666`. A separate NVBit run completed under
+the bounded launcher and produced one accepted launch, four nonempty CTA
+payloads (24,152 payload bytes), 1,272 traced instructions, valid `stats.csv`,
+and a trace-printer-parsable manifest. The first run exposed a launcher
+classifier defect: NVBit's harmless warning mentioning CUDA memory allocation
+was mistaken for OOM. The classifier was narrowed, a regression test was
+added, and a fresh retry passed.
+
+The simulator replay completed on the fresh trace and current SM86 cards. It
+observed 556 modeled records over four blocks, reached a 3,996-cycle modeled
+terminal event, and preserved dirty-writeback/coherence as unresolved tails.
+The prediction document was materialized before profiling with lower `3023`
+cycles and an open upper; it contains no NCU values and reports zero native
+macro dispatches.
+
+Five fresh NCU application-replay runs completed with the declared
+all-cache/no-clock-control contract. Target values were `5684, 5490, 5514,
+5524, 5517` GPC cycles (median `5517`, IQR `10`). Mechanism counters were
+retained independently. No workload OOM/OOD occurred.
+
+A8.5 is now complete: cross-artifact validation and post-observation join.
+
+### A8.5 — cross-artifact validation — complete
+
+The independently captured identity reports the expected RTX 3090 Ti, UUID,
+SM86, driver 615.71.09, CUDA 13.4, NCU 2026.1, and clean tracked worktree.
+The prediction, observation, and evaluation documents pass their JSON Schemas
+and shared prediction/observation contracts. The development row has an open
+upper, so finite interval coverage and point error are not applicable; its
+lower-bound consistency is `1.0`. The evaluator records
+`selection_used_observation_error=false` and source bindings are checked.
+
+A8.6 handoff synchronization is complete. A8 is complete; A9 is not started.
+
+### A8.6 — handoff synchronization — complete
+
+The plan, runbook, documentation map, status, project memory, and review
+history now describe the same A8 result. The tracked A8 artifacts are the
+bounded-run schema/runner tests, live vertical manifest, independently
+verified identity, pre-observation prediction, post-observation NCU document,
+evaluation join, and compact live-slice summary. Raw NVBit, NCU, simulator,
+and workload outputs remain under `results/alpha/` and were not deleted.
+
+The next phase is A9 workload expansion and stale-data cleanup. Its starting
+inputs are the explicit A8 limitations: no native macro dispatch, open
+dirty-writeback/coherence completion, finite accuracy not applicable for the
+vertical row, and the remaining larger-shape/OOD workload matrix.

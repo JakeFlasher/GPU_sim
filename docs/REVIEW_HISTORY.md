@@ -438,3 +438,30 @@ fallback. The result is retained in
 claim is unknown-preserving typed closure with exact fallback, independently
 compared with NCU where the endpoint remains open. Native selective dispatch,
 finite endpoint accuracy, and hardware-causal scheduling remain unclaimed.
+A8 live-campaign foundation — 2026-10-02 (complete)
+-------------------------------------------------------------------------
+
+The accuracy-first live-campaign plan is recorded in
+`plans/accuracy_first_live_campaign_a8_20261002.md`. A bounded workload
+launcher now preserves stdout/stderr, enforces a wall-time/process-group
+bound, checks free GPU memory, and distinguishes pass, OOM, OOD, timeout,
+launcher, and ordinary runtime failures. Seven focused launcher tests pass.
+
+All 15 active portable-LCD binaries were rebuilt from current source under
+CUDA 13.4. Rebuilt binary help no longer exposes the retired
+`--enable-cupti-activity` option, and the architecture/SASS verifier passes
+all 15 rows. Sequential correctness smoke runs pass for all 15 rows with no
+OOM/OOD/timeout or silent shape substitution.
+
+The first fresh vertical slice uses `gemm_hmma_bf16_sm80`. Native correctness,
+NVBit tracing, simulator replay, prediction-before-observation, independent
+identity capture, and five NCU application-replay repetitions all complete.
+The prediction has lower 3023 cycles and an open upper; NCU target values are
+5684, 5490, 5514, 5524, and 5517 cycles (median 5517). The post-observation
+join reports lower-bound consistency 1.0, finite interval coverage not
+applicable, and no observation-driven selection. Dirty-writeback/coherence
+remain open simulator tails and native macro dispatch remains zero. The
+machine-readable slice summary is `docs/sm86_a8_vertical_slice_v1.json`.
+
+A8.6 handoff synchronization is complete; A8 is complete and A9 is not
+started.
