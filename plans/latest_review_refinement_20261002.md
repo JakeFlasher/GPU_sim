@@ -33,6 +33,13 @@ No later level is inferred from an earlier one. In particular, a model-local
 not interval coverage, and a manifest-labeled NCU row is not an independently
 verified device identity.
 
+**Canonical status at synchronization:** R8.0/R8.1/R8.3/R8.4/R8.5/R8.6 are
+complete. R8.2 is deliberately reopened: the test/helper seam is not
+production event-loop evidence, and the bounded native canary fails at a
+response-owner/queue join before any macro is consumed. The sections below
+retain the staged work packages and falsifiers; this status line is authoritative
+over earlier historical prose.
+
 ## Stage ledger
 
 | Stage | Focus | Exit evidence | Status |

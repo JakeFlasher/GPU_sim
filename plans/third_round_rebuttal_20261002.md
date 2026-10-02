@@ -84,8 +84,9 @@ boundaries rather than one implied claim:
 
 - R2 executes a nonidentity transition in `sim-sm::ModelExecutor` and resumes a
 detailed suffix.
-- R5 consumes a comparator-selected nonidentity typed macro in a closed native
-  `SmCore` issue-model test and verifies detailed continuation state.
+- R5 retains a comparator-selected nonidentity typed macro in a closed native
+  `SmCore` helper test and verifies detailed continuation state; production
+  event-loop consumption remains unestablished after the latest canary.
 - The real front-end-enabled SM86 writer records exact fallback; R6 records
   `macro_execution_observed=false` and `step_reduction=null` for all 15 native
   rows.

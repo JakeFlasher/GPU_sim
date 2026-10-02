@@ -57,8 +57,9 @@ refinement complete for the closed issue-model seam**, **R6
 independent-corpus/observer evaluation complete**, and **R7 rebuttal/claim
 discipline complete**. R1 removed unsound finite
 bounds and evaluator ambiguities. R2 executes a model-local nonidentity
-transition and exact continuation. R5 consumes a closed native issue-model
-transition, while full front-end-enabled launches remain exact fallback. R6
+transition and exact continuation. R5 retains a closed native issue-model
+helper transition, while production event-loop consumption and full
+front-end-enabled launches remain exact fallback. R6
 expands the corpus and confirms that native compression, finite observer
 uppers, and hardware accuracy remain unproven; no model-only step reduction is
 relabeled as native compression.

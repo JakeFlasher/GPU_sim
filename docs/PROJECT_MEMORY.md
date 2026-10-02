@@ -120,8 +120,9 @@ decision operational and resumes detailed replay; that model-local seam now
 exists, but native `SmCore` remains untouched. R3 is separating witness
 extraction from descriptor eligibility and now refuses stale/self-witnesses;
 R4 now separates service roles and queue/assignment uncertainty. R5 validates
-a consumed closed native issue-model boundary; full front-end-enabled traces
-still record exact-replay plans. Current rankings, open
+a closed native issue-model helper boundary; production event-loop consumption
+and full front-end-enabled traces still record exact-replay plans. Current
+rankings, open
 intervals, and descriptor/macro probe remain negative/diagnostic evidence and
 black-box internals are not execution prerequisites. R7 rebuttal/
 claim-discipline is complete; R8.0 review intake, R8.1 soundness guards, and
