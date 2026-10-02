@@ -285,6 +285,15 @@ frontiers; `tools/report_sm86_completion_frontier.py` reports finite eligibility
 only when all declared tails are closed. The A8 vertical report remains open
 for dirty writeback and coherence. C1 is the active next milestone.
 
+C1 now has fresh live tail evidence: 13 small read/atomic/reduction/control/
+store cases, a device-scope fence/message-passing case, and an async-copy wait
+case all completed correctness, NVBit, replay, prediction-first ordering, and
+five NCU observations. Every row remains open for dirty writeback or
+coherence; the message-passing target median was 214207 GPC cycles and the
+async target median was 4459994 cycles. These are observations, not fitted
+parameters. The next seam is a mechanism-local writeback/coherence service
+intervention.
+
 ## Retained evidence
 
 The 2026-09-30 cold/warm campaigns completed 15/15 workloads on RTX 3090 Ti / SM86,

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpu-simulator.local/schemas/sm86_completion_frontier_c1_visibility_summary_v1.schema.json",
+  "title": "SM86 C1 visibility-tail summary",
+  "type": "object",
+  "required": ["schema", "status", "role", "contract", "cases", "finite_interval_rows", "open_lower_consistent_rows", "open_rows", "next_cases", "interpretation"],
+  "properties": {
+    "schema": {"const": "sm86_completion_frontier_c1_visibility_summary_v1"},
+    "status": {"const": "partial_live_matrix_complete"},
+    "role": {"const": "visibility_tail_development_not_fitting"},
+    "contract": {"const": "docs/sm86_completion_frontier_contract_v1.json"},
+    "cases": {"type": "array", "minItems": 2, "items": {"type": "object", "required": ["case", "kind", "correctness", "ncu_target_cycles", "ncu_target_median", "simulator", "finite_interval_covered", "open_lower_consistent"], "properties": {"case": {"type": "string"}, "kind": {"type": "string"}, "correctness": {"const": "passed"}, "ncu_target_cycles": {"type": "array", "minItems": 5, "items": {"type": "number", "minimum": 0}}, "ncu_target_median": {"type": "number", "minimum": 0}, "ncu_duration_ns": {"type": "array", "items": {"type": "number", "minimum": 0}}, "ncu_sm_active_cycles": {"type": "array", "items": {"type": "number", "minimum": 0}}, "ncu_instructions": {"type": "array", "items": {"type": "number", "minimum": 0}}, "ncu_dram_read_sectors": {"type": "array", "items": {"type": "number", "minimum": 0}}, "ncu_dram_write_sectors": {"type": "array", "items": {"type": "number", "minimum": 0}}, "simulator": {"type": "object", "required": ["launch_index", "kernel_name", "terminal_lower_bound_cycles", "completion"], "additionalProperties": true}, "finite_interval_covered": {"const": null}, "open_lower_consistent": {"const": true}, "interpretation": {"type": "string"}}, "additionalProperties": false}},
+    "finite_interval_rows": {"const": 0},
+    "open_lower_consistent_rows": {"const": 2},
+    "open_rows": {"const": 2},
+    "next_cases": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+    "interpretation": {"type": "string", "minLength": 1}
+  },
+  "additionalProperties": false
+}

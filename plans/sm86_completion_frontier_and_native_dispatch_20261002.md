@@ -337,3 +337,20 @@ A8 vertical simulator output identifies one open launch with
 `dirty_writeback` and `coherence` dimensions; it does not consume NCU values
 and does not treat the finite GPC envelope field as a finite completion upper.
 Focused report tests pass (`3 passed`). C1 is now active.
+
+### C1 — first live matrix — partial evidence
+
+Fresh live runs completed 13 small memory-domain/writeback cases plus a
+device-scope fence/message-passing case and an async-copy wait case. Every
+case completed native correctness, NVBit tracing, simulator replay, prediction
+before NCU, and five NCU repetitions. All 15 rows remain open for dirty
+writeback or coherence; the compact summaries are
+`docs/sm86_completion_frontier_c1_small_summary_v1.json` and
+`docs/sm86_completion_frontier_c1_visibility_summary_v1.json`.
+
+The message-passing target median was 214207 GPC cycles and the async target
+median was 4459994 cycles. The message-passing target varied substantially
+across repetitions, which is a reason to model the intervention/dispersion,
+not to average it into a simulator constant. C1 remains active until a
+writeback/coherence service intervention identifies a finite interval or
+demonstrates a precise refusal boundary.
