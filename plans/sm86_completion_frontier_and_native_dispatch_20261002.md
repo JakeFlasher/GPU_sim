@@ -134,9 +134,9 @@ missing simulator state field for that same row.
 | Stage | Focus | Exit evidence | Status |
 |---|---|---|---|
 | C0 | Endpoint and tail contract | A machine-readable contract separates `T_issue`, `T_visibility`, `T_writeback`, `T_coherence`, and `T_ncu`; finite-upper conditions are schema-checked | **complete** |
-| C1 | Live tail microbenchmark matrix | Native correctness, NVBit trace, simulator replay, and repeated NCU observations exist for clean stores, dirty stores, atomics/reductions, cross-SM sharing, fences, and async-copy waits | **active** |
-| C2 | Trace sufficiency and independent witness | NVBit-derived tail facts are independently extracted and every missing ownership/order/completion domain produces an explicit refusal | **planned** |
-| C3 | Writeback/coherence service model | Model-local queues, capacities, service intervals, and completion tokens produce finite bounds only on closed cases and remain open otherwise | **planned** |
+| C1 | Live tail microbenchmark matrix | Native correctness, NVBit trace, simulator replay, and repeated NCU observations exist for clean stores, dirty stores, atomics/reductions, cross-SM sharing, fences, and async-copy waits | **complete** |
+| C2 | Trace sufficiency and independent witness | NVBit-derived tail facts are independently extracted and every missing ownership/order/completion domain produces an explicit refusal | **active** |
+| C3 | Writeback/coherence service model | Model-local queues, capacities, service intervals, and completion tokens produce finite bounds only on closed cases and remain open otherwise | **partial: observer miss** |
 | C4 | Mechanism-local calibration | Service intervals are fitted on a disjoint calibration set using mechanism observations; scored rows never feed their own parameters | **planned** |
 | C5 | Held-out finite-upper validation | Held-out NCU target intervals and mechanism counters validate finite rows; open rows are reported separately | **planned** |
 | C6 | Production native witness | A real comparator-selected event-loop fixture dispatches one typed macro with tail state; a perturbed witness falls back before mutation | **planned** |
@@ -351,6 +351,24 @@ writeback or coherence; the compact summaries are
 The message-passing target median was 214207 GPC cycles and the async target
 median was 4459994 cycles. The message-passing target varied substantially
 across repetitions, which is a reason to model the intervention/dispersion,
-not to average it into a simulator constant. C1 remains active until a
-writeback/coherence service intervention identifies a finite interval or
-demonstrates a precise refusal boundary.
+not to average it into a simulator constant. The matrix leaves the
+writeback/coherence service intervention as the next C3 falsifier.
+
+C1 is now complete as a live matrix. C2 is active because the traces still do
+not independently expose all ownership/order/completion domains required for a
+hardware-facing upper.
+
+### C3 — explicit service probe — partial, observer miss
+
+The replay path now closes the dirty-writeback and coherence tail flags for a
+full-coverage, explicitly configured `CardedWriteback` plus bounded directory
+service run only when the corresponding completion frontiers drain and trace
+ownership/order evidence is complete. A live store probe produced a finite
+model-local interval (`1775..2287` cycles) on two store cases, but the
+independent NCU medians were `3310` and `3318` cycles; neither interval covered
+its NCU observation. The result is retained in
+`docs/sm86_completion_frontier_c3_service_probe_v1.json` as a falsification of
+the current endpoint padding/profile, not as a hardware-accuracy result.
+
+C3 remains incomplete until C2 supplies the missing tail evidence and a
+disjoint calibration/held-out intervention explains the observer gap.

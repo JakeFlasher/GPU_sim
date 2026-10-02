@@ -285,14 +285,18 @@ frontiers; `tools/report_sm86_completion_frontier.py` reports finite eligibility
 only when all declared tails are closed. The A8 vertical report remains open
 for dirty writeback and coherence. C1 is the active next milestone.
 
-C1 now has fresh live tail evidence: 13 small read/atomic/reduction/control/
+C1 is complete as a live tail matrix: 13 small read/atomic/reduction/control/
 store cases, a device-scope fence/message-passing case, and an async-copy wait
 case all completed correctness, NVBit, replay, prediction-first ordering, and
 five NCU observations. Every row remains open for dirty writeback or
 coherence; the message-passing target median was 214207 GPC cycles and the
 async target median was 4459994 cycles. These are observations, not fitted
 parameters. The next seam is a mechanism-local writeback/coherence service
-intervention.
+intervention. C3's explicit service probe closes two store-case simulator
+frontiers but misses independent NCU medians: predicted intervals
+`1775..2287`/`1782..2294` versus medians `3310`/`3318`. The service model is
+therefore not promoted to hardware accuracy; C2 tail-witness work remains
+active.
 
 ## Retained evidence
 

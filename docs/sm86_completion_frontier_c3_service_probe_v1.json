@@ -1,0 +1,68 @@
+{
+  "contract": "docs/sm86_completion_frontier_contract_v1.json",
+  "finite_interval_covered_rows": 0,
+  "finite_model_rows": 2,
+  "interpretation": "explicit model-local writeback/coherence queues close the simulator frontier, but the independent NCU target lies above the declared interval on both rows; do not promote the service profile or endpoint padding to hardware accuracy",
+  "open_rows": 0,
+  "profile": "docs/sm86_service_rate_profile_20261001.json",
+  "rows": [
+    {
+      "case": "small_store_0_b1_i8",
+      "completion_frontier": {
+        "cycles": 1775,
+        "status": "complete"
+      },
+      "finite_interval_covered": false,
+      "ncu_target_cycles": [
+        3308.0,
+        3310.0,
+        3308.0,
+        3320.0,
+        3316.0
+      ],
+      "ncu_target_median": 3310.0,
+      "open_lower_consistent": true,
+      "predicted_lower_cycles": 1775,
+      "predicted_upper_cycles": 2287,
+      "service_model": {
+        "carded_dram": true,
+        "coherence_capacity_sectors": 4,
+        "coherence_service_cycles": 20,
+        "dirty_writeback_capacity_sectors": 4,
+        "l1_resident_writeback": true,
+        "l1_visibility_protocol": true,
+        "stage_role": "independent_post_replay"
+      }
+    },
+    {
+      "case": "small_store_4_b1_i8",
+      "completion_frontier": {
+        "cycles": 1782,
+        "status": "complete"
+      },
+      "finite_interval_covered": false,
+      "ncu_target_cycles": [
+        3329.0,
+        3311.0,
+        3318.0,
+        3317.0,
+        3332.0
+      ],
+      "ncu_target_median": 3318.0,
+      "open_lower_consistent": true,
+      "predicted_lower_cycles": 1782,
+      "predicted_upper_cycles": 2294,
+      "service_model": {
+        "carded_dram": true,
+        "coherence_capacity_sectors": 4,
+        "coherence_service_cycles": 20,
+        "dirty_writeback_capacity_sectors": 4,
+        "l1_resident_writeback": true,
+        "l1_visibility_protocol": true,
+        "stage_role": "independent_post_replay"
+      }
+    }
+  ],
+  "schema": "sm86_completion_frontier_c3_service_probe_v1",
+  "status": "finite_model_probe_but_observer_miss"
+}

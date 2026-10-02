@@ -192,7 +192,7 @@ frontier report are schema-checked and report the A8 vertical row as open for
 `dirty_writeback` and `coherence`; the NCU target is not consumed. C1 is now
 the active research milestone: live tail microbenchmarks.
 
-C1 has partial live evidence: 13 small read/atomic/reduction/control/store
+C1 is complete as a live matrix: 13 small read/atomic/reduction/control/store
 cases plus device-scope message-passing and async-copy-wait cases completed
 native correctness, fresh NVBit tracing, simulator replay, prediction-first
 ordering, and five NCU repetitions. All 15 tail rows remain open; no finite
@@ -200,6 +200,12 @@ upper is claimed. The compact results are
 `sm86_completion_frontier_c1_small_summary_v1.json` and
 `sm86_completion_frontier_c1_visibility_summary_v1.json`. The next C1 work is
 the writeback/coherence service intervention, not the broad 15-row campaign.
+
+C3 has partial model-local evidence: explicitly configured writeback/coherence
+queues close two store-case simulator frontiers, but the resulting finite
+intervals (`1775..2287` and `1782..2294`) miss independent NCU medians `3310`
+and `3318`. This is an observer-model falsification, not a hardware-accuracy
+claim; C2 tail-witness work remains active.
 
 The first A5 preflight correctly rejected the dirty checkout; after the
 coherent implementation was committed and rebuilt, independent identity and

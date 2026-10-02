@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpu-simulator.local/schemas/sm86_completion_frontier_c3_service_probe_v1.schema.json",
+  "title": "SM86 C3 service probe",
+  "type": "object",
+  "required": ["schema", "status", "contract", "profile", "rows", "finite_model_rows", "finite_interval_covered_rows", "open_rows", "interpretation"],
+  "properties": {
+    "schema": {"const": "sm86_completion_frontier_c3_service_probe_v1"},
+    "status": {"const": "finite_model_probe_but_observer_miss"},
+    "contract": {"const": "docs/sm86_completion_frontier_contract_v1.json"},
+    "profile": {"type": "string"},
+    "rows": {"type": "array", "minItems": 2, "items": {"type": "object", "required": ["case", "service_model", "completion_frontier", "predicted_lower_cycles", "predicted_upper_cycles", "ncu_target_cycles", "ncu_target_median", "finite_interval_covered", "open_lower_consistent"], "properties": {"case": {"type": "string"}, "service_model": {"type": "object"}, "completion_frontier": {"type": "object", "required": ["status", "cycles"], "additionalProperties": true}, "predicted_lower_cycles": {"type": "integer", "minimum": 0}, "predicted_upper_cycles": {"type": "integer", "minimum": 0}, "ncu_target_cycles": {"type": "array", "minItems": 5, "items": {"type": "number", "minimum": 0}}, "ncu_target_median": {"type": "number", "minimum": 0}, "finite_interval_covered": {"const": false}, "open_lower_consistent": {"const": true}}, "additionalProperties": false}},
+    "finite_model_rows": {"const": 2},
+    "finite_interval_covered_rows": {"const": 0},
+    "open_rows": {"const": 0},
+    "interpretation": {"type": "string", "minLength": 1}
+  },
+  "additionalProperties": false
+}

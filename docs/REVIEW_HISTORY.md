@@ -476,9 +476,12 @@ C0 of the completion-frontier program is now implemented. The machine-readable
 contract and diagnostic report keep dirty writeback/coherence open and do not
 consume NCU targets; C1 begins the live tail microbenchmark matrix.
 
-C1's first live matrix is now recorded: 13 small memory-domain/writeback rows
+C1's live matrix is now complete: 13 small memory-domain/writeback rows
 plus device-scope message passing and async-copy wait. All rows completed
 native correctness, NVBit, replay, prediction-first ordering, and five NCU
 repetitions, but every simulator upper remains open for dirty writeback or
 coherence. The next experiment must identify a service/ownership interval;
-the observed NCU values are not calibration inputs for the same rows.
+the observed NCU values are not calibration inputs for the same rows. C3's
+explicit service probe closes two model-local store frontiers but misses their
+independent NCU medians, so the current padding/profile is falsified rather
+than promoted.
