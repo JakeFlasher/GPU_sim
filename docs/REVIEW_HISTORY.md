@@ -266,3 +266,16 @@ R9.2 audited the two-pass witness requirement. No complete typed
 pre/effect/post pair exists in the bounded canary, so constructing a witness
 from the same detailed stream is rejected as self-certification. The positive
 production falsifier remains explicit and unclaimed.
+
+## R10.0 live SM86 development campaign — 2026-10-02 (complete)
+
+The current RTX 3090 Ti host ran a fresh 168-block metric-domain campaign with
+10 cases (read/atom/reduction/control), native correctness, NVBit traces,
+simulator replay, analyzer coverage, and three fresh NCU repetitions per case.
+The runner now completes the prediction pass before starting post-prediction
+NCU collection. All 10 cases completed; all observer uppers remained open;
+analyzer candidates and native macro dispatches were zero. Mean lower-point APE
+against NCU medians was 43.793%, and open lower consistency was 1.0. This is a
+live development/domain result, not held-out accuracy or speedup evidence.
+The host changed P-state P0→P2 after the run while clocks remained 1350/10501
+MHz; the limitation is retained in the campaign summary.

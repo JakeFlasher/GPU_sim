@@ -113,6 +113,11 @@ from profiler measurements; black-box models are assumptions, not observations.
 - R9.2 completed the two-pass witness audit negatively: no complete typed
   pre/effect/post pair exists in the bounded canary, so self-derived witness
   construction is rejected. The required positive falsifier remains open.
+- R10.0 completed a live 168-block SM86 development campaign: 10/10 cases ran
+  native correctness, NVBit tracing, simulator replay, analyzer, and three
+  fresh post-prediction NCU repetitions. All intervals remained open, analyzer
+  candidates and native macro dispatches were zero, and no speedup claim is
+  made. Aggregate result: `docs/review_round7_20261002/`.
 
 ## Next useful work
 

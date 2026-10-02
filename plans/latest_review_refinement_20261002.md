@@ -49,6 +49,11 @@ is exercised only when a complete independent typed boundary is supplied; the
 ordinary native canary remains exact fallback with zero dispatches, and no
 complete two-pass witness exists yet.
 
+R10.0 live-campaign execution is complete for the bounded large development
+probe: current-host CUDA/NCU/NVBit execution succeeded, profiler values remain
+post-prediction observations, and the campaign role is development rather than
+held-out accuracy.
+
 ## Stage ledger
 
 | Stage | Focus | Exit evidence | Status |
@@ -63,6 +68,7 @@ complete two-pass witness exists yet.
 | R9.0 | Native canary queue/response closure | The bounded reference canary terminates with explicit unknown owner/queue state; complete boundaries and macro dispatch remain zero unless independently closed | **complete** |
 | R9.1 | Production witness dispatch attempt | A complete independent witness reaches the real event loop and proves continuation, or the canary records precise no-witness/refusal evidence without a native claim | **complete: no positive native fixture** |
 | R9.2 | Two-pass witness/continuation audit | A complete independent pre/effect/post witness exists and drives one production dispatch, or the corpus records no eligible pair and exact fallback | **complete: no eligible pair** |
+| R10.0 | Live SM86 campaign | A bounded live host run records host identity, native/NCU/trace/replay termination, prediction-before-post-observation artifacts, open/refused strata, and no unsupported speedup claim | **complete: 10-case large development probe** |
 
 ## R8.1 — immediate soundness guards
 

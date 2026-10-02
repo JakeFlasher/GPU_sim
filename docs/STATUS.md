@@ -98,6 +98,12 @@ pre/effect/post pair exists in the bounded canary, so self-derived witness
 construction is rejected. The required positive falsifier is documented in the
 R9 plan and remains open.
 
+R10.0 completed a live 168-block SM86 development campaign: 10/10 cases ran
+native correctness, NVBit trace, simulator replay, analyzer, and three fresh
+post-prediction NCU repetitions. All intervals remained open, analyzer
+candidate records and native macro dispatches were zero, and no speedup claim
+is made. See [the live campaign result](review_round7_20261002/README.md).
+
 ## Retained measurements
 
 2026-09-30 RTX 3090 Ti campaigns used driver 615.71.09, 1350/10501 MHz, P0,

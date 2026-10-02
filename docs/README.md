@@ -16,6 +16,8 @@ open only the relevant technical page.
 | Third-round result | [R6 corpus and observer evaluation](review_round3_20261002/README.md) · [corpus manifest](sm86_reification_corpus_v1_20261002.json) |
 | R9.0 native boundary probe | [Canary termination and unknown-join result](review_round4_20261002/README.md) |
 | R9.1 production witness attempt | [Negative native-dispatch result](review_round5_20261002/README.md) |
+| Live SM86 development probe | [RTX 3090 Ti small-suite result](review_round6_20261002/README.md) |
+| Live SM86 large campaign | [168-block RTX 3090 Ti result](review_round7_20261002/README.md) |
 | Latent and payload APIs | [Contract](sm86_factorized_latent_contract_20260930.md) |
 | Experimental semantics | [Diagnostics](experimental_diagnostics.md) |
 | Prior measurements | preserved under results/ and experiment inputs |
