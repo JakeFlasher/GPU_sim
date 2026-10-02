@@ -172,6 +172,21 @@ pub enum NativeBoundaryExecutionPath {
     ExactReplay { reason: NativeBoundaryReifyReason },
 }
 
+/// Result of consuming a native-boundary decision. The macro branch carries
+/// the independently derived transition contract; the exact branch carries
+/// the detailed exit that must remain authoritative.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "execution")]
+pub enum NativeBoundaryExecutionResult {
+    TypedMacro {
+        contract: TypedRegionContract,
+    },
+    ExactReplay {
+        reason: NativeBoundaryReifyReason,
+        detailed_exit: TypedEventBoundaryRecord,
+    },
+}
+
 pub fn native_boundary_execution_path(
     decision: &NativeBoundaryRefinementDecision,
 ) -> NativeBoundaryExecutionPath {
@@ -375,7 +390,7 @@ pub fn execute_typed_scalar_macro(
     detailed_effects: &[TypedEventTransition],
     detailed_labels: &[String],
     detailed_exit: &TypedEventBoundaryRecord,
-) -> Result<NativeBoundaryExecutionPath, RegionContractError> {
+) -> Result<NativeBoundaryExecutionResult, RegionContractError> {
     let summary = derive_typed_scalar_macro_region(entry, spec)?;
     let decision = compare_native_region_contract_with_trace(
         Some(&summary),
@@ -384,7 +399,17 @@ pub fn execute_typed_scalar_macro(
         detailed_labels,
         detailed_exit,
     );
-    Ok(native_boundary_execution_path(&decision))
+    Ok(match decision {
+        NativeBoundaryRefinementDecision::Preserve => {
+            NativeBoundaryExecutionResult::TypedMacro { contract: summary }
+        }
+        NativeBoundaryRefinementDecision::Reify { reason } => {
+            NativeBoundaryExecutionResult::ExactReplay {
+                reason,
+                detailed_exit: detailed_exit.clone(),
+            }
+        }
+    })
 }
 
 impl TypedRegionContract {
@@ -1429,7 +1454,7 @@ mod tests {
             ),
             NativeBoundaryRefinementDecision::Preserve
         ));
-        assert_eq!(
+        assert!(matches!(
             execute_typed_scalar_macro(
                 &entry,
                 &TypedScalarMacroSpec {
@@ -1442,8 +1467,8 @@ mod tests {
                 &region.exit,
             )
             .unwrap(),
-            NativeBoundaryExecutionPath::TypedMacro
-        );
+            NativeBoundaryExecutionResult::TypedMacro { contract: _ }
+        ));
         assert!(matches!(
             execute_typed_scalar_macro(
                 &entry,
@@ -1457,7 +1482,7 @@ mod tests {
                 &region.exit,
             )
             .unwrap(),
-            NativeBoundaryExecutionPath::ExactReplay { .. }
+            NativeBoundaryExecutionResult::ExactReplay { .. }
         ));
     }
 

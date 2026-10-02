@@ -137,14 +137,14 @@ use sim_mem::{
 };
 #[cfg(feature = "reference")]
 use sim_semantics::{
-    BoundaryStateError, DramBoundaryState, DramStateError, L2RequestKey, PowerBoundaryState,
-    PowerStateError, QueueBoundaryState, QueueStateError, TYPED_STATE_SCHEMA_VERSION,
-    TypedAdmissionWitness, TypedCoreBoundaryState, TypedEventBoundaryRecord, TypedEventIdentity,
-    TypedEventPayload, TypedEventTransition, TypedFillIdentity, TypedL2Source,
-    TypedMemoryOperation, TypedMemoryOrigin, TypedMemoryRequest, TypedObservationContract,
-    TypedPendingEvent, TypedResponseIdentity, TypedResponseKind, TypedScalarMacroSpec,
-    compare_native_region_contract, compare_native_region_contract_with_trace,
-    derive_typed_scalar_macro_region, native_boundary_execution_path,
+    BoundaryStateError, DramBoundaryState, DramStateError, L2RequestKey,
+    NativeBoundaryExecutionResult, PowerBoundaryState, PowerStateError, QueueBoundaryState,
+    QueueStateError, TYPED_STATE_SCHEMA_VERSION, TypedAdmissionWitness, TypedCoreBoundaryState,
+    TypedEventBoundaryRecord, TypedEventIdentity, TypedEventPayload, TypedEventTransition,
+    TypedFillIdentity, TypedL2Source, TypedMemoryOperation, TypedMemoryOrigin, TypedMemoryRequest,
+    TypedObservationContract, TypedPendingEvent, TypedResponseIdentity, TypedResponseKind,
+    TypedScalarMacroSpec, compare_native_region_contract, execute_typed_scalar_macro,
+    native_boundary_execution_path,
 };
 
 /// Stable response identity used only at the typed boundary. The process-local
@@ -1843,14 +1843,19 @@ impl ReferenceTrace {
         } else if boundary_phase == "post" {
             let entry = self.pending_typed_entry.take();
             if let (Some(entry), Some(spec)) = (entry, typed_scalar_macro_spec_from_env()) {
-                match derive_typed_scalar_macro_region(&entry, &spec) {
-                    Ok(summary) => compare_native_region_contract_with_trace(
-                        Some(&summary),
-                        &entry,
-                        &detailed_internal_effects,
-                        &[event.to_owned()],
-                        &typed_boundary,
-                    ),
+                match execute_typed_scalar_macro(
+                    &entry,
+                    &spec,
+                    &detailed_internal_effects,
+                    &[event.to_owned()],
+                    &typed_boundary,
+                ) {
+                    Ok(NativeBoundaryExecutionResult::TypedMacro { .. }) => {
+                        sim_semantics::NativeBoundaryRefinementDecision::Preserve
+                    }
+                    Ok(NativeBoundaryExecutionResult::ExactReplay { reason, .. }) => {
+                        sim_semantics::NativeBoundaryRefinementDecision::Reify { reason }
+                    }
                     Err(error) => sim_semantics::NativeBoundaryRefinementDecision::Reify {
                         reason: sim_semantics::NativeBoundaryReifyReason::SummaryStructure {
                             error: error.to_string(),

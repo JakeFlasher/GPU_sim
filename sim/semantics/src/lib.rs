@@ -52,8 +52,8 @@ pub use state::{
 };
 pub use transform::{
     ExternalInputFrontier, IdentityBoundaryTransformer, NativeBoundaryExecutionPath,
-    NativeBoundaryRefinementDecision, NativeBoundaryReifyReason, NativeBoundarySide,
-    ObservationDelta, RegionContractError, StateTransformer, SummaryProof,
+    NativeBoundaryExecutionResult, NativeBoundaryRefinementDecision, NativeBoundaryReifyReason,
+    NativeBoundarySide, ObservationDelta, RegionContractError, StateTransformer, SummaryProof,
     TRANSFORM_SCHEMA_VERSION, TransformCheckError, TransformError, TransformInput,
     TransformInterval, TransformIntervalError, TransformReifyReason, TransformerDecision,
     TransformerOutput, TypedEventTransition, TypedRegionContract, TypedScalarMacroSpec,
