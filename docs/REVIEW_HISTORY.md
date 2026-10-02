@@ -127,5 +127,6 @@ replay, the live path uses `independent_post_replay` and leaves the observer
 frontier unchanged. A separate `ServiceQueueProjection` reports serial
 admission, queue depth, open completion uppers, and unresolved marginal pool
 assignment. The v2 fitter now records occupancy/contention as unmodeled rather
-than pretending their presence identifies a parameter. Joint assignment and
-interval-valued throughput uncertainty remain open R4 work.
+than pretending their presence identifies a parameter, and retains a
+lower/upper initiation-interval envelope. Joint assignment correlation remains
+open R4 work.

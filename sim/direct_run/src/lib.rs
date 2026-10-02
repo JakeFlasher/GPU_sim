@@ -3231,7 +3231,10 @@ mod tests {
         assert_eq!(composition.role, ServiceStageRole::IndependentPostReplay);
         assert_eq!(launch.frontiers.resource_service, FrontierBound::unknown());
         assert_eq!(queue.admission, launch.frontiers.modeled_event);
-        assert_eq!(queue.queue_depth.lower, Some(launch.resource_demand.total_events));
+        assert_eq!(
+            queue.queue_depth.lower,
+            Some(launch.resource_demand.total_events)
+        );
         assert_eq!(
             launch.ncu_projection.simulator_lower_cycles,
             launch.frontiers.simulator_completion().lower

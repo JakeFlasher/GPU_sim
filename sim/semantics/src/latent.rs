@@ -71,6 +71,10 @@ pub enum LatentModelError {
     EmptyResourcePool,
     #[error("resource-demand pool count exceeds {MAX_RESOURCE_POOLS}")]
     ResourcePoolCountTooLarge,
+    #[error("resource assignment group must contain at least one candidate pool")]
+    EmptyAssignmentGroup,
+    #[error("resource assignment groups exceed total events: groups={groups}, total={total}")]
+    AssignmentGroupsExceedTotal { groups: u64, total: u64 },
     #[error("resource-demand interval for pool {pool} is inverted: lower={lower}, upper={upper}")]
     InvertedResourceDemand {
         pool: String,
@@ -900,6 +904,17 @@ pub struct ResourceDemandEnvelope {
     pub unclassified_events: u64,
     pub pools: BTreeMap<String, ResourceDemandInterval>,
     pub evidence: EvidenceKind,
+    /// Optional grouped alternatives preserve assignment correlation. An
+    /// empty vector means only marginal pool intervals are available.
+    #[serde(default)]
+    pub assignment_groups: Vec<ResourceAssignmentGroup>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ResourceAssignmentGroup {
+    pub event_count: u64,
+    pub candidate_pools: BTreeSet<String>,
 }
 
 impl ResourceDemandEnvelope {
@@ -915,6 +930,7 @@ impl ResourceDemandEnvelope {
             unclassified_events,
             pools,
             evidence,
+            assignment_groups: Vec::new(),
         };
         envelope.validate()?;
         Ok(envelope)
@@ -956,6 +972,30 @@ impl ResourceDemandEnvelope {
                 });
             }
         }
+        let mut grouped_events = 0_u64;
+        for group in &self.assignment_groups {
+            if group.event_count == 0 || group.candidate_pools.is_empty() {
+                return Err(LatentModelError::EmptyAssignmentGroup);
+            }
+            if group
+                .candidate_pools
+                .iter()
+                .any(|pool| pool.trim().is_empty())
+            {
+                return Err(LatentModelError::EmptyResourcePool);
+            }
+            grouped_events = grouped_events.checked_add(group.event_count).ok_or(
+                LatentModelError::ResourceDemandOverflow {
+                    pool: "assignment_groups".to_owned(),
+                },
+            )?;
+        }
+        if grouped_events > self.total_events {
+            return Err(LatentModelError::AssignmentGroupsExceedTotal {
+                groups: grouped_events,
+                total: self.total_events,
+            });
+        }
         Ok(())
     }
 }
@@ -967,6 +1007,10 @@ impl ResourceDemandEnvelope {
 pub struct ServiceRate {
     pub capacity: u32,
     pub initiation_interval_cycles: u64,
+    /// Optional upper endpoint for independent throughput uncertainty. When
+    /// absent, the legacy profile is an exact model-local slope.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initiation_interval_upper_cycles: Option<u64>,
     /// True when the fitted initiation interval already includes the measured
     /// effect of the probe's service capacity. This prevents projecting an
     /// aggregate throughput slope and dividing by capacity a second time.
@@ -1014,6 +1058,9 @@ impl ServiceRateProfile {
             if pool.trim().is_empty()
                 || rate.capacity == 0
                 || rate.initiation_interval_cycles == 0
+                || rate
+                    .initiation_interval_upper_cycles
+                    .is_some_and(|upper| upper < rate.initiation_interval_cycles)
                 || rate.latency_lower_cycles == 0
                 || rate.latency_lower_cycles > rate.latency_upper_cycles
             {
@@ -1136,6 +1183,8 @@ pub struct ServiceQueueProjection {
     pub admission: FrontierBound,
     pub issue_frontier: FrontierBound,
     pub completion_frontier: FrontierBound,
+    pub assignment_lower_cycles: u64,
+    pub assignment_upper_cycles: Option<u64>,
     pub queue_depth: FrontierBound,
     pub demand_events: u64,
     pub unclassified_events: u64,
@@ -1417,9 +1466,12 @@ impl ResourceDemandEnvelope {
                 .lower
                 .checked_mul(rate.initiation_interval_cycles)
                 .ok_or_else(|| LatentModelError::ResourceDemandOverflow { pool: pool.clone() })?;
+            let upper_interval = rate
+                .initiation_interval_upper_cycles
+                .unwrap_or(rate.initiation_interval_cycles);
             let upper_work = demand
                 .upper
-                .checked_mul(rate.initiation_interval_cycles)
+                .checked_mul(upper_interval)
                 .ok_or_else(|| LatentModelError::ResourceDemandOverflow { pool: pool.clone() })?;
             let lower_service = if rate.capacity_already_applied {
                 lower_work
@@ -1492,16 +1544,18 @@ impl ResourceDemandEnvelope {
         admission: FrontierBound,
     ) -> Result<ServiceQueueProjection, LatentModelError> {
         let service = self.project_service_cycles(profile)?;
+        let (assignment_lower_cycles, assignment_upper_cycles, assignment_semantics) =
+            self.project_grouped_assignment(profile, &service)?;
         admission.validate()?;
         let completion_lower = match admission.lower {
-            Some(base) => Some(base.checked_add(service.lower_cycles).ok_or_else(|| {
+            Some(base) => Some(base.checked_add(assignment_lower_cycles).ok_or_else(|| {
                 LatentModelError::ResourceDemandOverflow {
                     pool: "queue_completion_lower".to_owned(),
                 }
             })?),
             None => None,
         };
-        let completion_upper = match (admission.upper, service.upper_cycles) {
+        let completion_upper = match (admission.upper, assignment_upper_cycles) {
             (Some(base), Some(service)) => Some(base.checked_add(service).ok_or_else(|| {
                 LatentModelError::ResourceDemandOverflow {
                     pool: "queue_completion_upper".to_owned(),
@@ -1523,9 +1577,111 @@ impl ResourceDemandEnvelope {
             queue_depth: FrontierBound::exact(self.total_events),
             demand_events: self.total_events,
             unclassified_events: self.unclassified_events,
-            assignment_semantics: "marginal_pool_intervals_not_joint_route_assignment",
+            assignment_lower_cycles,
+            assignment_upper_cycles,
+            assignment_semantics,
         })
     }
+
+    fn project_grouped_assignment(
+        &self,
+        profile: &ServiceRateProfile,
+        marginal: &ResourceServiceProjection,
+    ) -> Result<(u64, Option<u64>, &'static str), LatentModelError> {
+        if self.assignment_groups.is_empty()
+            || self
+                .assignment_groups
+                .iter()
+                .map(|group| group.event_count)
+                .sum::<u64>()
+                != self.total_events
+        {
+            return Ok((
+                marginal.lower_cycles,
+                marginal.upper_cycles,
+                "marginal_pool_intervals_not_joint_route_assignment",
+            ));
+        }
+        let mut lower_total = 0_u64;
+        let mut upper_total = Some(0_u64);
+        for group in &self.assignment_groups {
+            let mut lower = None;
+            let mut upper = 0_u64;
+            for pool in &group.candidate_pools {
+                let rate = profile
+                    .pools
+                    .get(pool)
+                    .ok_or_else(|| LatentModelError::MissingServiceRate { pool: pool.clone() })?;
+                let interval = service_interval_for_demand(rate, 1, pool)?;
+                lower = Some(lower.map_or(interval.lower_cycles, |value: u64| {
+                    value.min(interval.lower_cycles)
+                }));
+                upper = upper.max(interval.upper_cycles);
+            }
+            let lower = lower.ok_or(LatentModelError::EmptyAssignmentGroup)?;
+            lower_total = lower_total
+                .checked_add(lower.checked_mul(group.event_count).ok_or_else(|| {
+                    LatentModelError::ResourceDemandOverflow {
+                        pool: "assignment_lower".to_owned(),
+                    }
+                })?)
+                .ok_or_else(|| LatentModelError::ResourceDemandOverflow {
+                    pool: "assignment_lower".to_owned(),
+                })?;
+            if let Some(current) = upper_total {
+                upper_total = Some(
+                    current
+                        .checked_add(upper.checked_mul(group.event_count).ok_or_else(|| {
+                            LatentModelError::ResourceDemandOverflow {
+                                pool: "assignment_upper".to_owned(),
+                            }
+                        })?)
+                        .ok_or_else(|| LatentModelError::ResourceDemandOverflow {
+                            pool: "assignment_upper".to_owned(),
+                        })?,
+                );
+            }
+        }
+        Ok((
+            lower_total,
+            upper_total,
+            "grouped_alternative_assignments_preserved_but_not_scheduled",
+        ))
+    }
+}
+
+fn service_interval_for_demand(
+    rate: &ServiceRate,
+    demand: u64,
+    pool: &str,
+) -> Result<ServiceCycleInterval, LatentModelError> {
+    let lower_work = demand
+        .checked_mul(rate.initiation_interval_cycles)
+        .ok_or_else(|| LatentModelError::ResourceDemandOverflow {
+            pool: pool.to_owned(),
+        })?;
+    let upper_work = demand
+        .checked_mul(
+            rate.initiation_interval_upper_cycles
+                .unwrap_or(rate.initiation_interval_cycles),
+        )
+        .ok_or_else(|| LatentModelError::ResourceDemandOverflow {
+            pool: pool.to_owned(),
+        })?;
+    let lower_service = if rate.capacity_already_applied {
+        lower_work
+    } else {
+        ceil_div(lower_work, u64::from(rate.capacity))?
+    };
+    let upper_service = if rate.capacity_already_applied {
+        upper_work
+    } else {
+        ceil_div(upper_work, u64::from(rate.capacity))?
+    };
+    Ok(ServiceCycleInterval {
+        lower_cycles: lower_service + rate.latency_lower_cycles,
+        upper_cycles: upper_service + rate.latency_upper_cycles,
+    })
 }
 
 fn ceil_div(numerator: u64, denominator: u64) -> Result<u64, LatentModelError> {
@@ -1806,6 +1962,7 @@ mod tests {
                 ServiceRate {
                     capacity: 1,
                     initiation_interval_cycles: 1,
+                    initiation_interval_upper_cycles: None,
                     capacity_already_applied: false,
                     latency_lower_cycles: 1,
                     latency_upper_cycles: 1,
@@ -1900,6 +2057,7 @@ mod tests {
             ServiceRate {
                 capacity: 1,
                 initiation_interval_cycles: 1,
+                initiation_interval_upper_cycles: None,
                 capacity_already_applied: false,
                 latency_lower_cycles: 1,
                 latency_upper_cycles: 2,
@@ -1937,6 +2095,7 @@ mod tests {
             ServiceRate {
                 capacity: 2,
                 initiation_interval_cycles: 2,
+                initiation_interval_upper_cycles: None,
                 capacity_already_applied: false,
                 latency_lower_cycles: 1,
                 latency_upper_cycles: 3,
@@ -1986,6 +2145,7 @@ mod tests {
                 ServiceRate {
                     capacity: 2,
                     initiation_interval_cycles: 3,
+                    initiation_interval_upper_cycles: None,
                     capacity_already_applied: true,
                     latency_lower_cycles: 2,
                     latency_upper_cycles: 2,
@@ -2007,6 +2167,38 @@ mod tests {
     }
 
     #[test]
+    fn throughput_interval_uncertainty_widens_only_the_service_upper() {
+        let demand = ResourceDemandEnvelope::new(
+            2,
+            0,
+            BTreeMap::from([("alu".to_owned(), ResourceDemandInterval::exact(2))]),
+            EvidenceKind::Hypothesis,
+        )
+        .unwrap();
+        let profile = ServiceRateProfile {
+            schema_version: RESOURCE_DEMAND_SCHEMA_VERSION,
+            source: "independent_throughput_probe_v2".to_owned(),
+            pools: BTreeMap::from([(
+                "alu".to_owned(),
+                ServiceRate {
+                    capacity: 1,
+                    initiation_interval_cycles: 2,
+                    initiation_interval_upper_cycles: Some(4),
+                    capacity_already_applied: true,
+                    latency_lower_cycles: 1,
+                    latency_upper_cycles: 1,
+                },
+            )]),
+            ncu_start_padding_cycles: None,
+            ncu_end_padding_cycles: None,
+            unmodeled_dimensions: Vec::new(),
+        };
+        let projection = demand.project_service_cycles(&profile).unwrap();
+        assert_eq!(projection.lower_cycles, 5);
+        assert_eq!(projection.upper_cycles, Some(9));
+    }
+
+    #[test]
     fn unresolved_unclassified_demand_never_collapses_to_zero_or_finite_upper() {
         let demand =
             ResourceDemandEnvelope::new(1, 1, BTreeMap::new(), EvidenceKind::Hypothesis).unwrap();
@@ -2018,6 +2210,7 @@ mod tests {
                 ServiceRate {
                     capacity: 1,
                     initiation_interval_cycles: 1,
+                    initiation_interval_upper_cycles: None,
                     capacity_already_applied: false,
                     latency_lower_cycles: 2,
                     latency_upper_cycles: 2,
@@ -2049,6 +2242,7 @@ mod tests {
                 ServiceRate {
                     capacity: 1,
                     initiation_interval_cycles: 4,
+                    initiation_interval_upper_cycles: None,
                     capacity_already_applied: false,
                     latency_lower_cycles: 7,
                     latency_upper_cycles: 9,
@@ -2080,6 +2274,7 @@ mod tests {
                 ServiceRate {
                     capacity: 1,
                     initiation_interval_cycles: 1,
+                    initiation_interval_upper_cycles: None,
                     capacity_already_applied: false,
                     latency_lower_cycles: 1,
                     latency_upper_cycles: 1,
@@ -2123,6 +2318,7 @@ mod tests {
                 ServiceRate {
                     capacity: 1,
                     initiation_interval_cycles: 1,
+                    initiation_interval_upper_cycles: None,
                     capacity_already_applied: false,
                     latency_lower_cycles: 1,
                     latency_upper_cycles: 1,
@@ -2222,6 +2418,7 @@ mod tests {
                 ServiceRate {
                     capacity: 1,
                     initiation_interval_cycles: 2,
+                    initiation_interval_upper_cycles: None,
                     capacity_already_applied: false,
                     latency_lower_cycles: 1,
                     latency_upper_cycles: 2,
@@ -2241,6 +2438,65 @@ mod tests {
             queue.assignment_semantics,
             "marginal_pool_intervals_not_joint_route_assignment"
         );
+    }
+
+    #[test]
+    fn grouped_assignment_domain_preserves_alternative_route_correlation() {
+        let mut demand = ResourceDemandEnvelope::new(
+            2,
+            0,
+            BTreeMap::from([
+                ("alu".to_owned(), ResourceDemandInterval::interval(0, 2)),
+                ("lsu".to_owned(), ResourceDemandInterval::interval(0, 2)),
+            ]),
+            EvidenceKind::Hypothesis,
+        )
+        .unwrap();
+        demand.assignment_groups = vec![ResourceAssignmentGroup {
+            event_count: 2,
+            candidate_pools: BTreeSet::from(["alu".to_owned(), "lsu".to_owned()]),
+        }];
+        demand.validate().unwrap();
+        let profile = ServiceRateProfile {
+            schema_version: RESOURCE_DEMAND_SCHEMA_VERSION,
+            source: "independent_probe_v1".to_owned(),
+            pools: BTreeMap::from([
+                (
+                    "alu".to_owned(),
+                    ServiceRate {
+                        capacity: 1,
+                        initiation_interval_cycles: 1,
+                        initiation_interval_upper_cycles: None,
+                        capacity_already_applied: false,
+                        latency_lower_cycles: 1,
+                        latency_upper_cycles: 1,
+                    },
+                ),
+                (
+                    "lsu".to_owned(),
+                    ServiceRate {
+                        capacity: 1,
+                        initiation_interval_cycles: 4,
+                        initiation_interval_upper_cycles: None,
+                        capacity_already_applied: false,
+                        latency_lower_cycles: 1,
+                        latency_upper_cycles: 1,
+                    },
+                ),
+            ]),
+            ncu_start_padding_cycles: None,
+            ncu_end_padding_cycles: None,
+            unmodeled_dimensions: Vec::new(),
+        };
+        let queue = demand
+            .project_service_queue(&profile, FrontierBound::exact(0))
+            .unwrap();
+        assert_eq!(
+            queue.assignment_semantics,
+            "grouped_alternative_assignments_preserved_but_not_scheduled"
+        );
+        assert_eq!(queue.assignment_lower_cycles, 4);
+        assert_eq!(queue.assignment_upper_cycles, Some(10));
     }
 
     #[test]

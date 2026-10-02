@@ -429,6 +429,9 @@ GPU overlap models, skipping refinement, or native trace-driven simulators.
   fitted rate equation. Occupancy/contention rows are retained as explicitly
   unmodeled dimensions and changing only those values leaves fitted rates
   unchanged; holdout reports them as unmodeled.
-- Remaining R4 work is joint assignment/queue correlation and independent
-  uncertainty intervals; no service-rate or queue result is a silicon timing
-  claim.
+- Throughput profiles now retain a lower/upper initiation-interval envelope;
+  the projection widens only the service upper under that uncertainty.
+- Grouped alternative assignment domains now preserve lower/upper assignment
+  envelopes when a producer supplies them; the native metrics path does not yet
+  extract such groups, so its reports remain marginal. No service-rate or queue
+  result is a silicon timing claim.

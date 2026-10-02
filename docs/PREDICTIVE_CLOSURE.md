@@ -43,7 +43,9 @@ probes are never divided by capacity a second time. The v2 probe fitter
 requires separate dependent-latency, independent-throughput, and queue-capacity
 observations. Occupancy and contention rows are accepted as holdout
 diagnostics but are emitted as explicitly unmodeled dimensions; their values do
-not silently change the fitted rate profile.
+not silently change the fitted rate profile. Independent throughput probes
+retain lower/upper initiation-interval endpoints so service uncertainty widens
+an upper bound instead of collapsing to one median slope.
 
 The staged Phase 6 evaluation uses three current SM86 families, joins NCU only
 after prediction, and keeps open upper bounds explicit. Its conclusion is

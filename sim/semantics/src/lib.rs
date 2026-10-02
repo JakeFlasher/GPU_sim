@@ -25,9 +25,9 @@ pub use latent::{
     CompletionRequirement, CompletionRequirements, EndpointDescriptor, EventKey, EvidenceKind,
     FrontierBound, FrontierVector, LATENT_SCHEMA_VERSION, LatentFactors, LatentModelError,
     LatentSummary, LatentWorld, LatentWorldSet, MechanismEnvelope, MustMay, NcuObserverProjection,
-    RESOURCE_DEMAND_SCHEMA_VERSION, ResourceDemandEnvelope, ResourceDemandInterval,
-    ResourceServiceProjection, ServiceComposition, ServiceCycleInterval, ServiceOverlapMode,
-    ServiceQueueProjection, ServiceRate, ServiceRateProfile, ServiceStageRole,
+    RESOURCE_DEMAND_SCHEMA_VERSION, ResourceAssignmentGroup, ResourceDemandEnvelope,
+    ResourceDemandInterval, ResourceServiceProjection, ServiceComposition, ServiceCycleInterval,
+    ServiceOverlapMode, ServiceQueueProjection, ServiceRate, ServiceRateProfile, ServiceStageRole,
 };
 pub use observation::{
     OBSERVATION_SCHEMA_VERSION, ObservationContract, ObservationContractError,

@@ -18,6 +18,7 @@ def test_fit_profile_uses_probe_only_service_observations() -> None:
         "test_probe_fit",
     )
     assert profile["pools"]["alu"]["initiation_interval_cycles"] == 2
+    assert profile["pools"]["alu"]["initiation_interval_upper_cycles"] == 3
     assert profile["pools"]["alu"]["latency_lower_cycles"] == 2
     assert profile["pools"]["alu"]["latency_upper_cycles"] == 3
     assert profile["pools"]["lsu"]["capacity"] == 1
@@ -66,6 +67,7 @@ def test_v2_requires_separate_identifiable_probe_modes_and_marks_capacity_slope(
     )
     assert profile["pools"]["alu"]["capacity_already_applied"] is True
     assert profile["pools"]["alu"]["initiation_interval_cycles"] == 3
+    assert profile["pools"]["alu"]["initiation_interval_upper_cycles"] == 3
     assert profile["pools"]["alu"]["latency_lower_cycles"] == 4
 
 

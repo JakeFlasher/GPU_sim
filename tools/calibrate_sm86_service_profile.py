@@ -68,6 +68,7 @@ def _fit_v1(raw: dict[str, Any], source: str) -> dict[str, Any]:
         pools[pool] = {
             "capacity": capacities.pop(),
             "initiation_interval_cycles": max(1, round(statistics.median(intervals))),
+            "initiation_interval_upper_cycles": max(intervals),
             "capacity_already_applied": False,
             "latency_lower_cycles": min(latencies),
             "latency_upper_cycles": max(latencies),
@@ -159,6 +160,7 @@ def _fit_v2(raw: dict[str, Any], source: str) -> dict[str, Any]:
             # projection must not divide it by capacity again.
             "capacity_already_applied": True,
             "initiation_interval_cycles": median_interval,
+            "initiation_interval_upper_cycles": max(throughput_intervals),
             "latency_lower_cycles": min(latencies),
             "latency_upper_cycles": max(latencies),
         }

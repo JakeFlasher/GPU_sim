@@ -22,7 +22,7 @@ are deleted rather than skipped.
 | Native replay | SM86 instruction, memory, and event replay; separate frontiers |
 | Custom frontends | Bounded functional/resource experiments, separate from native timing |
 | Predictive extension | Opt-in resource/service intervals composed into a model-local frontier, cache-topology candidates, NCU candidate projection |
-| Calibration | Profile loader and offline fitter exist; v2 separates latency/throughput/queue probes and records occupancy/contention as explicitly unmodeled dimensions; supplied rates remain uncalibrated |
+| Calibration | Profile loader and offline fitter exist; v2 separates latency/throughput/queue probes, retains throughput interval endpoints, and records occupancy/contention as explicitly unmodeled dimensions; supplied rates remain uncalibrated |
 | Accuracy | This extension has no demonstrated family-held-out cycle accuracy or interval coverage yet |
 | Reification | Typed region contract and native-boundary comparator preserve only complete exact projections; incomplete canary boundaries fall back to replay |
 | Selective coverage | Multi-warp/order and completion-multiplicity guards refuse conservatively; fast-frontier output includes full-trace candidate/reified/uncovered counts |
