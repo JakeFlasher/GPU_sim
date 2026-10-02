@@ -150,6 +150,7 @@ pub enum NativeBoundaryReifyReason {
     InternalEffectMismatch {
         expected: usize,
         observed: usize,
+        first_difference: Option<String>,
     },
     ObservableLabelMismatch,
 }
@@ -652,10 +653,22 @@ pub fn compare_native_region_contract_with_trace(
         return NativeBoundaryRefinementDecision::Reify { reason };
     }
     if summary.internal_effects != detailed_effects {
+        let first_difference = summary
+            .internal_effects
+            .iter()
+            .zip(detailed_effects)
+            .position(|(expected, observed)| expected != observed)
+            .map(|index| {
+                format!(
+                    "effect_index={index}:expected={:?}:observed={:?}",
+                    summary.internal_effects[index], detailed_effects[index]
+                )
+            });
         return NativeBoundaryRefinementDecision::Reify {
             reason: NativeBoundaryReifyReason::InternalEffectMismatch {
                 expected: summary.internal_effects.len(),
                 observed: detailed_effects.len(),
+                first_difference,
             },
         };
     }

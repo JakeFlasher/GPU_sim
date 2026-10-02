@@ -460,7 +460,8 @@ GPU overlap models, skipping refinement, or native trace-driven simulators.
   issued-instruction effect span for each SM wake. The pure-scalar SM86 probe
   yields one complete pre/post pair with two detailed issue effects; an opt-in
   typed scalar spec still reifies because its independently derived timing does
-  not match the cold front-end transition. This is the required adversarial
+  not match the cold front-end transition (first effect expected at 285 and
+  observed at 568 in the bounded probe). This is the required adversarial
   native check, not a preserve claim.
 - The decisive remaining R5 check is a real nonidentity native macro whose
   exit/effects/pending-token mapping are independently derived and consumed by
