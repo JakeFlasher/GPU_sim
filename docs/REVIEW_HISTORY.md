@@ -142,4 +142,6 @@ fallback soundness but does not yet consume a nonidentity native macro; the
 retained SM86 canary remains exact-fallback evidence. A pure-scalar SM86 probe
 now supplies a complete typed pre/post boundary pair; its cold front-end
 transition is intentionally rejected by the strict typed scalar macro executor
-instead of being claimed as preserved.
+instead of being claimed as preserved. The reference trace now retains paired
+pre/post boundaries and explicit issue-effect spans, making that rejection a
+transition-level check rather than endpoint-only telemetry.

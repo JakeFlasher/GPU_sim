@@ -31,7 +31,9 @@ class BoundaryTraceTests(unittest.TestCase):
         rows.extend(events)
         if footer:
             rows.append({"kind": "footer", "records_before_footer": len(rows),
-                         "queue_events_popped": len(events)})
+                         "queue_events_popped": sum(
+                             row.get("boundary_phase") != "pre" for row in events
+                         )})
         path.write_text("".join(json.dumps(row) + "\n" for row in rows))
         return path
 
@@ -142,8 +144,37 @@ class BoundaryTraceTests(unittest.TestCase):
                     "shared_l2_transient_state": 1,
                     "unmodeled_completion_tails": 1,
                 },
+                "transition_boundary_pairs": 0,
+                "complete_transition_pairs": 0,
+                "transition_effect_counts": [],
             },
         )
+
+    def test_complete_pre_post_pair_reports_detailed_effect_span(self):
+        event = self.write(
+            "event",
+            [
+                {
+                    "kind": "event",
+                    "target": 0,
+                    "sequence": 4,
+                    "boundary_phase": "pre",
+                    "typed_boundary": {"completeness": "complete"},
+                },
+                {
+                    "kind": "event",
+                    "target": 0,
+                    "sequence": 4,
+                    "boundary_phase": "post",
+                    "typed_boundary": {"completeness": "complete"},
+                    "detailed_internal_effects": [{"effect": 1}, {"effect": 2}],
+                },
+            ],
+        )
+        report = summarize_native_boundary_refinement(event, "event")
+        assert report["transition_boundary_pairs"] == 1
+        assert report["complete_transition_pairs"] == 1
+        assert report["transition_effect_counts"] == [2]
 
     def test_explicit_reify_decision_overrides_complete_typed_shape(self):
         event = self.write(

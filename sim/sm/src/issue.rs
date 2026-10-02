@@ -9619,6 +9619,8 @@ pub(crate) struct SmCore<'a> {
     dense_reference: bool,
     #[cfg(feature = "reference")]
     advance_diagnostics: AdvanceDiagnostics,
+    #[cfg(feature = "reference")]
+    reference_issue_effects: Vec<(u64, u64, u32)>,
 }
 
 #[cfg(feature = "reference")]
@@ -10067,6 +10069,8 @@ impl<'a> SmCore<'a> {
             dense_reference,
             #[cfg(feature = "reference")]
             advance_diagnostics: AdvanceDiagnostics::default(),
+            #[cfg(feature = "reference")]
+            reference_issue_effects: Vec::new(),
         };
         core.admit_blocks(core.t)?;
         Ok(core)
@@ -10083,6 +10087,11 @@ impl<'a> SmCore<'a> {
     #[cfg(feature = "reference")]
     pub(crate) fn advance_diagnostics(&self) -> AdvanceDiagnostics {
         self.advance_diagnostics
+    }
+
+    #[cfg(feature = "reference")]
+    pub(crate) fn reference_issue_effects_since(&self, start: usize) -> &[(u64, u64, u32)] {
+        self.reference_issue_effects.get(start..).unwrap_or(&[])
     }
 
     #[cfg(feature = "reference")]
@@ -16054,6 +16063,12 @@ impl<'a> SmCore<'a> {
             }
             self.warps[wix].next =
                 checked_usize_counter_add("warp instruction cursor", self.warps[wix].next, 1)?;
+            #[cfg(feature = "reference")]
+            self.reference_issue_effects.push((
+                self.t,
+                u64::try_from(wix).unwrap_or(u64::MAX),
+                u32::try_from(instruction).unwrap_or(u32::MAX),
+            ));
             let final_block_barrier = slot_class == OpClass::BlockBarrier
                 && self.warps[wix].next == self.warps[wix].insts.len();
             if retires_warp {

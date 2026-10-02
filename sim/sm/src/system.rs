@@ -140,9 +140,11 @@ use sim_semantics::{
     BoundaryStateError, DramBoundaryState, DramStateError, L2RequestKey, PowerBoundaryState,
     PowerStateError, QueueBoundaryState, QueueStateError, TYPED_STATE_SCHEMA_VERSION,
     TypedAdmissionWitness, TypedCoreBoundaryState, TypedEventBoundaryRecord, TypedEventIdentity,
-    TypedEventPayload, TypedFillIdentity, TypedL2Source, TypedMemoryOperation, TypedMemoryOrigin,
-    TypedMemoryRequest, TypedObservationContract, TypedPendingEvent, TypedResponseIdentity,
-    TypedResponseKind, compare_native_region_contract, native_boundary_execution_path,
+    TypedEventPayload, TypedEventTransition, TypedFillIdentity, TypedL2Source,
+    TypedMemoryOperation, TypedMemoryOrigin, TypedMemoryRequest, TypedObservationContract,
+    TypedPendingEvent, TypedResponseIdentity, TypedResponseKind, TypedScalarMacroSpec,
+    compare_native_region_contract, compare_native_region_contract_with_trace,
+    derive_typed_scalar_macro_region, native_boundary_execution_path,
 };
 
 /// Stable response identity used only at the typed boundary. The process-local
@@ -1292,10 +1294,31 @@ struct ReferenceTrace {
     records: u64,
     max_records: u64,
     previous_event: Option<serde_json::Value>,
+    issue_effect_cursors: Vec<usize>,
+    pending_typed_entry: Option<TypedEventBoundaryRecord>,
 }
 
 #[cfg(feature = "reference")]
 const DEFAULT_REFERENCE_TRACE_MAX_RECORDS: u64 = 8_192;
+
+#[cfg(feature = "reference")]
+fn typed_scalar_macro_spec_from_env() -> Option<TypedScalarMacroSpec> {
+    let instruction_count = std::env::var("SIM_SM_REFERENCE_TYPED_SCALAR_COUNT")
+        .ok()?
+        .parse::<u64>()
+        .ok()?;
+    let latency_cycles = std::env::var("SIM_SM_REFERENCE_TYPED_SCALAR_LATENCY")
+        .ok()?
+        .parse::<u64>()
+        .ok()?;
+    let label = std::env::var("SIM_SM_REFERENCE_TYPED_SCALAR_LABEL")
+        .unwrap_or_else(|_| "sm_wake".to_owned());
+    Some(TypedScalarMacroSpec {
+        instruction_count,
+        latency_cycles,
+        label,
+    })
+}
 
 /// Lossless replacements relative to the preceding event record. Equal-length
 /// arrays keep their positions; a shape change replaces the entire container.
@@ -1445,6 +1468,8 @@ impl ReferenceTrace {
             records: 0,
             max_records,
             previous_event: None,
+            issue_effect_cursors: Vec::new(),
+            pending_typed_entry: None,
         };
         trace.write(&serde_json::json!({
             "kind": "header",
@@ -1775,12 +1800,69 @@ impl ReferenceTrace {
             completeness: typed_l2_power_completeness.clone(),
         };
         typed_boundary.validate_structure()?;
-        // The fast scalar recurrence currently has no complete typed macro
-        // boundary. Record that conservative decision beside the independent
-        // native projection; this is a diagnostic exact-fallback result and
-        // does not alter replay or become an execution prerequisite.
-        let native_boundary_refinement =
+        if self.issue_effect_cursors.len() < cores.len() {
+            self.issue_effect_cursors.resize(cores.len(), 0);
+        }
+        let effect_sequence_base = self
+            .pending_typed_entry
+            .as_ref()
+            .map(|entry| entry.event.sequence)
+            .unwrap_or(sequence);
+        let mut detailed_internal_effects = Vec::new();
+        let mut detailed_effect_index = 0_u64;
+        for (ix, core) in cores.iter().enumerate() {
+            let start = self.issue_effect_cursors[ix];
+            let effects = core.reference_issue_effects_since(start);
+            self.issue_effect_cursors[ix] = start.saturating_add(effects.len());
+            for &(effect_time, _warp, _instruction) in effects {
+                let effect_sequence = effect_sequence_base
+                    .checked_add(detailed_effect_index.saturating_add(1))
+                    .unwrap_or(u64::MAX);
+                detailed_effect_index = detailed_effect_index.saturating_add(1);
+                detailed_internal_effects.push(TypedEventTransition {
+                    phase: 0,
+                    event: TypedEventIdentity {
+                        time: effect_time,
+                        sequence: effect_sequence,
+                        sequence_span: 1,
+                        phase: 0,
+                        target: sm_ids
+                            .get(ix)
+                            .and_then(|id| u32::try_from(*id).ok())
+                            .unwrap_or(u32::MAX),
+                        payload: TypedEventPayload::SmWake,
+                    },
+                });
+            }
+        }
+        let missing_macro_decision =
             compare_native_region_contract(None, &typed_boundary, &typed_boundary);
+        let native_boundary_refinement = if boundary_phase == "pre" {
+            self.pending_typed_entry = Some(typed_boundary.clone());
+            missing_macro_decision
+        } else if boundary_phase == "post" {
+            let entry = self.pending_typed_entry.take();
+            if let (Some(entry), Some(spec)) = (entry, typed_scalar_macro_spec_from_env()) {
+                match derive_typed_scalar_macro_region(&entry, &spec) {
+                    Ok(summary) => compare_native_region_contract_with_trace(
+                        Some(&summary),
+                        &entry,
+                        &detailed_internal_effects,
+                        &[event.to_owned()],
+                        &typed_boundary,
+                    ),
+                    Err(error) => sim_semantics::NativeBoundaryRefinementDecision::Reify {
+                        reason: sim_semantics::NativeBoundaryReifyReason::SummaryStructure {
+                            error: error.to_string(),
+                        },
+                    },
+                }
+            } else {
+                missing_macro_decision
+            }
+        } else {
+            missing_macro_decision
+        };
         let native_boundary_execution = native_boundary_execution_path(&native_boundary_refinement);
         // `typed_boundary` is the canonical state. The old formatted core/L2
         // projections were diagnostic duplicates and made every boundary much
@@ -1793,6 +1875,7 @@ impl ReferenceTrace {
             "target": target,
             "event": event,
             "typed_boundary": typed_boundary,
+            "detailed_internal_effects": detailed_internal_effects,
             "native_boundary_refinement": native_boundary_refinement,
             "native_boundary_execution": native_boundary_execution,
             "boundary_phase": boundary_phase,
@@ -5295,6 +5378,8 @@ mod tests {
             records: 0,
             max_records: 2,
             previous_event: None,
+            issue_effect_cursors: Vec::new(),
+            pending_typed_entry: None,
         };
         trace.write(&serde_json::json!({"kind": "header"})).unwrap();
         trace.write(&serde_json::json!({"kind": "event"})).unwrap();
@@ -5314,6 +5399,8 @@ mod tests {
             records: 2,
             max_records: 2,
             previous_event: None,
+            issue_effect_cursors: Vec::new(),
+            pending_typed_entry: None,
         };
         trace
             .finish(

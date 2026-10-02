@@ -247,6 +247,7 @@ def _trace_records(path: pathlib.Path, mode: str) -> Iterator[dict[str, Any]]:
                 return
             if kind == "event":
                 previous = row
+                events += int(row.get("boundary_phase") != "pre")
             elif kind == "event_delta" and encoding == "full_then_delta_v1":
                 if previous is None or row.get("base_record") != index - 1:
                     raise RuntimeError(f"reference delta has no matching base at record {index}: {path}")
@@ -264,6 +265,7 @@ def _trace_records(path: pathlib.Path, mode: str) -> Iterator[dict[str, Any]]:
                     raise RuntimeError(f"malformed reference delta at record {index}: {path}: {error}") from error
                 if not isinstance(previous, dict) or previous.get("kind") != "event":
                     raise RuntimeError(f"reference delta did not reconstruct an event: {path}")
+                events += int(previous.get("boundary_phase") != "pre")
             elif kind == "event_delta" and encoding == "full_then_delta_v2":
                 if previous is None or row.get("base_record") != index - 1:
                     raise RuntimeError(f"reference delta has no matching base at record {index}: {path}")
@@ -295,9 +297,9 @@ def _trace_records(path: pathlib.Path, mode: str) -> Iterator[dict[str, Any]]:
                     raise RuntimeError(f"malformed reference delta at record {index}: {path}: {error}") from error
                 if not isinstance(previous, dict) or previous.get("kind") != "event":
                     raise RuntimeError(f"reference delta did not reconstruct an event: {path}")
+                events += int(previous.get("boundary_phase") != "pre")
             else:
                 raise RuntimeError(f"unexpected reference record kind {kind!r}: {path}")
-            events += 1
             yield previous
     raise RuntimeError(f"reference trace is missing its footer: {path}")
 
@@ -332,6 +334,10 @@ def summarize_native_boundary_refinement(path: pathlib.Path, mode: str) -> dict[
     complete = 0
     fallback = 0
     unknown_fields: dict[str, int] = {}
+    transition_pairs = 0
+    complete_transition_pairs = 0
+    transition_effect_counts: list[int] = []
+    pre_boundaries: dict[tuple[Any, Any], dict[str, Any]] = {}
     for row in _trace_records(path, mode):
         if row.get("kind") != "event":
             continue
@@ -340,14 +346,28 @@ def summarize_native_boundary_refinement(path: pathlib.Path, mode: str) -> dict[
         completeness = boundary.get("completeness") if isinstance(boundary, dict) else None
         refinement = row.get("native_boundary_refinement")
         refinement_decision = refinement.get("decision") if isinstance(refinement, dict) else None
+        phase = row.get("boundary_phase")
+        key = (row.get("target"), row.get("sequence"))
+        if phase == "pre":
+            pre_boundaries[key] = row
+        elif phase == "post" and key in pre_boundaries:
+            transition_pairs += 1
+            pre = pre_boundaries.pop(key)
+            pre_complete = pre.get("typed_boundary", {}).get("completeness") == "complete"
+            post_complete = completeness == "complete"
+            if pre_complete and post_complete:
+                complete_transition_pairs += 1
+            effects = row.get("detailed_internal_effects")
+            transition_effect_counts.append(len(effects) if isinstance(effects, list) else 0)
         # Older reference streams have no comparator field; their complete
         # typed boundary remains a structural eligibility count.  Once an
         # explicit comparator decision exists, only `preserve` is eligible.
         if refinement_decision == "reify":
             fallback += 1
             reason = refinement.get("reason") if isinstance(refinement, dict) else None
-            if isinstance(reason, dict) and len(reason) == 1:
-                kind, detail = next(iter(reason.items()))
+            if isinstance(reason, dict) and isinstance(reason.get("kind"), str):
+                kind = reason["kind"]
+                detail = reason.get("error") or reason.get("side")
                 fields = [
                     f"native_reification:{kind}:{detail}"
                     if isinstance(detail, (str, int, float, bool))
@@ -385,6 +405,9 @@ def summarize_native_boundary_refinement(path: pathlib.Path, mode: str) -> dict[
         "exact_fallback_boundary_records": fallback,
         "exact_fallback_required": fallback != 0,
         "unknown_or_refused_fields": dict(sorted(unknown_fields.items())),
+        "transition_boundary_pairs": transition_pairs,
+        "complete_transition_pairs": complete_transition_pairs,
+        "transition_effect_counts": transition_effect_counts,
     }
 
 

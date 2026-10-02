@@ -456,6 +456,12 @@ GPU overlap models, skipping refinement, or native trace-driven simulators.
   not derivable by that rule and correctly remains exact replay.
 - The typed executor explicitly refuses pending queue responses, dependency
   barriers, and incomplete/unknown tails before deriving an exit.
+- The reference writer now captures explicit pre/post typed boundaries and the
+  issued-instruction effect span for each SM wake. The pure-scalar SM86 probe
+  yields one complete pre/post pair with two detailed issue effects; an opt-in
+  typed scalar spec still reifies because its independently derived timing does
+  not match the cold front-end transition. This is the required adversarial
+  native check, not a preserve claim.
 - The decisive remaining R5 check is a real nonidentity native macro whose
   exit/effects/pending-token mapping are independently derived and consumed by
   continuation execution; until then this stage is not complete.
