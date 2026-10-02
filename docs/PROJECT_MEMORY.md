@@ -102,6 +102,10 @@ from profiler measurements; black-box models are assumptions, not observations.
   reports open intervals separately from finite coverage. Observation rows are
   explicitly `manifest_labeled_historical`; the builder does not independently
   verify live GPU identity.
+- R9.0 repaired the bounded reference-canary response-owner/queue projection
+  failure by marking due-owner/queued-response mismatches as unresolved
+  ownership. The rerun terminates with 10,032 reference records and exact
+  fallback throughout; R8.2 production macro dispatch remains open.
 
 ## Next useful work
 

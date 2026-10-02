@@ -243,3 +243,15 @@ Prediction artifacts now retain semantic trace/control/card/launch bindings.
 The design evaluator reports accepted/refused coverage and full child
 wall-clock/peak-RSS scope (parse, replay, planning, effect materialization,
 comparison, and output), while explicitly setting native speedup to false.
+
+## R9.0 native canary queue/response closure — 2026-10-02 (complete; R8.2 remains open)
+
+The bounded native reference canary exposed a real typed projection failure:
+due response owners and queued memory responses could temporarily disagree
+while L2 ownership was still unresolved. The boundary builder now treats that
+owner/queue mismatch as unknown ownership and widens the typed completeness
+result instead of aborting replay. The rerun completed with a footer: 10,032
+reference records, 5,016 pre/post pairs, zero complete typed boundaries, and
+exact fallback for every record. No native macro dispatch or speedup was
+observed. This repairs termination/unknown propagation, not production macro
+dispatch; R8.2 remains the next native research blocker.

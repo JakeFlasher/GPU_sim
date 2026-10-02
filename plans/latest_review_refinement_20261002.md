@@ -40,6 +40,10 @@ response-owner/queue join before any macro is consumed. The sections below
 retain the staged work packages and falsifiers; this status line is authoritative
 over earlier historical prose.
 
+R9.0 is complete: the canary boundary now preserves unresolved owner/queue
+joins as unknown and the bounded executable terminates with exact fallback.
+R8.2 production macro dispatch remains open.
+
 ## Stage ledger
 
 | Stage | Focus | Exit evidence | Status |
@@ -51,6 +55,7 @@ over earlier historical prose.
 | R8.4 | Service/queue semantics and identifiability | Queue unknowns cannot close spuriously; residual/replacement roles have explicit equations and a held-out intervention, or the profile is clearly sidecar-only; latency, throughput, and queue parameters are separately identified | **complete** |
 | R8.5 | Measurement identity and cost utility | NCU observations are explicitly verified or labeled as manifest-labeled historical data; source/trace/control/card/launch identity is bound; parser/planner/effect/compare/RSS/wall-time cost and accepted/refused coverage are reported without speedup overclaim | **complete** |
 | R8.6 | Independent evaluation and paper synchronization | New tests/probes, negative results, novelty/prior-art boundary, histories, memory, status, schemas, and rebuttal all agree; full validation passes | **complete** |
+| R9.0 | Native canary queue/response closure | The bounded reference canary terminates with explicit unknown owner/queue state; complete boundaries and macro dispatch remain zero unless independently closed | **complete** |
 
 ## R8.1 — immediate soundness guards
 
@@ -363,3 +368,16 @@ The repository is synchronized for the next review. The highest-value open
 research task remains a real production comparator-selected native fixture;
 until its queue/response, completion, and front-end state close, exact replay
 and explicit unknowns remain authoritative.
+
+## R9.0 implementation evidence (complete 2026-10-02)
+
+- The typed reference boundary now compares due response-owner keys with queued
+  memory-response keys before declaring shared-L2 ownership complete. Any
+  mismatch is recorded as `response_owner_queue_join_unknown` and widens the
+  boundary instead of raising a structural error.
+- The bounded SM86 `l1-l2` reference canary now exits successfully with a
+  footer: 10,032 records, 5,016 pre/post pairs, zero complete typed boundaries,
+  and exact fallback for all records. The prior failure at SM2/warp0/
+  instruction17/sector0/due1686 is reproducibly gone.
+- This is a termination and unknown-propagation fix. It does not select a
+  native macro, reduce native steps, or close R8.2 production dispatch.

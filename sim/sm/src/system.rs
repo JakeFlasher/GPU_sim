@@ -49,6 +49,8 @@ use std::cell::RefCell;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap, HashMap};
 #[cfg(feature = "reference")]
+use std::collections::BTreeSet;
+#[cfg(feature = "reference")]
 use std::fs::File;
 #[cfg(feature = "reference")]
 use std::io::{self, BufWriter, Write};
@@ -1738,6 +1740,61 @@ impl ReferenceTrace {
                     "pending_fill_allocation_unknown:{}:{}:{}",
                     line_id, generation, sector
                 ));
+            }
+        }
+        // Response owners and queued response events are observed through
+        // different internal lanes. A due owner without a matching queued
+        // response (or vice versa) is unresolved boundary state, not a
+        // structural contradiction. Mark the ownership domain incomplete so
+        // the typed contract widens/refuses instead of aborting the replay.
+        type ResponseQueueKey = (u32, u64, u64, u64, TypedResponseKind, u64);
+        let mut owner_counts = BTreeMap::<ResponseQueueKey, u32>::new();
+        for owner in &typed_l2.request_owners {
+            let Some(due) = owner.due else { continue };
+            let key = (
+                owner.request.sm_id,
+                owner.request.response_warp,
+                owner.request.instruction,
+                owner.request.sector_index,
+                owner.request.response_kind,
+                due,
+            );
+            *owner_counts.entry(key).or_default() += 1;
+        }
+        let mut queue_counts = BTreeMap::<ResponseQueueKey, u32>::new();
+        for pending in &typed_queue.pending {
+            let TypedEventPayload::MemoryResponse {
+                reply: Some(reply), ..
+            } = &pending.payload
+            else {
+                continue;
+            };
+            let Some(sm_id) = sm_ids
+                .get(usize::try_from(pending.target).unwrap_or(usize::MAX))
+                .and_then(|sm_id| u32::try_from(*sm_id).ok())
+            else {
+                ownership_unknown.push(format!(
+                    "response_owner_queue_target_unknown:{}",
+                    pending.target
+                ));
+                continue;
+            };
+            let key = (
+                sm_id,
+                reply.warp,
+                reply.instruction,
+                reply.sector_index,
+                reply.response_kind,
+                pending.time,
+            );
+            *queue_counts.entry(key).or_default() += 1;
+        }
+        let mut response_keys = BTreeSet::new();
+        response_keys.extend(owner_counts.keys().copied());
+        response_keys.extend(queue_counts.keys().copied());
+        for key in response_keys {
+            if owner_counts.get(&key) != queue_counts.get(&key) {
+                ownership_unknown.push(format!("response_owner_queue_join_unknown:{key:?}"));
             }
         }
         ownership_unknown.sort();

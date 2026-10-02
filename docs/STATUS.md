@@ -84,6 +84,11 @@ state-complete. R8.4 adds explicit residual/replacement service roles and a
 model-local intervention test; the independent-post-replay default remains a
 sidecar and queue-depth observations remain unmodeled.
 
+R9.0 repaired the bounded reference-canary owner/queue projection failure by
+widening unresolved joins to unknown ownership. The rerun terminates with
+10,032 reference records and exact fallback throughout; it does not close R8.2
+production macro dispatch.
+
 ## Retained measurements
 
 2026-09-30 RTX 3090 Ti campaigns used driver 615.71.09, 1350/10501 MHz, P0,
