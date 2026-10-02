@@ -271,6 +271,14 @@ finite coverage not applicable. A8.6 handoff synchronization is complete; A8
 is complete and A9 is not started. Real native dispatch and finite hardware
 accuracy remain falsifiers.
 
+The next active research plan is
+`plans/sm86_completion_frontier_and_native_dispatch_20261002.md`. It treats
+the open upper as a completion-contract problem: dirty writeback, visibility,
+coherence, and asynchronous-copy tails must be closed or remain explicitly
+open before finite interval coverage is possible. The full 15-row live
+campaign is deferred until a vertical tail-completion case earns a finite
+upper; no native macro dispatch is currently observed.
+
 ## Retained evidence
 
 The 2026-09-30 cold/warm campaigns completed 15/15 workloads on RTX 3090 Ti / SM86,

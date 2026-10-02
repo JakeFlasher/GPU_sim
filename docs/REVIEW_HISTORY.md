@@ -465,3 +465,9 @@ machine-readable slice summary is `docs/sm86_a8_vertical_slice_v1.json`.
 
 A8.6 handoff synchronization is complete; A8 is complete and A9 is not
 started.
+
+The follow-on completion-frontier program is recorded in
+`plans/sm86_completion_frontier_and_native_dispatch_20261002.md`. It defers
+the broad roster campaign until a live tail-completion case can either earn a
+finite upper or produce a precise refusal, and until the native witness path
+has a real production dispatch falsifier.

@@ -180,6 +180,13 @@ and point error are not applicable. Simulator dirty-writeback/coherence tails
 remain open and native macro dispatch is zero. A8.6 handoff synchronization is
 complete; A8 is complete and A9 is the next phase (not started).
 
+The next research priority is the completion-frontier program in
+[`sm86_completion_frontier_and_native_dispatch_20261002.md`](../plans/sm86_completion_frontier_and_native_dispatch_20261002.md).
+It must close or explicitly bound dirty-writeback, visibility, coherence, and
+asynchronous-copy tails before a finite upper or production native dispatch
+is claimed. The broad 15-row campaign is deferred until its vertical
+tail-completion case succeeds.
+
 The first A5 preflight correctly rejected the dirty checkout; after the
 coherent implementation was committed and rebuilt, independent identity and
 preflight passed. The first collection command retained a historical launch

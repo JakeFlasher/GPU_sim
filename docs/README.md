@@ -15,6 +15,7 @@ open only the relevant technical page.
 | Prediction/observation schemas | [`reification_prediction_manifest_v1`](reification_prediction_manifest_v1.schema.json), [`reification_prediction_v2`](reification_prediction_v2.schema.json), [`ncu_observation_v2`](ncu_observation_v2.schema.json), [`reification_prediction_evaluation_v2`](reification_prediction_evaluation_v2.schema.json), [`reification_native_macro_witness_v1`](reification_native_macro_witness_v1.schema.json) |
 | Accuracy-first NCU protocol | [Declared SM86 NCU accuracy protocol](sm86_ncu_accuracy_protocol_v1.json) · [Protocol schema](sm86_ncu_accuracy_protocol_v1.schema.json) |
 | A8 live-campaign plan | [Accuracy-first A8 plan](../plans/accuracy_first_live_campaign_a8_20261002.md) · [bounded-run schema](sm86_workload_run_v1.schema.json) |
+| Completion frontier program | [Writeback/coherence and native-dispatch plan](../plans/sm86_completion_frontier_and_native_dispatch_20261002.md) |
 | NCU identity capture | [Identity schema](sm86_ncu_identity_v1.schema.json) · `tools/capture_sm86_ncu_identity.py` |
 | NCU campaign preflight | [Preflight schema](sm86_ncu_campaign_preflight_v1.schema.json) · `tools/preflight_sm86_ncu_campaign.py` |
 | First accuracy campaign | `sm86_accuracy_campaign_v1_{manifest,predictions_pre_ncu,observations_post_ncu,evaluation_join,repetition_summary}.json` |
