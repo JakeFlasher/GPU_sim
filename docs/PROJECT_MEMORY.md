@@ -106,6 +106,10 @@ from profiler measurements; black-box models are assumptions, not observations.
   failure by marking due-owner/queued-response mismatches as unresolved
   ownership. The rerun terminates with 10,032 reference records and exact
   fallback throughout; R8.2 production macro dispatch remains open.
+- R9.1 attempted the guarded witness/dispatcher path. The native canary has no
+  complete independent witness, so it records zero macro dispatches and exact
+  fallback throughout; a positive production fixture remains the next open
+  falsifier.
 
 ## Next useful work
 

@@ -255,3 +255,9 @@ reference records, 5,016 pre/post pairs, zero complete typed boundaries, and
 exact fallback for every record. No native macro dispatch or speedup was
 observed. This repairs termination/unknown propagation, not production macro
 dispatch; R8.2 remains the next native research blocker.
+
+R9.1 attempted the optional witness/dispatcher path after that repair. The
+bounded native canary had no complete independent witness, so the guarded run
+recorded zero native macro dispatches and exact fallback throughout. The
+positive production fixture remains open; the required falsifier is a matching
+complete witness that dispatches once and preserves detailed continuation.

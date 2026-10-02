@@ -15,6 +15,7 @@ open only the relevant technical page.
 | Prediction/observation schemas | [`reification_prediction_manifest_v1`](reification_prediction_manifest_v1.schema.json), [`reification_prediction_v2`](reification_prediction_v2.schema.json), [`ncu_observation_v2`](ncu_observation_v2.schema.json), [`reification_prediction_evaluation_v2`](reification_prediction_evaluation_v2.schema.json), [`reification_native_macro_witness_v1`](reification_native_macro_witness_v1.schema.json) |
 | Third-round result | [R6 corpus and observer evaluation](review_round3_20261002/README.md) · [corpus manifest](sm86_reification_corpus_v1_20261002.json) |
 | R9.0 native boundary probe | [Canary termination and unknown-join result](review_round4_20261002/README.md) |
+| R9.1 production witness attempt | [Negative native-dispatch result](review_round5_20261002/README.md) |
 | Latent and payload APIs | [Contract](sm86_factorized_latent_contract_20260930.md) |
 | Experimental semantics | [Diagnostics](experimental_diagnostics.md) |
 | Prior measurements | preserved under results/ and experiment inputs |

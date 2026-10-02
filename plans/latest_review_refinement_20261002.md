@@ -44,6 +44,10 @@ R9.0 is complete: the canary boundary now preserves unresolved owner/queue
 joins as unknown and the bounded executable terminates with exact fallback.
 R8.2 production macro dispatch remains open.
 
+R9.1 is the active loop: the optional witness/dispatcher path may be exercised
+only when a complete independent typed boundary is supplied; ordinary native
+canaries must remain exact fallback with zero dispatches.
+
 ## Stage ledger
 
 | Stage | Focus | Exit evidence | Status |
@@ -56,6 +60,7 @@ R8.2 production macro dispatch remains open.
 | R8.5 | Measurement identity and cost utility | NCU observations are explicitly verified or labeled as manifest-labeled historical data; source/trace/control/card/launch identity is bound; parser/planner/effect/compare/RSS/wall-time cost and accepted/refused coverage are reported without speedup overclaim | **complete** |
 | R8.6 | Independent evaluation and paper synchronization | New tests/probes, negative results, novelty/prior-art boundary, histories, memory, status, schemas, and rebuttal all agree; full validation passes | **complete** |
 | R9.0 | Native canary queue/response closure | The bounded reference canary terminates with explicit unknown owner/queue state; complete boundaries and macro dispatch remain zero unless independently closed | **complete** |
+| R9.1 | Production witness dispatch attempt | A complete independent witness reaches the real event loop and proves continuation, or the canary records precise no-witness/refusal evidence without a native claim | **complete: no positive native fixture** |
 
 ## R8.1 — immediate soundness guards
 
@@ -381,3 +386,18 @@ and explicit unknowns remain authoritative.
   instruction17/sector0/due1686 is reproducibly gone.
 - This is a termination and unknown-propagation fix. It does not select a
   native macro, reduce native steps, or close R8.2 production dispatch.
+
+## R9.1 implementation evidence (complete 2026-10-02; negative native result)
+
+- The reference feature accepts an optional typed witness and routes a
+  comparator result through the `SmWake` dispatcher only when that witness
+  matches the event. Exact replay remains the default; no witness is inferred
+  from the same detailed boundary.
+- The repaired 15-SM canary was rerun with no witness and completed with
+  10,033 records before its footer, zero native macro dispatches, and exact
+  fallback throughout. No complete typed boundary was observed.
+- The positive requirement is therefore not met: there is no independently
+  closed production fixture yet. The falsifier for the next loop is explicit:
+  a complete witness matching a real event must produce one dispatch and an
+  identical detailed continuation, while a perturbed witness must fallback
+  before mutation.

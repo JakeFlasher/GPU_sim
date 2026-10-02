@@ -47,9 +47,9 @@
 
 use std::cell::RefCell;
 use std::cmp::Reverse;
-use std::collections::{BTreeMap, BinaryHeap, HashMap};
 #[cfg(feature = "reference")]
 use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BinaryHeap, HashMap};
 #[cfg(feature = "reference")]
 use std::fs::File;
 #[cfg(feature = "reference")]
@@ -1288,6 +1288,20 @@ pub enum ReferenceTraceError {
     Queue(#[from] QueueStateError),
     #[error("typed boundary structure validation failed: {0}")]
     Boundary(#[from] BoundaryStateError),
+    #[error("reference macro witness is invalid: {0}")]
+    Witness(String),
+}
+
+#[cfg(feature = "reference")]
+#[derive(Debug, Clone, serde::Deserialize)]
+struct ReferenceMacroWitness {
+    schema: String,
+    target: u32,
+    start_sequence: u64,
+    spec: TypedScalarMacroSpec,
+    detailed_internal_effects: Vec<TypedEventTransition>,
+    detailed_labels: Vec<String>,
+    detailed_exit: TypedEventBoundaryRecord,
 }
 
 #[cfg(feature = "reference")]
@@ -1298,6 +1312,11 @@ struct ReferenceTrace {
     previous_event: Option<serde_json::Value>,
     issue_effect_cursors: Vec<usize>,
     pending_typed_entry: Option<TypedEventBoundaryRecord>,
+    witness: Option<ReferenceMacroWitness>,
+    pending_native_result: Option<NativeBoundaryExecutionResult>,
+    active_native_result: Option<NativeBoundaryExecutionResult>,
+    native_macro_dispatches: u64,
+    native_macro_fallbacks: u64,
 }
 
 #[cfg(feature = "reference")]
@@ -1477,6 +1496,22 @@ impl ReferenceTrace {
             previous_event: None,
             issue_effect_cursors: Vec::new(),
             pending_typed_entry: None,
+            witness: std::env::var_os("SIM_SM_REFERENCE_TYPED_SCALAR_WITNESS")
+                .map(|path| {
+                    let bytes = std::fs::read(path)?;
+                    let witness: ReferenceMacroWitness = serde_json::from_slice(&bytes)?;
+                    if witness.schema != "reification_native_macro_witness_v1" {
+                        return Err(ReferenceTraceError::Witness(
+                            "schema must be reification_native_macro_witness_v1".to_owned(),
+                        ));
+                    }
+                    Ok(witness)
+                })
+                .transpose()?,
+            pending_native_result: None,
+            active_native_result: None,
+            native_macro_dispatches: 0,
+            native_macro_fallbacks: 0,
         };
         trace.write(&serde_json::json!({
             "kind": "header",
@@ -1490,8 +1525,37 @@ impl ReferenceTrace {
             "state_projection_complete": false,
             "state_projection_incomplete_reason": "legacy_core_debug_projections",
             "observation_contract": "boundary_projection",
+            "native_macro_witness": trace.witness.is_some(),
+            "native_macro_execution": "comparator_selected_reference_event_loop",
         }))?;
         Ok(Some(trace))
+    }
+
+    fn take_pending_native_result(&mut self) -> Option<NativeBoundaryExecutionResult> {
+        self.pending_native_result.take()
+    }
+
+    fn note_native_fallback(&mut self) {
+        self.native_macro_fallbacks = self.native_macro_fallbacks.saturating_add(1);
+    }
+
+    fn note_native_dispatch(&mut self) {
+        self.native_macro_dispatches = self.native_macro_dispatches.saturating_add(1);
+    }
+
+    fn native_result_decision(
+        result: &NativeBoundaryExecutionResult,
+    ) -> sim_semantics::NativeBoundaryRefinementDecision {
+        match result {
+            NativeBoundaryExecutionResult::TypedMacro { .. } => {
+                sim_semantics::NativeBoundaryRefinementDecision::Preserve
+            }
+            NativeBoundaryExecutionResult::ExactReplay { reason, .. } => {
+                sim_semantics::NativeBoundaryRefinementDecision::Reify {
+                    reason: reason.clone(),
+                }
+            }
+        }
     }
 
     fn write<T: serde::Serialize>(&mut self, value: &T) -> Result<(), ReferenceTraceError> {
@@ -1901,10 +1965,38 @@ impl ReferenceTrace {
             compare_native_region_contract(None, &typed_boundary, &typed_boundary);
         let native_boundary_refinement = if boundary_phase == "pre" {
             self.pending_typed_entry = Some(typed_boundary.clone());
-            missing_macro_decision
+            let witness = self
+                .witness
+                .clone()
+                .filter(|witness| witness.target == target && witness.start_sequence == sequence);
+            if let Some(witness) = witness {
+                match execute_typed_scalar_macro(
+                    &typed_boundary,
+                    &witness.spec,
+                    &witness.detailed_internal_effects,
+                    &witness.detailed_labels,
+                    &witness.detailed_exit,
+                ) {
+                    Ok(result) => {
+                        let decision = Self::native_result_decision(&result);
+                        self.pending_native_result = Some(result.clone());
+                        self.active_native_result = Some(result);
+                        decision
+                    }
+                    Err(error) => sim_semantics::NativeBoundaryRefinementDecision::Reify {
+                        reason: sim_semantics::NativeBoundaryReifyReason::SummaryStructure {
+                            error: error.to_string(),
+                        },
+                    },
+                }
+            } else {
+                missing_macro_decision
+            }
         } else if boundary_phase == "post" {
             let entry = self.pending_typed_entry.take();
-            if let (Some(entry), Some(spec)) = (entry, typed_scalar_macro_spec_from_env()) {
+            if let Some(result) = self.active_native_result.take() {
+                Self::native_result_decision(&result)
+            } else if let (Some(entry), Some(spec)) = (entry, typed_scalar_macro_spec_from_env()) {
                 match execute_typed_scalar_macro(
                     &entry,
                     &spec,
@@ -1966,6 +2058,8 @@ impl ReferenceTrace {
                 "queue_clock_gap_cycles": queue.clock_gap_cycles,
                 "power_state": power,
                 "state_projection_complete": false,
+                "native_macro_dispatches": self.native_macro_dispatches,
+                "native_macro_fallbacks": self.native_macro_fallbacks,
             }),
         )?;
         self.writer.write_all(b"\n")?;
@@ -3686,29 +3780,55 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                 "pre",
             )?;
         }
+        #[cfg(feature = "reference")]
+        let mut reference_native_result = reference_trace
+            .as_mut()
+            .and_then(ReferenceTrace::take_pending_native_result);
         match ev.kind {
             Ev::SmWake => {
                 wake_due.pop_expect("SM wake", sm_ix, ev.time)?;
-                let progress = run_sm(
-                    sm_ix,
-                    &mut cores,
-                    &mut queue,
-                    &mut response_due,
-                    &mut write_ack_due,
-                    &mut wake_due,
-                    &mut unpriced,
-                    &payload_due,
-                    batch_replyless_writes,
-                    &mut scratch,
-                    &mut l1_visibility_observations,
-                    &mut l1_fence_observations,
-                    &mut l1_fill_visibility_observations,
-                    l1_visibility_queue.as_mut(),
-                    &sm_ids,
-                    params.l1_miss_latency,
-                    memory_admission_feedback,
-                )?;
-                spin.on_event(ev.time, !progress)?;
+                #[cfg(feature = "reference")]
+                let mut handled_reference_macro = false;
+                #[cfg(feature = "reference")]
+                if let Some(result) = reference_native_result.take() {
+                    let actor_count = cores.len();
+                    if dispatch_reference_macro_event(
+                        &mut cores[sm_ix],
+                        sm_ix,
+                        actor_count,
+                        &result,
+                        &mut queue,
+                        &mut wake_due,
+                        reference_trace.as_mut(),
+                    )? {
+                        handled_reference_macro = true;
+                        spin.on_event(ev.time, false)?;
+                    }
+                }
+                #[cfg(not(feature = "reference"))]
+                let handled_reference_macro = false;
+                if !handled_reference_macro {
+                    let progress = run_sm(
+                        sm_ix,
+                        &mut cores,
+                        &mut queue,
+                        &mut response_due,
+                        &mut write_ack_due,
+                        &mut wake_due,
+                        &mut unpriced,
+                        &payload_due,
+                        batch_replyless_writes,
+                        &mut scratch,
+                        &mut l1_visibility_observations,
+                        &mut l1_fence_observations,
+                        &mut l1_fill_visibility_observations,
+                        l1_visibility_queue.as_mut(),
+                        &sm_ids,
+                        params.l1_miss_latency,
+                        memory_admission_feedback,
+                    )?;
+                    spin.on_event(ev.time, !progress)?;
+                }
             }
             Ev::L1PayloadAdmission {
                 payloads,
@@ -5161,6 +5281,38 @@ fn schedule_emitted_requests(
     Ok(())
 }
 
+#[cfg(feature = "reference")]
+fn dispatch_reference_macro_event(
+    core: &mut SmCore<'_>,
+    sm_ix: usize,
+    actor_count: usize,
+    result: &NativeBoundaryExecutionResult,
+    queue: &mut EventQueue<Ev>,
+    wake_due: &mut DueTimes,
+    trace: Option<&mut ReferenceTrace>,
+) -> Result<bool, SystemError> {
+    let native_execution = core.execute_reference_boundary_result(result)?;
+    let Some(execution) = native_execution else {
+        if let Some(trace) = trace {
+            trace.note_native_fallback();
+        }
+        return Ok(false);
+    };
+    if let Some(trace) = trace {
+        trace.note_native_dispatch();
+    }
+    let target = u32::try_from(sm_ix)
+        .map_err(|_| SystemError::ActorCountOutOfRange { count: actor_count })?;
+    if wake_due
+        .next(sm_ix)
+        .is_none_or(|wake| wake > execution.end_cycle)
+    {
+        queue.schedule_at(execution.end_cycle, TargetId(target), Ev::SmWake)?;
+        wake_due.push(sm_ix, execution.end_cycle)?;
+    }
+    Ok(true)
+}
+
 /// Resume one SM actor: advance to its earliest self-affecting external
 /// event — the earlier of its next scheduled response and the lower
 /// bound of any request still awaiting L2 pricing — schedule its
@@ -5447,6 +5599,11 @@ mod tests {
             previous_event: None,
             issue_effect_cursors: Vec::new(),
             pending_typed_entry: None,
+            witness: None,
+            pending_native_result: None,
+            active_native_result: None,
+            native_macro_dispatches: 0,
+            native_macro_fallbacks: 0,
         };
         trace.write(&serde_json::json!({"kind": "header"})).unwrap();
         trace.write(&serde_json::json!({"kind": "event"})).unwrap();
@@ -5468,6 +5625,11 @@ mod tests {
             previous_event: None,
             issue_effect_cursors: Vec::new(),
             pending_typed_entry: None,
+            witness: None,
+            pending_native_result: None,
+            active_native_result: None,
+            native_macro_dispatches: 0,
+            native_macro_fallbacks: 0,
         };
         trace
             .finish(

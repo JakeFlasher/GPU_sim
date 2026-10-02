@@ -89,6 +89,10 @@ widening unresolved joins to unknown ownership. The rerun terminates with
 10,032 reference records and exact fallback throughout; it does not close R8.2
 production macro dispatch.
 
+R9.1 attempted the guarded witness/dispatcher path. The native canary has no
+complete independent witness, so the run records zero native macro dispatches
+and exact fallback throughout; the positive production fixture remains open.
+
 ## Retained measurements
 
 2026-09-30 RTX 3090 Ti campaigns used driver 615.71.09, 1350/10501 MHz, P0,
