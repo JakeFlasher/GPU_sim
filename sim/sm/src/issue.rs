@@ -9943,10 +9943,24 @@ impl<'a> SmCore<'a> {
                 retry: VecDeque::new(),
             }),
         };
-        let instruction_front_end = params
-            .instruction_front_end
-            .map(|config| InstructionFrontEndState::new(config, params.l1_miss_latency))
-            .transpose()?;
+        let disable_reference_front_end = {
+            #[cfg(feature = "reference")]
+            {
+                std::env::var_os("SIM_SM_REFERENCE_DISABLE_FRONTEND").is_some()
+            }
+            #[cfg(not(feature = "reference"))]
+            {
+                false
+            }
+        };
+        let instruction_front_end = if disable_reference_front_end {
+            None
+        } else {
+            params
+                .instruction_front_end
+                .map(|config| InstructionFrontEndState::new(config, params.l1_miss_latency))
+                .transpose()?
+        };
         let memory_issue_pipeline = params
             .memory_issue_pipeline
             .map(MemoryIssuePipelineState::new)

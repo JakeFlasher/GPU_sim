@@ -470,6 +470,12 @@ GPU overlap models, skipping refinement, or native trace-driven simulators.
   exact-replay reason. `SmCore::execute_reference_macro_path` consumes that
   selected path and the native issue-model test compares macro entry/exit and
   detailed continuation state; the real probe selects the latter branch.
+- `SmCore::execute_reference_macro_path` is covered by a native issue-model
+  differential: two scalar instructions are installed as a typed-macro path,
+  the detailed suffix resumes, and the final native boundary/cycle projection
+  matches detailed replay; a `Reify` path performs no macro mutation. This is
+  a closed native issue-model seam, while full front-end-enabled SM86 launches
+  still conservatively fall back.
 - The typed scalar rule now derives first issue from the entry warp readiness
   and can consume a closed front-end instruction-buffer prefix; it still
   refuses absent/noncontiguous buffers and all open pipeline/cache state.
