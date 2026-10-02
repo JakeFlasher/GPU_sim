@@ -455,7 +455,8 @@ GPU overlap models, skipping refinement, or native trace-driven simulators.
   complete typed pre/post boundary pair, but its cold front-end transition is
   not derivable by that rule and correctly remains exact replay.
 - The typed executor explicitly refuses pending queue responses, dependency
-  barriers, and incomplete/unknown tails before deriving an exit.
+  barriers, front-end/cache/pipeline state, and incomplete/unknown tails before
+  deriving an exit.
 - The reference writer now captures explicit pre/post typed boundaries and the
   issued-instruction effect span for each SM wake. The pure-scalar SM86 probe
   yields one complete pre/post pair with two detailed issue effects; an opt-in

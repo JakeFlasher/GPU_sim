@@ -270,6 +270,11 @@ pub fn derive_typed_scalar_macro_region(
         || core.block_states.iter().any(|block| block.waiting != 0)
         || core.outstanding_responses != 0
         || !core.response_owners.is_empty()
+        || core.front_end.is_some()
+        || core.l1.is_some()
+        || core.memory_pipeline.is_some()
+        || core.scalar_pipeline.is_some()
+        || core.async_copy.iter().any(Option::is_some)
     {
         return Err(RegionContractError::UnsupportedScalarMacro {
             reason: "future_relevant_warp_or_response_state_is_not_closed".to_owned(),
