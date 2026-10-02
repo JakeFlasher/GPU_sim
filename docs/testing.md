@@ -35,7 +35,9 @@ The report ranks only the declared simulator interval, checks native replay
 invariance, and labels the result model-local; it rejects NCU/CUPTI inputs.
 Pass a separately generated `--fast-frontier-only` JSON with
 `--fast-frontier-report` to add balanced candidate/reified/uncovered coverage
-and compression metrics.
+and separate exact/summarized execution-step reduction metrics. A nonzero
+`macro_dispatches` value now confirms that the model executor installed a
+macro transition; zero means the region stayed on detailed/fallback execution.
 
 After predictions are materialized, join independent NCU targets in a separate
 step:
@@ -48,16 +50,21 @@ PYTHONPATH=tools python3 tools/evaluate_prediction_splits.py \
 For raw NCU CSV output, create the observation document first with
 `tools/ncu_csv_to_observation.py`; this adapter has no access to predictions.
 
-The evaluator rejects observed fields inside predictions and reports split
-coverage, interval width, error, refusal/OOD rate, runtime, memory, and
-compression metrics.
+The evaluator rejects observed fields inside predictions, requires a declared
+v2 target contract (metric, endpoint, clock domain, cache policy, launch
+identity, repetitions, and GPU identity), checks that families do not cross
+splits, and reports finite-interval coverage/width separately from open-tail
+refusal, error, runtime, memory, and actual step-reduction metrics. An open
+interval is not counted as calibrated coverage.
 
 For multiple current trace families, use `tools/run_prediction_manifest.py` to
 materialize the calibration/development/held-out prediction document before
 running the NCU CSV adapter and join.
 
-The loader checks shape and numeric domains only. Supplied rates are examples,
-not cycle-accuracy evidence.
+The prediction manifest must carry the same target contract as the later NCU
+observation document. The NCU CSV adapter requires the metric and hardware/run
+identity explicitly; it has no access to predictions. Supplied rates are
+examples, not cycle-accuracy evidence.
 
 ## Rust workspace
 

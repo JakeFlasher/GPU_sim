@@ -463,6 +463,61 @@ impl Default for FrontierBound {
     }
 }
 
+/// A frontier explicitly required by this simulator completion contract even
+/// when neither of its bounds is known. Not listing an entirely unobserved
+/// field means it is outside this projection, not known to have zero cost.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[repr(usize)]
+pub enum CompletionRequirement {
+    Issue,
+    ModeledEvent,
+    ResourceService,
+    TypedTail,
+    CacheHistory,
+    Visibility,
+    WritebackService,
+}
+
+/// Copy-friendly field-activation witness for completion projection. A bound
+/// with no values is normally inactive; callers that know an unobserved tail
+/// is still required set the corresponding bit here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CompletionRequirements {
+    bits: [bool; 7],
+}
+
+impl CompletionRequirements {
+    pub const fn none() -> Self {
+        Self { bits: [false; 7] }
+    }
+
+    pub const fn contains(self, requirement: CompletionRequirement) -> bool {
+        self.bits[requirement as usize]
+    }
+
+    pub fn insert(&mut self, requirement: CompletionRequirement) {
+        self.bits[requirement as usize] = true;
+    }
+}
+
+impl Default for CompletionRequirements {
+    fn default() -> Self {
+        Self::none()
+    }
+}
+
+impl FromIterator<CompletionRequirement> for CompletionRequirements {
+    fn from_iter<T: IntoIterator<Item = CompletionRequirement>>(iter: T) -> Self {
+        let mut requirements = Self::none();
+        for requirement in iter {
+            requirements.insert(requirement);
+        }
+        requirements
+    }
+}
+
 /// Separate issue, completion, visibility, endpoint, and typed-tail domains.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -483,10 +538,14 @@ pub struct FrontierVector {
     pub writeback_service: FrontierBound,
     pub endpoint_start: FrontierBound,
     pub endpoint_end: FrontierBound,
+    /// Present bounds are active requirements too. This set additionally
+    /// distinguishes active-but-wholly-unknown state from fields not projected.
+    #[serde(default)]
+    pub required_completion: CompletionRequirements,
 }
 
 impl FrontierVector {
-    pub fn validate(self) -> Result<(), LatentModelError> {
+    pub fn validate(&self) -> Result<(), LatentModelError> {
         for bound in [
             self.issue,
             self.modeled_event,
@@ -645,24 +704,42 @@ impl FrontierVector {
         Ok(result)
     }
 
-    /// Completion interval for a declared simulator endpoint. A frontier
-    /// with a known lower side and unknown upper side is an active unbounded
-    /// tail and prevents a finite upper completion bound.
+    fn completion_bounds(&self) -> impl Iterator<Item = FrontierBound> + '_ {
+        [
+            (CompletionRequirement::Issue, self.issue),
+            (CompletionRequirement::ModeledEvent, self.modeled_event),
+            (
+                CompletionRequirement::ResourceService,
+                self.resource_service,
+            ),
+            (CompletionRequirement::TypedTail, self.typed_tail),
+            (CompletionRequirement::CacheHistory, self.cache_history),
+            (
+                CompletionRequirement::WritebackService,
+                self.writeback_service,
+            ),
+            (CompletionRequirement::Visibility, self.visibility),
+        ]
+        .into_iter()
+        .filter(|(field, bound)| {
+            self.required_completion.contains(*field)
+                || bound.lower.is_some()
+                || bound.upper.is_some()
+        })
+        .map(|(_, bound)| bound)
+        .chain(
+            (self.endpoint_end.lower.is_some() || self.endpoint_end.upper.is_some())
+                .then_some(self.endpoint_end),
+        )
+    }
+
+    /// Completion of all declared required frontiers in the same cycle domain.
+    /// The launch envelope is not part of this contract: it is a separate
+    /// observation model, not an additional completion event.
     pub fn simulator_completion(&self) -> FrontierBound {
-        let bounds = [
-            self.issue,
-            self.modeled_event,
-            self.resource_service,
-            self.typed_tail,
-            self.cache_history,
-            self.writeback_service,
-            self.visibility,
-            self.endpoint_end,
-        ];
+        let bounds: Vec<_> = self.completion_bounds().collect();
         let lower = bounds.iter().filter_map(|bound| bound.lower).max();
-        let active_unbounded = bounds
-            .iter()
-            .any(|bound| bound.lower.is_some() && bound.upper.is_none());
+        let active_unbounded = bounds.iter().any(|bound| bound.upper.is_none());
         let upper = if active_unbounded {
             None
         } else {
@@ -999,7 +1076,10 @@ pub struct ResourceServiceProjection {
     pub role: &'static str,
     pub profile_source: String,
     pub lower_cycles: u64,
-    pub upper_cycles: u64,
+    /// `None` means the demand includes an unresolved class/tail. A finite
+    /// interval from the named pools must not manufacture an upper bound for
+    /// that unresolved work.
+    pub upper_cycles: Option<u64>,
     pub unclassified_events: u64,
     pub pools: BTreeMap<String, ServiceCycleInterval>,
     pub pool_capacities: BTreeMap<String, u32>,
@@ -1121,12 +1201,22 @@ impl NcuObserverProjection {
             || frontiers.endpoint_end.upper.is_some();
         let simulator_completion = if endpoint_fields_present {
             // An explicit endpoint pair denotes elapsed duration. A known
-            // endpoint must not hide an active unknown typed-tail upper.
+            // endpoint must not hide an active unknown completion tail.
             let mut completion_end = frontiers.endpoint_end;
-            if (frontiers.typed_tail.upper.is_none() && frontiers.typed_tail.lower.is_some())
-                || (frontiers.cache_history.upper.is_none()
-                    && frontiers.cache_history.lower.is_some())
+            let required = frontiers.simulator_completion();
+            if let (Some(lower), Some(upper)) = (required.lower, completion_end.upper)
+                && lower > upper
             {
+                return Err(LatentModelError::FrontierOrder {
+                    earlier: "required_completion",
+                    later: "endpoint_end",
+                });
+            }
+            completion_end.lower = required.lower;
+            let active_unbounded = frontiers
+                .completion_bounds()
+                .any(|bound| bound.upper.is_none());
+            if active_unbounded {
                 completion_end.upper = None;
             }
             FrontierVector::elapsed(frontiers.endpoint_start, completion_end)?
@@ -1163,7 +1253,9 @@ impl NcuObserverProjection {
                         pool: "ncu_observer_upper".to_owned(),
                     })?,
             ),
-            // An active unknown simulator tail has no finite upper endpoint.
+            // Any active unresolved completion frontier has no finite upper
+            // endpoint.  Explicit endpoint pairs do not override work that
+            // is declared to occur before that endpoint.
             _ => None,
         };
         Ok(Self {
@@ -1259,8 +1351,7 @@ impl ResourceDemandEnvelope {
         let mut pools = BTreeMap::new();
         let mut pool_capacities = BTreeMap::new();
         let mut lower_cycles = 0_u64;
-        let mut upper_cycles = 0_u64;
-        let mut max_upper_per_event = 0_u64;
+        let mut upper_cycles = Some(0_u64);
         for (pool, demand) in &self.pools {
             let rate = profile
                 .pools
@@ -1284,15 +1375,25 @@ impl ResourceDemandEnvelope {
             } else {
                 ceil_div(upper_work, u64::from(rate.capacity))?
             };
+            // A pool with no mandatory work contributes no mandatory startup
+            // latency.  This keeps optional/zero-demand pools from inflating
+            // the lower bound merely because the profile contains them.
+            let lower_latency = (lower_service != 0)
+                .then_some(rate.latency_lower_cycles)
+                .unwrap_or(0);
+            let upper_latency = (upper_service != 0)
+                .then_some(rate.latency_upper_cycles)
+                .unwrap_or(0);
             let lower = lower_service
-                .checked_add(rate.latency_lower_cycles)
+                .checked_add(lower_latency)
                 .ok_or_else(|| LatentModelError::ResourceDemandOverflow { pool: pool.clone() })?;
             let upper = upper_service
-                .checked_add(rate.latency_upper_cycles)
+                .checked_add(upper_latency)
                 .ok_or_else(|| LatentModelError::ResourceDemandOverflow { pool: pool.clone() })?;
-            max_upper_per_event = max_upper_per_event.max(upper.max(1));
             lower_cycles = lower_cycles.max(lower);
-            upper_cycles = upper_cycles.max(upper);
+            if let Some(current) = upper_cycles {
+                upper_cycles = Some(current.max(upper));
+            }
             pools.insert(
                 pool.clone(),
                 ServiceCycleInterval {
@@ -1302,20 +1403,13 @@ impl ResourceDemandEnvelope {
             );
             pool_capacities.insert(pool.clone(), rate.capacity);
         }
-        let unknown_extra = if self.unclassified_events == 0 {
-            0
-        } else {
-            self.unclassified_events
-                .checked_mul(max_upper_per_event)
-                .ok_or_else(|| LatentModelError::ResourceDemandOverflow {
-                    pool: "unclassified".to_owned(),
-                })?
-        };
-        upper_cycles = upper_cycles.checked_add(unknown_extra).ok_or_else(|| {
-            LatentModelError::ResourceDemandOverflow {
-                pool: "unclassified".to_owned(),
-            }
-        })?;
+        if self.unclassified_events != 0 {
+            // Unclassified records may use a missing/slow resource class. A
+            // named-pool maximum is not a safe substitute for that unknown
+            // route, so retain an open upper instead of returning false
+            // precision (including the all-unclassified/empty-pool case).
+            upper_cycles = None;
+        }
         Ok(ResourceServiceProjection {
             schema_version: RESOURCE_DEMAND_SCHEMA_VERSION,
             role: "model_service_interval_not_silicon_timing",
@@ -1760,7 +1854,7 @@ mod tests {
         };
         let projection = demand.project_service_cycles(&profile).unwrap();
         assert_eq!(projection.lower_cycles, 3);
-        assert_eq!(projection.upper_cycles, 7);
+        assert_eq!(projection.upper_cycles, Some(7));
         assert_eq!(projection.role, "model_service_interval_not_silicon_timing");
         let frontiers = FrontierVector {
             modeled_event: FrontierBound::interval(10, 12).unwrap(),
@@ -1805,6 +1899,147 @@ mod tests {
                 upper_cycles: 14,
             }
         );
+    }
+
+    #[test]
+    fn unresolved_unclassified_demand_never_collapses_to_zero_or_finite_upper() {
+        let demand =
+            ResourceDemandEnvelope::new(1, 1, BTreeMap::new(), EvidenceKind::Hypothesis).unwrap();
+        let profile = ServiceRateProfile {
+            schema_version: RESOURCE_DEMAND_SCHEMA_VERSION,
+            source: "independent_probe_v1".to_owned(),
+            pools: BTreeMap::from([(
+                "alu".to_owned(),
+                ServiceRate {
+                    capacity: 1,
+                    initiation_interval_cycles: 1,
+                    capacity_already_applied: false,
+                    latency_lower_cycles: 2,
+                    latency_upper_cycles: 2,
+                },
+            )]),
+            ncu_start_padding_cycles: None,
+            ncu_end_padding_cycles: None,
+        };
+        let projection = demand.project_service_cycles(&profile).unwrap();
+        assert_eq!(projection.lower_cycles, 0);
+        assert_eq!(projection.upper_cycles, None);
+    }
+
+    #[test]
+    fn zero_demand_does_not_pay_optional_pool_startup_latency() {
+        let demand = ResourceDemandEnvelope::new(
+            0,
+            0,
+            BTreeMap::from([(String::from("alu"), ResourceDemandInterval::exact(0))]),
+            EvidenceKind::Hypothesis,
+        )
+        .unwrap();
+        let profile = ServiceRateProfile {
+            schema_version: RESOURCE_DEMAND_SCHEMA_VERSION,
+            source: "independent_probe_v1".to_owned(),
+            pools: BTreeMap::from([(
+                "alu".to_owned(),
+                ServiceRate {
+                    capacity: 1,
+                    initiation_interval_cycles: 4,
+                    capacity_already_applied: false,
+                    latency_lower_cycles: 7,
+                    latency_upper_cycles: 9,
+                },
+            )]),
+            ncu_start_padding_cycles: None,
+            ncu_end_padding_cycles: None,
+        };
+        let projection = demand.project_service_cycles(&profile).unwrap();
+        assert_eq!(projection.lower_cycles, 0);
+        assert_eq!(projection.upper_cycles, Some(0));
+        assert_eq!(
+            projection.pools["alu"],
+            ServiceCycleInterval {
+                lower_cycles: 0,
+                upper_cycles: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn explicit_endpoint_does_not_hide_active_unknown_service_visibility_or_writeback() {
+        let profile = ServiceRateProfile {
+            schema_version: RESOURCE_DEMAND_SCHEMA_VERSION,
+            source: "independent_probe_v1".to_owned(),
+            pools: BTreeMap::from([(
+                "alu".to_owned(),
+                ServiceRate {
+                    capacity: 1,
+                    initiation_interval_cycles: 1,
+                    capacity_already_applied: false,
+                    latency_lower_cycles: 1,
+                    latency_upper_cycles: 1,
+                },
+            )]),
+            ncu_start_padding_cycles: Some(ServiceCycleInterval {
+                lower_cycles: 0,
+                upper_cycles: 0,
+            }),
+            ncu_end_padding_cycles: Some(ServiceCycleInterval {
+                lower_cycles: 0,
+                upper_cycles: 0,
+            }),
+        };
+        for field in ["resource", "visibility", "writeback"] {
+            let mut vector = FrontierVector {
+                endpoint_start: FrontierBound::exact(0),
+                endpoint_end: FrontierBound::exact(20),
+                ..FrontierVector::default()
+            };
+            match field {
+                "resource" => vector.resource_service = FrontierBound::lower_bound(3),
+                "visibility" => vector.visibility = FrontierBound::lower_bound(3),
+                "writeback" => vector.writeback_service = FrontierBound::lower_bound(3),
+                _ => unreachable!(),
+            }
+            let projection = NcuObserverProjection::from_frontiers(vector, Some(&profile)).unwrap();
+            assert_eq!(projection.simulator_upper_cycles, None, "{field}");
+            assert_eq!(projection.predicted_upper_cycles, None, "{field}");
+        }
+    }
+
+    #[test]
+    fn wholly_unknown_completion_field_is_open_only_when_declared_required() {
+        let profile = ServiceRateProfile {
+            schema_version: RESOURCE_DEMAND_SCHEMA_VERSION,
+            source: "independent_probe_v1".to_owned(),
+            pools: BTreeMap::from([(
+                "alu".to_owned(),
+                ServiceRate {
+                    capacity: 1,
+                    initiation_interval_cycles: 1,
+                    capacity_already_applied: false,
+                    latency_lower_cycles: 1,
+                    latency_upper_cycles: 1,
+                },
+            )]),
+            ncu_start_padding_cycles: Some(ServiceCycleInterval {
+                lower_cycles: 0,
+                upper_cycles: 0,
+            }),
+            ncu_end_padding_cycles: Some(ServiceCycleInterval {
+                lower_cycles: 0,
+                upper_cycles: 0,
+            }),
+        };
+        let base = FrontierVector {
+            endpoint_start: FrontierBound::exact(0),
+            endpoint_end: FrontierBound::exact(20),
+            ..FrontierVector::default()
+        };
+        let inactive = NcuObserverProjection::from_frontiers(base, Some(&profile)).unwrap();
+        assert_eq!(inactive.simulator_upper_cycles, Some(20));
+        let mut active = base;
+        active.required_completion = [CompletionRequirement::Visibility].into_iter().collect();
+        let active = NcuObserverProjection::from_frontiers(active, Some(&profile)).unwrap();
+        assert_eq!(active.simulator_upper_cycles, None);
     }
 
     #[test]

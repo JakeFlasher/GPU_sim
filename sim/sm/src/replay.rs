@@ -939,6 +939,7 @@ pub struct FastFrontierSummary {
     pub collapsed_instructions: u64,
     pub exact_execution_steps: u64,
     pub summarized_execution_steps: u64,
+    pub macro_dispatches: u64,
     pub maximum_exact_final_cycle: u64,
     pub maximum_summarized_final_cycle: u64,
     pub terminal_state_matches: bool,
@@ -1223,6 +1224,7 @@ pub fn fast_frontier_for_trace(
         collapsed_instructions: 0,
         exact_execution_steps: 0,
         summarized_execution_steps: 0,
+        macro_dispatches: 0,
         maximum_exact_final_cycle: 0,
         maximum_summarized_final_cycle: 0,
         terminal_state_matches: true,
@@ -1447,6 +1449,11 @@ pub fn fast_frontier_for_trace(
                     "summarized_execution_steps",
                     &mut summary.summarized_execution_steps,
                     report.causal_execution_steps,
+                )?;
+                add(
+                    "macro_dispatches",
+                    &mut summary.macro_dispatches,
+                    report.macro_dispatches,
                 )?;
                 summary.maximum_exact_final_cycle = summary
                     .maximum_exact_final_cycle

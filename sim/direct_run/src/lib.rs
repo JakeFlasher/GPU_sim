@@ -1140,7 +1140,7 @@ fn build_latent_envelope(
                     frontiers.modeled_event,
                     FrontierBound {
                         lower: Some(service.lower_cycles),
-                        upper: Some(service.upper_cycles),
+                        upper: service.upper_cycles,
                     },
                     ServiceOverlapMode::SerialAfterAdmission,
                 )
@@ -1175,8 +1175,11 @@ fn build_latent_envelope(
             cache_candidates,
             resource_demand,
             operand_bank_pressure: launch.trace_metrics.operand_bank_pressure.clone(),
-            ncu_projection: NcuObserverProjection::from_frontiers(frontiers, service_profile)
-                .map_err(at("latent NCU projection"))?,
+            ncu_projection: NcuObserverProjection::from_frontiers(
+                frontiers.clone(),
+                service_profile,
+            )
+            .map_err(at("latent NCU projection"))?,
             frontiers,
             endpoint: endpoint.clone(),
         });
@@ -1361,6 +1364,12 @@ impl TimingReport {
             // includes required tails, not just the last processed event.
             endpoint_start: FrontierBound::exact(0),
             endpoint_end: typed_tail,
+            required_completion: [
+                sim_semantics::CompletionRequirement::ModeledEvent,
+                sim_semantics::CompletionRequirement::TypedTail,
+            ]
+            .into_iter()
+            .collect(),
         };
         vector.validate()?;
         Ok(vector)
@@ -3189,10 +3198,17 @@ mod tests {
             .service_composition
             .as_ref()
             .expect("profile should emit an explicit service composition");
-        assert!(service.upper_cycles >= service.lower_cycles);
+        assert!(
+            service
+                .upper_cycles
+                .is_none_or(|upper| upper >= service.lower_cycles)
+        );
         assert_eq!(
             composition.service,
-            FrontierBound::interval(service.lower_cycles, service.upper_cycles).unwrap()
+            FrontierBound {
+                lower: Some(service.lower_cycles),
+                upper: service.upper_cycles,
+            }
         );
         assert_eq!(composition.completion, launch.frontiers.resource_service);
         assert_eq!(

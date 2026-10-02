@@ -219,6 +219,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "planner_time_ns": report.planner_time_ns,
             "exact_execution_steps": report.exact_execution_steps,
             "causal_execution_steps": report.causal_execution_steps,
+            "macro_dispatches": report.macro_dispatches,
             "exact_final_cycle": report.exact_final_cycle,
             "causal_final_cycle": report.causal_final_cycle,
             "candidate_regions": report.candidate_regions,

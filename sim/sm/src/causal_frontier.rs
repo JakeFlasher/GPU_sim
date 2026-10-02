@@ -1,11 +1,12 @@
 //! Resource-aware model-local frontier analysis for explicit replay
 //! descriptors.
 //!
-//! This is an analysis seam, not a second SM executor and not a native causal
-//! proof. A producer supplies dependency and completion facts for a descriptor
-//! model; the analyzer refuses to summarize unknown effects and preserves the
-//! same *descriptor-model* issue/completion envelope when it does summarize an
-//! interval. Native state refinement is a later, separate contract.
+//! This is an explicit descriptor-model executor, not a native SM executor or
+//! causal proof. A producer supplies dependency and completion facts for a
+//! descriptor model; the model executor may install a typed macro transition,
+//! emits its effects, and resumes detailed descriptors. It refuses unknown
+//! effects and does not claim equivalence to `SmCore` or silicon. Native state
+//! refinement remains a later, separate contract.
 
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
@@ -207,6 +208,9 @@ pub struct CausalFrontierReport {
     pub causal_last_issue_cycle: Option<u64>,
     pub exact_execution_steps: u64,
     pub causal_execution_steps: u64,
+    /// Number of executable macro transitions installed by the selective
+    /// model executor. This is a dispatch count, not a native-silicon claim.
+    pub macro_dispatches: u64,
     pub terminal_state_matches: bool,
     /// Mechanism-local envelopes remain separate; summing them would not
     /// produce elapsed cycles when SMSPs overlap.
@@ -234,6 +238,103 @@ pub struct ReifiedRegion {
     pub first_sequence: u64,
     pub last_sequence: u64,
     pub reason: ReifyReason,
+}
+
+/// One observable effect emitted by the narrow scalar macro transition.
+/// Effects are retained so a continuation can compare intermediate state, not
+/// only the terminal completion cycle.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct MacroEffect {
+    pub sequence: u64,
+    pub physical_warp: i32,
+    pub issue: u64,
+    pub completion: u64,
+}
+
+/// Executable model transition for one homogeneous scalar region. The
+/// transition is derived from an `IntervalCertificate`'s closed form, then
+/// installed into `ModelExecutor`; detailed execution resumes at the next
+/// descriptor after the transition.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct MacroTransition {
+    pub physical_warp: i32,
+    pub first_sequence: u64,
+    pub last_sequence: u64,
+    pub instruction_count: u64,
+    pub first_issue: u64,
+    pub last_issue: u64,
+    pub next_issue: u64,
+    pub dispatch_ready: u64,
+    pub last_completion: u64,
+    pub pending_completions: Vec<u64>,
+    pub effects: Vec<MacroEffect>,
+}
+
+impl MacroTransition {
+    fn derive(
+        first: CausalFrontierInstruction,
+        certificate: IntervalCertificate,
+        start: u64,
+    ) -> Result<Self, ReifyReason> {
+        if certificate.first_sequence() != first.sequence {
+            return Err(ReifyReason::NonContiguousSequence);
+        }
+        let projection = certificate.project(start)?;
+        let observations = certificate.issue_completion_times(start)?;
+        let effects = observations
+            .into_iter()
+            .enumerate()
+            .map(|(index, (issue, completion))| {
+                let sequence = first
+                    .sequence
+                    .checked_add(u64::try_from(index).map_err(|_| ReifyReason::ArithmeticOverflow)?)
+                    .ok_or(ReifyReason::ArithmeticOverflow)?;
+                Ok(MacroEffect {
+                    sequence,
+                    physical_warp: first.physical_warp,
+                    issue,
+                    completion,
+                })
+            })
+            .collect::<Result<Vec<_>, ReifyReason>>()?;
+        Ok(Self {
+            physical_warp: first.physical_warp,
+            first_sequence: certificate.first_sequence(),
+            last_sequence: certificate.last_sequence(),
+            instruction_count: certificate.instruction_count(),
+            first_issue: projection.first_issue,
+            last_issue: projection.last_issue,
+            next_issue: projection.next_issue,
+            dispatch_ready: projection.dispatch_ready,
+            last_completion: projection.last_completion,
+            pending_completions: projection.pending_completions,
+            effects,
+        })
+    }
+}
+
+/// Public execution snapshot used to compare a macro continuation with the
+/// detailed model path. It intentionally exposes only model state, never a
+/// native `SmCore` or hardware state claim.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ModelExecutionSnapshot {
+    pub warp_ready: Vec<(i32, u64)>,
+    pub dispatch_ready: [u64; SMSP_COUNT as usize],
+    pub pipeline_ready: [[u64; 3]; SMSP_COUNT as usize],
+    pub pending_completions: Vec<(u8, u8, Vec<u64>)>,
+    pub completion: u64,
+    pub last_issue: Option<u64>,
+    pub effects: Vec<MacroEffect>,
+}
+
+/// Dispatch actually taken by `ModelExecutor::execute_decision`. A `Detailed`
+/// result means the candidate was refused and one exact instruction was
+/// executed; the caller continues from the next descriptor.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "dispatch")]
+pub enum ModelDispatch {
+    Macro { transition: MacroTransition },
+    Detailed { reason: ReifyReason },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -302,6 +403,9 @@ pub enum CausalFrontierError {
         pc: u64,
         expected: u64,
         got: u64,
+    },
+    MacroTransitionRejected {
+        reason: ReifyReason,
     },
 }
 
@@ -396,6 +500,12 @@ impl std::fmt::Display for CausalFrontierError {
                     "pc {pc} supplies latency {got}, but the card requires {expected}"
                 )
             }
+            Self::MacroTransitionRejected { reason } => {
+                write!(
+                    f,
+                    "macro transition rejected; exact continuation required: {reason:?}"
+                )
+            }
         }
     }
 }
@@ -479,25 +589,17 @@ fn append_instruction(
 /// Matching this state is model-local self-equivalence, not equivalence to
 /// `SmCore` or to silicon.
 #[derive(Debug)]
-struct ModelState {
+pub struct ModelExecutor {
     warp_ready: HashMap<i32, u64>,
     dispatch_ready: [u64; SMSP_COUNT as usize],
     pipeline_ready: [[u64; 3]; SMSP_COUNT as usize],
     in_flight_done: [[Vec<u64>; 3]; SMSP_COUNT as usize],
     completion: u64,
     last_issue: Option<u64>,
-    observations: Vec<InstructionObservation>,
+    observations: Vec<MacroEffect>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct InstructionObservation {
-    sequence: u64,
-    physical_warp: i32,
-    issue: u64,
-    completion: u64,
-}
-
-impl PartialEq for ModelState {
+impl PartialEq for ModelExecutor {
     fn eq(&self, other: &Self) -> bool {
         self.warp_ready == other.warp_ready
             && self.dispatch_ready == other.dispatch_ready
@@ -508,11 +610,11 @@ impl PartialEq for ModelState {
     }
 }
 
-impl Eq for ModelState {}
+impl Eq for ModelExecutor {}
 
 fn ensure_terminal_state_match(
-    exact: &ModelState,
-    causal: &ModelState,
+    exact: &ModelExecutor,
+    causal: &ModelExecutor,
 ) -> Result<(), CausalFrontierError> {
     if exact == causal {
         return Ok(());
@@ -526,13 +628,12 @@ fn ensure_terminal_state_match(
 }
 
 fn ensure_observation_match(
-    exact: &ModelState,
-    causal: &ModelState,
+    exact: &ModelExecutor,
+    causal: &ModelExecutor,
 ) -> Result<(), CausalFrontierError> {
     let mut exact_observations = exact.observations.clone();
     let mut causal_observations = causal.observations.clone();
-    let key =
-        |observation: &InstructionObservation| (observation.sequence, observation.physical_warp);
+    let key = |observation: &MacroEffect| (observation.sequence, observation.physical_warp);
     exact_observations.sort_unstable_by_key(key);
     causal_observations.sort_unstable_by_key(key);
     if exact_observations.len() != causal_observations.len() {
@@ -558,7 +659,7 @@ fn ensure_observation_match(
     Ok(())
 }
 
-impl Default for ModelState {
+impl Default for ModelExecutor {
     fn default() -> Self {
         Self {
             warp_ready: HashMap::new(),
@@ -571,8 +672,43 @@ impl Default for ModelState {
         }
     }
 }
-impl ModelState {
-    fn append(
+impl ModelExecutor {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn snapshot(&self) -> ModelExecutionSnapshot {
+        let mut warp_ready = self
+            .warp_ready
+            .iter()
+            .map(|(&warp, &ready)| (warp, ready))
+            .collect::<Vec<_>>();
+        warp_ready.sort_unstable();
+        let pending_completions = self
+            .in_flight_done
+            .iter()
+            .enumerate()
+            .flat_map(|(smsp, pipelines)| {
+                pipelines
+                    .iter()
+                    .enumerate()
+                    .filter_map(move |(pipe, pending)| {
+                        (!pending.is_empty()).then(|| (smsp as u8, pipe as u8, pending.clone()))
+                    })
+            })
+            .collect();
+        ModelExecutionSnapshot {
+            warp_ready,
+            dispatch_ready: self.dispatch_ready,
+            pipeline_ready: self.pipeline_ready,
+            pending_completions,
+            completion: self.completion,
+            last_issue: self.last_issue,
+            effects: self.observations.clone(),
+        }
+    }
+
+    pub fn execute_detailed(
         &mut self,
         instruction: CausalFrontierInstruction,
     ) -> Result<(), CausalFrontierError> {
@@ -588,7 +724,7 @@ impl ModelState {
             self.last_issue
                 .map_or(issue, |previous| previous.max(issue)),
         );
-        self.observations.push(InstructionObservation {
+        self.observations.push(MacroEffect {
             sequence: instruction.sequence,
             physical_warp: instruction.physical_warp,
             issue,
@@ -597,11 +733,11 @@ impl ModelState {
         Ok(())
     }
 
-    fn apply_summary(
+    pub fn execute_macro(
         &mut self,
         first: CausalFrontierInstruction,
         certificate: IntervalCertificate,
-    ) -> Result<CertifiedRegion, ReifyReason> {
+    ) -> Result<MacroTransition, CausalFrontierError> {
         // Descriptor validation already bounded physical_warp before either run.
         let smsp = first.physical_warp as usize % usize::from(SMSP_COUNT);
         let pipe = pipeline_index(first.pipeline);
@@ -616,39 +752,46 @@ impl ModelState {
             .iter()
             .any(|done| *done > start)
         {
-            return Err(ReifyReason::IncomingPipelineWork);
-        }
-        let projected = certificate.project(start)?;
-        let observations = certificate.issue_completion_times(start)?;
-        for (index, (issue, completion)) in observations.into_iter().enumerate() {
-            let sequence = first
-                .sequence
-                .checked_add(u64::try_from(index).map_err(|_| ReifyReason::ArithmeticOverflow)?)
-                .ok_or(ReifyReason::ArithmeticOverflow)?;
-            self.observations.push(InstructionObservation {
-                sequence,
-                physical_warp: first.physical_warp,
-                issue,
-                completion,
+            return Err(CausalFrontierError::MacroTransitionRejected {
+                reason: ReifyReason::IncomingPipelineWork,
             });
         }
+        let transition = MacroTransition::derive(first, certificate, start)
+            .map_err(|reason| CausalFrontierError::MacroTransitionRejected { reason })?;
+        self.observations.extend(transition.effects.iter().copied());
         self.warp_ready
-            .insert(first.physical_warp, projected.next_issue);
-        self.dispatch_ready[smsp] = projected.dispatch_ready;
-        self.pipeline_ready[smsp][pipe] = projected.next_issue;
-        self.in_flight_done[smsp][pipe] = projected.pending_completions;
-        self.completion = self.completion.max(projected.last_completion);
-        self.last_issue = Some(self.last_issue.map_or(projected.last_issue, |previous| {
-            previous.max(projected.last_issue)
+            .insert(first.physical_warp, transition.next_issue);
+        self.dispatch_ready[smsp] = transition.dispatch_ready;
+        self.pipeline_ready[smsp][pipe] = transition.next_issue;
+        self.in_flight_done[smsp][pipe] = transition.pending_completions.clone();
+        self.completion = self.completion.max(transition.last_completion);
+        self.last_issue = Some(self.last_issue.map_or(transition.last_issue, |previous| {
+            previous.max(transition.last_issue)
         }));
-        Ok(CertifiedRegion {
-            physical_warp: first.physical_warp,
-            first_sequence: certificate.first_sequence(),
-            last_sequence: certificate.last_sequence(),
-            first_issue_cycle: start,
-            last_issue_cycle: projected.last_issue,
-            completion_cycle: projected.last_completion,
-        })
+        Ok(transition)
+    }
+
+    pub fn execute_decision(
+        &mut self,
+        first: CausalFrontierInstruction,
+        decision: FidelityDecision,
+    ) -> Result<ModelDispatch, CausalFrontierError> {
+        match decision {
+            FidelityDecision::Summary { certificate } => {
+                match self.execute_macro(first, certificate) {
+                    Ok(transition) => Ok(ModelDispatch::Macro { transition }),
+                    Err(CausalFrontierError::MacroTransitionRejected { reason }) => {
+                        self.execute_detailed(first)?;
+                        Ok(ModelDispatch::Detailed { reason })
+                    }
+                    Err(error) => Err(error),
+                }
+            }
+            FidelityDecision::Reify { reason } => {
+                self.execute_detailed(first)?;
+                Ok(ModelDispatch::Detailed { reason })
+            }
+        }
     }
 }
 
@@ -772,14 +915,15 @@ pub fn summarize_with_residency(
         }
     }
     ordered.sort_unstable();
-    let mut exact = ModelState::default();
+    let mut exact = ModelExecutor::default();
     for (_, _, program, instruction) in &ordered {
-        exact.append(canonical_programs[*program][*instruction])?;
+        exact.execute_detailed(canonical_programs[*program][*instruction])?;
     }
 
-    let mut causal = ModelState::default();
+    let mut causal = ModelExecutor::default();
     let mut causal_events = exact_events;
     let mut causal_execution_steps = 0_u64;
+    let mut macro_dispatches = 0_u64;
     let mut candidate_regions = 0_u64;
     let mut candidate_instructions = 0_u64;
     let mut collapsed_instructions = 0_u64;
@@ -859,14 +1003,17 @@ pub fn summarize_with_residency(
                 } else {
                     certify_interval(evidence, residents_per_smsp[subcore(first.physical_warp)?])
                 };
-                let attempt = match decision {
-                    FidelityDecision::Summary { certificate } => {
-                        causal.apply_summary(first, certificate)
-                    }
-                    FidelityDecision::Reify { reason } => Err(reason),
-                };
-                match attempt {
-                    Ok(region) => {
+                let dispatch = causal.execute_decision(first, decision)?;
+                match dispatch {
+                    ModelDispatch::Macro { transition } => {
+                        let region = CertifiedRegion {
+                            physical_warp: transition.physical_warp,
+                            first_sequence: transition.first_sequence,
+                            last_sequence: transition.last_sequence,
+                            first_issue_cycle: transition.first_issue,
+                            last_issue_cycle: transition.last_issue,
+                            completion_cycle: transition.last_completion,
+                        };
                         let length = (end - index) as u64;
                         let reduction = length
                             .checked_mul(2)
@@ -885,6 +1032,11 @@ pub fn summarize_with_residency(
                             },
                         )?;
                         certified_regions.push(region);
+                        macro_dispatches = macro_dispatches.checked_add(1).ok_or(
+                            CausalFrontierError::CounterOverflow {
+                                counter: "macro dispatches",
+                            },
+                        )?;
                         consumed[program_index] = end;
                         causal_execution_steps = causal_execution_steps.checked_add(1).ok_or(
                             CausalFrontierError::CounterOverflow {
@@ -893,16 +1045,25 @@ pub fn summarize_with_residency(
                         )?;
                         continue;
                     }
-                    Err(reason) => reified_region_details.push(ReifiedRegion {
-                        physical_warp: first.physical_warp,
-                        first_sequence: first.sequence,
-                        last_sequence: program[end - 1].sequence,
-                        reason,
-                    }),
+                    ModelDispatch::Detailed { reason } => {
+                        reified_region_details.push(ReifiedRegion {
+                            physical_warp: first.physical_warp,
+                            first_sequence: first.sequence,
+                            last_sequence: program[end - 1].sequence,
+                            reason,
+                        });
+                        consumed[program_index] = index + 1;
+                        causal_execution_steps = causal_execution_steps.checked_add(1).ok_or(
+                            CausalFrontierError::CounterOverflow {
+                                counter: "causal execution steps",
+                            },
+                        )?;
+                        continue;
+                    }
                 }
             }
         }
-        causal.append(first)?;
+        causal.execute_detailed(first)?;
         consumed[program_index] = index + 1;
         causal_execution_steps =
             causal_execution_steps
@@ -938,6 +1099,7 @@ pub fn summarize_with_residency(
         causal_last_issue_cycle: causal.last_issue,
         exact_execution_steps,
         causal_execution_steps,
+        macro_dispatches,
         terminal_state_matches: exact == causal,
         candidate_regions,
         collapsed_regions,
@@ -1084,6 +1246,69 @@ mod tests {
         assert_eq!(report.causal_execution_steps, 2);
         assert_eq!(report.certified_regions[0].last_issue_cycle, 32);
         assert!(report.terminal_state_matches);
+        assert_eq!(report.macro_dispatches, 1);
+    }
+
+    #[test]
+    fn executable_macro_emits_effects_and_resumes_detailed_continuation() {
+        let prefix = (0..3)
+            .map(|sequence| instruction(sequence, false))
+            .collect::<Vec<_>>();
+        let tail = CausalFrontierInstruction {
+            sequence: 3,
+            external_side_effect: true,
+            ..instruction(3, true)
+        };
+        let mut detailed = ModelExecutor::new();
+        for item in prefix.iter().copied().chain([tail]) {
+            detailed.execute_detailed(item).unwrap();
+        }
+        let certificate = match certify_interval(
+            prefix
+                .iter()
+                .copied()
+                .map(CausalFrontierInstruction::execution_evidence),
+            1,
+        ) {
+            FidelityDecision::Summary { certificate } => certificate,
+            FidelityDecision::Reify { reason } => panic!("unexpected refusal: {reason:?}"),
+        };
+        let mut selective = ModelExecutor::new();
+        let transition = selective.execute_macro(prefix[0], certificate).unwrap();
+        selective.execute_detailed(tail).unwrap();
+        assert_eq!(transition.effects.len(), 3);
+        assert_eq!(transition.first_issue, 0);
+        assert_eq!(selective.snapshot(), detailed.snapshot());
+    }
+
+    #[test]
+    fn executable_macro_refuses_when_a_pending_completion_crosses_entry() {
+        let mut predecessor = instruction(0, true);
+        predecessor.latency_cycles = 20;
+        predecessor.in_flight_capacity = 1;
+        let next = CausalFrontierInstruction {
+            sequence: 1,
+            in_flight_capacity: 1,
+            latency_cycles: 4,
+            ..instruction(1, false)
+        };
+        let certificate = match certify_interval(
+            [next]
+                .into_iter()
+                .map(CausalFrontierInstruction::execution_evidence),
+            1,
+        ) {
+            FidelityDecision::Summary { certificate } => certificate,
+            FidelityDecision::Reify { reason } => panic!("unexpected refusal: {reason:?}"),
+        };
+        let mut executor = ModelExecutor::new();
+        executor.execute_detailed(predecessor).unwrap();
+        assert_eq!(
+            executor.execute_macro(next, certificate),
+            Err(CausalFrontierError::MacroTransitionRejected {
+                reason: ReifyReason::IncomingPipelineWork,
+            })
+        );
     }
 
     #[test]
@@ -1263,8 +1488,8 @@ mod tests {
 
     #[test]
     fn state_mismatch_fails_closed_before_a_report_can_certify_a_skip() {
-        let exact = ModelState::default();
-        let mut causal = ModelState::default();
+        let exact = ModelExecutor::default();
+        let mut causal = ModelExecutor::default();
         causal.completion = 1;
         assert!(matches!(
             ensure_terminal_state_match(&exact, &causal),
@@ -1278,9 +1503,9 @@ mod tests {
 
     #[test]
     fn observation_count_mismatch_is_not_misreported_as_overflow() {
-        let exact = ModelState::default();
-        let mut causal = ModelState::default();
-        causal.observations.push(InstructionObservation {
+        let exact = ModelExecutor::default();
+        let mut causal = ModelExecutor::default();
+        causal.observations.push(MacroEffect {
             sequence: 0,
             physical_warp: 0,
             issue: 0,

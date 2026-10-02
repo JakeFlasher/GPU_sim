@@ -40,6 +40,15 @@ from profiler measurements; black-box models are assumptions, not observations.
 - The v2 independent-probe fitter and three-family calibration/development/
   held-out NCU join now run post-prediction; broader corpus coverage and native
   preserved compression remain unproven.
+- Second-round R1 now uses v2 prediction/observation target contracts,
+  rejects family-crossing splits, separates finite interval coverage from open
+  refusal, and reports execution-step reduction separately from record
+  coverage. These are evidence-hygiene changes, not accuracy evidence.
+- R2 is active: `sim-sm::ModelExecutor` now has an explicit
+  `MacroTransition`/`MacroEffect` seam. The model-local descriptor probe
+  installs one independently projected scalar transition (16 detailed steps
+  to one macro dispatch) and resumes a detailed suffix; pending pipeline work
+  rejects the transition. This is not native `SmCore` execution.
 - Service profiles now mark capacity-adjusted throughput slopes and carry an
   explicit serial admission/service composition; the v2 probe fitter refuses
   aggregate-only identification and requires latency, throughput, queue,
@@ -51,15 +60,20 @@ from profiler measurements; black-box models are assumptions, not observations.
 
 ## Next useful work
 
-Review the [reification/refactor plan](../plans/sm86_reification_refactor_20261001.md):
-the full staged plan is complete for the retained SM86 corpus. The current
-evaluator reports model-local service rankings; three canary families have
-calibration/development/held-out post-prediction NCU joins, and the witnessed
-model-local probe replaces 16 descriptor steps with one summary step. Native
-memory-heavy families remain exact/refused. Second-round review work is to
-expand the corpus, obtain a native-preserved region, and test ranking stability
-under independent uncertainty intervals; do not turn black-box internals into
-prerequisites.
+The first-round implementation plan is retained in
+[`sm86_reification_refactor_20261001.md`](../plans/sm86_reification_refactor_20261001.md).
+The active second-round program is
+[`second_round_refinement_20261001.md`](../plans/second_round_refinement_20261001.md),
+with **R1 semantic closure and evidence hygiene complete**, **R2 executable
+macro transition seam complete**, and **R3 independent witness/order closure
+active**. R1 repaired unknown/zero-demand service
+arithmetic, explicit-endpoint propagation, event ordering, compression
+vocabulary, and split/NCU identity checks. R2 made a nonidentity macro
+decision operational and resumes detailed replay; that model-local seam now
+exists, but native `SmCore` remains untouched. R3 is separating witness
+extraction from descriptor eligibility; until R5, current rankings, open
+intervals, and descriptor/macro probe remain negative/diagnostic evidence and
+black-box internals are not execution prerequisites.
 
 ## Retained evidence
 

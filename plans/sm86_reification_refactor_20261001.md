@@ -77,12 +77,15 @@ Three current SM86 canary families have now been captured and predicted before
 the NCU join: `atomic_histogram` (calibration), `gemm_hmma_bf16`
 (development), and `addr_carry_canary` (held out). Independent NCU
 `gpc__cycles_elapsed.max` values were 8,811 / 4,530 / 5,270 cycles; simulator
-lower-bound proxies were 2,435 / 1,024 / 432 cycles. All three open intervals
-cover their NCU value, with lower-bound-proxy APEs 72.36%, 77.40%, and 91.80%.
+lower-bound proxies were 2,435 / 1,024 / 432 cycles. The original evaluator
+counted all three open intervals as “covered”; second-round R1 corrects that
+label to open-tail refusal/unresolved-upper evidence, with lower-bound-proxy
+APEs 72.36%, 77.40%, and 91.80%.
 The corresponding NCU GPU-duration averages were 4,672 / 2,432 / 2,848 ns.
 Runtime was 11.42 / 6.14 / 6.04 ms and peak RSS was 6.08 MiB / 16 KiB / 392
-KiB. The post-prediction report includes split coverage, open-width status,
-refusal/OOD, runtime, memory, and compression fields; these NCU values were
+KiB. The post-prediction report now separates finite interval coverage from
+open-tail refusal/OOD, runtime, memory, record coverage, and execution-step
+reduction; these NCU values were
 not calibration labels or selection features.
 `tools/run_prediction_manifest.py` is the reproducible pre-NCU materialization
 path for these family splits.
@@ -90,10 +93,11 @@ The prediction run used a profile emitted by the v2 independent-probe fitter;
 the probe document contains latency, throughput, queue-capacity, occupancy,
 and contention modes and contains no NCU rows.
 
-Repeating that manifest for service scales 1/2/4 produced monotone model-local
-rankings for every split: atomic 2,435/3,972/7,046; tensor async GEMM
-1,024/1,040/1,072; and mixed-memory held-out 432/478/570 cycles. Each split
-retained 100% open-interval coverage against its independent NCU observation.
+Repeating that manifest for service scales 1/2/4 produced the following
+model-local lower-bound values for every split: atomic 2,435/3,972/7,046;
+tensor async GEMM 1,024/1,040/1,072; and mixed-memory held-out 432/478/570
+cycles. Because the intervals were open, R1 reports these as sensitivity values
+and indeterminate interval rankings rather than calibrated coverage.
 Mean lower-bound-proxy APE across variants was 49.11% calibration, 76.92%
 development, and 90.64% held out. Mean runtime/RSS were 13.33 ms/5.93 MiB,
 6.19 ms/296 KiB, and 6.08 ms/16 KiB respectively. These rankings are

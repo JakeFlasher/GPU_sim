@@ -26,9 +26,10 @@ are deleted rather than skipped.
 | Accuracy | This extension has no demonstrated family-held-out cycle accuracy or interval coverage yet |
 | Reification | Typed region contract and native-boundary comparator preserve only complete exact projections; incomplete canary boundaries fall back to replay |
 | Selective coverage | Multi-warp/order and completion-multiplicity guards refuse conservatively; fast-frontier output includes full-trace candidate/reified/uncovered counts |
+| Model macro seam | `sim-sm::ModelExecutor` consumes a certified scalar `MacroTransition`, emits explicit effects/pending completions, and resumes detailed descriptors; this is model-local and not yet wired into native `SmCore` |
 | Service composition | Typed serial admission/service composition reaches the elapsed observer projection; parallel pool policy remains explicit and model-local |
 | Cache candidates | Warp-local instrumentation order can be observed when decoded identities are complete; cross-warp order, fence scope, line generation, owner/read-from, and hardware completion remain explicit unknowns |
-| Design evaluation | Three-family calibration/development/held-out NCU join runs post-prediction; model-local service ranking and 16:1 witnessed descriptor-step reduction are reported, while native memory-heavy families remain exact/refused |
+| Design evaluation | Three-family calibration/development/held-out NCU join runs post-prediction; v2 target contracts check metric/endpoint/clock/cache/launch/repetition/GPU identity and family split semantics; finite intervals, open refusals, model-local partial-order ties, and 16:1 witnessed descriptor-step reduction are reported, while native memory-heavy families remain exact/refused |
 | Payload/value work | Bounded model-local identity, ordering, and conservation checks |
 
 Native replay is unchanged by the predictive flag. Service demand now feeds an
@@ -40,14 +41,20 @@ require an explicit statistical/modeling assumption rather than timer equality.
 
 ## Next work
 
-Use the [reification/refactor plan](../plans/sm86_reification_refactor_20261001.md):
-the interval/endpoint/service-composition, conservative native-boundary
-fallback, order/multiplicity/full-span coverage, identifiable-probe, cache
-witness, and staged evaluation slices are implemented. Second-round work is to
-expand the workload corpus, obtain a native-preserved region with a closed
-typed entry, and test ranking stability under independent uncertainty sweeps.
-Report error, coverage, OOD behavior, compression, memory, and runtime
-together; no accuracy claim follows from a passing unit suite.
+The first-round history remains in the
+[reification/refactor plan](../plans/sm86_reification_refactor_20261001.md).
+The active second-round program is the
+[second-round refinement plan](../plans/second_round_refinement_20261001.md),
+with **R1 semantic closure and evidence hygiene complete**, **R2 executable
+macro transition seam complete**, and **R3 independent witness/order closure
+active**. R1 removed unsound finite bounds and evaluator ambiguities. R2 now
+executes a model-local nonidentity transition and exact continuation, while
+R5 still requires a native-preserved region; until R5, model-local descriptor
+reduction and exact fallback are the only supported native compression
+conclusions.
+Report finite intervals, open/refused cases, OOD behavior, actual execution
+steps, memory, and runtime separately; a passing unit suite is not accuracy
+evidence.
 
 ## Retained measurements
 

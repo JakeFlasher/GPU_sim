@@ -79,7 +79,9 @@
     "primary_metrics": [
       "median_absolute_log_error",
       "mape",
-      "interval_coverage",
+      "finite_interval_coverage",
+      "open_interval_rate",
+      "finite_interval_width",
       "rank_correlation"
     ]
   },
@@ -87,7 +89,10 @@
     "status": "docs/STATUS.md",
     "memory": "docs/PROJECT_MEMORY.md",
     "contract": "docs/PREDICTIVE_CLOSURE.md",
-    "plan": "plans/sm86_reification_refactor_20261001.md"
+    "plan": "plans/second_round_refinement_20261001.md",
+    "first_round_plan": "plans/sm86_reification_refactor_20261001.md",
+    "prediction_schema": "docs/reification_prediction_v2.schema.json",
+    "observation_schema": "docs/ncu_observation_v2.schema.json"
   },
   "service_rate_profile": "docs/sm86_service_rate_profile_20261001.json",
   "scope_policy": "analytical_or_statistical_modeling_with_unobservable_internals_black_box"

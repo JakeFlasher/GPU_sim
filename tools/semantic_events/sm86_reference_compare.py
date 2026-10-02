@@ -338,8 +338,30 @@ def summarize_native_boundary_refinement(path: pathlib.Path, mode: str) -> dict[
         records += 1
         boundary = row.get("typed_boundary")
         completeness = boundary.get("completeness") if isinstance(boundary, dict) else None
-        if completeness == "complete" or (
+        refinement = row.get("native_boundary_refinement")
+        refinement_decision = refinement.get("decision") if isinstance(refinement, dict) else None
+        # Older reference streams have no comparator field; their complete
+        # typed boundary remains a structural eligibility count.  Once an
+        # explicit comparator decision exists, only `preserve` is eligible.
+        if refinement_decision == "reify":
+            fallback += 1
+            reason = refinement.get("reason") if isinstance(refinement, dict) else None
+            if isinstance(reason, dict) and len(reason) == 1:
+                kind, detail = next(iter(reason.items()))
+                fields = [
+                    f"native_reification:{kind}:{detail}"
+                    if isinstance(detail, (str, int, float, bool))
+                    else f"native_reification:{kind}"
+                ]
+            else:
+                fields = ["native_reification:malformed_reason"]
+            for field in fields:
+                unknown_fields[field] = unknown_fields.get(field, 0) + 1
+            continue
+        if (refinement_decision in (None, "preserve")) and (
+            completeness == "complete" or (
             isinstance(completeness, dict) and set(completeness) == {"complete"}
+            )
         ):
             complete += 1
             continue

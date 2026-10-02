@@ -17,6 +17,11 @@ import time
 from pathlib import Path
 from typing import Any
 
+from prediction_contract import validate_target_contract
+
+
+SPLITS = {"calibration", "development", "held_out"}
+
 
 def _run(command: list[str], timeout: float) -> tuple[dict[str, Any], float, int | None]:
     if any(argument.startswith("--ncu") or argument.startswith("--cupti") for argument in command):
@@ -42,23 +47,51 @@ def _run(command: list[str], timeout: float) -> tuple[dict[str, Any], float, int
         stdout = stdout_file.read().decode()
         stderr = stderr_file.read().decode()
     if process.returncode != 0:
-        raise RuntimeError(f"prediction failed with {process.returncode}: {stderr.decode()[-2000:]}")
+        raise RuntimeError(f"prediction failed with {process.returncode}: {stderr[-2000:]}")
     return json.loads(stdout), (time.perf_counter() - started) * 1000.0, peak_kb * 1024 or None
 
 
 def run_manifest(manifest: dict[str, Any], sim_run: Path, profile: Path, timeout: float) -> dict[str, Any]:
     if manifest.get("schema") != "reification_prediction_manifest_v1":
         raise ValueError("manifest schema must be reification_prediction_manifest_v1")
+    target_contract = validate_target_contract(
+        manifest.get("target_contract"), "prediction manifest", require_hardware=True
+    )
     rows = manifest.get("rows")
     if not isinstance(rows, list) or not rows:
         raise ValueError("manifest rows must be nonempty")
-    predictions = []
+    workload_families: dict[str, str] = {}
+    family_splits: dict[str, str] = {}
+    workload_splits: dict[str, str] = {}
+    validated_rows: list[dict[str, Any]] = []
+    required = ("workload", "family", "split", "trace", "control", "arch_card", "pchase_card")
+    # Validate the entire split/family roster before launching even the first
+    # simulator process. A late row must not leave a partially materialized
+    # prediction document.
     for index, row in enumerate(rows):
         if not isinstance(row, dict):
             raise ValueError(f"manifest row {index} must be an object")
-        required = ("workload", "family", "split", "trace", "control", "arch_card", "pchase_card")
         if any(key not in row for key in required):
             raise ValueError(f"manifest row {index} is missing a required field")
+        workload = row["workload"]
+        family = row["family"]
+        split = row["split"]
+        if not all(isinstance(value, str) and value.strip() for value in (workload, family)):
+            raise ValueError(f"manifest row {index} workload/family must be nonempty strings")
+        if split not in SPLITS:
+            raise ValueError(f"manifest row {index} has unsupported split {split!r}")
+        if workload in workload_splits and workload_splits[workload] != split:
+            raise ValueError(f"workload {workload!r} crosses prediction splits")
+        if workload in workload_families and workload_families[workload] != family:
+            raise ValueError(f"workload {workload!r} appears with multiple families")
+        if family in family_splits and family_splits[family] != split:
+            raise ValueError(f"family {family!r} crosses prediction splits")
+        workload_splits[workload] = split
+        workload_families[workload] = family
+        family_splits[family] = split
+        validated_rows.append(row)
+    predictions = []
+    for row in validated_rows:
         command = [
             str(sim_run),
             "--trace", str(row["trace"]),
@@ -93,9 +126,14 @@ def run_manifest(manifest: dict[str, Any], sim_run: Path, profile: Path, timeout
             "native_terminal_modeled_event": timing.get("terminal_modeled_event_time"),
             "runtime_ms": round(runtime_ms, 3),
             "memory_bytes": memory_bytes,
-            "compression_ratio": None,
+            "step_reduction": None,
         })
-    return {"schema": "reification_prediction_v1", "intervention": "abstract_service_capacity", "rows": predictions}
+    return {
+        "schema": "reification_prediction_v2",
+        "intervention": "abstract_service_capacity",
+        "target_contract": target_contract,
+        "rows": predictions,
+    }
 
 
 def main() -> int:

@@ -145,6 +145,23 @@ class BoundaryTraceTests(unittest.TestCase):
             },
         )
 
+    def test_explicit_reify_decision_overrides_complete_typed_shape(self):
+        event = self.write(
+            "event",
+            [{
+                "kind": "event",
+                "typed_boundary": {"completeness": "complete"},
+                "native_boundary_refinement": {
+                    "decision": "reify",
+                    "reason": {"projection_mismatch": {}},
+                },
+            }],
+        )
+        report = summarize_native_boundary_refinement(event, "event")
+        self.assertEqual(report["complete_boundary_records"], 0)
+        self.assertEqual(report["exact_fallback_boundary_records"], 1)
+        self.assertTrue(report["exact_fallback_required"])
+
     def test_failed_run_removes_partial_trace(self):
         trace = self.root / "partial.jsonl"
         command = self.root / "failed.py"

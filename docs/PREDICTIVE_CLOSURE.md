@@ -42,6 +42,14 @@ after prediction, and keeps open upper bounds explicit. Its conclusion is
 model-local service ranking plus exact fallback for native memory-heavy
 regions; it does not establish a silicon design ranking.
 
+Second-round R1 adds an explicit active/inactive completion requirement witness:
+an entirely unknown field is inactive only when it is outside the declared
+projection; an active unknown service/visibility/writeback/cache/tail field
+keeps the observer upper open. The v2 prediction/observation documents carry
+the metric, endpoint, clock, cache, launch, repetition, and independently
+checked GPU identity. Finite interval coverage is reported separately from
+open-tail refusal, and record coverage is not called execution compression.
+
 ## Abstractions
 
 - Resource demand and queue contention replace physical route reconstruction.
@@ -69,5 +77,6 @@ parameter set. The v2 fitter and three-family staged evaluation use independent
 probe inputs and post-prediction NCU joins; finite/open intervals remain model
 outputs, not guaranteed confidence bounds. Broader workload-family accuracy,
 native-preserved compression, and hardware design ranking remain unproven.
-See the [active reification/refactor plan](../plans/sm86_reification_refactor_20261001.md)
+See the [active second-round refinement program](../plans/second_round_refinement_20261001.md),
+the [first-round implementation history](../plans/sm86_reification_refactor_20261001.md),
 and [configuration](archprofile.md) rather than older report task lists.

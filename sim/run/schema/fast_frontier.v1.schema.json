@@ -61,7 +61,7 @@
         "contract", "architecture", "blocks_seen", "warps_seen", "eligible_warps",
         "candidate_regions", "certified_regions", "reified_regions",
         "candidate_instructions", "collapsed_instructions", "exact_execution_steps",
-        "summarized_execution_steps", "maximum_exact_final_cycle",
+        "summarized_execution_steps", "macro_dispatches", "maximum_exact_final_cycle",
         "maximum_summarized_final_cycle", "terminal_state_matches", "coverage",
         "refusal_reasons"
       ],
@@ -78,6 +78,7 @@
         "collapsed_instructions": {"$ref": "#/$defs/u64"},
         "exact_execution_steps": {"$ref": "#/$defs/u64"},
         "summarized_execution_steps": {"$ref": "#/$defs/u64"},
+        "macro_dispatches": {"$ref": "#/$defs/u64"},
         "maximum_exact_final_cycle": {"$ref": "#/$defs/u64"},
         "maximum_summarized_final_cycle": {"$ref": "#/$defs/u64"},
         "terminal_state_matches": {"type": "boolean"},

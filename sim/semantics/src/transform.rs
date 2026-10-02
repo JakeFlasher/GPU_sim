@@ -23,11 +23,18 @@ pub struct TransformInterval {
     pub end_cycle: u64,
     pub start_sequence: u64,
     pub end_sequence: u64,
+    /// Sequence monotonicity is an optional producer witness. Event time and
+    /// insertion sequence are independent coordinates when an event can be
+    /// inserted after an earlier timestamp has already been scheduled.
+    #[serde(default)]
+    pub sequence_ordered: bool,
 }
 
 impl TransformInterval {
     pub fn validate(self) -> Result<(), TransformIntervalError> {
-        if self.end_cycle < self.start_cycle || self.end_sequence < self.start_sequence {
+        if self.end_cycle < self.start_cycle
+            || (self.sequence_ordered && self.end_sequence < self.start_sequence)
+        {
             return Err(TransformIntervalError::Reversed);
         }
         Ok(())
@@ -236,16 +243,32 @@ impl TypedRegionContract {
                     sequence: effect.event.sequence,
                 });
             }
+            let sequence_in_interval = if self.interval.sequence_ordered {
+                effect.event.sequence >= self.interval.start_sequence
+                    && effect.event.sequence <= self.interval.end_sequence
+            } else {
+                let lower = self.interval.start_sequence.min(self.interval.end_sequence);
+                let upper = self.interval.start_sequence.max(self.interval.end_sequence);
+                effect.event.sequence >= lower && effect.event.sequence <= upper
+            };
             if effect.event.time < self.interval.start_cycle
                 || effect.event.time > self.interval.end_cycle
-                || effect.event.sequence < self.interval.start_sequence
-                || effect.event.sequence > self.interval.end_sequence
+                || !sequence_in_interval
             {
                 return Err(RegionContractError::EffectOutsideInterval {
                     sequence: effect.event.sequence,
                 });
             }
-            if previous.is_some_and(|old| key < old) {
+            let out_of_order = previous.is_some_and(|old| {
+                if self.interval.sequence_ordered {
+                    key < old
+                } else {
+                    (effect.event.time, effect.phase) < (old.0, old.1)
+                        || (effect.event.time, effect.phase) == (old.0, old.1)
+                            && effect.event.sequence < old.2
+                }
+            });
+            if out_of_order {
                 return Err(RegionContractError::EffectOrder {
                     sequence: effect.event.sequence,
                 });
@@ -777,6 +800,7 @@ mod tests {
                 end_cycle: 1,
                 start_sequence: 0,
                 end_sequence: 1,
+                sequence_ordered: false,
             },
         };
         assert_eq!(
@@ -790,6 +814,62 @@ mod tests {
     }
 
     #[test]
+    fn interval_keeps_time_and_insertion_sequence_as_separate_coordinates() {
+        let reordered = TransformInterval {
+            start_cycle: 5,
+            end_cycle: 10,
+            start_sequence: 9,
+            end_sequence: 3,
+            sequence_ordered: false,
+        };
+        assert!(reordered.validate().is_ok());
+        assert!(
+            TransformInterval {
+                sequence_ordered: true,
+                ..reordered
+            }
+            .validate()
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn same_cycle_effects_still_require_engine_insertion_order() {
+        let entry = boundary(5, 9, true);
+        let exit = boundary(10, 3, true);
+        let mut later = entry.event.clone();
+        later.sequence = 8;
+        let result = TypedRegionContract::new(
+            TypedObservationContract::cycle_exact_power(),
+            TransformInterval {
+                start_cycle: 5,
+                end_cycle: 10,
+                start_sequence: 9,
+                end_sequence: 3,
+                sequence_ordered: false,
+            },
+            entry.clone(),
+            vec![
+                TypedEventTransition {
+                    phase: 0,
+                    event: entry.event,
+                },
+                TypedEventTransition {
+                    phase: 0,
+                    event: later,
+                },
+            ],
+            Vec::new(),
+            Vec::new(),
+            exit,
+        );
+        assert!(matches!(
+            result,
+            Err(RegionContractError::EffectOrder { .. })
+        ));
+    }
+
+    #[test]
     fn checker_rejects_a_corrupted_exit_state() {
         let mut proof = SummaryProof {
             schema_version: TRANSFORM_SCHEMA_VERSION,
@@ -799,6 +879,7 @@ mod tests {
                 end_cycle: 1,
                 start_sequence: 0,
                 end_sequence: 1,
+                sequence_ordered: false,
             },
             contract: TypedObservationContract::cycle_exact_power(),
             external_frontier: ExternalInputFrontier {
@@ -850,6 +931,7 @@ mod tests {
                 end_cycle: 0,
                 start_sequence: 0,
                 end_sequence: 0,
+                sequence_ordered: false,
             },
         };
         let TransformerDecision::Certify(output) = IdentityBoundaryTransformer
@@ -936,6 +1018,7 @@ mod tests {
                 end_cycle: 0,
                 start_sequence: 0,
                 end_sequence: 0,
+                sequence_ordered: false,
             },
         };
         let TransformerDecision::Certify(output) = IdentityBoundaryTransformer
@@ -1003,6 +1086,7 @@ mod tests {
                 end_cycle: 1,
                 start_sequence: 0,
                 end_sequence: 1,
+                sequence_ordered: false,
             },
         };
         assert_eq!(
@@ -1033,6 +1117,7 @@ mod tests {
                 end_cycle: 1,
                 start_sequence: 0,
                 end_sequence: 1,
+                sequence_ordered: false,
             },
         };
         assert!(matches!(

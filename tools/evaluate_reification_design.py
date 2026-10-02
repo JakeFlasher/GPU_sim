@@ -35,6 +35,57 @@ def _native_terminal(document: dict[str, Any]) -> int | None:
     return value if isinstance(value, int) else None
 
 
+def _native_projection(document: dict[str, Any]) -> dict[str, Any]:
+    """Return the declared timing projection used for invariance checks.
+
+    A terminal timestamp alone can stay equal while issue/readiness or the
+    modeled system-event frontier changes.  Fields absent from an older output
+    remain ``None`` rather than being silently treated as equal to an
+    unobserved value.
+    """
+    timing = _first_launch(document).get("timing")
+    if not isinstance(timing, dict):
+        raise ValueError("simulator output has no timing report")
+    keys = (
+        "diagnostic_last_issue_cycles",
+        "last_processed_modeled_system_event_time",
+        "terminal_modeled_event_time",
+        "completion_frontier",
+        "readiness",
+    )
+    return {key: timing.get(key) for key in keys}
+
+
+def _native_projection_fields_present(document: dict[str, Any]) -> bool:
+    timing = _first_launch(document).get("timing")
+    return isinstance(timing, dict) and all(
+        key in timing
+        for key in (
+            "diagnostic_last_issue_cycles",
+            "last_processed_modeled_system_event_time",
+            "terminal_modeled_event_time",
+            "completion_frontier",
+            "readiness",
+        )
+    )
+
+
+def _interval_relations(rows: list[dict[str, Any]]) -> dict[str, list[list[str]]]:
+    ordered_pairs: list[list[str]] = []
+    indeterminate_pairs: list[list[str]] = []
+    for index, left in enumerate(rows):
+        for right in rows[index + 1 :]:
+            left_upper = left.get("simulator_upper")
+            right_upper = right.get("simulator_upper")
+            if isinstance(left_upper, int) and left_upper < right["simulator_lower"]:
+                ordered_pairs.append([left["variant"], right["variant"]])
+            elif isinstance(right_upper, int) and right_upper < left["simulator_lower"]:
+                ordered_pairs.append([right["variant"], left["variant"]])
+            else:
+                indeterminate_pairs.append([left["variant"], right["variant"]])
+    return {"ordered_pairs": ordered_pairs, "indeterminate_pairs": indeterminate_pairs}
+
+
 def _latent_projection(document: dict[str, Any]) -> dict[str, Any]:
     envelope = document.get("latent_envelope")
     if not isinstance(envelope, dict):
@@ -61,7 +112,7 @@ def _latent_projection(document: dict[str, Any]) -> dict[str, Any]:
 
 
 def summarize_selective_coverage(summary: dict[str, Any]) -> dict[str, Any]:
-    """Compute coverage and compression metrics from a fast-frontier summary."""
+    """Compute record coverage and execution-step reduction separately."""
     coverage = summary.get("coverage")
     if not isinstance(coverage, dict):
         raise ValueError("fast-frontier summary has no coverage object")
@@ -72,16 +123,36 @@ def summarize_selective_coverage(summary: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("fast-frontier coverage denominator does not balance")
     if coverage["candidate_records"] != coverage["summarized_records"] + coverage["reified_records"]:
         raise ValueError("fast-frontier candidate coverage does not balance")
+    exact_steps = summary.get("exact_execution_steps")
+    summarized_steps = summary.get("summarized_execution_steps")
+    if not isinstance(exact_steps, int) or exact_steps < 0:
+        exact_steps = None
+    if not isinstance(summarized_steps, int) or summarized_steps < 0:
+        summarized_steps = None
+    macro_dispatches = summary.get("macro_dispatches")
+    if not isinstance(macro_dispatches, int) or macro_dispatches < 0:
+        macro_dispatches = None
+    step_reduction = (
+        exact_steps / summarized_steps
+        if exact_steps is not None and summarized_steps not in (None, 0)
+        else None
+    )
     return {
         **coverage,
         "summarized_fraction": (
             coverage["summarized_records"] / coverage["trace_records"]
             if coverage["trace_records"] else 0.0
         ),
-        "compression_ratio": (
+        # This is a record statistic, not an execution compression claim.
+        "record_to_summary_ratio": (
             coverage["trace_records"] / coverage["summarized_records"]
             if coverage["summarized_records"] else None
         ),
+        "exact_execution_steps": exact_steps,
+        "summarized_execution_steps": summarized_steps,
+        "step_reduction": step_reduction,
+        "macro_dispatches": macro_dispatches,
+        "macro_execution_observed": macro_dispatches is not None and macro_dispatches > 0,
     }
 
 
@@ -99,14 +170,22 @@ def summarize_design_runs(
             {
                 "variant": name,
                 "native_terminal_modeled_event": _native_terminal(document),
+                "native_projection": _native_projection(document),
                 "runtime_ms": document.get("__evaluation_runtime_ms"),
                 "memory_bytes": document.get("__evaluation_memory_bytes"),
                 **projection,
             }
         )
-    native_invariant = all(row["native_terminal_modeled_event"] == detailed_terminal for row in rows)
+    detailed_projection = _native_projection(detailed)
+    native_projection_complete = bool(rows) and _native_projection_fields_present(detailed) and all(
+        _native_projection_fields_present(document)
+        for _, document in variants
+    )
+    native_invariant = native_projection_complete and all(
+        row["native_projection"] == detailed_projection for row in rows
+    )
     finite = [row for row in rows if isinstance(row["simulator_lower"], int)]
-    ranking = [row["variant"] for row in sorted(finite, key=lambda row: (row["simulator_lower"], row["variant"]))]
+    relations = _interval_relations(finite)
     selective_coverage = None
     if fast_frontier is not None:
         rows_fast = fast_frontier.get("fast_frontier")
@@ -114,21 +193,19 @@ def summarize_design_runs(
             raise ValueError("fast-frontier report has no launch summary")
         selective_coverage = summarize_selective_coverage(rows_fast[0].get("summary", {}))
     return {
-        "schema": "sm86_reification_design_evaluation_v1",
+        "schema": "sm86_reification_design_evaluation_v2",
         "classification": "model_local_service_intervention",
         "native_replay_terminal_invariant": native_invariant,
         "detailed_native_terminal_modeled_event": detailed_terminal,
-        "ranking_basis": "simulator_elapsed_interval_lower_bound",
-        "ranking": ranking,
+        "native_projection_complete": native_projection_complete,
+        "ranking_basis": "simulator_elapsed_interval_partial_order",
+        "ranking": relations["ordered_pairs"],
+        "ranking_relations": relations,
         "ranking_stability": {
             "native_terminal_invariant": native_invariant,
-            "model_lower_bound_monotone": all(
-                left["simulator_lower"] <= right["simulator_lower"]
-                for left, right in zip(
-                    sorted(finite, key=lambda row: row["variant"]),
-                    sorted(finite, key=lambda row: row["variant"])[1:],
-                )
-            ),
+            "declared_projection_invariant": native_invariant,
+            "model_lower_bound_ordered_pairs": relations["ordered_pairs"],
+            "indeterminate_pairs": relations["indeterminate_pairs"],
         },
         "variants": rows,
         "selective_coverage": selective_coverage,
@@ -136,9 +213,13 @@ def summarize_design_runs(
         "runtime_measurement": "wall_clock_child_process",
         "memory_measurement": "child_peak_rss_usr_bin_time_or_proc_status",
         "architectural_conclusion": (
-            "model_local_ranking_only_native_replay_unchanged"
-            if native_invariant
-            else "native_replay_changed_reify_or_investigate"
+            "native_projection_unknown_exact_replay_required"
+            if not native_projection_complete
+            else (
+                "model_local_partial_order_only_declared_native_projection_unchanged"
+                if native_invariant
+                else "native_replay_changed_reify_or_investigate"
+            )
         ),
     }
 
@@ -187,15 +268,19 @@ def _run(command: Sequence[str], timeout: float) -> dict[str, Any]:
     return document
 
 
-def _scaled_profile(base: dict[str, Any], scale: int) -> dict[str, Any]:
+def _scaled_profile(base: dict[str, Any], scale: int, mode: str = "throughput") -> dict[str, Any]:
     if scale <= 0:
         raise ValueError("service scale must be positive")
+    if mode not in {"throughput", "latency", "both"}:
+        raise ValueError("service scale mode must be throughput, latency, or both")
     profile = json.loads(json.dumps(base))
     for rate in profile.get("pools", {}).values():
-        rate["initiation_interval_cycles"] *= scale
-        rate["latency_lower_cycles"] *= scale
-        rate["latency_upper_cycles"] *= scale
-    profile["source"] = f"{profile.get('source', 'profile')}:scale_{scale}"
+        if mode in {"throughput", "both"}:
+            rate["initiation_interval_cycles"] *= scale
+        if mode in {"latency", "both"}:
+            rate["latency_lower_cycles"] *= scale
+            rate["latency_upper_cycles"] *= scale
+    profile["source"] = f"{profile.get('source', 'profile')}:{mode}_scale_{scale}"
     return profile
 
 
@@ -208,6 +293,7 @@ def main() -> int:
     parser.add_argument("--arch-card", type=Path, required=True)
     parser.add_argument("--pchase-card", type=Path, required=True)
     parser.add_argument("--scale", type=int, action="append", required=True)
+    parser.add_argument("--scale-mode", choices=("throughput", "latency", "both"), default="throughput")
     parser.add_argument("--fast-frontier-report", type=Path)
     parser.add_argument("--timeout", type=float, default=120.0)
     args = parser.parse_args()
@@ -226,10 +312,10 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="gpusim_design_profiles_") as directory:
         for scale in args.scale:
             profile_path = Path(directory) / f"scale_{scale}.json"
-            profile_path.write_text(json.dumps(_scaled_profile(base, scale)))
+            profile_path.write_text(json.dumps(_scaled_profile(base, scale, args.scale_mode)))
             variants.append(
                 (
-                    f"service_scale_{scale}",
+                    f"service_{args.scale_mode}_scale_{scale}",
                     _run(common + [
                         "--latent-envelope",
                         "--predictive-service-profile", str(profile_path),

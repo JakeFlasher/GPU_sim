@@ -21,12 +21,13 @@ pub use certificate::{
 };
 pub use dram::{DramBoundaryState, DramStateError};
 pub use latent::{
-    CacheCandidateSummary, CacheWitnessDomains, CandidateDomain, ClockDomain, EndpointDescriptor,
-    EventKey, EvidenceKind, FrontierBound, FrontierVector, LATENT_SCHEMA_VERSION, LatentFactors,
-    LatentModelError, LatentSummary, LatentWorld, LatentWorldSet, MechanismEnvelope, MustMay,
-    NcuObserverProjection, RESOURCE_DEMAND_SCHEMA_VERSION, ResourceDemandEnvelope,
-    ResourceDemandInterval, ResourceServiceProjection, ServiceComposition, ServiceCycleInterval,
-    ServiceOverlapMode, ServiceRate, ServiceRateProfile,
+    CacheCandidateSummary, CacheWitnessDomains, CandidateDomain, ClockDomain,
+    CompletionRequirement, CompletionRequirements, EndpointDescriptor, EventKey, EvidenceKind,
+    FrontierBound, FrontierVector, LATENT_SCHEMA_VERSION, LatentFactors, LatentModelError,
+    LatentSummary, LatentWorld, LatentWorldSet, MechanismEnvelope, MustMay, NcuObserverProjection,
+    RESOURCE_DEMAND_SCHEMA_VERSION, ResourceDemandEnvelope, ResourceDemandInterval,
+    ResourceServiceProjection, ServiceComposition, ServiceCycleInterval, ServiceOverlapMode,
+    ServiceRate, ServiceRateProfile,
 };
 pub use observation::{
     OBSERVATION_SCHEMA_VERSION, ObservationContract, ObservationContractError,

@@ -48,7 +48,48 @@ not closed.
   results, not calibration or selection features.
 - A witnessed single-warp descriptor region reduced 16 exact model steps to
   one summary step. Real memory-heavy traces remained exact/refused.
-- Full Rust workspace and focused Python suites pass.
+- Full Rust workspace and focused reification/evaluation Python suites pass;
+  the unrelated PTX subset compiler test still observes a pre-existing
+  `ptx_subset_compiler_alpha_v1` versus `...artifact_v1` binary/schema mismatch.
+
+## Second-round R1 hardening — 2026-10-01 (complete; R2 active)
+
+The second-round review found several concrete soundness holes rather than
+asking for more report volume. The active first stage now addresses those
+holes before any executable macro work:
+
+- unresolved/unclassified service demand produces an open upper, and optional
+  zero-demand pools contribute no startup latency to the lower bound;
+- explicit endpoint projections propagate every active lower-only completion
+  frontier instead of checking only typed/cache tails;
+- transform intervals separate event time from optional insertion-sequence
+  order, so an earlier timestamp inserted later is not rejected by a synthetic
+  monotonicity edge;
+- design/evaluation summaries compare the declared timing projection, report
+  finite interval coverage separately from open refusal, and expose partial
+  order ties rather than lexical rankings;
+- prediction/observation documents use a v2 target contract and reject metric,
+  endpoint, clock, cache, launch, repetition, GPU, or family-split mismatches;
+- record coverage is named separately from exact/summarized execution-step
+  reduction; no record ratio is presented as compression.
+
+These changes are still model/evaluation evidence. R2 is now complete at the
+model-executor level; native `SmCore` remains untouched and no naming change is
+treated as native completion.
+
+## Second-round R2 execution seam — 2026-10-01 (complete; R3 active)
+
+The descriptor analyzer now exposes an explicit model executor rather than only
+returning report telemetry. `ModelExecutor::execute_macro` derives a
+nonidentity scalar `MacroTransition` from the closed-form interval certificate,
+installs its issue/completion effects and pending completion vector, and then
+accepts a detailed continuation. The model-local probe observes one macro
+dispatch for the 16-instruction witnessed region; a pending predecessor forces
+`IncomingPipelineWork` fallback. Native `SmCore` still does not consume this
+transition, so no native compression claim follows.
+The fast-frontier output carries a `macro_dispatches` counter and the schema
+requires it. R3 is now active: independently derive eligibility witnesses and
+close or refuse global order and same-cycle effects.
 
 ## Second-round review questions
 

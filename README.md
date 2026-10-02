@@ -31,6 +31,7 @@ decoder.
 - [Documentation map](docs/README.md)
 - [Review/refactor history](docs/REVIEW_HISTORY.md)
 - [Active reification/refactor plan](plans/sm86_reification_refactor_20261001.md)
+- [Second-round refinement program](plans/second_round_refinement_20261001.md)
 
 From the repository root:
 
