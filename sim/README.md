@@ -57,4 +57,6 @@ custom inputs see [`arch_profiles/programs/README.md`](../arch_profiles/programs
 Current limitations, the predictive replacement contract, and the compact continuation record live in
 [`docs/STATUS.md`](../docs/STATUS.md), [`docs/PREDICTIVE_CLOSURE.md`](../docs/PREDICTIVE_CLOSURE.md),
 and [`docs/PROJECT_MEMORY.md`](../docs/PROJECT_MEMORY.md); dated reports are indexed by
-the active docs map.
+the active docs map. The third-round corpus result and claim boundary are in
+[`docs/review_round3_20261002/README.md`](../docs/review_round3_20261002/README.md)
+and [`plans/third_round_rebuttal_20261002.md`](../plans/third_round_rebuttal_20261002.md).

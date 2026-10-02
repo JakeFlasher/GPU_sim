@@ -16,7 +16,15 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from prediction_contract import compare_target_contracts, validate_target_contract
+from prediction_contract import (
+    compare_target_contracts,
+    validate_observation_document,
+    validate_observation_row,
+    validate_observation_workloads,
+    validate_prediction_row,
+    validate_split_roster,
+    validate_target_contract,
+)
 
 
 SPLITS = {"calibration", "development", "held_out"}
@@ -70,43 +78,23 @@ def evaluate_prediction_splits(predictions: dict[str, Any], observations: dict[s
         raise ValueError("prediction and observation rows must be arrays")
     if not prediction_rows:
         raise ValueError("prediction rows must be nonempty")
-    observed_forbidden = {"ncu", "observed", "observation", "target", "target_value"}
+    validate_split_roster(prediction_rows, "prediction")
     predictions_by_key: dict[tuple[str, str], dict[str, Any]] = {}
-    workload_families: dict[str, str] = {}
-    family_splits: dict[str, str] = {}
     for index, row in enumerate(prediction_rows):
-        if not isinstance(row, dict):
-            raise ValueError(f"prediction row {index} must be an object")
-        if observed_forbidden.intersection(row):
-            raise ValueError("prediction rows must not contain observed target fields")
+        validate_prediction_row(row, index)
         key = row.get("workload")
         split = row.get("split")
-        if not isinstance(key, str) or not key or split not in SPLITS:
-            raise ValueError(f"prediction row {index} needs workload and split")
-        family = row.get("family")
-        if not isinstance(family, str) or not family.strip():
-            raise ValueError(f"prediction row {index} needs a nonempty family")
-        prior_family = workload_families.setdefault(key, family)
-        if prior_family != family:
-            raise ValueError(f"workload {key!r} appears with multiple families")
-        prior_split = family_splits.setdefault(family, split)
-        if prior_split != split:
-            raise ValueError(f"family {family!r} crosses prediction splits")
         intervention = row.get("intervention", "default")
-        if not isinstance(intervention, str) or not intervention:
-            raise ValueError(f"prediction row {index}.intervention must be nonempty")
         identity = (key, intervention)
         if identity in predictions_by_key:
             raise ValueError(f"duplicate prediction workload/intervention {identity!r}")
         predictions_by_key[identity] = row
+    validate_observation_document(observations)
+    validate_observation_workloads(observation_rows, {key for key, _ in predictions_by_key})
     observations_by_key: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for index, row in enumerate(observation_rows):
-        if not isinstance(row, dict) or not isinstance(row.get("workload"), str):
-            raise ValueError(f"observation row {index} needs workload")
+        validate_observation_row(row, index, observation_contract)
         key = row["workload"]
-        for field in ("metric", "endpoint", "clock_domain", "hardware"):
-            if field in row and row[field] != observation_contract[field]:
-                raise ValueError(f"observation row {index}.{field} disagrees with target_contract")
         observations_by_key[key].append({
             "value": _finite(row.get("value"), f"observation row {index}.value"),
             "metric": row.get("metric", observation_contract["metric"]),
@@ -145,6 +133,7 @@ def evaluate_prediction_splits(predictions: dict[str, Any], observations: dict[s
         observations_for_workload = observations_by_key[key]
         observation = observations_for_workload[0]
         observed = statistics.median(row["value"] for row in observations_for_workload)
+        finite_interval = upper is not None
         joined.append({
             "workload": key,
             "intervention": intervention,
@@ -160,7 +149,16 @@ def evaluate_prediction_splits(predictions: dict[str, Any], observations: dict[s
             "observation_endpoint": observation["endpoint"],
             "observation_clock_domain": observation["clock_domain"],
             "observation_hardware": observation["hardware"],
-            "covered": lower <= observed and (upper is None or observed <= upper),
+            # Coverage is defined only for finite intervals.  For an open
+            # upper, retain a separate lower-bound consistency diagnostic so
+            # it cannot be mistaken for calibrated interval coverage.
+            "interval_stratum": "finite_interval" if finite_interval else "open_interval",
+            "covered": (
+                lower <= observed <= upper
+                if finite_interval
+                else None
+            ),
+            "lower_bound_consistent": lower <= observed,
             "width": upper - lower if upper is not None else None,
             "ape_pct": abs(point - observed) / abs(observed) * 100 if observed != 0 else None,
             "runtime_ms": row.get("runtime_ms"),
@@ -199,6 +197,11 @@ def evaluate_prediction_splits(predictions: dict[str, Any], observations: dict[s
             "finite_interval_rows": len(finite),
             "open_interval_rows": len(open_rows),
             "open_interval_rate": len(open_rows) / len(predicted) if predicted else None,
+            "open_lower_bound_consistency": (
+                sum(row["lower_bound_consistent"] for row in open_rows) / len(open_rows)
+                if open_rows
+                else None
+            ),
             "mean_interval_width": statistics.mean(widths) if widths else None,
             "mean_ape_pct": statistics.mean(errors) if errors else None,
             "mean_runtime_ms": statistics.mean([row["runtime_ms"] for row in predicted if isinstance(row.get("runtime_ms"), (int, float))]) if any(isinstance(row.get("runtime_ms"), (int, float)) for row in predicted) else None,
@@ -209,7 +212,12 @@ def evaluate_prediction_splits(predictions: dict[str, Any], observations: dict[s
     return {
         "schema": "reification_prediction_evaluation_v2",
         "target_join": "independent_ncu_after_prediction",
+        "prediction_stage": "pre_observation_document_checked_before_join",
         "target_contract": prediction_contract,
+        "prediction_row_count": len(prediction_rows),
+        "observation_row_count": len(observation_rows),
+        "joined_row_count": len(joined),
+        "workload_count": len({key for key, _ in predictions_by_key}),
         "split_reports": split_reports,
         "joined_rows": joined,
         "selection_used_observation_error": False,

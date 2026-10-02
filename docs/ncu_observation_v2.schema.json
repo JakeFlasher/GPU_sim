@@ -39,7 +39,7 @@
     },
     "row": {
       "type": "object",
-      "required": ["workload", "value"],
+      "required": ["workload", "value", "metric", "endpoint", "clock_domain", "hardware"],
       "properties": {
         "workload": {"type": "string", "minLength": 1},
         "value": {"type": "number"},

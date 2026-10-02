@@ -1,7 +1,6 @@
 # Second-round refinement and reification program
 
-**Revision basis:** second-round aggregated review at
-`research_audit_20261001/second_round_aggregated_review_20261001.md`,
+**Revision basis:** second-round aggregated review supplied for this revision,
 against commit `ca3867b0`.
 
 **Purpose:** turn the review into a staged research and implementation program
@@ -272,7 +271,7 @@ result showing why the current typed boundary cannot close it.
 - The native boundary report distinguishes preserved, exact-fallback, and
   incomplete cases without treating fallback as compression.
 
-## R6 — independent evaluation and corpus expansion
+## R6 — independent evaluation and corpus expansion (complete)
 
 ### Goal
 
@@ -299,7 +298,41 @@ identity-checked corpus.
 - Compression is a real execution-step/runtime measurement when claimed; refused
   regions remain in the denominator.
 
-## R7 — robust conclusion and rebuttal framing
+### R6 implementation evidence (complete; native compression remains refused)
+
+- `docs/sm86_reification_corpus_v1_20261002.json` expands the staged corpus to
+  15 retained SM86 workloads across six operation families. Family assignment
+  is checked before execution: normalization is calibration, tensor GEMM is
+  development, and attention/convolution/elementwise/memory embedding are
+  held out; no family crosses a split.
+- `tools/run_prediction_manifest.py` now emits a pre-observation document from
+  the declared observer projection (`predicted_lower_cycles`/`predicted_upper_cycles`),
+  not the simulator-only lower-bound field. It records that the execution path
+  is detailed native replay plus a model-local latent sidecar and that no macro
+  dispatch or step reduction was observed.
+- `tools/build_ncu_observation_set.py` reads only the two retained NCU CSV
+  repetitions per workload and materializes a separate post-prediction
+  observation document. `tools/evaluate_prediction_splits.py` joins only after
+  prediction, checks row-level metric/endpoint/clock/hardware identity, rejects
+  unknown workloads, and reports finite, open, and refused strata separately.
+- The 15-row run produced 15 open intervals and no finite native interval:
+  finite coverage is not applicable, open lower-bound consistency is 0.667 for
+  calibration, 1.000 for development, and 0.750 for held-out, and mean lower
+  point APE is 14.640%, 28.232%, and 25.938%, respectively. These are
+  model-distance diagnostics, not calibrated interval or silicon accuracy.
+- The complete pre-NCU predictions, post-NCU observations, and joined report are
+  retained under `docs/review_round3_20261002/README.md` and its JSON files.
+  The report explicitly records zero native macro dispatches, null step
+  reduction, and unresolved retirement tails as the correct negative result.
+- The checked-in service profile is now accepted by a freshly rebuilt release
+  binary; the prior rejection of its declared `unmodeled_dimensions` field was
+  a stale-binary/configuration mismatch, not a model result.
+
+R6 closes the independent-evaluation and evidence-hygiene seam. It does **not**
+close the front-end-enabled native macro boundary; real launches remain exact
+fallback and no runtime/compression benefit is claimed.
+
+## R7 — robust conclusion and rebuttal framing (complete)
 
 ### Goal
 
@@ -326,6 +359,27 @@ GPU overlap models, skipping refinement, or native trace-driven simulators.
   speedup.
 - Remaining blockers are explicit and do not prevent useful model-local use.
 
+### R7 implementation evidence (complete; third-round revision)
+
+- `plans/third_round_rebuttal_20261002.md` maps every ranked second-round
+  finding to an implementation response, evidence level, limitation, and
+  falsifier. It explicitly withdraws native scheduler, silicon accuracy,
+  cache-causality, and native-speedup claims.
+- The claim map distinguishes descriptor equivalence (level 1), executable
+  model transition equivalence (level 2), the closed native issue-model seam
+  (level 3), and the identity-checked post-prediction NCU comparison (level 4).
+- The R6 15-workload result is reported as a negative/diagnostic outcome:
+  all native uppers are open, finite coverage is not applicable, and no native
+  macro dispatch or runtime/step benefit is claimed.
+- `README.md`, `docs/README.md`, `docs/STATUS.md`,
+  `docs/PROJECT_MEMORY.md`, `docs/PREDICTIVE_CLOSURE.md`,
+  `docs/REVIEW_HISTORY.md`, the predictive config, and active schemas now use
+  the same scope and terminology. Stale “three-family current evidence”,
+  “R6 active”, and “open intervals are covered accuracy” wording is removed.
+- The repository remains executable without any authority, provenance,
+  approval, freeze, receipt, or audit workflow artifact. The pre-existing local
+  research corpus remains untracked and untouched.
+
 ## Current stage ledger
 
 | Stage | Status | Evidence / next action |
@@ -335,8 +389,8 @@ GPU overlap models, skipping refinement, or native trace-driven simulators.
 | R3 | **complete (2026-10-01)** | Eligibility requires a separate fact-complete witness with an allowed origin; stale/producer-premise facts reify, and multi-warp/same-cycle order remains explicit refusal or engine-order checked. |
 | R4 | **complete (2026-10-01)** | Service roles, serial queue/frontier semantics, grouped assignment lower/upper envelopes, unknown/zero-demand handling, occupancy/contention labeling, and throughput interval endpoints are implemented and tested. Native metrics remain marginal where no per-record route witness exists. |
 | R5 | **complete (2026-10-02)** | A closed two-instruction native `SmCore` scalar region derives a typed entry/exit, validates effects/pending state, consumes typed-macro/exact-replay decisions, matches detailed continuation state, and falls back on every unsupported boundary. Full front-end-enabled SM86 traces remain exact fallback. |
-| R6 | **active** | Expand native-preserved regions and evaluate independent corpus/observer behavior without weakening fallback. |
-| R7 | queued | Final claim discipline after evidence is complete. |
+| R6 | **complete (2026-10-02)** | 15-workload, six-family, identity-checked pre-NCU/post-NCU evaluation is materialized; all native rows remain open/exact fallback and no compression claim is made. |
+| R7 | **complete (2026-10-02)** | Claim map, falsifiers, novelty boundary, negative R6 result, and repository-wide terminology/docs/config synchronization are committed in the third-round rebuttal. |
 
 ## Continuity rules
 
@@ -485,9 +539,10 @@ GPU overlap models, skipping refinement, or native trace-driven simulators.
   the warp/effect cardinality and interval before dispatching the macro; an
   `ExactReplay` result is a no-op fallback. The full system writer still
   selects exact replay for the real front-end-enabled probe.
-- R5 therefore has a consumed closed native issue-model seam and a verified
-  full native fallback path, but is not complete until a front-end-enabled
-  native region selects the typed-macro branch.
+- R5 is complete for the closed native issue-model seam. A
+  front-end-enabled full SM86 region still selects exact replay because its
+  future-relevant front-end/cache state is not closed; that is the declared
+  boundary for R6/R7, not a hidden native-compression result.
 - The typed scalar rule now derives first issue from the entry warp readiness
   and can consume a closed front-end instruction-buffer prefix; it still
   refuses absent/noncontiguous buffers and all open pipeline/cache state.

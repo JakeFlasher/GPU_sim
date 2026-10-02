@@ -23,11 +23,13 @@ duration requires its own unit/endpoint contract. Keep issue, modeled-event,
 completion, launch-envelope, and typed-tail values separate. Do not choose a
 frontier, route, or coefficient using the same workload's scored NCU result.
 
-The opt-in service projection now composes its abstract service interval after
-the modeled-event frontier before constructing the observer candidate. An
-active unknown completion tail propagates an unknown upper endpoint; finite
-padding cannot manufacture a bound. This remains model-local composition, not
-native-state refinement or a hardware endpoint identity.
+The opt-in path constructs an explicit abstract service composition and queue
+frontier after the modeled-event frontier. The live full-trace role is
+`independent_post_replay`, so that service envelope is not silently fed into
+the native observer endpoint; residual or replacement timing must be selected
+explicitly. An active unknown completion tail propagates an unknown upper
+endpoint; finite padding cannot manufacture a bound. This remains model-local
+composition, not native-state refinement or a hardware endpoint identity.
 
 The current full-trace demand path is explicitly labeled
 `independent_post_replay`: its service/queue envelope is reported separately
@@ -47,10 +49,13 @@ not silently change the fitted rate profile. Independent throughput probes
 retain lower/upper initiation-interval endpoints so service uncertainty widens
 an upper bound instead of collapsing to one median slope.
 
-The staged Phase 6 evaluation uses three current SM86 families, joins NCU only
-after prediction, and keeps open upper bounds explicit. Its conclusion is
-model-local service ranking plus exact fallback for native memory-heavy
-regions; it does not establish a silicon design ranking.
+The R6 evaluation uses 15 retained SM86 workloads across six operation families
+with a checked family-held-out split, joins NCU only after prediction, and keeps
+open upper bounds explicit. All real native rows currently remain detailed
+replay plus a latent sidecar: the observer projection is a model-local
+candidate, not a hardware endpoint identity, and no native compression/runtime
+benefit is claimed. The result is deliberately negative where the boundary is
+not closed.
 
 Second-round R1 adds an explicit active/inactive completion requirement witness:
 an entirely unknown field is inactive only when it is outside the declared
@@ -83,10 +88,13 @@ per-family failures, and end-to-end cost. Repeated use of a development cohort
 is not a new independent holdout.
 
 The checked-in service profile remains an example, not a silicon-calibrated
-parameter set. The v2 fitter and three-family staged evaluation use independent
-probe inputs and post-prediction NCU joins; finite/open intervals remain model
-outputs, not guaranteed confidence bounds. Broader workload-family accuracy,
-native-preserved compression, and hardware design ranking remain unproven.
+parameter set. The v2 fitter and six-family staged evaluation use independent
+probe inputs and post-prediction NCU joins; the current native rows are all
+open intervals, so finite interval coverage is not applicable. Open-tail
+consistency and lower-point APE are diagnostics, not confidence bounds or
+hardware accuracy. Native-preserved compression and hardware design ranking
+remain unproven. See the [R6 corpus result](review_round3_20261002/README.md)
+and the [third-round rebuttal](../plans/third_round_rebuttal_20261002.md).
 See the [active second-round refinement program](../plans/second_round_refinement_20261001.md),
 the [first-round implementation history](../plans/sm86_reification_refactor_20261001.md),
 and [configuration](archprofile.md) rather than older report task lists.

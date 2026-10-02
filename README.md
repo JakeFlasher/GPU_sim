@@ -32,6 +32,8 @@ decoder.
 - [Review/refactor history](docs/REVIEW_HISTORY.md)
 - [Active reification/refactor plan](plans/sm86_reification_refactor_20261001.md)
 - [Second-round refinement program](plans/second_round_refinement_20261001.md)
+- [Third-round rebuttal and claim map](plans/third_round_rebuttal_20261002.md)
+- [R6 corpus/observer result](docs/review_round3_20261002/README.md)
 
 From the repository root:
 
@@ -50,6 +52,9 @@ probes have different contracts; see `docs/STATUS.md` before comparing them.
 Unmatched shapes in the projection receive a documented candidate fallback and
 interval rather than an empty row, but no tool can guarantee accuracy for every
 future workload without a defined distribution and independent observations.
+The current native front-end path remains exact fallback; the closed native
+issue-model seam and model-only macro probe are not native runtime speedup
+claims.
 
 The retained published Accel-Sim manifest
 (`docs/accelsim_literature_lower_bound_manifest_20260928.json`) is a separate

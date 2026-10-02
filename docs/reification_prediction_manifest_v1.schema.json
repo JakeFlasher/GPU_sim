@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/gpusim/reification_prediction_manifest_v1.schema.json",
+  "title": "Pre-observation reification prediction manifest v1",
+  "type": "object",
+  "required": ["schema", "target_contract", "rows"],
+  "properties": {
+    "schema": {"const": "reification_prediction_manifest_v1"},
+    "target_contract": {"$ref": "#/$defs/target_contract"},
+    "rows": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/row"}}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "hardware": {
+      "type": "object",
+      "required": ["gpu_uuid", "compute_capability", "sm_clock_mhz", "device_index"],
+      "properties": {
+        "gpu_uuid": {"type": "string", "minLength": 1},
+        "compute_capability": {"type": "string", "minLength": 1},
+        "sm_clock_mhz": {"type": "integer", "minimum": 1},
+        "device_index": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "target_contract": {
+      "type": "object",
+      "required": ["metric", "endpoint", "clock_domain", "cache_policy", "launch_identity", "repetitions", "hardware"],
+      "properties": {
+        "metric": {"const": "gpc__cycles_elapsed.max"},
+        "endpoint": {"type": "string", "minLength": 1},
+        "clock_domain": {"type": "string", "minLength": 1},
+        "cache_policy": {"type": "string", "minLength": 1},
+        "launch_identity": {"type": "string", "minLength": 1},
+        "repetitions": {"type": "integer", "minimum": 1},
+        "hardware": {"$ref": "#/$defs/hardware"}
+      },
+      "additionalProperties": false
+    },
+    "row": {
+      "type": "object",
+      "required": ["workload", "family", "split", "trace", "control", "arch_card", "pchase_card"],
+      "properties": {
+        "workload": {"type": "string", "minLength": 1},
+        "family": {"type": "string", "minLength": 1},
+        "split": {"enum": ["calibration", "development", "held_out"]},
+        "intervention": {"type": "string", "minLength": 1},
+        "trace": {"type": "string", "minLength": 1},
+        "control": {"type": "string", "minLength": 1},
+        "arch_card": {"type": "string", "minLength": 1},
+        "pchase_card": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    }
+  }
+}

@@ -1,0 +1,101 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/gpusim/reification_prediction_evaluation_v2.schema.json",
+  "title": "Post-prediction reification evaluation join v2",
+  "type": "object",
+  "required": ["schema", "target_join", "prediction_stage", "target_contract", "prediction_row_count", "observation_row_count", "joined_row_count", "workload_count", "split_reports", "joined_rows", "selection_used_observation_error"],
+  "properties": {
+    "schema": {"const": "reification_prediction_evaluation_v2"},
+    "target_join": {"const": "independent_ncu_after_prediction"},
+    "prediction_stage": {"const": "pre_observation_document_checked_before_join"},
+    "target_contract": {"$ref": "#/$defs/target_contract"},
+    "prediction_row_count": {"type": "integer", "minimum": 1},
+    "observation_row_count": {"type": "integer", "minimum": 0},
+    "joined_row_count": {"type": "integer", "minimum": 0},
+    "workload_count": {"type": "integer", "minimum": 1},
+    "selection_used_observation_error": {"const": false},
+    "split_reports": {
+      "type": "object",
+      "required": ["calibration", "development", "held_out"],
+      "properties": {
+        "calibration": {"$ref": "#/$defs/split_report"},
+        "development": {"$ref": "#/$defs/split_report"},
+        "held_out": {"$ref": "#/$defs/split_report"}
+      },
+      "additionalProperties": false
+    },
+    "joined_rows": {"type": "array", "items": {"$ref": "#/$defs/joined_row"}}
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "hardware": {
+      "type": "object",
+      "required": ["gpu_uuid", "compute_capability", "sm_clock_mhz", "device_index"],
+      "properties": {
+        "gpu_uuid": {"type": "string", "minLength": 1},
+        "compute_capability": {"type": "string", "minLength": 1},
+        "sm_clock_mhz": {"type": "integer", "minimum": 1},
+        "device_index": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "target_contract": {
+      "type": "object",
+      "required": ["metric", "endpoint", "clock_domain", "cache_policy", "launch_identity", "repetitions", "hardware"],
+      "properties": {
+        "metric": {"const": "gpc__cycles_elapsed.max"},
+        "endpoint": {"type": "string", "minLength": 1},
+        "clock_domain": {"type": "string", "minLength": 1},
+        "cache_policy": {"type": "string", "minLength": 1},
+        "launch_identity": {"type": "string", "minLength": 1},
+        "repetitions": {"type": "integer", "minimum": 1},
+        "hardware": {"$ref": "#/$defs/hardware"}
+      },
+      "additionalProperties": false
+    },
+    "nullable_number": {"type": ["number", "null"]},
+    "split_report": {
+      "type": "object",
+      "required": ["rows", "predicted", "refused", "refusal_rate", "finite_interval_coverage", "finite_interval_rows", "open_interval_rows", "open_interval_rate", "open_lower_bound_consistency", "mean_interval_width", "mean_ape_pct", "variant_rankings"],
+      "properties": {
+        "rows": {"type": "integer", "minimum": 0},
+        "predicted": {"type": "integer", "minimum": 0},
+        "refused": {"type": "integer", "minimum": 0},
+        "refusal_rate": {"$ref": "#/$defs/nullable_number"},
+        "finite_interval_coverage": {"$ref": "#/$defs/nullable_number"},
+        "interval_coverage": {"$ref": "#/$defs/nullable_number"},
+        "finite_interval_rows": {"type": "integer", "minimum": 0},
+        "open_interval_rows": {"type": "integer", "minimum": 0},
+        "open_interval_rate": {"$ref": "#/$defs/nullable_number"},
+        "open_lower_bound_consistency": {"$ref": "#/$defs/nullable_number"},
+        "mean_interval_width": {"$ref": "#/$defs/nullable_number"},
+        "mean_ape_pct": {"$ref": "#/$defs/nullable_number"},
+        "mean_runtime_ms": {"$ref": "#/$defs/nullable_number"},
+        "mean_memory_bytes": {"$ref": "#/$defs/nullable_number"},
+        "mean_step_reduction": {"$ref": "#/$defs/nullable_number"},
+        "variant_rankings": {"type": "object"}
+      },
+      "additionalProperties": false
+    },
+    "joined_row": {
+      "type": "object",
+      "required": ["workload", "intervention", "split", "status"],
+      "properties": {
+        "workload": {"type": "string", "minLength": 1},
+        "intervention": {"type": "string", "minLength": 1},
+        "split": {"enum": ["calibration", "development", "held_out"]},
+        "status": {"enum": ["predicted", "refused"]},
+        "point": {"$ref": "#/$defs/nullable_number"},
+        "lower": {"$ref": "#/$defs/nullable_number"},
+        "upper": {"$ref": "#/$defs/nullable_number"},
+        "observed": {"$ref": "#/$defs/nullable_number"},
+        "covered": {"type": ["boolean", "null"]},
+        "lower_bound_consistent": {"type": "boolean"},
+        "interval_stratum": {"enum": ["finite_interval", "open_interval"]},
+        "width": {"$ref": "#/$defs/nullable_number"},
+        "ape_pct": {"$ref": "#/$defs/nullable_number"}
+      },
+      "additionalProperties": true
+    }
+  }
+}

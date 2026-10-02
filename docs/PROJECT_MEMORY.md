@@ -1,6 +1,6 @@
 # Continuation memory
 
-Updated 2026-10-01. Start here, then [STATUS](STATUS.md); read only the
+Updated 2026-10-02. Start here, then [STATUS](STATUS.md); read only the
 contract/source needed for the task.
 
 ## Research scope
@@ -37,9 +37,10 @@ from profiler measurements; black-box models are assumptions, not observations.
   comparator. The opt-in SM86 reference trace records exact fallback when a
   macro does not provide complete typed state; a matching descriptor recurrence
   alone is not a native certificate.
-- The v2 independent-probe fitter and three-family calibration/development/
-  held-out NCU join now run post-prediction; broader corpus coverage and native
-  preserved compression remain unproven.
+- The v2 independent-probe fitter and 15-workload/six-family
+  calibration/development/held-out NCU join now run post-prediction. All real
+  native rows currently have open upper bounds; finite coverage, native
+  preserved compression, and hardware accuracy remain unproven.
 - Second-round R1 now uses v2 prediction/observation target contracts,
   rejects family-crossing splits, separates finite interval coverage from open
   refusal, and reports execution-step reduction separately from record
@@ -59,8 +60,8 @@ from profiler measurements; black-box models are assumptions, not observations.
   entry/exit with detailed replay, and resume a detailed suffix. R5 also
   captures native reference pre/post typed boundaries and detailed issue
   effects. The pure-scalar SM86 probe has a complete pre/post pair with two
-  effects; the opt-in independently derived scalar transition reifies on the
-  first effect mismatch (expected 285, observed 568) rather than preserving.
+  effects; the strict independently derived scalar transition rejects the
+  front-end state as not closed and therefore preserves exact fallback.
 - The reference `SmCore` issue actor now consumes the comparator-selected
   typed-macro/exact-replay path; a native issue-model test compares macro entry,
   exit, and detailed continuation state. The real SM86 reference probe still
@@ -76,6 +77,14 @@ from profiler measurements; black-box models are assumptions, not observations.
   producer supplies it; cross-warp order, fences, generations, owner/read-from,
   and completion remain unknown and unresolved cache history widens the
   separate cache frontier rather than adding a bottleneck claim.
+- R6 is complete: `docs/sm86_reification_corpus_v1_20261002.json` defines a
+  15-workload, six-family SM86 corpus with no family crossing; prediction,
+  observation, and join artifacts are retained under
+  `docs/review_round3_20261002/`. The pre-observation output uses the declared
+  observer projection, records detailed replay plus a latent sidecar, and
+  reports zero native macro dispatches/step reduction. The post-prediction join
+  enforces row-level metric/endpoint/clock/hardware identity and reports open
+  intervals separately from finite coverage.
 
 ## Next useful work
 
@@ -86,8 +95,8 @@ The active second-round program is
 with **R1 semantic closure and evidence hygiene complete**, **R2 executable
 macro transition seam complete**, and **R3 independent witness/order closure
 complete**, **R4 service/queue semantics complete**, **R5 native state
-refinement complete for the closed issue-model seam**, and **R6 corpus/observer
-evaluation active**. R1 repaired unknown/zero-demand service
+refinement complete for the closed issue-model seam**, and **R6
+corpus/observer evaluation complete**. R1 repaired unknown/zero-demand service
 arithmetic, explicit-endpoint propagation, event ordering, compression
 vocabulary, and split/NCU identity checks. R2 made a nonidentity macro
 decision operational and resumes detailed replay; that model-local seam now
@@ -97,7 +106,10 @@ R4 now separates service roles and queue/assignment uncertainty. R5 validates
 a consumed closed native issue-model boundary; full front-end-enabled traces
 still record exact-replay plans. Current rankings, open
 intervals, and descriptor/macro probe remain negative/diagnostic evidence and
-black-box internals are not execution prerequisites.
+black-box internals are not execution prerequisites. R7 rebuttal/
+claim-discipline is complete; use
+[`third_round_rebuttal_20261002.md`](../plans/third_round_rebuttal_20261002.md)
+for the evidence map and remaining falsifiers.
 
 ## Retained evidence
 

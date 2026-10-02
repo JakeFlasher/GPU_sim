@@ -1,10 +1,13 @@
 # SM86 state-complete selective reification refactor
 
-Updated 2026-10-01 from the supplied review findings. This is an implementation
-plan, not an execution gate or authority record. It replaces the misleading
-use of “causal” for descriptor self-equivalence with a staged, evidence-backed
-reification contract. Native replay remains the detailed fallback; unknown
-hardware internals remain black-box model variables.
+Updated 2026-10-02 from the supplied review findings. This is the retained
+first-round history, not the current execution plan, and it is not an execution
+gate or authority record. It replaces the misleading use of “causal” for
+descriptor self-equivalence with a staged, evidence-backed reification
+contract. Native replay remains the detailed fallback; unknown hardware
+internals remain black-box model variables. The superseding second-round/R7
+status is in [`second_round_refinement_20261001.md`](second_round_refinement_20261001.md)
+and [`third_round_rebuttal_20261002.md`](third_round_rebuttal_20261002.md).
 
 **Phase 1 status (2026-10-01): complete.** The model-local scope is now
 documented, abstract service demand composes into an opt-in service frontier,
@@ -50,9 +53,10 @@ admission/service composition makes serial versus parallel overlap explicit.
 The v2 fitter requires distinct dependent-latency, independent-throughput,
 queue-capacity, occupancy, and contention modes; it refuses an aggregate-only
 pool and leaves occupancy/contention unmodeled rather than inventing a hidden
-parameter. The current observer path uses the declared serial composition and
-unknown-tail propagation; a separate probe-only holdout scorer covers the
-identifiable modes and reports occupancy/contention as unmodeled.
+parameter. The current full-trace observer path uses the explicit
+`independent_post_replay` role and unknown-tail propagation; residual or
+replacement timing is not implicit. A separate probe-only holdout scorer
+covers the identifiable modes and reports occupancy/contention as unmodeled.
 
 **Phase 5 status (2026-10-01): complete for the staged corpus.**
 `CacheCandidateSummary` now carries separate temporal-order, fence-scope, and
@@ -65,8 +69,9 @@ constructor without promoting them to physical coherence claims. A separate
 cache-history frontier removes a finite upper endpoint for unresolved
 cross-SM history while adding no positive delay or coherence-bottleneck claim.
 
-**Phase 6 status (2026-10-01): complete for the current staged corpus; result
-is explicitly negative about hardware conclusions.** `tools/evaluate_reification_design.py`
+**Phase 6 status (2026-10-01): complete for the first-round staged corpus;
+superseded by R6/R7, with hardware conclusions explicitly negative.**
+`tools/evaluate_reification_design.py`
 compares detailed replay with service-profile variants, checks native terminal
 invariance, ranks only the declared simulator elapsed lower bound, and reports
 runtime/RSS. The descriptor probe reports the complementary model-local result:
@@ -127,7 +132,7 @@ difference between dense and event replay on the retained canary.
 
 The defensible contribution is:
 
-> Unknown-preserving, state-complete selective compression of GPU trace regions,
+> Unknown-preserving, state-complete selective reification of GPU trace regions,
 > with exact fallback whenever the boundary state, event order, completion
 > effects, or observer endpoint is not closed.
 
@@ -138,15 +143,17 @@ hardware-causal certificate.
 
 ## Contracts and vocabulary
 
-Keep three evidence levels separate:
+Keep four evidence levels separate:
 
-1. **Model-local summary** — an independently coded recurrence and its compact
-   macro-transition agree on the supplied descriptor model.
-2. **Native state refinement** — a macro-transition preserves a declared
-   projection of `SmCore`/system boundary state at region entry and exit, with
-   all future-relevant fields represented or explicitly refused.
-3. **Hardware comparison** — native replay or a reified model is compared with
-   independent NCU measurements. This is not implied by (1) or (2).
+1. **Descriptor equivalence** — an independently coded recurrence and its compact
+  macro-transition agree on the supplied descriptor model.
+2. **Model transition equivalence** — an executable macro emits declared
+   effects/tokens and resumes detailed model execution with the same state.
+3. **Native state refinement** — a macro-transition preserves a declared
+  projection of `SmCore`/system boundary state at region entry and exit, with
+  all future-relevant fields represented or explicitly refused.
+4. **Hardware comparison** — native replay or a reified model is compared with
+  independent NCU measurements. This is not implied by (1) or (2).
 
 Use `reification`/`summary` for the implementation surface. Reserve `causal`
 for relations derived from an independently observed native order or state
@@ -156,7 +163,7 @@ transition. Keep the detailed native replay as the exact fallback.
 
 ### Deliverables
 
-- Add this plan and update active documentation to state the three evidence
+- Add this plan and update active documentation to state the four evidence
   levels above.
 - Relabel the current causal-frontier report/contract as model-local
   descriptor equivalence; preserve the existing binary/API compatibility where
@@ -279,7 +286,8 @@ transition. Keep the detailed native replay as the exact fallback.
 - Missing ownership/read-from state remains explicitly unknown.
 - Traffic and causal-order outputs are tested separately.
 
-## Phase 6 — design-space conclusion and independent evaluation
+## Phase 6 — design-space conclusion and independent evaluation (historical;
+superseded by second-round R6/R7)
 
 ### Deliverables
 
@@ -290,8 +298,10 @@ transition. Keep the detailed native replay as the exact fallback.
   calibrated intervals.
 - Calibrate on independent probes, develop on separate workload families, and
   score untouched families with NCU joined only after prediction.
-- Report error distributions, interval coverage/width, OOD/refusal behavior,
-  compression ratio, replay/model runtime, and memory cost together.
+- Report error distributions, finite/open/refusal strata, OOD behavior,
+  execution-step counters, replay/model runtime, and memory cost together;
+  never call a record ratio or detailed replay runtime a native compression
+  result.
 
 ### Completion evidence
 
@@ -303,6 +313,11 @@ transition. Keep the detailed native replay as the exact fallback.
 - Exact fallback remains available for every unsupported or non-closed region.
 - The paper can state precisely what is model-relative, native-refined, and
   hardware-compared.
+
+The first-round three-canary result above is retained as historical context.
+The current 15-workload R6 result is in
+`docs/review_round3_20261002/README.md`; all real native intervals are open and
+no native macro runtime or architectural ranking is claimed.
 
 ## Cross-cutting invariants
 

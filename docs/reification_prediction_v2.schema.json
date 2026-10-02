@@ -7,8 +7,12 @@
   "properties": {
     "schema": {"const": "reification_prediction_v2"},
     "intervention": {"type": "string", "minLength": 1},
+    "prediction_stage": {"const": "pre_observation"},
+    "execution_path": {"type": "string", "minLength": 1},
+    "macro_execution_observed": {"type": "boolean"},
+    "step_reduction_basis": {"type": "string", "minLength": 1},
     "target_contract": {"$ref": "#/$defs/target_contract"},
-    "rows": {"type": "array", "items": {"$ref": "#/$defs/row"}}
+    "rows": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/row"}}
   },
   "additionalProperties": false,
   "$defs": {
@@ -47,6 +51,20 @@
       },
       "additionalProperties": false
     },
+    "observer_projection": {
+      "type": "object",
+      "required": ["target_metric", "role", "conversion", "simulator_lower_cycles", "simulator_upper_cycles", "predicted_lower_cycles", "predicted_upper_cycles"],
+      "properties": {
+        "target_metric": {"const": "gpc__cycles_elapsed.max"},
+        "role": {"type": "string", "minLength": 1},
+        "conversion": {"type": "string", "minLength": 1},
+        "simulator_lower_cycles": {"type": ["integer", "null"]},
+        "simulator_upper_cycles": {"type": ["integer", "null"]},
+        "predicted_lower_cycles": {"type": ["integer", "null"]},
+        "predicted_upper_cycles": {"type": ["integer", "null"]}
+      },
+      "additionalProperties": false
+    },
     "row": {
       "type": "object",
       "required": ["workload", "family", "split", "status"],
@@ -56,13 +74,26 @@
         "split": {"enum": ["calibration", "development", "held_out"]},
         "intervention": {"type": "string", "minLength": 1},
         "status": {"enum": ["predicted", "refused"]},
+        "reason": {"type": "string", "minLength": 1},
         "prediction": {"$ref": "#/$defs/prediction"},
-        "point_basis": {"type": "string"},
+        "point_basis": {"type": "string", "minLength": 1},
+        "observer_projection": {"$ref": "#/$defs/observer_projection"},
+        "native_terminal_modeled_event": {"type": ["integer", "null"]},
         "runtime_ms": {"type": ["number", "null"]},
         "memory_bytes": {"type": ["integer", "null"]},
         "step_reduction": {"type": ["number", "null"]}
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"const": "predicted"}}},
+          "then": {"required": ["prediction", "point_basis", "observer_projection"]}
+        },
+        {
+          "if": {"properties": {"status": {"const": "refused"}}},
+          "then": {"required": ["reason"], "not": {"required": ["prediction"]}}
+        }
+      ]
     }
   }
 }

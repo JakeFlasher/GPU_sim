@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""Run current simulator predictions from a split manifest, before NCU join.
+"""Run simulator predictions from a split manifest, before the NCU join.
 
 The manifest contains traces/cards and fixed split labels. No NCU/CUPTI input is
-accepted. Predictions use the declared model-local lower-bound proxy as the
-point field and preserve open upper bounds.
+accepted. Predictions use the declared observer-projection lower endpoint as a
+model-local point and preserve open upper bounds. The native execution path is
+reported explicitly; detailed replay plus a latent sidecar is not a macro
+runtime measurement.
 """
 
 from __future__ import annotations
@@ -17,10 +19,12 @@ import time
 from pathlib import Path
 from typing import Any
 
-from prediction_contract import validate_target_contract
-
-
-SPLITS = {"calibration", "development", "held_out"}
+from prediction_contract import (
+    validate_prediction_document,
+    validate_prediction_row,
+    validate_split_roster,
+    validate_target_contract,
+)
 
 
 def _run(command: list[str], timeout: float) -> tuple[dict[str, Any], float, int | None]:
@@ -60,9 +64,11 @@ def run_manifest(manifest: dict[str, Any], sim_run: Path, profile: Path, timeout
     rows = manifest.get("rows")
     if not isinstance(rows, list) or not rows:
         raise ValueError("manifest rows must be nonempty")
-    workload_families: dict[str, str] = {}
-    family_splits: dict[str, str] = {}
-    workload_splits: dict[str, str] = {}
+    validate_split_roster(rows, "prediction manifest")
+    if not sim_run.exists():
+        raise ValueError(f"sim-run executable does not exist: {sim_run}")
+    if not profile.is_file():
+        raise ValueError(f"predictive service profile does not exist: {profile}")
     validated_rows: list[dict[str, Any]] = []
     required = ("workload", "family", "split", "trace", "control", "arch_card", "pchase_card")
     # Validate the entire split/family roster before launching even the first
@@ -73,22 +79,13 @@ def run_manifest(manifest: dict[str, Any], sim_run: Path, profile: Path, timeout
             raise ValueError(f"manifest row {index} must be an object")
         if any(key not in row for key in required):
             raise ValueError(f"manifest row {index} is missing a required field")
-        workload = row["workload"]
-        family = row["family"]
-        split = row["split"]
-        if not all(isinstance(value, str) and value.strip() for value in (workload, family)):
-            raise ValueError(f"manifest row {index} workload/family must be nonempty strings")
-        if split not in SPLITS:
-            raise ValueError(f"manifest row {index} has unsupported split {split!r}")
-        if workload in workload_splits and workload_splits[workload] != split:
-            raise ValueError(f"workload {workload!r} crosses prediction splits")
-        if workload in workload_families and workload_families[workload] != family:
-            raise ValueError(f"workload {workload!r} appears with multiple families")
-        if family in family_splits and family_splits[family] != split:
-            raise ValueError(f"family {family!r} crosses prediction splits")
-        workload_splits[workload] = split
-        workload_families[workload] = family
-        family_splits[family] = split
+        for field in required[3:]:
+            path = Path(row[field])
+            # Native traces are directory trees; cards and control sidecars
+            # are regular files.  Validate existence without flattening the
+            # trace representation into a file-only contract.
+            if not path.exists():
+                raise ValueError(f"manifest row {index}.{field} does not exist: {path}")
         validated_rows.append(row)
     predictions = []
     for row in validated_rows:
@@ -106,34 +103,58 @@ def run_manifest(manifest: dict[str, Any], sim_run: Path, profile: Path, timeout
         document, runtime_ms, memory_bytes = _run(command, timeout)
         launches = document.get("latent_envelope", {}).get("launches", [])
         timing = document.get("launches", [{}])[0].get("timing", {})
-        if not launches:
-            predictions.append({"workload": row["workload"], "family": row["family"], "split": row["split"], "status": "refused", "reason": "latent_envelope_missing"})
-            continue
-        launch = launches[0]
-        projection = launch.get("ncu_projection", {})
-        lower = projection.get("simulator_lower_cycles")
-        upper = projection.get("simulator_upper_cycles")
-        if not isinstance(lower, int):
-            predictions.append({"workload": row["workload"], "family": row["family"], "split": row["split"], "status": "refused", "reason": "simulator_lower_unknown"})
-            continue
-        predictions.append({
+        common_row = {
             "workload": row["workload"],
             "family": row["family"],
             "split": row["split"],
+            "intervention": row.get("intervention", "default"),
+        }
+        if not launches:
+            predictions.append({**common_row, "status": "refused", "reason": "latent_envelope_missing"})
+            continue
+        launch = launches[0]
+        projection = launch.get("ncu_projection", {})
+        lower = projection.get("predicted_lower_cycles")
+        upper = projection.get("predicted_upper_cycles")
+        if not isinstance(lower, int):
+            predictions.append({
+                **common_row,
+                "status": "refused",
+                "reason": "observer_projection_lower_unknown",
+            })
+            continue
+        predictions.append({
+            **common_row,
             "status": "predicted",
             "prediction": {"point": lower, "lower": lower, "upper": upper},
-            "point_basis": "simulator_lower_bound_proxy",
+            "point_basis": "declared_observer_projection_lower_bound",
+            "observer_projection": {
+                "target_metric": projection.get("target_metric"),
+                "role": projection.get("role"),
+                "conversion": projection.get("conversion"),
+                "simulator_lower_cycles": projection.get("simulator_lower_cycles"),
+                "simulator_upper_cycles": projection.get("simulator_upper_cycles"),
+                "predicted_lower_cycles": lower,
+                "predicted_upper_cycles": upper,
+            },
             "native_terminal_modeled_event": timing.get("terminal_modeled_event_time"),
             "runtime_ms": round(runtime_ms, 3),
             "memory_bytes": memory_bytes,
             "step_reduction": None,
         })
-    return {
+    document = {
         "schema": "reification_prediction_v2",
-        "intervention": "abstract_service_capacity",
+        "intervention": "declared_observer_projection",
+        "prediction_stage": "pre_observation",
+        "execution_path": "native_detailed_replay_with_model_local_latent_sidecar",
+        "macro_execution_observed": False,
+        "step_reduction_basis": "not_available_native_frontend_exact_fallback",
         "target_contract": target_contract,
         "rows": predictions,
     }
+    for index, row in enumerate(predictions):
+        validate_prediction_row(row, index)
+    return validate_prediction_document(document)
 
 
 def main() -> int:

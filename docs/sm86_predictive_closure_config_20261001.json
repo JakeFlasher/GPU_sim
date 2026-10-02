@@ -1,6 +1,6 @@
 {
   "schema": "sm86_predictive_closure_config_v1",
-  "updated": "2026-10-01",
+  "updated": "2026-10-02",
   "branch": "GPUSim_main",
   "hardware": {
     "gpu": "NVIDIA GeForce RTX 3090 Ti",
@@ -83,7 +83,13 @@
       "open_interval_rate",
       "finite_interval_width",
       "rank_correlation"
-    ]
+    ],
+    "corpus_manifest": "docs/sm86_reification_corpus_v1_20261002.json",
+    "prediction_artifact": "docs/review_round3_20261002/predictions_pre_ncu.json",
+    "observation_artifact": "docs/review_round3_20261002/observations_post_ncu.json",
+    "join_report": "docs/review_round3_20261002/evaluation_join.json",
+    "finite_interval_policy": "score finite intervals only; report open intervals as unresolved/refusal",
+    "native_macro_runtime_policy": "report only when macro_execution_observed is true; current native corpus is false"
   },
   "active_docs": {
     "status": "docs/STATUS.md",
@@ -92,7 +98,12 @@
     "plan": "plans/second_round_refinement_20261001.md",
     "first_round_plan": "plans/sm86_reification_refactor_20261001.md",
     "prediction_schema": "docs/reification_prediction_v2.schema.json",
-    "observation_schema": "docs/ncu_observation_v2.schema.json"
+    "observation_schema": "docs/ncu_observation_v2.schema.json",
+    "corpus_manifest": "docs/sm86_reification_corpus_v1_20261002.json",
+    "prediction_manifest_schema": "docs/reification_prediction_manifest_v1.schema.json",
+    "evaluation_schema": "docs/reification_prediction_evaluation_v2.schema.json",
+    "round3_result": "docs/review_round3_20261002/README.md",
+    "round3_rebuttal": "plans/third_round_rebuttal_20261002.md"
   },
   "service_rate_profile": "docs/sm86_service_rate_profile_20261001.json",
   "scope_policy": "analytical_or_statistical_modeling_with_unobservable_internals_black_box"

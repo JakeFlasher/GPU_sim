@@ -34,16 +34,19 @@ not closed.
 5. **Cache witness separation** — warp-local instrumentation order only where
    supplied; fence, generation, owner/read-from, and hardware completion stay
    unknown; unresolved cache history widens a separate frontier.
-6. **Staged evaluation** — service-capacity variants, three-family
+6. **Staged evaluation** — service-capacity variants, family-held-out
    calibration/development/held-out prediction rows, post-prediction NCU join,
-   interval/refusal/runtime/memory reporting, and model-local compression probe.
+   interval/refusal/runtime/memory reporting, and a model-local compression
+   probe whose execution status is explicit.
 
-## Current evidence
+## Earlier staged evidence (retained, not the R6 headline)
 
 - Three current SM86 families were captured and predicted before the NCU join:
   atomic histogram, tensor async GEMM, and the mixed-memory canary.
 - NCU `gpc__cycles_elapsed.max` values were 8,811, 4,530, and 5,270 cycles;
-  all open lower-bound intervals covered their target.
+  the earlier evaluator counted the open lower-bound intervals as covered, a
+  convention later corrected by R1 to open/refusal reporting rather than finite
+  interval accuracy.
 - Lower-bound-proxy APEs were 72.36%, 77.40%, and 91.80%; these are comparison
   results, not calibration or selection features.
 - A witnessed single-warp descriptor region reduced 16 exact model steps to
@@ -51,6 +54,10 @@ not closed.
 - Full Rust workspace and focused reification/evaluation Python suites pass;
   the unrelated PTX subset compiler test still observes a pre-existing
   `ptx_subset_compiler_alpha_v1` versus `...artifact_v1` binary/schema mismatch.
+
+The earlier three-canary numbers are retained for historical comparison only.
+The R6 corpus below is the current evidence and deliberately does not count
+open intervals as covered finite intervals.
 
 ## Second-round R1 hardening — 2026-10-01 (complete; R2 active)
 
@@ -132,7 +139,7 @@ lower/upper initiation-interval envelope. Grouped assignment envelopes are
 preserved when supplied; the native metrics path remains marginal without a
 per-record route witness. R5 is now active on native state refinement.
 
-## Second-round R5 native refinement — 2026-10-01/02 (complete for closed issue-model seam; R6 active)
+## Second-round R5 native refinement — 2026-10-01/02 (complete for closed issue-model seam; followed by R6)
 
 The typed region validator now checks internal effect payload spans, and the
 trace-aware native comparator checks effect/label sequences in addition to
@@ -151,4 +158,40 @@ native issue-model differential consumes the comparator-selected path for a
 two-instruction scalar macro, matches detailed entry/exit state and terminal
 cycles, resumes a detailed suffix, and verifies that exact replay is
 non-mutating. Full front-end-enabled launches remain conservative fallback;
-R6 expands preserved-region coverage rather than weakening this boundary.
+R6 therefore expands the independent corpus/observer evaluation rather than
+weakening this boundary.
+
+## Third-round R6 corpus and observer evaluation — 2026-10-02 (complete; followed by R7)
+
+R6 materializes the requested independent evaluation without turning the
+profiler target into a feature or execution selector:
+
+- The checked-in manifest covers 15 retained SM86 workloads in six families;
+  normalization is calibration, tensor GEMM is development, and attention,
+  convolution, elementwise/reduction, and memory embedding are held out. The
+  roster validator rejects workload or family split crossings before a
+  simulator process starts.
+- `run_prediction_manifest.py` writes the prediction document first, using the
+  declared observer projection fields rather than the simulator-only field.
+  The output records `native_detailed_replay_with_model_local_latent_sidecar`,
+  `macro_execution_observed=false`, and null step reduction. No NCU value is
+  present in the prediction document.
+- `build_ncu_observation_set.py` then reads exactly two retained NCU CSV
+  repetitions per workload. The post-prediction document carries row-level
+  metric, endpoint, clock, cache, launch, repetition, and historical GPU
+  identity. `evaluate_prediction_splits.py` rejects mismatched or unknown rows
+  before joining.
+- All 15 native rows have open uppers because unresolved retirement/cache tails
+  remain active. Finite interval coverage is therefore not applicable; open
+  lower-bound consistency is 0.667 (calibration), 1.000 (development), and
+  0.750 (held-out). Mean lower-point APE is 14.640%, 28.232%, and 25.938%.
+  These are negative/model-distance diagnostics, not calibrated interval or
+  hardware accuracy. No native macro dispatch, runtime speedup, or step
+  reduction is claimed.
+- The complete artifacts and interpretation are in
+  [`docs/review_round3_20261002/README.md`](review_round3_20261002/README.md).
+
+R6 closes corpus, split, target-identity, and open/finite reporting hygiene. It
+does not produce a front-end-enabled native macro or a finite silicon observer
+upper. R7 now maps every paper/rebuttal claim to its evidence level and
+falsifier.
