@@ -188,7 +188,7 @@ replay from the macro exit. The macro-disabled path remains the reference.
 - A pending-response/barrier adversarial case takes exact fallback.
 - Runtime/step counters show actual macro dispatch, not report-only collapsing.
 
-## R3 — independent witness and ordering closure
+## R3 — independent witness and ordering closure (complete)
 
 ### Goal
 
@@ -215,7 +215,7 @@ real witness or a conservative refusal.
   refuse without synthetic lockstep.
 - Completion-token count and pending state match at macro exit.
 
-## R4 — service, queue, and assignment semantics
+## R4 — service, queue, and assignment semantics (current stage)
 
 ### Goal
 
@@ -332,8 +332,8 @@ GPU overlap models, skipping refinement, or native trace-driven simulators.
 |---|---|---|
 | R1 | **complete (2026-10-01)** | Unknown/zero-demand/optional-pool arithmetic, active completion requirements, event-order semantics, v2 target contracts, finite/open evaluation strata, native projection completeness, and record-vs-step metrics are implemented and tested. |
 | R2 | **complete (2026-10-01)** | `ModelExecutor::execute_decision` consumes Summary/Reify decisions, installs a nonidentity scalar macro or exact fallback, emits effects/pending completions, resumes detailed descriptors, and exposes macro dispatch counters. |
-| R3 | **active** | Separate dependency/effect/residency witness extraction from descriptor eligibility and close/refuse global order and same-cycle effects. |
-| R4 | queued | Can use R1 service types but must define queue semantics. |
+| R3 | **complete (2026-10-01)** | Eligibility requires a separate fact-complete witness with an allowed origin; stale/producer-premise facts reify, and multi-warp/same-cycle order remains explicit refusal or engine-order checked. |
+| R4 | **active** | Define residual versus replacement service semantics, queue state, assignment correlation, and interval-valued probe parameters. |
 | R5 | queued | Depends on R2 and R3. |
 | R6 | queued | Depends on an actual macro path and observer contract. |
 | R7 | queued | Final claim discipline after evidence is complete. |
@@ -395,3 +395,21 @@ GPU overlap models, skipping refinement, or native trace-driven simulators.
   `SmCore` execution. The fast-frontier surface aggregates `macro_dispatches`,
   and its v1 JSON schema requires that field. Native replay remains unchanged;
   R5 is still required for a native boundary-preservation claim.
+
+## R3 implementation evidence (complete)
+
+- `CausalFrontierWitness` facts are separate from descriptor booleans and carry
+  an explicit origin. `CausalFrontierEvidence::from_independent_facts` requires
+  contiguous fact coverage and rejects `ProducerPremise`; `covers` compares all
+  dependency/effect/multiplicity fields before eligibility.
+- The compact native fast path no longer manufactures `CompleteWithEvidence`
+  from the candidate segment. It supplies residency only and therefore takes
+  exact/fallback execution until a separate static/trace witness is provided.
+- A stale witness whose dependency fact is perturbed reifies with
+  `MissingIndependentEvidence`; multi-warp candidates still reify with
+  `CrossWarpOrderUnknown`; same-cycle internal effects retain engine
+  `(time, phase, sequence)` order.
+- Evidence: 491 `sim-sm` tests (including adversarial witness/order cases),
+  the model-local probe with one witnessed macro dispatch and three multi-warp
+  refusals, plus the prior workspace and focused evaluation checks. This closes
+  the model contract only; it does not infer a hardware scheduler order.

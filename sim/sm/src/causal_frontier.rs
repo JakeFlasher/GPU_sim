@@ -175,18 +175,94 @@ pub enum CausalFrontierResidency {
     },
 }
 
+/// Origin of an eligibility witness. `ProducerPremise` is retained for
+/// diagnostics but is never sufficient for certification.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CausalFrontierWitnessOrigin {
+    StaticAnalysis,
+    IndependentTraceAnalysis,
+    ProducerPremise,
+}
+
+/// One fact derived outside the descriptor eligibility loop. The analyzer
+/// checks these facts against the candidate instruction, so toggling a
+/// descriptor flag without regenerating the witness forces exact fallback.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct CausalFrontierWitness {
+    pub physical_warp: i32,
+    pub sequence: u64,
+    pub control_clean: bool,
+    pub dependency_free: bool,
+    pub external_side_effect: bool,
+    pub completion_units: u32,
+    pub origin: CausalFrontierWitnessOrigin,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct CausalFrontierEvidence {
     pub physical_warp: i32,
     pub first_sequence: u64,
     pub last_sequence: u64,
+    pub witnesses: Vec<CausalFrontierWitness>,
 }
 
 impl CausalFrontierEvidence {
-    fn covers(self, instruction: CausalFrontierInstruction) -> bool {
+    pub fn from_independent_facts(
+        physical_warp: i32,
+        first_sequence: u64,
+        last_sequence: u64,
+        witnesses: Vec<CausalFrontierWitness>,
+    ) -> Result<Self, CausalFrontierError> {
+        if first_sequence > last_sequence || witnesses.is_empty() {
+            return Err(CausalFrontierError::InvalidEvidenceRange {
+                physical_warp,
+                first_sequence,
+                last_sequence,
+            });
+        }
+        let expected = last_sequence
+            .checked_sub(first_sequence)
+            .and_then(|width| width.checked_add(1))
+            .ok_or(CausalFrontierError::InvalidEvidenceRange {
+                physical_warp,
+                first_sequence,
+                last_sequence,
+            })?;
+        if u64::try_from(witnesses.len()).ok() != Some(expected)
+            || witnesses.iter().enumerate().any(|(index, witness)| {
+                witness.physical_warp != physical_warp
+                    || witness.sequence != first_sequence.saturating_add(index as u64)
+                    || witness.origin == CausalFrontierWitnessOrigin::ProducerPremise
+            })
+        {
+            return Err(CausalFrontierError::IncompleteIndependentEvidence {
+                physical_warp,
+                first_sequence,
+                last_sequence,
+            });
+        }
+        Ok(Self {
+            physical_warp,
+            first_sequence,
+            last_sequence,
+            witnesses,
+        })
+    }
+
+    fn covers(&self, instruction: CausalFrontierInstruction) -> bool {
         self.physical_warp == instruction.physical_warp
             && self.first_sequence <= instruction.sequence
             && instruction.sequence <= self.last_sequence
+            && self.witnesses.iter().any(|witness| {
+                witness.physical_warp == instruction.physical_warp
+                    && witness.sequence == instruction.sequence
+                    && witness.control_clean == instruction.control_clean
+                    && witness.dependency_free == instruction.dependency_free
+                    && witness.external_side_effect == instruction.external_side_effect
+                    && witness.completion_units == instruction.completion_units
+                    && witness.origin != CausalFrontierWitnessOrigin::ProducerPremise
+            })
     }
 }
 
@@ -404,6 +480,16 @@ pub enum CausalFrontierError {
         expected: u64,
         got: u64,
     },
+    InvalidEvidenceRange {
+        physical_warp: i32,
+        first_sequence: u64,
+        last_sequence: u64,
+    },
+    IncompleteIndependentEvidence {
+        physical_warp: i32,
+        first_sequence: u64,
+        last_sequence: u64,
+    },
     MacroTransitionRejected {
         reason: ReifyReason,
     },
@@ -506,6 +592,22 @@ impl std::fmt::Display for CausalFrontierError {
                     "macro transition rejected; exact continuation required: {reason:?}"
                 )
             }
+            Self::InvalidEvidenceRange {
+                physical_warp,
+                first_sequence,
+                last_sequence,
+            } => write!(
+                f,
+                "invalid witness range for warp {physical_warp}: {first_sequence}..={last_sequence}"
+            ),
+            Self::IncompleteIndependentEvidence {
+                physical_warp,
+                first_sequence,
+                last_sequence,
+            } => write!(
+                f,
+                "independent witness does not cover warp {physical_warp} range {first_sequence}..={last_sequence}"
+            ),
         }
     }
 }
@@ -1148,30 +1250,48 @@ mod tests {
             let physical_warp = ordered
                 .first()
                 .map_or(0, |instruction| instruction.physical_warp);
-            let mut run_start = None;
-            let mut run_last = None;
+            let mut run_facts = Vec::new();
             for instruction in ordered {
                 let safe = instruction.control_clean
                     && instruction.dependency_free
                     && !instruction.external_side_effect
                     && instruction.completion_units == 1;
                 if safe {
-                    run_start.get_or_insert(instruction.sequence);
-                    run_last = Some(instruction.sequence);
-                } else if let (Some(first), Some(last)) = (run_start.take(), run_last.take()) {
-                    evidence.push(CausalFrontierEvidence {
+                    run_facts.push(CausalFrontierWitness {
                         physical_warp,
-                        first_sequence: first,
-                        last_sequence: last,
+                        sequence: instruction.sequence,
+                        control_clean: instruction.control_clean,
+                        dependency_free: instruction.dependency_free,
+                        external_side_effect: instruction.external_side_effect,
+                        completion_units: instruction.completion_units,
+                        origin: CausalFrontierWitnessOrigin::StaticAnalysis,
                     });
+                } else if !run_facts.is_empty() {
+                    let first = run_facts.first().unwrap().sequence;
+                    let last = run_facts.last().unwrap().sequence;
+                    evidence.push(
+                        CausalFrontierEvidence::from_independent_facts(
+                            physical_warp,
+                            first,
+                            last,
+                            std::mem::take(&mut run_facts),
+                        )
+                        .unwrap(),
+                    );
                 }
             }
-            if let (Some(first), Some(last)) = (run_start, run_last) {
-                evidence.push(CausalFrontierEvidence {
-                    physical_warp,
-                    first_sequence: first,
-                    last_sequence: last,
-                });
+            if !run_facts.is_empty() {
+                let first = run_facts.first().unwrap().sequence;
+                let last = run_facts.last().unwrap().sequence;
+                evidence.push(
+                    CausalFrontierEvidence::from_independent_facts(
+                        physical_warp,
+                        first,
+                        last,
+                        run_facts,
+                    )
+                    .unwrap(),
+                );
             }
         }
         CausalFrontierResidency::CompleteWithEvidence {
@@ -1463,6 +1583,88 @@ mod tests {
                 .iter()
                 .any(|detail| { detail.reason == ReifyReason::MissingIndependentEvidence })
         );
+    }
+
+    #[test]
+    fn stale_independent_witness_reifies_after_descriptor_dependency_perturbation() {
+        let original = (0..3)
+            .map(|sequence| instruction(sequence, false))
+            .collect::<Vec<_>>();
+        let evidence = CausalFrontierEvidence::from_independent_facts(
+            0,
+            0,
+            2,
+            original
+                .iter()
+                .map(|item| CausalFrontierWitness {
+                    physical_warp: item.physical_warp,
+                    sequence: item.sequence,
+                    control_clean: item.control_clean,
+                    dependency_free: item.dependency_free,
+                    external_side_effect: item.external_side_effect,
+                    completion_units: item.completion_units,
+                    origin: CausalFrontierWitnessOrigin::StaticAnalysis,
+                })
+                .collect(),
+        )
+        .unwrap();
+        let perturbed = original.clone();
+        let mut stale_witnesses = evidence.witnesses.clone();
+        stale_witnesses[1].dependency_free = false;
+        let stale_evidence = CausalFrontierEvidence {
+            physical_warp: evidence.physical_warp,
+            first_sequence: evidence.first_sequence,
+            last_sequence: evidence.last_sequence,
+            witnesses: stale_witnesses,
+        };
+        let report = summarize_with_residency(
+            &[perturbed],
+            CausalFrontierResidency::CompleteWithEvidence {
+                physical_warps: vec![0],
+                evidence: vec![stale_evidence],
+            },
+        )
+        .unwrap();
+        assert_eq!(report.collapsed_regions, 0);
+        assert!(
+            report
+                .reified_region_details
+                .iter()
+                .any(|detail| { detail.reason == ReifyReason::MissingIndependentEvidence })
+        );
+    }
+
+    #[test]
+    fn producer_premise_witnesses_are_not_accepted_as_independent_facts() {
+        let result = CausalFrontierEvidence::from_independent_facts(
+            0,
+            0,
+            1,
+            vec![
+                CausalFrontierWitness {
+                    physical_warp: 0,
+                    sequence: 0,
+                    control_clean: true,
+                    dependency_free: true,
+                    external_side_effect: false,
+                    completion_units: 1,
+                    origin: CausalFrontierWitnessOrigin::ProducerPremise,
+                },
+                CausalFrontierWitness {
+                    physical_warp: 0,
+                    sequence: 1,
+                    control_clean: true,
+                    dependency_free: true,
+                    external_side_effect: false,
+                    completion_units: 1,
+                    origin: CausalFrontierWitnessOrigin::ProducerPremise,
+                },
+            ],
+        );
+        assert!(matches!(
+            result,
+            Err(CausalFrontierError::IncompleteIndependentEvidence { .. })
+        ));
     }
 
     #[test]

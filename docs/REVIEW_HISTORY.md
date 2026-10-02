@@ -91,6 +91,19 @@ The fast-frontier output carries a `macro_dispatches` counter and the schema
 requires it. R3 is now active: independently derive eligibility witnesses and
 close or refuse global order and same-cycle effects.
 
+## Second-round R3 witness/order closure — 2026-10-01 (complete; R4 active)
+
+Eligibility now requires contiguous `CausalFrontierWitness` facts from an
+allowed static/independent-trace origin. The witness is checked against every
+dependency, control, side-effect, and completion-multiplicity field; stale
+facts and producer-premise-only ranges reify. The compact native path no longer
+creates evidence from its own candidate segment, so real traces remain exact or
+refused until a separate witness source is supplied. Multi-warp order remains
+an explicit `CrossWarpOrderUnknown` refusal, while same-cycle effects retain
+the engine's time/phase/insertion-order check. This closes the descriptor
+evidence boundary, not a hardware scheduler proof. R4 is now active on service
+queue/assignment semantics.
+
 ## Second-round review questions
 
 - Can a native typed macro exit be produced for a nontrivial region without

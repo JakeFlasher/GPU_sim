@@ -83,8 +83,9 @@ mod system;
 
 pub use causal_frontier::{
     CausalFrontierError, CausalFrontierEvidence, CausalFrontierInstruction, CausalFrontierReport,
-    CausalFrontierResidency, MacroEffect, MacroTransition, ModelDispatch, ModelExecutionSnapshot,
-    ModelExecutor, summarize as summarize_causal_frontier,
+    CausalFrontierResidency, CausalFrontierWitness, CausalFrontierWitnessOrigin, MacroEffect,
+    MacroTransition, ModelDispatch, ModelExecutionSnapshot, ModelExecutor,
+    summarize as summarize_causal_frontier,
     summarize_with_residency as summarize_causal_frontier_with_residency,
 };
 pub use control_bits::{

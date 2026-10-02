@@ -72,8 +72,8 @@ use sim_mem::{
 };
 
 use crate::causal_frontier::{
-    CausalFrontierEvidence, CausalFrontierInstruction, CausalFrontierReport,
-    CausalFrontierResidency, summarize_with_residency,
+    CausalFrontierInstruction, CausalFrontierReport, CausalFrontierResidency,
+    summarize_with_residency,
 };
 #[cfg(feature = "campaign")]
 use crate::evidence::AdmittedLaunchEvidence;
@@ -1360,13 +1360,12 @@ pub fn fast_frontier_for_trace(
                     )?;
                 }
                 let residency = if closed_entry {
-                    CausalFrontierResidency::CompleteWithEvidence {
+                    // The compact trace is not an independent dependency or
+                    // effect witness. Residency alone therefore remains an
+                    // exact/fallback premise; a separate static/trace witness
+                    // is required before a macro can be installed.
+                    CausalFrontierResidency::Complete {
                         physical_warps: residents.clone(),
-                        evidence: vec![CausalFrontierEvidence {
-                            physical_warp: segment[0].physical_warp,
-                            first_sequence: segment[0].sequence,
-                            last_sequence: segment[segment.len() - 1].sequence,
-                        }],
                     }
                 } else {
                     CausalFrontierResidency::Unknown

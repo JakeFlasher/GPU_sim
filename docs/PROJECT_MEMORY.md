@@ -44,11 +44,16 @@ from profiler measurements; black-box models are assumptions, not observations.
   rejects family-crossing splits, separates finite interval coverage from open
   refusal, and reports execution-step reduction separately from record
   coverage. These are evidence-hygiene changes, not accuracy evidence.
-- R2 is active: `sim-sm::ModelExecutor` now has an explicit
+- R2 is complete at the model-executor level: `sim-sm::ModelExecutor` now has an explicit
   `MacroTransition`/`MacroEffect` seam. The model-local descriptor probe
   installs one independently projected scalar transition (16 detailed steps
   to one macro dispatch) and resumes a detailed suffix; pending pipeline work
   rejects the transition. This is not native `SmCore` execution.
+- R3 is complete at the model contract: eligibility requires contiguous
+  independent witness facts with an allowed origin; the compact native path
+  supplies residency only and therefore refuses rather than self-certifying.
+  Multi-warp/global-order cases remain conservative refusal, and same-cycle
+  effect ordering is checked independently of global sequence monotonicity.
 - Service profiles now mark capacity-adjusted throughput slopes and carry an
   explicit serial admission/service composition; the v2 probe fitter refuses
   aggregate-only identification and requires latency, throughput, queue,
@@ -66,12 +71,13 @@ The active second-round program is
 [`second_round_refinement_20261001.md`](../plans/second_round_refinement_20261001.md),
 with **R1 semantic closure and evidence hygiene complete**, **R2 executable
 macro transition seam complete**, and **R3 independent witness/order closure
-active**. R1 repaired unknown/zero-demand service
+complete**; **R4 service/queue semantics is active**. R1 repaired unknown/zero-demand service
 arithmetic, explicit-endpoint propagation, event ordering, compression
 vocabulary, and split/NCU identity checks. R2 made a nonidentity macro
 decision operational and resumes detailed replay; that model-local seam now
 exists, but native `SmCore` remains untouched. R3 is separating witness
-extraction from descriptor eligibility; until R5, current rankings, open
+extraction from descriptor eligibility and now refuses stale/self-witnesses;
+until R5, current rankings, open
 intervals, and descriptor/macro probe remain negative/diagnostic evidence and
 black-box internals are not execution prerequisites.
 

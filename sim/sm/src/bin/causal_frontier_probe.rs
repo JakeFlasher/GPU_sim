@@ -5,8 +5,9 @@
 //! collapse/refusal behavior in the same release build used by campaigns.
 
 use sim_sm::{
-    CausalFrontierEvidence, CausalFrontierInstruction, CausalFrontierResidency, PipelineClass,
-    summarize_causal_frontier, summarize_causal_frontier_with_residency,
+    CausalFrontierEvidence, CausalFrontierInstruction, CausalFrontierResidency,
+    CausalFrontierWitness, CausalFrontierWitnessOrigin, PipelineClass, summarize_causal_frontier,
+    summarize_causal_frontier_with_residency,
 };
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -59,15 +60,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             external_side_effect: false,
         })
         .collect::<Vec<_>>();
+    let independent_witness = CausalFrontierEvidence::from_independent_facts(
+        0,
+        0,
+        15,
+        single_warp
+            .iter()
+            .map(|instruction| CausalFrontierWitness {
+                physical_warp: instruction.physical_warp,
+                sequence: instruction.sequence,
+                control_clean: instruction.control_clean,
+                dependency_free: instruction.dependency_free,
+                external_side_effect: instruction.external_side_effect,
+                completion_units: instruction.completion_units,
+                origin: CausalFrontierWitnessOrigin::StaticAnalysis,
+            })
+            .collect(),
+    )?;
     let model_local_single_warp = summarize_causal_frontier_with_residency(
         std::slice::from_ref(&single_warp),
         CausalFrontierResidency::CompleteWithEvidence {
             physical_warps: vec![0],
-            evidence: vec![CausalFrontierEvidence {
-                physical_warp: 0,
-                first_sequence: 0,
-                last_sequence: 15,
-            }],
+            evidence: vec![independent_witness],
         },
     )?;
     let report = summarize_causal_frontier_with_residency(
