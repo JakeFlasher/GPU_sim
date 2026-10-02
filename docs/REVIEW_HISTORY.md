@@ -401,3 +401,16 @@ without launching NCU. The historical 15-workload roster passes family/split
 and source closure but is correctly ineligible for the new five-repetition
 campaign contract. Five expansion slots (scalar, tensor, memory,
 synchronization, mixed) are declared without collecting data.
+
+## A5 first deterministic accuracy campaign — 2026-10-02 (complete)
+
+After committing the coherent implementation and rebuilding the release
+simulator, independent identity/preflight passed. Five fresh NCU application-
+replay/all-cache/no-clock-control repetitions completed for all 15 workloads.
+The first attempt retained the historical launch skip while reducing warmup
+and produced no profiled kernels; its raw output is retained, and the corrected
+skip-zero run produced 75 reports/CSV imports. Predictions remain separate and
+pre-observation. All predicted uppers remain open, so finite coverage and
+finite point-error scoring are not applicable; lower consistency is
+0.667/1.000/0.750 for calibration/development/held-out. The next work is A6
+intervention falsification, not a finite hardware-accuracy claim.

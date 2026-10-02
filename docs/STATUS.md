@@ -151,14 +151,20 @@ family/split closure pass, five expansion slots are declared, and missing
 predictions keep preflight unready. A4 is complete: the protocol-aligned
 source-bound 15-row prediction artifact is prepared before observations and
 the service sidecar remains explicitly unvalidated/unmodeled where required.
-No new NCU observations were collected or scored. A5 is next, conditional on
-clean A1/A2 eligibility. The primary outcome is NCU
+No NCU observations were collected in A4. A5 is now complete: five fresh
+application-replay/all-cache/no-clock-control repetitions ran for all 15
+workloads after clean identity/preflight. The 75 observations are separate
+from predictions; all intervals remain open, so finite accuracy is not
+applicable (lower consistency 0.667/1.000/0.750 across the three splits). A6
+is next: separate intervention falsification. The primary outcome is NCU
 accuracy; simulator wall-clock runtime remains secondary, with no
 compression/speedup metric.
 
-The current A5 preflight was run against that manifest/prediction: the
-prediction is valid and no observation exists, but the identity is ineligible
-because the worktree is dirty. No NCU workload command was launched.
+The first A5 preflight correctly rejected the dirty checkout; after the
+coherent implementation was committed and rebuilt, independent identity and
+preflight passed. The first collection command retained a historical launch
+skip and produced no profiled kernels; the corrected skip-zero campaign
+completed all 75 repetitions and is the retained baseline.
 
 ## Retained measurements
 

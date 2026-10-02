@@ -1,0 +1,700 @@
+{
+  "all_termination_ok": true,
+  "campaign_root": "results/alpha/sm86_accuracy_campaign_v1_retry_20261002",
+  "collection_performed": true,
+  "protocol": "sm86_ncu_accuracy_protocol_v1",
+  "rows": [
+    {
+      "repetitions": [
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.9971694946289062,
+          "metric_value": 13214.0,
+          "rep": 0,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.952317953109741,
+          "metric_value": 13026.0,
+          "rep": 1,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.9467811584472656,
+          "metric_value": 13031.0,
+          "rep": 2,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.9304563999176025,
+          "metric_value": 13121.0,
+          "rep": 3,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.9784724712371826,
+          "metric_value": 13076.0,
+          "rep": 4,
+          "returncode": 0,
+          "timed_out": false
+        }
+      ],
+      "termination_ok": true,
+      "workload": "base__embedding_gather_int32_sm80"
+    },
+    {
+      "repetitions": [
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.8725011348724365,
+          "metric_value": 15961.0,
+          "rep": 0,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.9293668270111084,
+          "metric_value": 15918.0,
+          "rep": 1,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.917429208755493,
+          "metric_value": 16042.0,
+          "rep": 2,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 3.0024349689483643,
+          "metric_value": 15924.0,
+          "rep": 3,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.923117160797119,
+          "metric_value": 15906.0,
+          "rep": 4,
+          "returncode": 0,
+          "timed_out": false
+        }
+      ],
+      "termination_ok": true,
+      "workload": "base__flash_attn_fwd_bf16_sm80"
+    },
+    {
+      "repetitions": [
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.971337080001831,
+          "metric_value": 13556.0,
+          "rep": 0,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.9253392219543457,
+          "metric_value": 13412.0,
+          "rep": 1,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.866103172302246,
+          "metric_value": 13470.0,
+          "rep": 2,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.9331514835357666,
+          "metric_value": 13983.0,
+          "rep": 3,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.925518751144409,
+          "metric_value": 13440.0,
+          "rep": 4,
+          "returncode": 0,
+          "timed_out": false
+        }
+      ],
+      "termination_ok": true,
+      "workload": "base__gemm_hmma_bf16_sm80"
+    },
+    {
+      "repetitions": [
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.9138407707214355,
+          "metric_value": 11497.0,
+          "rep": 0,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.930048942565918,
+          "metric_value": 11645.0,
+          "rep": 1,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.9549875259399414,
+          "metric_value": 11626.0,
+          "rep": 2,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.9150407314300537,
+          "metric_value": 11685.0,
+          "rep": 3,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.932219982147217,
+          "metric_value": 11553.0,
+          "rep": 4,
+          "returncode": 0,
+          "timed_out": false
+        }
+      ],
+      "termination_ok": true,
+      "workload": "base__gemm_imma_int8_sm80"
+    },
+    {
+      "repetitions": [
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.8985543251037598,
+          "metric_value": 5804.0,
+          "rep": 0,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.898122549057007,
+          "metric_value": 6153.0,
+          "rep": 1,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.91967511177063,
+          "metric_value": 5779.0,
+          "rep": 2,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.9666907787323,
+          "metric_value": 5830.0,
+          "rep": 3,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.9657578468322754,
+          "metric_value": 5841.0,
+          "rep": 4,
+          "returncode": 0,
+          "timed_out": false
+        }
+      ],
+      "termination_ok": true,
+      "workload": "base__gemm_sparse_2to4_bf16_sm80"
+    },
+    {
+      "repetitions": [
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.9542341232299805,
+          "metric_value": 21961.0,
+          "rep": 0,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.923269033432007,
+          "metric_value": 21730.0,
+          "rep": 1,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.9328629970550537,
+          "metric_value": 21804.0,
+          "rep": 2,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.91632080078125,
+          "metric_value": 22573.0,
+          "rep": 3,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.8168931007385254,
+          "metric_value": 21835.0,
+          "rep": 4,
+          "returncode": 0,
+          "timed_out": false
+        }
+      ],
+      "termination_ok": true,
+      "workload": "base__layernorm_fwd_bf16_sm80"
+    },
+    {
+      "repetitions": [
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.9273130893707275,
+          "metric_value": 18866.0,
+          "rep": 0,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.9559597969055176,
+          "metric_value": 18945.0,
+          "rep": 1,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.954437494277954,
+          "metric_value": 19238.0,
+          "rep": 2,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.904301404953003,
+          "metric_value": 19074.0,
+          "rep": 3,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.92352557182312,
+          "metric_value": 19360.0,
+          "rep": 4,
+          "returncode": 0,
+          "timed_out": false
+        }
+      ],
+      "termination_ok": true,
+      "workload": "base__rmsnorm_fwd_bf16_sm80"
+    },
+    {
+      "repetitions": [
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.9287476539611816,
+          "metric_value": 5690.0,
+          "rep": 0,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.9424445629119873,
+          "metric_value": 5773.0,
+          "rep": 1,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.892185926437378,
+          "metric_value": 5955.0,
+          "rep": 2,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.9257068634033203,
+          "metric_value": 5739.0,
+          "rep": 3,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.9095444679260254,
+          "metric_value": 5752.0,
+          "rep": 4,
+          "returncode": 0,
+          "timed_out": false
+        }
+      ],
+      "termination_ok": true,
+      "workload": "base__silu_fwd_bf16_sm80"
+    },
+    {
+      "repetitions": [
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.957365036010742,
+          "metric_value": 12535.0,
+          "rep": 0,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.966622829437256,
+          "metric_value": 12517.0,
+          "rep": 1,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.963193893432617,
+          "metric_value": 12542.0,
+          "rep": 2,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.8782153129577637,
+          "metric_value": 12528.0,
+          "rep": 3,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.91856050491333,
+          "metric_value": 12507.0,
+          "rep": 4,
+          "returncode": 0,
+          "timed_out": false
+        }
+      ],
+      "termination_ok": true,
+      "workload": "large__conv2d_implicit_gemm_bf16_sm80"
+    },
+    {
+      "repetitions": [
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.9905521869659424,
+          "metric_value": 9686.0,
+          "rep": 0,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.912379503250122,
+          "metric_value": 9695.0,
+          "rep": 1,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.9263851642608643,
+          "metric_value": 9737.0,
+          "rep": 2,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.9132118225097656,
+          "metric_value": 9588.0,
+          "rep": 3,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.92960262298584,
+          "metric_value": 9420.0,
+          "rep": 4,
+          "returncode": 0,
+          "timed_out": false
+        }
+      ],
+      "termination_ok": true,
+      "workload": "large__cross_entropy_fwd_fp32_sm80"
+    },
+    {
+      "repetitions": [
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.945690393447876,
+          "metric_value": 203445.0,
+          "rep": 0,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.9310786724090576,
+          "metric_value": 203874.0,
+          "rep": 1,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.910935401916504,
+          "metric_value": 203182.0,
+          "rep": 2,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 3.003716468811035,
+          "metric_value": 203282.0,
+          "rep": 3,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.9130733013153076,
+          "metric_value": 203644.0,
+          "rep": 4,
+          "returncode": 0,
+          "timed_out": false
+        }
+      ],
+      "termination_ok": true,
+      "workload": "large__flash_attn_bwd_bf16_sm80"
+    },
+    {
+      "repetitions": [
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.8939056396484375,
+          "metric_value": 13603.0,
+          "rep": 0,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.936678409576416,
+          "metric_value": 13422.0,
+          "rep": 1,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.9989678859710693,
+          "metric_value": 13539.0,
+          "rep": 2,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.98858642578125,
+          "metric_value": 13642.0,
+          "rep": 3,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.9029273986816406,
+          "metric_value": 13520.0,
+          "rep": 4,
+          "returncode": 0,
+          "timed_out": false
+        }
+      ],
+      "termination_ok": true,
+      "workload": "large__gemm_hmma_fp16_sm80"
+    },
+    {
+      "repetitions": [
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.940824031829834,
+          "metric_value": 15535.0,
+          "rep": 0,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.909208297729492,
+          "metric_value": 15229.0,
+          "rep": 1,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.9965970516204834,
+          "metric_value": 15803.0,
+          "rep": 2,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.9206759929656982,
+          "metric_value": 15286.0,
+          "rep": 3,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.921093702316284,
+          "metric_value": 15057.0,
+          "rep": 4,
+          "returncode": 0,
+          "timed_out": false
+        }
+      ],
+      "termination_ok": true,
+      "workload": "large__rmsnorm_bwd_bf16_sm80"
+    },
+    {
+      "repetitions": [
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.959733247756958,
+          "metric_value": 15713.0,
+          "rep": 0,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.9391579627990723,
+          "metric_value": 15857.0,
+          "rep": 1,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.8987905979156494,
+          "metric_value": 15812.0,
+          "rep": 2,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.936938524246216,
+          "metric_value": 16207.0,
+          "rep": 3,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.9233992099761963,
+          "metric_value": 15714.0,
+          "rep": 4,
+          "returncode": 0,
+          "timed_out": false
+        }
+      ],
+      "termination_ok": true,
+      "workload": "large__softmax_safe_bf16_sm80"
+    },
+    {
+      "repetitions": [
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.944032907485962,
+          "metric_value": 14391.0,
+          "rep": 0,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.998697519302368,
+          "metric_value": 14951.0,
+          "rep": 1,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 2.982365369796753,
+          "metric_value": 14424.0,
+          "rep": 2,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 3.0301907062530518,
+          "metric_value": 14266.0,
+          "rep": 3,
+          "returncode": 0,
+          "timed_out": false
+        },
+        {
+          "csv_returncode": 0,
+          "elapsed_seconds": 3.0689992904663086,
+          "metric_value": 14429.0,
+          "rep": 4,
+          "returncode": 0,
+          "timed_out": false
+        }
+      ],
+      "termination_ok": true,
+      "workload": "large__swiglu_fwd_bf16_sm80_n1048576"
+    }
+  ],
+  "schema": "sm86_accuracy_campaign_v1_repetition_summary",
+  "target_metric": "gpc__cycles_elapsed.max"
+}

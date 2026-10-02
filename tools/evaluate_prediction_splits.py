@@ -195,7 +195,13 @@ def evaluate_prediction_splits(predictions: dict[str, Any], observations: dict[s
         predicted = [row for row in rows if row["status"] == "predicted"]
         refused = [row for row in rows if row["status"] == "refused"]
         widths = [row["width"] for row in predicted if row["width"] is not None]
-        errors = [row["ape_pct"] for row in predicted if row["ape_pct"] is not None]
+        # Point error is an accuracy score only for finite intervals. Open
+        # upper rows remain lower-bound diagnostics, never finite accuracy.
+        errors = [
+            row["ape_pct"]
+            for row in predicted
+            if row["upper"] is not None and row["ape_pct"] is not None
+        ]
         by_workload: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for row in predicted:
             by_workload[row["workload"]].append(row)

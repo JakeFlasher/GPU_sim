@@ -16,6 +16,7 @@ open only the relevant technical page.
 | Accuracy-first NCU protocol | [Declared SM86 NCU accuracy protocol](sm86_ncu_accuracy_protocol_v1.json) · [Protocol schema](sm86_ncu_accuracy_protocol_v1.schema.json) |
 | NCU identity capture | [Identity schema](sm86_ncu_identity_v1.schema.json) · `tools/capture_sm86_ncu_identity.py` |
 | NCU campaign preflight | [Preflight schema](sm86_ncu_campaign_preflight_v1.schema.json) · `tools/preflight_sm86_ncu_campaign.py` |
+| First accuracy campaign | `sm86_accuracy_campaign_v1_{manifest,predictions_pre_ncu,observations_post_ncu,evaluation_join,repetition_summary}.json` |
 | Third-round result | [R6 corpus and observer evaluation](review_round3_20261002/README.md) · [corpus manifest](sm86_reification_corpus_v1_20261002.json) |
 | R9.0 native boundary probe | [Canary termination and unknown-join result](review_round4_20261002/README.md) |
 | R9.1 production witness attempt | [Negative native-dispatch result](review_round5_20261002/README.md) |

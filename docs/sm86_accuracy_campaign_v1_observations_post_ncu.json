@@ -1,0 +1,1746 @@
+{
+  "identity_status": "independently_verified",
+  "rows": [
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__embedding_gather_int32_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__embedding_gather_int32_sm80/trace",
+        "workload": "base__embedding_gather_int32_sm80"
+      },
+      "value": 13214.0,
+      "workload": "base__embedding_gather_int32_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__embedding_gather_int32_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__embedding_gather_int32_sm80/trace",
+        "workload": "base__embedding_gather_int32_sm80"
+      },
+      "value": 13026.0,
+      "workload": "base__embedding_gather_int32_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__embedding_gather_int32_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__embedding_gather_int32_sm80/trace",
+        "workload": "base__embedding_gather_int32_sm80"
+      },
+      "value": 13031.0,
+      "workload": "base__embedding_gather_int32_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__embedding_gather_int32_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__embedding_gather_int32_sm80/trace",
+        "workload": "base__embedding_gather_int32_sm80"
+      },
+      "value": 13121.0,
+      "workload": "base__embedding_gather_int32_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__embedding_gather_int32_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__embedding_gather_int32_sm80/trace",
+        "workload": "base__embedding_gather_int32_sm80"
+      },
+      "value": 13076.0,
+      "workload": "base__embedding_gather_int32_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__flash_attn_fwd_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__flash_attn_fwd_bf16_sm80/trace",
+        "workload": "base__flash_attn_fwd_bf16_sm80"
+      },
+      "value": 15961.0,
+      "workload": "base__flash_attn_fwd_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__flash_attn_fwd_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__flash_attn_fwd_bf16_sm80/trace",
+        "workload": "base__flash_attn_fwd_bf16_sm80"
+      },
+      "value": 15918.0,
+      "workload": "base__flash_attn_fwd_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__flash_attn_fwd_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__flash_attn_fwd_bf16_sm80/trace",
+        "workload": "base__flash_attn_fwd_bf16_sm80"
+      },
+      "value": 16042.0,
+      "workload": "base__flash_attn_fwd_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__flash_attn_fwd_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__flash_attn_fwd_bf16_sm80/trace",
+        "workload": "base__flash_attn_fwd_bf16_sm80"
+      },
+      "value": 15924.0,
+      "workload": "base__flash_attn_fwd_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__flash_attn_fwd_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__flash_attn_fwd_bf16_sm80/trace",
+        "workload": "base__flash_attn_fwd_bf16_sm80"
+      },
+      "value": 15906.0,
+      "workload": "base__flash_attn_fwd_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_hmma_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_hmma_bf16_sm80/trace",
+        "workload": "base__gemm_hmma_bf16_sm80"
+      },
+      "value": 13556.0,
+      "workload": "base__gemm_hmma_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_hmma_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_hmma_bf16_sm80/trace",
+        "workload": "base__gemm_hmma_bf16_sm80"
+      },
+      "value": 13412.0,
+      "workload": "base__gemm_hmma_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_hmma_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_hmma_bf16_sm80/trace",
+        "workload": "base__gemm_hmma_bf16_sm80"
+      },
+      "value": 13470.0,
+      "workload": "base__gemm_hmma_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_hmma_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_hmma_bf16_sm80/trace",
+        "workload": "base__gemm_hmma_bf16_sm80"
+      },
+      "value": 13983.0,
+      "workload": "base__gemm_hmma_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_hmma_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_hmma_bf16_sm80/trace",
+        "workload": "base__gemm_hmma_bf16_sm80"
+      },
+      "value": 13440.0,
+      "workload": "base__gemm_hmma_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_imma_int8_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_imma_int8_sm80/trace",
+        "workload": "base__gemm_imma_int8_sm80"
+      },
+      "value": 11497.0,
+      "workload": "base__gemm_imma_int8_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_imma_int8_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_imma_int8_sm80/trace",
+        "workload": "base__gemm_imma_int8_sm80"
+      },
+      "value": 11645.0,
+      "workload": "base__gemm_imma_int8_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_imma_int8_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_imma_int8_sm80/trace",
+        "workload": "base__gemm_imma_int8_sm80"
+      },
+      "value": 11626.0,
+      "workload": "base__gemm_imma_int8_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_imma_int8_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_imma_int8_sm80/trace",
+        "workload": "base__gemm_imma_int8_sm80"
+      },
+      "value": 11685.0,
+      "workload": "base__gemm_imma_int8_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_imma_int8_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_imma_int8_sm80/trace",
+        "workload": "base__gemm_imma_int8_sm80"
+      },
+      "value": 11553.0,
+      "workload": "base__gemm_imma_int8_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_sparse_2to4_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_sparse_2to4_bf16_sm80/trace",
+        "workload": "base__gemm_sparse_2to4_bf16_sm80"
+      },
+      "value": 5804.0,
+      "workload": "base__gemm_sparse_2to4_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_sparse_2to4_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_sparse_2to4_bf16_sm80/trace",
+        "workload": "base__gemm_sparse_2to4_bf16_sm80"
+      },
+      "value": 6153.0,
+      "workload": "base__gemm_sparse_2to4_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_sparse_2to4_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_sparse_2to4_bf16_sm80/trace",
+        "workload": "base__gemm_sparse_2to4_bf16_sm80"
+      },
+      "value": 5779.0,
+      "workload": "base__gemm_sparse_2to4_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_sparse_2to4_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_sparse_2to4_bf16_sm80/trace",
+        "workload": "base__gemm_sparse_2to4_bf16_sm80"
+      },
+      "value": 5830.0,
+      "workload": "base__gemm_sparse_2to4_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_sparse_2to4_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_sparse_2to4_bf16_sm80/trace",
+        "workload": "base__gemm_sparse_2to4_bf16_sm80"
+      },
+      "value": 5841.0,
+      "workload": "base__gemm_sparse_2to4_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__layernorm_fwd_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__layernorm_fwd_bf16_sm80/trace",
+        "workload": "base__layernorm_fwd_bf16_sm80"
+      },
+      "value": 21961.0,
+      "workload": "base__layernorm_fwd_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__layernorm_fwd_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__layernorm_fwd_bf16_sm80/trace",
+        "workload": "base__layernorm_fwd_bf16_sm80"
+      },
+      "value": 21730.0,
+      "workload": "base__layernorm_fwd_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__layernorm_fwd_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__layernorm_fwd_bf16_sm80/trace",
+        "workload": "base__layernorm_fwd_bf16_sm80"
+      },
+      "value": 21804.0,
+      "workload": "base__layernorm_fwd_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__layernorm_fwd_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__layernorm_fwd_bf16_sm80/trace",
+        "workload": "base__layernorm_fwd_bf16_sm80"
+      },
+      "value": 22573.0,
+      "workload": "base__layernorm_fwd_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__layernorm_fwd_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__layernorm_fwd_bf16_sm80/trace",
+        "workload": "base__layernorm_fwd_bf16_sm80"
+      },
+      "value": 21835.0,
+      "workload": "base__layernorm_fwd_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__rmsnorm_fwd_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__rmsnorm_fwd_bf16_sm80/trace",
+        "workload": "base__rmsnorm_fwd_bf16_sm80"
+      },
+      "value": 18866.0,
+      "workload": "base__rmsnorm_fwd_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__rmsnorm_fwd_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__rmsnorm_fwd_bf16_sm80/trace",
+        "workload": "base__rmsnorm_fwd_bf16_sm80"
+      },
+      "value": 18945.0,
+      "workload": "base__rmsnorm_fwd_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__rmsnorm_fwd_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__rmsnorm_fwd_bf16_sm80/trace",
+        "workload": "base__rmsnorm_fwd_bf16_sm80"
+      },
+      "value": 19238.0,
+      "workload": "base__rmsnorm_fwd_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__rmsnorm_fwd_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__rmsnorm_fwd_bf16_sm80/trace",
+        "workload": "base__rmsnorm_fwd_bf16_sm80"
+      },
+      "value": 19074.0,
+      "workload": "base__rmsnorm_fwd_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__rmsnorm_fwd_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__rmsnorm_fwd_bf16_sm80/trace",
+        "workload": "base__rmsnorm_fwd_bf16_sm80"
+      },
+      "value": 19360.0,
+      "workload": "base__rmsnorm_fwd_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__silu_fwd_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__silu_fwd_bf16_sm80/trace",
+        "workload": "base__silu_fwd_bf16_sm80"
+      },
+      "value": 5690.0,
+      "workload": "base__silu_fwd_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__silu_fwd_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__silu_fwd_bf16_sm80/trace",
+        "workload": "base__silu_fwd_bf16_sm80"
+      },
+      "value": 5773.0,
+      "workload": "base__silu_fwd_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__silu_fwd_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__silu_fwd_bf16_sm80/trace",
+        "workload": "base__silu_fwd_bf16_sm80"
+      },
+      "value": 5955.0,
+      "workload": "base__silu_fwd_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__silu_fwd_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__silu_fwd_bf16_sm80/trace",
+        "workload": "base__silu_fwd_bf16_sm80"
+      },
+      "value": 5739.0,
+      "workload": "base__silu_fwd_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__silu_fwd_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__silu_fwd_bf16_sm80/trace",
+        "workload": "base__silu_fwd_bf16_sm80"
+      },
+      "value": 5752.0,
+      "workload": "base__silu_fwd_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__conv2d_implicit_gemm_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__conv2d_implicit_gemm_bf16_sm80/trace",
+        "workload": "large__conv2d_implicit_gemm_bf16_sm80"
+      },
+      "value": 12535.0,
+      "workload": "large__conv2d_implicit_gemm_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__conv2d_implicit_gemm_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__conv2d_implicit_gemm_bf16_sm80/trace",
+        "workload": "large__conv2d_implicit_gemm_bf16_sm80"
+      },
+      "value": 12517.0,
+      "workload": "large__conv2d_implicit_gemm_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__conv2d_implicit_gemm_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__conv2d_implicit_gemm_bf16_sm80/trace",
+        "workload": "large__conv2d_implicit_gemm_bf16_sm80"
+      },
+      "value": 12542.0,
+      "workload": "large__conv2d_implicit_gemm_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__conv2d_implicit_gemm_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__conv2d_implicit_gemm_bf16_sm80/trace",
+        "workload": "large__conv2d_implicit_gemm_bf16_sm80"
+      },
+      "value": 12528.0,
+      "workload": "large__conv2d_implicit_gemm_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__conv2d_implicit_gemm_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__conv2d_implicit_gemm_bf16_sm80/trace",
+        "workload": "large__conv2d_implicit_gemm_bf16_sm80"
+      },
+      "value": 12507.0,
+      "workload": "large__conv2d_implicit_gemm_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__cross_entropy_fwd_fp32_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__cross_entropy_fwd_fp32_sm80/trace",
+        "workload": "large__cross_entropy_fwd_fp32_sm80"
+      },
+      "value": 9686.0,
+      "workload": "large__cross_entropy_fwd_fp32_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__cross_entropy_fwd_fp32_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__cross_entropy_fwd_fp32_sm80/trace",
+        "workload": "large__cross_entropy_fwd_fp32_sm80"
+      },
+      "value": 9695.0,
+      "workload": "large__cross_entropy_fwd_fp32_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__cross_entropy_fwd_fp32_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__cross_entropy_fwd_fp32_sm80/trace",
+        "workload": "large__cross_entropy_fwd_fp32_sm80"
+      },
+      "value": 9737.0,
+      "workload": "large__cross_entropy_fwd_fp32_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__cross_entropy_fwd_fp32_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__cross_entropy_fwd_fp32_sm80/trace",
+        "workload": "large__cross_entropy_fwd_fp32_sm80"
+      },
+      "value": 9588.0,
+      "workload": "large__cross_entropy_fwd_fp32_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__cross_entropy_fwd_fp32_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__cross_entropy_fwd_fp32_sm80/trace",
+        "workload": "large__cross_entropy_fwd_fp32_sm80"
+      },
+      "value": 9420.0,
+      "workload": "large__cross_entropy_fwd_fp32_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__flash_attn_bwd_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__flash_attn_bwd_bf16_sm80/trace",
+        "workload": "large__flash_attn_bwd_bf16_sm80"
+      },
+      "value": 203445.0,
+      "workload": "large__flash_attn_bwd_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__flash_attn_bwd_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__flash_attn_bwd_bf16_sm80/trace",
+        "workload": "large__flash_attn_bwd_bf16_sm80"
+      },
+      "value": 203874.0,
+      "workload": "large__flash_attn_bwd_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__flash_attn_bwd_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__flash_attn_bwd_bf16_sm80/trace",
+        "workload": "large__flash_attn_bwd_bf16_sm80"
+      },
+      "value": 203182.0,
+      "workload": "large__flash_attn_bwd_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__flash_attn_bwd_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__flash_attn_bwd_bf16_sm80/trace",
+        "workload": "large__flash_attn_bwd_bf16_sm80"
+      },
+      "value": 203282.0,
+      "workload": "large__flash_attn_bwd_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__flash_attn_bwd_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__flash_attn_bwd_bf16_sm80/trace",
+        "workload": "large__flash_attn_bwd_bf16_sm80"
+      },
+      "value": 203644.0,
+      "workload": "large__flash_attn_bwd_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__gemm_hmma_fp16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__gemm_hmma_fp16_sm80/trace",
+        "workload": "large__gemm_hmma_fp16_sm80"
+      },
+      "value": 13603.0,
+      "workload": "large__gemm_hmma_fp16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__gemm_hmma_fp16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__gemm_hmma_fp16_sm80/trace",
+        "workload": "large__gemm_hmma_fp16_sm80"
+      },
+      "value": 13422.0,
+      "workload": "large__gemm_hmma_fp16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__gemm_hmma_fp16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__gemm_hmma_fp16_sm80/trace",
+        "workload": "large__gemm_hmma_fp16_sm80"
+      },
+      "value": 13539.0,
+      "workload": "large__gemm_hmma_fp16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__gemm_hmma_fp16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__gemm_hmma_fp16_sm80/trace",
+        "workload": "large__gemm_hmma_fp16_sm80"
+      },
+      "value": 13642.0,
+      "workload": "large__gemm_hmma_fp16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__gemm_hmma_fp16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__gemm_hmma_fp16_sm80/trace",
+        "workload": "large__gemm_hmma_fp16_sm80"
+      },
+      "value": 13520.0,
+      "workload": "large__gemm_hmma_fp16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__rmsnorm_bwd_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__rmsnorm_bwd_bf16_sm80/trace",
+        "workload": "large__rmsnorm_bwd_bf16_sm80"
+      },
+      "value": 15535.0,
+      "workload": "large__rmsnorm_bwd_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__rmsnorm_bwd_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__rmsnorm_bwd_bf16_sm80/trace",
+        "workload": "large__rmsnorm_bwd_bf16_sm80"
+      },
+      "value": 15229.0,
+      "workload": "large__rmsnorm_bwd_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__rmsnorm_bwd_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__rmsnorm_bwd_bf16_sm80/trace",
+        "workload": "large__rmsnorm_bwd_bf16_sm80"
+      },
+      "value": 15803.0,
+      "workload": "large__rmsnorm_bwd_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__rmsnorm_bwd_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__rmsnorm_bwd_bf16_sm80/trace",
+        "workload": "large__rmsnorm_bwd_bf16_sm80"
+      },
+      "value": 15286.0,
+      "workload": "large__rmsnorm_bwd_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__rmsnorm_bwd_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__rmsnorm_bwd_bf16_sm80/trace",
+        "workload": "large__rmsnorm_bwd_bf16_sm80"
+      },
+      "value": 15057.0,
+      "workload": "large__rmsnorm_bwd_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__softmax_safe_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__softmax_safe_bf16_sm80/trace",
+        "workload": "large__softmax_safe_bf16_sm80"
+      },
+      "value": 15713.0,
+      "workload": "large__softmax_safe_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__softmax_safe_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__softmax_safe_bf16_sm80/trace",
+        "workload": "large__softmax_safe_bf16_sm80"
+      },
+      "value": 15857.0,
+      "workload": "large__softmax_safe_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__softmax_safe_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__softmax_safe_bf16_sm80/trace",
+        "workload": "large__softmax_safe_bf16_sm80"
+      },
+      "value": 15812.0,
+      "workload": "large__softmax_safe_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__softmax_safe_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__softmax_safe_bf16_sm80/trace",
+        "workload": "large__softmax_safe_bf16_sm80"
+      },
+      "value": 16207.0,
+      "workload": "large__softmax_safe_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__softmax_safe_bf16_sm80/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__softmax_safe_bf16_sm80/trace",
+        "workload": "large__softmax_safe_bf16_sm80"
+      },
+      "value": 15714.0,
+      "workload": "large__softmax_safe_bf16_sm80"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__swiglu_fwd_bf16_sm80_n1048576/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__swiglu_fwd_bf16_sm80_n1048576/trace",
+        "workload": "large__swiglu_fwd_bf16_sm80_n1048576"
+      },
+      "value": 14391.0,
+      "workload": "large__swiglu_fwd_bf16_sm80_n1048576"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__swiglu_fwd_bf16_sm80_n1048576/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__swiglu_fwd_bf16_sm80_n1048576/trace",
+        "workload": "large__swiglu_fwd_bf16_sm80_n1048576"
+      },
+      "value": 14951.0,
+      "workload": "large__swiglu_fwd_bf16_sm80_n1048576"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__swiglu_fwd_bf16_sm80_n1048576/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__swiglu_fwd_bf16_sm80_n1048576/trace",
+        "workload": "large__swiglu_fwd_bf16_sm80_n1048576"
+      },
+      "value": 14424.0,
+      "workload": "large__swiglu_fwd_bf16_sm80_n1048576"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__swiglu_fwd_bf16_sm80_n1048576/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__swiglu_fwd_bf16_sm80_n1048576/trace",
+        "workload": "large__swiglu_fwd_bf16_sm80_n1048576"
+      },
+      "value": 14266.0,
+      "workload": "large__swiglu_fwd_bf16_sm80_n1048576"
+    },
+    {
+      "clock_domain": "gpc_cycles",
+      "endpoint": "ncu_grid_completion_semaphore",
+      "hardware": {
+        "compute_capability": "8.6",
+        "device_index": 0,
+        "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+        "sm_clock_mhz": 1350
+      },
+      "identity_status": "independently_verified",
+      "metric": "gpc__cycles_elapsed.max",
+      "source": "sm86_accuracy_campaign_v1_ncu",
+      "source_binding": {
+        "arch_card": "arch_profiles/cards/sm_86.json",
+        "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__swiglu_fwd_bf16_sm80_n1048576/control.json",
+        "launch_identity": "sm86_accuracy_campaign_v1",
+        "pchase_card": "data/pchase/sm_86_static_card.json",
+        "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__swiglu_fwd_bf16_sm80_n1048576/trace",
+        "workload": "large__swiglu_fwd_bf16_sm80_n1048576"
+      },
+      "value": 14429.0,
+      "workload": "large__swiglu_fwd_bf16_sm80_n1048576"
+    }
+  ],
+  "schema": "ncu_observation_v2",
+  "source": "sm86_accuracy_campaign_v1_ncu",
+  "target_contract": {
+    "cache_policy": "all",
+    "clock_domain": "gpc_cycles",
+    "endpoint": "ncu_grid_completion_semaphore",
+    "hardware": {
+      "compute_capability": "8.6",
+      "device_index": 0,
+      "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+      "sm_clock_mhz": 1350
+    },
+    "launch_identity": "sm86_accuracy_campaign_v1",
+    "metric": "gpc__cycles_elapsed.max",
+    "repetitions": 5
+  }
+}

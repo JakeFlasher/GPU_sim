@@ -28,7 +28,21 @@
     "captured_at_utc": {"type": "string", "minLength": 1},
     "hardware": {"$ref": "#/$defs/hardware"},
     "software": {"type": "object", "additionalProperties": {"type": ["string", "null"]}},
-    "build": {"type": "object", "required": ["simulator_git_commit", "simulator_build_profile", "simulator_binary", "trace_schema_version", "nvbit_tracer_build", "working_tree_dirty"], "additionalProperties": {"type": ["string", "boolean", "null"]}},
+    "build": {
+      "type": "object",
+      "required": ["simulator_git_commit", "simulator_build_profile", "simulator_binary", "trace_schema_version", "nvbit_tracer_build", "working_tree_dirty"],
+      "properties": {
+        "simulator_git_commit": {"type": ["string", "null"]},
+        "simulator_build_profile": {"type": ["string", "null"]},
+        "simulator_binary": {"type": ["string", "null"]},
+        "trace_schema_version": {"type": ["string", "null"]},
+        "nvbit_tracer_build": {"type": ["string", "null"]},
+        "working_tree_dirty": {"type": "boolean"},
+        "untracked_paths": {"type": "array", "items": {"type": "string"}},
+        "ignored_untracked_paths": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    },
     "inputs": {"type": "object", "additionalProperties": {"type": ["string", "null"]}},
     "metric_availability": {"$ref": "#/$defs/metric_availability"},
     "mismatches": {"type": "array", "items": {"type": "string", "minLength": 1}}

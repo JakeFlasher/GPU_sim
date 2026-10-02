@@ -224,8 +224,15 @@ artifact is prepared before any observation, source-bound, five-repetition
 targeted, and free of NCU values. The service fitter remains probe-only with
 explicit latency/throughput intervals and queue/occupancy/contention
 unmodeled; the supplied profile is explicitly unvalidated. No new NCU
-observations were collected or scored. A5 is next, conditional on clean A1/A2
-eligibility.
+observations were collected or scored. A5 is now complete: five fresh
+application-replay/all-cache/no-clock-control repetitions ran for all 15
+workloads after clean identity/preflight. The corrected launch-skip setting is
+0; the first historical-skip attempt produced no profiled kernels and is
+retained as failed raw execution evidence. The 75 observations are separate
+from predictions and all intervals remain open: finite accuracy is not
+applicable, with lower consistency 0.667/1.000/0.750 across
+calibration/development/held-out. A6 is next: separate intervention
+falsification.
 
 ## Retained evidence
 

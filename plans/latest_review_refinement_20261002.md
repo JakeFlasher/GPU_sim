@@ -817,3 +817,28 @@ is the sole current mismatch, so `identity_ineligible=true` and
 workload command was launched. A5 remains active until a clean, independently
 identified build can be supplied, after which the five-repetition application-
 replay/all-cache/no-clock-control baseline can run.
+
+### A5 implementation evidence (complete 2026-10-02)
+
+- The coherent implementation/protocol set was committed, the release
+  `sim-run` binary rebuilt, and metadata/preflight rerun successfully. The
+  preserved untracked review corpus is listed but not treated as source dirt;
+  the build recorded by the identity artifact is commit `681aa6e3`.
+- The declared baseline was collected with five fresh application-replay,
+  all-cache, no-clock-control repetitions for all 15 workloads. A first
+  command attempt retained the historical `--launch-skip 8` while changing
+  warmup to 3 and produced no profiled kernels; it was stopped and retained as
+  failed/raw execution evidence. The corrected run sets launch skip to 0 and
+  produced 75 successful NCU reports/CSV imports under
+  `results/alpha/sm86_accuracy_campaign_v1_retry_20261002/`.
+- Predictions remain the pre-observation document. The new identity,
+  observation, repetition, and evaluation artifacts are separate
+  `docs/sm86_accuracy_campaign_v1_*.json` files. Row/source/target identities
+  match and all repetition processes terminated successfully.
+- All 15 predictions remain open upper intervals: finite interval coverage
+  and finite point-error scores are not applicable. Open lower consistency is
+  0.667 calibration, 1.000 development, and 0.750 held out. This is a measured
+  negative accuracy boundary, not a finite hardware-accuracy claim.
+- Evidence passed: 40 affected Python tests and all A5 artifact schemas.
+  The next goal is A6: intervention falsification under the same declared
+  identity/endpoint contract, keeping every contrast separate from baseline.
