@@ -10136,10 +10136,37 @@ impl<'a> SmCore<'a> {
                 reason: "nonzero_count_and_initiation_interval_required",
             });
         }
-        if self.instruction_front_end.is_some()
-            || self.memory_issue_pipeline.is_some()
-            || self.scalar_execution_pipeline.is_some()
-            || self.immediate_constant_cache.is_some()
+        let memory_pipeline_open = self.memory_issue_pipeline.as_ref().is_some_and(|pipeline| {
+            pipeline
+                .queue_release_times
+                .iter()
+                .any(|queue| !queue.is_empty())
+                || pipeline
+                    .local_completion_ready
+                    .iter()
+                    .any(|&ready| ready > self.t)
+                || pipeline.shared_accept_ready > self.t
+        });
+        let scalar_pipeline_open =
+            self.scalar_execution_pipeline
+                .as_ref()
+                .is_some_and(|pipeline| {
+                    pipeline.release_times.iter().any(|queue| !queue.is_empty())
+                        || pipeline.next_service.iter().any(|&ready| ready > self.t)
+                });
+        let constant_cache_open = self
+            .immediate_constant_cache
+            .as_ref()
+            .is_some_and(|caches| {
+                caches.iter().any(|cache| {
+                    !cache.pending.is_empty()
+                        || cache.next_service > self.t
+                        || cache.sets.iter().any(|set| !set.is_empty())
+                })
+            });
+        if memory_pipeline_open
+            || scalar_pipeline_open
+            || constant_cache_open
             || !self.unmodeled_tails.is_empty()
             || self.outstanding_responses() != 0
             || self.block_states.iter().any(|block| block.waiting != 0)

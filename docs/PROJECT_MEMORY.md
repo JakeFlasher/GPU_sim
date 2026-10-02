@@ -62,6 +62,8 @@ from profiler measurements; black-box models are assumptions, not observations.
   typed-macro/exact-replay path; a native issue-model test compares macro entry,
   exit, and detailed continuation state. The real SM86 reference probe still
   selects exact replay because its front-end state is open.
+- The closed native issue-model seam is exercised with a two-instruction scalar
+  macro and detailed suffix; front-end-enabled launches remain exact fallback.
 - Service profiles now mark capacity-adjusted throughput slopes and carry
   explicit residual/replacement/independent service roles plus a serial queue
   projection; the v2 probe fitter refuses

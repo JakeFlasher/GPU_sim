@@ -481,6 +481,9 @@ GPU overlap models, skipping refinement, or native trace-driven simulators.
   the warp/effect cardinality and interval before dispatching the macro; an
   `ExactReplay` result is a no-op fallback. The full system writer still
   selects exact replay for the real front-end-enabled probe.
+- R5 therefore has a consumed closed native issue-model seam and a verified
+  full native fallback path, but is not complete until a front-end-enabled
+  native region selects the typed-macro branch.
 - The typed scalar rule now derives first issue from the entry warp readiness
   and can consume a closed front-end instruction-buffer prefix; it still
   refuses absent/noncontiguous buffers and all open pipeline/cache state.
