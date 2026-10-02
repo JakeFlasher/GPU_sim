@@ -294,9 +294,11 @@ async target median was 4459994 cycles. These are observations, not fitted
 parameters. The next seam is a mechanism-local writeback/coherence service
 intervention. C3's explicit service probe closes two store-case simulator
 frontiers but misses independent NCU medians: predicted intervals
-`1775..2287`/`1782..2294` versus medians `3310`/`3318`. The service model is
-therefore not promoted to hardware accuracy; C2 tail-witness work remains
-active.
+`1775..2287`/`1782..2294` versus medians `3310`/`3318`. A disjoint store-2
+holdout with calibration padding covers its median (`1827..3683` vs `3667`),
+but only 4/5 raw repetitions (one `3721`) and 50.18% lower-point APE. The
+service model is therefore not promoted to hardware accuracy; C2 tail-witness
+work remains active.
 
 ## Retained evidence
 

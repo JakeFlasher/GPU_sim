@@ -204,8 +204,11 @@ the writeback/coherence service intervention, not the broad 15-row campaign.
 C3 has partial model-local evidence: explicitly configured writeback/coherence
 queues close two store-case simulator frontiers, but the resulting finite
 intervals (`1775..2287` and `1782..2294`) miss independent NCU medians `3310`
-and `3318`. This is an observer-model falsification, not a hardware-accuracy
-claim; C2 tail-witness work remains active.
+and `3318`. A disjoint store-2 holdout with calibration padding produced a
+finite median interval (`1827..3683`) covering its NCU median `3667`, but only
+4/5 raw repetitions (one reached `3721`) and 50.18% lower-point APE. This is
+observer-model evidence, not a hardware-accuracy claim; C2 tail-witness work
+remains active.
 
 The first A5 preflight correctly rejected the dirty checkout; after the
 coherent implementation was committed and rebuilt, independent identity and

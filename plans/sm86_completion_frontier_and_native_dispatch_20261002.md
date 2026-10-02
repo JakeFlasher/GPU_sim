@@ -371,4 +371,10 @@ its NCU observation. The result is retained in
 the current endpoint padding/profile, not as a hardware-accuracy result.
 
 C3 remains incomplete until C2 supplies the missing tail evidence and a
-disjoint calibration/held-out intervention explains the observer gap.
+disjoint calibration/held-out intervention explains the observer gap. A
+store-2 held-out run using padding calibrated from a disjoint store case
+produced a finite median interval (`1827..3683`) covering median `3667`, but
+only 4/5 raw repetitions (one `3721`) and 50.18% lower-point APE. It is
+recorded in `docs/sm86_completion_frontier_c3_store2_holdout_v1.json` as
+promising model-local evidence with unresolved repeat dispersion, not as
+hardware accuracy.

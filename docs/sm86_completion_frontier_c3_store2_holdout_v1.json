@@ -1,0 +1,65 @@
+{
+  "evaluation": "docs/sm86_completion_frontier_c3_store2_evaluation_v1.json",
+  "finite_upper_model_status": "complete_explicit_service_queues",
+  "identity": "docs/sm86_completion_frontier_c3_store2_identity.json",
+  "interpretation": "calibration padding from a disjoint store case yields a finite held_out median interval, but one of five NCU repetitions exceeds the upper; this is not yet a stable hardware-accuracy result",
+  "mean_point_ape_pct": 50.17725661303518,
+  "mechanism_metrics": {
+    "dram__sectors_read.sum": [
+      120.0,
+      144.0,
+      116.0,
+      152.0,
+      116.0
+    ],
+    "dram__sectors_write.sum": [
+      0.0,
+      132.0,
+      8.0,
+      0.0,
+      0.0
+    ],
+    "gpu__time_duration.max": [
+      2752.0,
+      2752.0,
+      2752.0,
+      2752.0,
+      2816.0
+    ],
+    "sm__cycles_active.max": [
+      1932.0,
+      1928.0,
+      1929.0,
+      1929.0,
+      1981.0
+    ],
+    "sm__inst_executed.sum": [
+      216.0,
+      216.0,
+      216.0,
+      216.0,
+      216.0
+    ]
+  },
+  "median_coverage": true,
+  "model_interval": {
+    "lower_cycles": 1827,
+    "upper_cycles": 3683
+  },
+  "ncu_max_cycles": 3721.0,
+  "ncu_median_cycles": 3667.0,
+  "ncu_min_cycles": 3663.0,
+  "ncu_samples": [
+    3667.0,
+    3663.0,
+    3669.0,
+    3666.0,
+    3721.0
+  ],
+  "ncu_target_metric": "gpc__cycles_elapsed.max",
+  "observation": "docs/sm86_completion_frontier_c3_store2_observations_post_ncu_v1.json",
+  "prediction": "docs/sm86_completion_frontier_c3_store2_prediction_pre_ncu_v1.json",
+  "raw_repetition_coverage": 0.8,
+  "schema": "sm86_completion_frontier_c3_store2_holdout_v1",
+  "status": "held_out_finite_median_but_repeat_dispersion"
+}

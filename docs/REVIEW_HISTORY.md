@@ -484,4 +484,5 @@ coherence. The next experiment must identify a service/ownership interval;
 the observed NCU values are not calibration inputs for the same rows. C3's
 explicit service probe closes two model-local store frontiers but misses their
 independent NCU medians, so the current padding/profile is falsified rather
-than promoted.
+than promoted. A disjoint store-2 holdout covers its median but not every raw
+repetition (4/5), so repeat dispersion remains unresolved.
