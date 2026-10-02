@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpu-simulator.local/schemas/sm86_workload_run_v1.schema.json",
+  "title": "Bounded SM86 workload run",
+  "type": "object",
+  "required": [
+    "schema", "workload_id", "command", "status", "returncode",
+    "timed_out", "process_group_cleanup", "elapsed_seconds",
+    "expected_device_memory_mib", "reserve_free_memory_mib",
+    "failure_reason", "stdout_path", "stderr_path"
+  ],
+  "properties": {
+    "schema": {"const": "sm86_workload_run_v1"},
+    "workload_id": {"type": "string", "minLength": 1},
+    "command": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "cwd": {"type": ["string", "null"]},
+    "started_at_utc": {"type": "string"},
+    "finished_at_utc": {"type": "string"},
+    "status": {"enum": ["passed", "preflight_memory_low", "oom", "out_of_domain", "timeout", "runtime_error", "host_query_error", "launcher_error"]},
+    "returncode": {"type": ["integer", "null"]},
+    "timed_out": {"type": "boolean"},
+    "process_group_cleanup": {"type": "boolean"},
+    "elapsed_seconds": {"type": "number", "minimum": 0},
+    "gpu_before": {"type": ["object", "null"]},
+    "gpu_after": {"type": ["object", "null"]},
+    "gpu_query_error": {"type": ["string", "null"]},
+    "expected_device_memory_mib": {"type": ["integer", "null"], "minimum": 0},
+    "reserve_free_memory_mib": {"type": "integer", "minimum": 0},
+    "failure_reason": {"type": ["string", "null"]},
+    "stdout_path": {"const": "stdout.txt"},
+    "stderr_path": {"const": "stderr.txt"}
+  },
+  "additionalProperties": false
+}

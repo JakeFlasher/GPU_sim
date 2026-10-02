@@ -1,0 +1,29 @@
+{
+  "schema": "reification_prediction_manifest_v1",
+  "target_contract": {
+    "metric": "gpc__cycles_elapsed.max",
+    "endpoint": "ncu_grid_completion_semaphore",
+    "clock_domain": "gpc_cycles",
+    "cache_policy": "all",
+    "clock_control": "none",
+    "launch_identity": "sm86_accuracy_campaign_v1",
+    "repetitions": 5,
+    "hardware": {
+      "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+      "compute_capability": "8.6",
+      "sm_clock_mhz": 1350,
+      "device_index": 0
+    }
+  },
+  "rows": [
+    {
+      "workload": "gemm_hmma_bf16_sm80_a8_vertical",
+      "family": "tensor_gemm",
+      "split": "development",
+      "trace": "results/alpha/a8_vertical_20261002_retry/nvbit_trace",
+      "control": "data/annex/control_bits_sm86_20260706/gemm_hmma_bf16_sm80.control_bits.json",
+      "arch_card": "arch_profiles/cards/sm_86.json",
+      "pchase_card": "data/pchase/sm_86_static_card.json"
+    }
+  ]
+}
