@@ -54,6 +54,10 @@ probe: current-host CUDA/NCU/NVBit execution succeeded, profiler values remain
 post-prediction observations, and the campaign role is development rather than
 held-out accuracy.
 
+R10.1 is the live writeback loop: dirty-stream footprints target the unresolved
+terminal service tail, with fresh post-prediction NCU repetitions and no
+writeback fitting.
+
 ## Stage ledger
 
 | Stage | Focus | Exit evidence | Status |
@@ -69,6 +73,7 @@ held-out accuracy.
 | R9.1 | Production witness dispatch attempt | A complete independent witness reaches the real event loop and proves continuation, or the canary records precise no-witness/refusal evidence without a native claim | **complete: no positive native fixture** |
 | R9.2 | Two-pass witness/continuation audit | A complete independent pre/effect/post witness exists and drives one production dispatch, or the corpus records no eligible pair and exact fallback | **complete: no eligible pair** |
 | R10.0 | Live SM86 campaign | A bounded live host run records host identity, native/NCU/trace/replay termination, prediction-before-post-observation artifacts, open/refused strata, and no unsupported speedup claim | **complete: 10-case large development probe** |
+| R10.1 | Live writeback campaign | Large dirty streams complete native/trace/replay/NCU runs, preserve writeback tails as unknown/unavailable, and make no speedup or fitted-hardware claim | **complete: 2-case large writeback probe** |
 
 ## R8.1 — immediate soundness guards
 

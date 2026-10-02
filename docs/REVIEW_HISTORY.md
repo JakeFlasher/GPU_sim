@@ -279,3 +279,13 @@ against NCU medians was 43.793%, and open lower consistency was 1.0. This is a
 live development/domain result, not held-out accuracy or speedup evidence.
 The host changed P-state P0→P2 after the run while clocks remained 1350/10501
 MHz; the limitation is retained in the campaign summary.
+
+## R10.1 live writeback campaign — 2026-10-02 (complete)
+
+Two large dirty-store footprints ran through native correctness, NVBit trace,
+simulator replay, analyzer, and three fresh post-prediction NCU repetitions.
+Both completed, but writeback completion remained explicitly unavailable and
+observer uppers remained open. Mean lower-point APE was 32.936%, open
+lower-bound consistency was 1.0, and native/analyzer dispatch counts were zero.
+This live campaign strengthens the negative tail boundary without fitting a
+writeback parameter or claiming hardware scheduler behavior.

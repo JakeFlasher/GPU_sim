@@ -1,0 +1,272 @@
+{
+  "aggregate": {
+    "candidate_records": 0,
+    "completed_cases": 2,
+    "mean_lower_point_ape_pct": 32.935515814343646,
+    "native_macro_dispatches": 0,
+    "open_intervals": 2,
+    "open_lower_consistency": 1.0
+  },
+  "campaign_id": "sm86_writeback_20261002_live_large_v2",
+  "host_after": "index, name, uuid, compute_cap, driver_version, pstate, clocks.current.sm [MHz], clocks.current.memory [MHz]\n0, NVIDIA GeForce RTX 3090 Ti, GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c, 8.6, 615.71.09, P2, 1350 MHz, 10501 MHz",
+  "host_before": "index, name, uuid, compute_cap, driver_version, pstate, clocks.current.sm [MHz], clocks.current.memory [MHz]\n0, NVIDIA GeForce RTX 3090 Ti, GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c, 8.6, 615.71.09, P0, 1350 MHz, 10501 MHz",
+  "limitations": [
+    "development probe, not held-out accuracy",
+    "writeback/DRAM flush remains explicitly unavailable in simulator metrics",
+    "NCU metadata is caller-labeled unverified",
+    "all observer uppers are open",
+    "no native macro dispatch or speedup claim"
+  ],
+  "ncu_repetitions": 3,
+  "prediction_before_post_ncu": true,
+  "role": "live_development_no_fitting",
+  "rows": [
+    {
+      "analyzer_coverage": [
+        {
+          "candidate_records": 0,
+          "reified_records": 0,
+          "summarized_records": 0,
+          "trace_records": 729344,
+          "uncovered_records": 729344
+        }
+      ],
+      "analyzer_macro_dispatches": 0,
+      "analyzer_process_cost": {
+        "exit_code": 0,
+        "finished_at": "2026-10-02T15:15:29.239770+00:00",
+        "peak_rss_bytes": 52580352,
+        "seconds": 0.5102219320033328,
+        "started_at": "2026-10-02T15:15:28.729552+00:00",
+        "system_seconds": 0.018944,
+        "timed_out": false,
+        "user_seconds": 0.48825799999999997
+      },
+      "blocks": 256,
+      "case": "large_store_4_b256_i128",
+      "completion": {
+        "lower_bound_cycles": 10899,
+        "status": "incomplete_unmodeled_retirement_tails",
+        "unmodeled_tails": {
+          "async_copy_shared_visibility": false,
+          "coherence": true,
+          "dirty_writeback": true,
+          "reduction_read_modify_write": false
+        }
+      },
+      "domain_checks_all_repetitions": {
+        "global_atomic_requests": true,
+        "global_atomic_sectors": true,
+        "global_load_requests": true,
+        "global_load_sectors": true,
+        "global_reduction_requests": true,
+        "global_reduction_sectors": true,
+        "global_store_requests": true,
+        "global_store_sectors": true,
+        "instructions": true
+      },
+      "finite_interval_covered": null,
+      "instructions": 729344,
+      "iterations": 128,
+      "lower_point_ape_pct": 20.935799782372143,
+      "native_macro_execution": "not_enabled",
+      "ncu_cycles_median": 13785.0,
+      "ncu_cycles_samples": [
+        13772.0,
+        13785.0,
+        13789.0
+      ],
+      "ncu_dram_read_sectors": [
+        256.0,
+        120.0,
+        120.0
+      ],
+      "ncu_dram_write_sectors": [
+        118840.0,
+        97232.0,
+        102592.0
+      ],
+      "ncu_range_over_median_pct": 0.12332245194051505,
+      "observer_candidate_lower_cycles": 10899,
+      "observer_candidate_upper_cycles": null,
+      "open_lower_consistent": true,
+      "operation": "store",
+      "pattern": 4,
+      "replay_process_cost": {
+        "exit_code": 0,
+        "finished_at": "2026-10-02T15:15:28.729305+00:00",
+        "peak_rss_bytes": 99606528,
+        "seconds": 1.2562736330000916,
+        "started_at": "2026-10-02T15:15:27.473035+00:00",
+        "system_seconds": 0.023927,
+        "timed_out": false,
+        "user_seconds": 1.225808
+      },
+      "status": "completed",
+      "suite": "writeback",
+      "terminal_modeled_event": 10899,
+      "trace_metrics": {
+        "dirty_eviction_sectors": {
+          "denominator": 1,
+          "ncu_metric": null,
+          "numerator": 0,
+          "semantics": "eviction demand only; not scheduled DRAM write traffic",
+          "status": "modeled",
+          "unit": "sector",
+          "value": 0.0
+        },
+        "dram_read_bytes": {
+          "denominator": 1,
+          "ncu_metric": "dram__bytes_read.sum",
+          "numerator": 896,
+          "semantics": "modeled data reads plus compulsory instruction sectors; no byte-to-sector ambiguity",
+          "status": "modeled",
+          "unit": "byte",
+          "value": 896.0
+        },
+        "dram_write_sectors": {
+          "denominator": null,
+          "ncu_metric": "dram__sectors_write.sum",
+          "numerator": null,
+          "semantics": "dirty writeback transactions and profiler flush boundary not modeled",
+          "status": "unavailable",
+          "unit": "sector",
+          "value": null
+        },
+        "terminal_dirty_sectors": {
+          "denominator": 1,
+          "ncu_metric": null,
+          "numerator": 132096,
+          "semantics": "maximum terminal L2 dirty residency gauge; a flush/writeback demand bound, not completed DRAM traffic",
+          "status": "modeled",
+          "unit": "sector",
+          "value": 132096.0
+        }
+      }
+    },
+    {
+      "analyzer_coverage": [
+        {
+          "candidate_records": 0,
+          "reified_records": 0,
+          "summarized_records": 0,
+          "trace_records": 2917376,
+          "uncovered_records": 2917376
+        }
+      ],
+      "analyzer_macro_dispatches": 0,
+      "analyzer_process_cost": {
+        "exit_code": 0,
+        "finished_at": "2026-10-02T15:16:10.122680+00:00",
+        "peak_rss_bytes": 190517248,
+        "seconds": 2.0351992220021202,
+        "started_at": "2026-10-02T15:16:08.087486+00:00",
+        "system_seconds": 0.044882,
+        "timed_out": false,
+        "user_seconds": 1.984572
+      },
+      "blocks": 1024,
+      "case": "large_store_4_b1024_i128",
+      "completion": {
+        "lower_bound_cycles": 16281,
+        "status": "incomplete_unmodeled_retirement_tails",
+        "unmodeled_tails": {
+          "async_copy_shared_visibility": false,
+          "coherence": true,
+          "dirty_writeback": true,
+          "reduction_read_modify_write": false
+        }
+      },
+      "domain_checks_all_repetitions": {
+        "global_atomic_requests": true,
+        "global_atomic_sectors": true,
+        "global_load_requests": true,
+        "global_load_sectors": true,
+        "global_reduction_requests": true,
+        "global_reduction_sectors": true,
+        "global_store_requests": true,
+        "global_store_sectors": true,
+        "instructions": true
+      },
+      "finite_interval_covered": null,
+      "instructions": 2917376,
+      "iterations": 128,
+      "lower_point_ape_pct": 44.93523184631515,
+      "native_macro_execution": "not_enabled",
+      "ncu_cycles_median": 29567.0,
+      "ncu_cycles_samples": [
+        29567.0,
+        30795.0,
+        29069.0
+      ],
+      "ncu_dram_read_sectors": [
+        176.0,
+        180.0,
+        168.0
+      ],
+      "ncu_dram_write_sectors": [
+        490124.0,
+        498720.0,
+        490512.0
+      ],
+      "ncu_range_over_median_pct": 5.837589204180336,
+      "observer_candidate_lower_cycles": 16281,
+      "observer_candidate_upper_cycles": null,
+      "open_lower_consistent": true,
+      "operation": "store",
+      "pattern": 4,
+      "replay_process_cost": {
+        "exit_code": 0,
+        "finished_at": "2026-10-02T15:16:08.087264+00:00",
+        "peak_rss_bytes": 369643520,
+        "seconds": 4.005347864003852,
+        "started_at": "2026-10-02T15:16:04.081921+00:00",
+        "system_seconds": 0.085827,
+        "timed_out": false,
+        "user_seconds": 3.912706
+      },
+      "status": "completed",
+      "suite": "writeback",
+      "terminal_modeled_event": 16281,
+      "trace_metrics": {
+        "dirty_eviction_sectors": {
+          "denominator": 1,
+          "ncu_metric": null,
+          "numerator": 331776,
+          "semantics": "eviction demand only; not scheduled DRAM write traffic",
+          "status": "modeled",
+          "unit": "sector",
+          "value": 331776.0
+        },
+        "dram_read_bytes": {
+          "denominator": 1,
+          "ncu_metric": "dram__bytes_read.sum",
+          "numerator": 896,
+          "semantics": "modeled data reads plus compulsory instruction sectors; no byte-to-sector ambiguity",
+          "status": "modeled",
+          "unit": "byte",
+          "value": 896.0
+        },
+        "dram_write_sectors": {
+          "denominator": null,
+          "ncu_metric": "dram__sectors_write.sum",
+          "numerator": null,
+          "semantics": "dirty writeback transactions and profiler flush boundary not modeled",
+          "status": "unavailable",
+          "unit": "sector",
+          "value": null
+        },
+        "terminal_dirty_sectors": {
+          "denominator": 1,
+          "ncu_metric": null,
+          "numerator": 196608,
+          "semantics": "maximum terminal L2 dirty residency gauge; a flush/writeback demand bound, not completed DRAM traffic",
+          "status": "modeled",
+          "unit": "sector",
+          "value": 196608.0
+        }
+      }
+    }
+  ],
+  "schema": "sm86_live_writeback_campaign_v1"
+}

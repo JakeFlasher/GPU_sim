@@ -104,6 +104,12 @@ post-prediction NCU repetitions. All intervals remained open, analyzer
 candidate records and native macro dispatches were zero, and no speedup claim
 is made. See [the live campaign result](review_round7_20261002/README.md).
 
+R10.1 completed a live writeback campaign: 2/2 large dirty-stream cases ran
+native correctness, NVBit trace, replay/analyzer, and three fresh NCU
+repetitions. Writeback completion remains explicitly unavailable/open; no
+parameter fit, native dispatch, or speedup claim is made. See
+[the writeback result](review_round8_20261002/README.md).
+
 ## Retained measurements
 
 2026-09-30 RTX 3090 Ti campaigns used driver 615.71.09, 1350/10501 MHz, P0,

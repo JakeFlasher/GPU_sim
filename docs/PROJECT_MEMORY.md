@@ -118,6 +118,11 @@ from profiler measurements; black-box models are assumptions, not observations.
   fresh post-prediction NCU repetitions. All intervals remained open, analyzer
   candidates and native macro dispatches were zero, and no speedup claim is
   made. Aggregate result: `docs/review_round7_20261002/`.
+- R10.1 completed a live writeback campaign: 2/2 large dirty-stream cases ran
+  native correctness, NVBit trace, replay/analyzer, and three fresh NCU
+  repetitions. Writeback completion remains open/unavailable; no fitting or
+  native speedup claim is made. Aggregate result:
+  `docs/review_round8_20261002/`.
 
 ## Next useful work
 
