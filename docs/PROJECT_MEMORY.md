@@ -54,6 +54,10 @@ from profiler measurements; black-box models are assumptions, not observations.
   supplies residency only and therefore refuses rather than self-certifying.
   Multi-warp/global-order cases remain conservative refusal, and same-cycle
   effect ordering is checked independently of global sequence monotonicity.
+- R5 now captures native reference pre/post typed boundaries and detailed issue
+  effects. The pure-scalar SM86 probe has a complete pre/post pair with two
+  effects; the opt-in independently derived scalar transition reifies on the
+  first effect mismatch (expected 285, observed 568) rather than preserving.
 - Service profiles now mark capacity-adjusted throughput slopes and carry
   explicit residual/replacement/independent service roles plus a serial queue
   projection; the v2 probe fitter refuses
