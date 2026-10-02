@@ -262,6 +262,11 @@ pub fn derive_typed_scalar_macro_region(
             .barrier_pending
             .iter()
             .any(|&pending| pending != 0)
+        || core.warp_states[0].at_block_barrier
+        || core.warp_states[0].block_barrier_dispatch.is_some()
+        || core.warp_states[0].block_barrier_arrival.is_some()
+        || core.barrier_pipe_ready != 0
+        || core.block_states.iter().any(|block| block.waiting != 0)
         || core.outstanding_responses != 0
         || !core.response_owners.is_empty()
     {
@@ -1435,6 +1440,49 @@ mod tests {
             )
             .unwrap(),
             NativeBoundaryExecutionPath::ExactReplay { .. }
+        ));
+    }
+
+    #[test]
+    fn typed_scalar_macro_refuses_pending_response_barrier_and_unknown_tail_entries() {
+        let spec = TypedScalarMacroSpec {
+            instruction_count: 1,
+            latency_cycles: 2,
+            label: "scalar_macro_v1".to_owned(),
+        };
+        let mut pending = scalar_entry_boundary();
+        pending.queue.depth = 1;
+        pending.queue.next_event_time = Some(0);
+        pending.queue.next_sequence = Some(2);
+        pending.queue.pending.push(TypedPendingEvent {
+            time: 0,
+            sequence: 1,
+            phase: 0,
+            sequence_span: 1,
+            target: 0,
+            payload: TypedEventPayload::SmWake,
+        });
+        assert!(matches!(
+            derive_typed_scalar_macro_region(&pending, &spec),
+            Err(RegionContractError::UnsupportedScalarMacro { .. })
+        ));
+
+        let mut barrier = scalar_entry_boundary();
+        barrier.cores[0].warp_states[0].barrier_pending[0] = 1;
+        assert!(matches!(
+            derive_typed_scalar_macro_region(&barrier, &spec),
+            Err(RegionContractError::Boundary { .. })
+                | Err(RegionContractError::UnsupportedScalarMacro { .. })
+        ));
+
+        let mut unknown = scalar_entry_boundary();
+        unknown.completeness = Completeness::Incomplete {
+            unknown: vec!["unmodeled_completion_tails".to_owned()],
+        };
+        assert!(matches!(
+            derive_typed_scalar_macro_region(&unknown, &spec),
+            Err(RegionContractError::Boundary { .. })
+                | Err(RegionContractError::UnsupportedScalarMacro { .. })
         ));
     }
 

@@ -454,6 +454,8 @@ GPU overlap models, skipping refinement, or native trace-driven simulators.
   covered by preserve/fallback tests. A real SM86 pure-scalar probe now emits a
   complete typed pre/post boundary pair, but its cold front-end transition is
   not derivable by that rule and correctly remains exact replay.
+- The typed executor explicitly refuses pending queue responses, dependency
+  barriers, and incomplete/unknown tails before deriving an exit.
 - The decisive remaining R5 check is a real nonidentity native macro whose
   exit/effects/pending-token mapping are independently derived and consumed by
   continuation execution; until then this stage is not complete.
