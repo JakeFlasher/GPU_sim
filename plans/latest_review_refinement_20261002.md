@@ -41,7 +41,7 @@ verified device identity.
 | R8.1 | Immediate soundness guards | Mismatched certificates, inconsistent grouped queues, missing observer projections, incomplete cache domains, and unchecked arithmetic refuse before mutation or finite projection | **complete** |
 | R8.2 | Production native decision path | A comparator-selected closed fixture reaches the real event loop, increments a dispatch counter, installs effects/pending state, resumes a detailed suffix, and falls back before mutation when one field is perturbed | **complete** |
 | R8.3 | Native state closure and independent refinement | Nonzero scalar latency/completion/front-end state is either consumed and compared against an independently captured boundary or conservatively refused; self-match tests are not the sole evidence | **complete** |
-| R8.4 | Service/queue semantics and identifiability | Queue unknowns cannot close spuriously; residual/replacement roles have explicit equations and a held-out intervention, or the profile is clearly sidecar-only; latency, throughput, and queue parameters are separately identified | pending |
+| R8.4 | Service/queue semantics and identifiability | Queue unknowns cannot close spuriously; residual/replacement roles have explicit equations and a held-out intervention, or the profile is clearly sidecar-only; latency, throughput, and queue parameters are separately identified | **complete** |
 | R8.5 | Measurement identity and cost utility | NCU observations are explicitly verified or labeled as manifest-labeled historical data; source/trace/control/card/launch identity is bound; parser/planner/effect/compare/RSS/wall-time cost and accepted/refused coverage are reported without speedup overclaim | pending |
 | R8.6 | Independent evaluation and paper synchronization | New tests/probes, negative results, novelty/prior-art boundary, histories, memory, status, schemas, and rebuttal all agree; full validation passes | pending |
 
@@ -242,6 +242,35 @@ an explicit future research stage, not a hidden claim.
   identity claims.
 - A cost table includes the full analyzer path and never presents 16-to-1
   dispatch as CPU/runtime speedup.
+
+## R8.4 implementation evidence (complete 2026-10-02; queue equation explicitly absent)
+
+- The v2 fitter now requires explicit `dependent_latency` and
+  `independent_throughput` modes. Omitting `latency_cycles` from a dependent
+  probe is an error; aggregate `(cycles/events)` is never relabeled as chain
+  latency. Queue-capacity/depth rows remain accepted interventions, but the
+  profile declares `queue_depth` unmodeled because no queue-delay equation is
+  fitted. Occupancy and contention remain unmodeled as before.
+- Capacity-adjusted throughput slopes remain marked
+  `capacity_already_applied`, with lower/upper initiation-interval endpoints.
+  Queue-depth rows are retained in holdout diagnostics with an explicit
+  `queue_depth_not_in_profile_equation` reason rather than being silently
+  treated as calibrated queue state.
+- `sim-run` now exposes `--service-stage-role` with explicit
+  `independent_post_replay` (default), `residual_closure`, and
+  `replacement_timing` compositions. Non-independent roles activate the
+  resource-service completion requirement and therefore feed the declared
+  model-local observer frontier only by explicit selection; the default
+  sidecar does not alter native replay or the observer endpoint.
+- Direct-run tests compare the sidecar and replacement roles on a held-out
+  model fixture. The ordinary profile changes the declared resource frontier
+  while the unresolved typed tail still dominates the observer candidate;
+  a stressed replacement profile demonstrably moves the model-local lower
+  endpoint. No NCU target is used, and no hardware prediction is implied.
+
+This closes the review's queue-identifiability and disconnected-composition
+wording. It does not recover a hardware scheduler queue or turn the abstract
+service profile into a calibrated silicon model.
 
 ## R8.6 — evaluation, synchronization, and rebuttal
 

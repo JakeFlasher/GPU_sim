@@ -37,7 +37,21 @@
         "queue_depth": {"$ref": "#/$defs/positive"},
         "occupancy": {"$ref": "#/$defs/positive"},
         "contenders": {"$ref": "#/$defs/positive"}
-      }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"mode": {"const": "dependent_latency"}}},
+          "then": {"required": ["latency_cycles"]}
+        },
+        {
+          "if": {"properties": {"mode": {"enum": ["independent_throughput", "queue_capacity"]}}},
+          "then": {"required": ["capacity"]}
+        },
+        {
+          "if": {"properties": {"mode": {"const": "queue_capacity"}}},
+          "then": {"required": ["queue_depth"]}
+        }
+      ]
     }
   }
 }

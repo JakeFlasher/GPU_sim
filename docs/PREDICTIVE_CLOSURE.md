@@ -42,12 +42,14 @@ Service composition is now typed as an explicit admission/service overlap
 policy. Pool rates expose their queue capacities and whether the fitted
 initiation interval already includes capacity; capacity-adjusted throughput
 probes are never divided by capacity a second time. The v2 probe fitter
-requires separate dependent-latency, independent-throughput, and queue-capacity
-observations. Occupancy and contention rows are accepted as holdout
-diagnostics but are emitted as explicitly unmodeled dimensions; their values do
-not silently change the fitted rate profile. Independent throughput probes
-retain lower/upper initiation-interval endpoints so service uncertainty widens
-an upper bound instead of collapsing to one median slope.
+requires explicit dependent-latency and independent-throughput observations;
+queue-depth/capacity rows are retained as interventions but the current profile
+has no queue equation, so `queue_depth` remains explicitly unmodeled. Occupancy
+and contention rows are likewise holdout diagnostics; their values do not
+silently change the fitted rate profile. Dependent latency is never inferred
+from aggregate throughput. Independent throughput probes retain lower/upper
+initiation-interval endpoints so service uncertainty widens an upper bound
+instead of collapsing to one median slope.
 
 The R6 evaluation uses 15 retained SM86 workloads across six operation families
 with a checked family-held-out split, joins NCU only after prediction, and keeps

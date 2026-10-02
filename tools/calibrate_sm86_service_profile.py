@@ -2,12 +2,13 @@
 """Fit an abstract service-rate profile from independent probe observations.
 
 ``sm86_service_probe_v1`` remains a compatibility format for old aggregate
-probes.  New work should use ``sm86_service_probe_v2`` and provide separate
-dependent-chain latency, independent-stream throughput, queue-capacity,
-occupancy, and contention observations. The fitter refuses to manufacture a
-queue/occupancy parameter from one aggregate slope; occupancy and contention
-remain explicitly unmodeled rather than acting as an identification gate. It
-never accepts NCU scores or workload identity fields.
+probes. New work should use ``sm86_service_probe_v2`` and provide explicit
+dependent-chain latency and independent-stream throughput observations. Queue
+depth/capacity, occupancy, and contention observations are retained as
+interventions, but the current profile has no queue equation; they are
+reported as unmodeled rather than being called calibrated state. Dependent
+latency must be supplied explicitly and is never inferred from aggregate
+throughput. The fitter never accepts NCU scores or workload identity fields.
 """
 from __future__ import annotations
 
@@ -114,12 +115,13 @@ def _fit_v2(raw: dict[str, Any], source: str) -> dict[str, Any]:
                 probe.get("capacity"), f"probe {index}.capacity"
             )
         if mode == "dependent_latency":
-            if "latency_cycles" in probe:
-                entry["latency"] = _positive_int(
-                    probe["latency_cycles"], f"probe {index}.latency_cycles"
+            if "latency_cycles" not in probe:
+                raise ValueError(
+                    f"probe {index}.latency_cycles is required for dependent_latency"
                 )
-            else:
-                entry["latency"] = (cycles + events - 1) // events
+            entry["latency"] = _positive_int(
+                probe["latency_cycles"], f"probe {index}.latency_cycles"
+            )
         if mode == "queue_capacity":
             entry["queue_depth"] = _positive_int(
                 probe.get("queue_depth"), f"probe {index}.queue_depth"
@@ -136,16 +138,23 @@ def _fit_v2(raw: dict[str, Any], source: str) -> dict[str, Any]:
 
     pools: dict[str, Any] = {}
     for pool, modes in sorted(grouped.items()):
-        required = {"dependent_latency", "independent_throughput", "queue_capacity"}
+        required = {"dependent_latency", "independent_throughput"}
         missing = required - modes.keys()
         if missing:
             raise ValueError(f"pool {pool} is missing probe modes: {sorted(missing)}")
-        capacities = {entry["capacity"] for entry in modes["queue_capacity"]}
+        queue_entries = modes.get("queue_capacity", [])
+        capacities = {
+            entry["capacity"]
+            for entry in [*modes["independent_throughput"], *queue_entries]
+            if "capacity" in entry
+        }
         throughput_capacities = {
             entry["capacity"] for entry in modes["independent_throughput"]
         }
-        if len(capacities) != 1 or throughput_capacities != capacities:
-            raise ValueError(f"pool {pool} has no consistent queue-capacity witness")
+        if len(throughput_capacities) != 1 or (
+            capacities and throughput_capacities != capacities
+        ):
+            raise ValueError(f"pool {pool} has no consistent throughput-capacity witness")
         throughput_intervals = [
             max(1, (entry["cycles"] + entry["events"] - 1) // entry["events"])
             for entry in modes["independent_throughput"]
@@ -170,7 +179,7 @@ def _fit_v2(raw: dict[str, Any], source: str) -> dict[str, Any]:
         "pools": pools,
         "ncu_start_padding_cycles": None,
         "ncu_end_padding_cycles": None,
-        "unmodeled_dimensions": ["occupancy", "contention"],
+            "unmodeled_dimensions": ["queue_depth", "occupancy", "contention"],
     }
 
 
@@ -202,8 +211,12 @@ def evaluate_profile_on_holdout(profile: dict[str, Any], raw: Any) -> dict[str, 
         if mode == "dependent_latency":
             events = _positive_int(probe.get("events"), f"holdout probe {index}.events")
             cycles = _positive_int(probe.get("cycles"), f"holdout probe {index}.cycles")
+            if "latency_cycles" not in probe:
+                raise ValueError(
+                    f"holdout probe {index}.latency_cycles is required for dependent_latency"
+                )
             observed = _positive_int(
-                probe.get("latency_cycles", (cycles + events - 1) // events),
+                probe["latency_cycles"],
                 f"holdout probe {index}.latency_cycles",
             )
             lower = rate["latency_lower_cycles"]
@@ -222,7 +235,15 @@ def evaluate_profile_on_holdout(profile: dict[str, Any], raw: Any) -> dict[str, 
             absolute_errors.append(error)
             observations.append({"index": index, "mode": mode, "observed": observed, "predicted": predicted, "error": error})
         else:
-            observations.append({"index": index, "mode": mode, "status": "unmodeled"})
+            observations.append({
+                "index": index,
+                "mode": mode,
+                "status": "unmodeled",
+                "reason": "queue_depth_not_in_profile_equation"
+                if mode == "queue_capacity"
+                else "probe_dimension_not_in_profile_equation",
+                "queue_depth": probe.get("queue_depth") if mode == "queue_capacity" else None,
+            })
     return {
         "schema": "sm86_service_holdout_v1",
         "observations": observations,

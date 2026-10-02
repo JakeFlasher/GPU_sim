@@ -43,7 +43,7 @@ def test_v2_requires_separate_identifiable_probe_modes_and_marks_capacity_slope(
         {
             "schema": "sm86_service_probe_v2",
             "probes": [
-                {"pool": "alu", "mode": "dependent_latency", "events": 8, "cycles": 32},
+                {"pool": "alu", "mode": "dependent_latency", "events": 8, "cycles": 32, "latency_cycles": 4},
                 {
                     "pool": "alu",
                     "mode": "independent_throughput",
@@ -94,7 +94,7 @@ def test_v2_holdout_scores_only_identifiable_probe_modes() -> None:
     train = {
         "schema": "sm86_service_probe_v2",
         "probes": [
-            {"pool": "alu", "mode": "dependent_latency", "events": 8, "cycles": 32},
+            {"pool": "alu", "mode": "dependent_latency", "events": 8, "cycles": 32, "latency_cycles": 4},
             {"pool": "alu", "mode": "independent_throughput", "events": 16, "cycles": 48, "capacity": 2},
             {"pool": "alu", "mode": "queue_capacity", "events": 16, "cycles": 48, "capacity": 2, "queue_depth": 8},
             {"pool": "alu", "mode": "occupancy_sweep", "events": 8, "cycles": 32, "occupancy": 1},
@@ -105,7 +105,7 @@ def test_v2_holdout_scores_only_identifiable_probe_modes() -> None:
     holdout = {
         "schema": "sm86_service_probe_v2",
         "probes": [
-            {"pool": "alu", "mode": "dependent_latency", "events": 4, "cycles": 16},
+            {"pool": "alu", "mode": "dependent_latency", "events": 4, "cycles": 16, "latency_cycles": 4},
             {"pool": "alu", "mode": "independent_throughput", "events": 8, "cycles": 24, "capacity": 2},
             {"pool": "alu", "mode": "occupancy_sweep", "events": 8, "cycles": 24, "occupancy": 2},
         ],
@@ -121,7 +121,7 @@ def test_v2_marks_occupancy_and_contention_unmodeled_without_using_their_values(
     base = {
         "schema": "sm86_service_probe_v2",
         "probes": [
-            {"pool": "alu", "mode": "dependent_latency", "events": 8, "cycles": 32},
+            {"pool": "alu", "mode": "dependent_latency", "events": 8, "cycles": 32, "latency_cycles": 4},
             {"pool": "alu", "mode": "independent_throughput", "events": 16, "cycles": 48, "capacity": 2},
             {"pool": "alu", "mode": "queue_capacity", "events": 16, "cycles": 48, "capacity": 2, "queue_depth": 8},
         ],
@@ -130,4 +130,34 @@ def test_v2_marks_occupancy_and_contention_unmodeled_without_using_their_values(
     first = fit_profile(base, "first")
     second = fit_profile(changed, "second")
     assert first["pools"] == second["pools"]
-    assert second["unmodeled_dimensions"] == ["occupancy", "contention"]
+    assert second["unmodeled_dimensions"] == ["queue_depth", "occupancy", "contention"]
+
+
+def test_v2_requires_explicit_dependent_latency_instead_of_aggregate_inference():
+    with pytest.raises(ValueError, match="latency_cycles is required"):
+        fit_profile(
+            {
+                "schema": "sm86_service_probe_v2",
+                "probes": [
+                    {"pool": "alu", "mode": "dependent_latency", "events": 8, "cycles": 32},
+                    {"pool": "alu", "mode": "independent_throughput", "events": 16, "cycles": 48, "capacity": 2},
+                ],
+            },
+            "missing_latency",
+        )
+
+
+def test_queue_depth_is_retained_as_an_unmodeled_intervention():
+    profile = fit_profile(
+        {
+            "schema": "sm86_service_probe_v2",
+            "probes": [
+                {"pool": "alu", "mode": "dependent_latency", "events": 8, "cycles": 32, "latency_cycles": 4},
+                {"pool": "alu", "mode": "independent_throughput", "events": 16, "cycles": 48, "capacity": 2},
+                {"pool": "alu", "mode": "queue_capacity", "events": 16, "cycles": 48, "capacity": 2, "queue_depth": 1},
+                {"pool": "alu", "mode": "queue_capacity", "events": 16, "cycles": 48, "capacity": 2, "queue_depth": 64},
+            ],
+        },
+        "queue_unmodeled",
+    )
+    assert "queue_depth" in profile["unmodeled_dimensions"]

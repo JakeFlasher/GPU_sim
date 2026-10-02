@@ -289,5 +289,27 @@ front-end-enabled SM86 launches. The 15-workload R6 corpus demonstrates that
 identity-checked independent evaluation can be run without target leakage, but
 also demonstrates why the real native traces remain open/exact fallback.
 
+## Latest-panel addendum (R8.1–R8.4)
+
+The subsequent panel re-review identified additional executable boundaries,
+which are now addressed in the active R8 plan:
+
+- model certificates bind to the full consumed descriptor region before any
+  state mutation; grouped unknown service tails, missing observer projections,
+  and incomplete cache-history domains cannot acquire finite precision;
+- an optional independently witnessed typed boundary is consumed by the real
+  reference `SmWake` event branch. A validated fixture dispatches a two-
+  instruction unit-tail macro and resumes a detailed suffix; invalid/empty
+  effects, exact-replay decisions, pending tokens, non-unit completion tails,
+  and untouched future state fall back before mutation;
+- the service fitter requires explicit dependent latency and independent
+  throughput. Queue-depth/capacity interventions are retained but declared
+  unmodeled because no queue equation is fit. `sim-run` exposes explicit
+  independent-sidecar, residual, and replacement roles; only the latter two
+  activate the model-local resource completion requirement.
+
+These changes strengthen refusal and composition semantics; they do not upgrade
+the R6 rows to hardware accuracy, native speedup, or a recovered GPU scheduler.
+
 That negative result is not relabeled as success. It is the current falsifiable
 boundary and the appropriate rebuttal to the original overclaims.

@@ -70,9 +70,11 @@ from profiler measurements; black-box models are assumptions, not observations.
   macro and detailed suffix; front-end-enabled launches remain exact fallback.
 - Service profiles now mark capacity-adjusted throughput slopes and carry
   explicit residual/replacement/independent service roles plus a serial queue
-  projection; the v2 probe fitter refuses
-  aggregate-only identification and requires latency, throughput, and queue
-  probe modes; occupancy/contention rows remain explicitly unmodeled.
+  projection; the v2 probe fitter requires explicit dependent latency and
+  independent throughput, retains queue-depth/capacity interventions as
+  explicitly unmodeled (no queue equation), and refuses aggregate-only
+  latency identification; occupancy/contention rows remain explicitly
+  unmodeled.
 - Cache candidates preserve warp-local instrumentation order only when the
   producer supplies it; exact cache history now additionally requires temporal
   order, fence scope, line generation, owner/read-from, and completion.

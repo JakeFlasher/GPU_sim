@@ -32,10 +32,10 @@ use sim_run::emit::{
     emit_launch,
 };
 use sim_semantics::{
-    CacheCandidateSummary, CacheWitnessDomains, ClockDomain, EndpointDescriptor, FrontierBound,
-    FrontierVector, LatentFactors, LatentModelError, NcuObserverProjection,
-    ResourceServiceProjection, ServiceComposition, ServiceOverlapMode, ServiceQueueProjection,
-    ServiceRateProfile, ServiceStageRole,
+    CacheCandidateSummary, CacheWitnessDomains, ClockDomain, CompletionRequirement,
+    EndpointDescriptor, FrontierBound, FrontierVector, LatentFactors, LatentModelError,
+    NcuObserverProjection, ResourceServiceProjection, ServiceComposition, ServiceOverlapMode,
+    ServiceQueueProjection, ServiceRateProfile, ServiceStageRole,
 };
 use sim_sm::{
     ControlSidecar, DramBw, DramStats, FastFrontierSummary, FullKernelReplayResult,
@@ -189,6 +189,10 @@ pub struct RunConfig {
     /// Optional abstract service-rate profile used only by the opt-in
     /// predictive envelope. It never changes native replay timing.
     pub predictive_service_profile: Option<PathBuf>,
+    /// Explicit model-local composition role for the service profile. The
+    /// default is an independent sidecar; residual/replacement roles are
+    /// experimental and must remain declared in the output.
+    pub service_stage_role: ServiceStageRole,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1094,6 +1098,7 @@ fn build_latent_envelope(
     launches: &[LaunchReport],
     ncu_observed: bool,
     service_profile: Option<&ServiceRateProfile>,
+    service_stage_role: ServiceStageRole,
 ) -> Result<LatentEnvelopeReport, RunError> {
     let endpoint = TimingReport::simulator_endpoint_descriptor().map_err(at("latent endpoint"))?;
     let external_endpoint = ncu_observed
@@ -1146,7 +1151,7 @@ fn build_latent_envelope(
                         upper: service.upper_cycles,
                     },
                     ServiceOverlapMode::SerialAfterAdmission,
-                    ServiceStageRole::IndependentPostReplay,
+                    service_stage_role,
                 )
             })
             .transpose()
@@ -1160,6 +1165,9 @@ fn build_latent_envelope(
                 composition.role != ServiceStageRole::IndependentPostReplay
             })
         {
+            frontiers
+                .required_completion
+                .insert(CompletionRequirement::ResourceService);
             frontiers.resource_service = service_composition
                 .as_ref()
                 .map(|composition| composition.completion)
@@ -2771,6 +2779,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
             &launches,
             ncu_observation.is_some(),
             predictive_service_profile.as_ref(),
+            config.service_stage_role,
         )?)
     } else {
         None
@@ -2861,6 +2870,7 @@ mod tests {
             native_payload_events_path: None,
             latent_envelope: false,
             predictive_service_profile: None,
+            service_stage_role: ServiceStageRole::IndependentPostReplay,
         }
     }
 
@@ -3249,6 +3259,87 @@ mod tests {
         );
         assert!(launch.cache_candidates.fence_scope.is_unknown());
         assert!(launch.cache_candidates.line_generation.is_unknown());
+    }
+
+    #[test]
+    fn service_stage_role_makes_replacement_an_explicit_model_intervention() {
+        let mut independent = fixture(MemoryMode::Flat);
+        independent.latent_envelope = true;
+        independent.predictive_service_profile = Some(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../docs/sm86_service_rate_profile_20261001.json"),
+        );
+        let independent_report = run(&independent).unwrap();
+        let independent_launch = &independent_report.latent_envelope.unwrap().launches[0];
+        assert_eq!(
+            independent_launch
+                .service_composition
+                .as_ref()
+                .unwrap()
+                .role,
+            ServiceStageRole::IndependentPostReplay
+        );
+        assert_eq!(
+            independent_launch.frontiers.resource_service,
+            FrontierBound::unknown()
+        );
+
+        let mut replacement = independent.clone();
+        replacement.service_stage_role = ServiceStageRole::ReplacementTiming;
+        let replacement_report = run(&replacement).unwrap();
+        let replacement_launch = &replacement_report.latent_envelope.unwrap().launches[0];
+        assert_eq!(
+            replacement_launch
+                .service_composition
+                .as_ref()
+                .unwrap()
+                .role,
+            ServiceStageRole::ReplacementTiming
+        );
+        assert_ne!(
+            replacement_launch.frontiers.resource_service,
+            FrontierBound::unknown()
+        );
+        // The fixture's unresolved typed tail (386 cycles) dominates the
+        // replacement service lower (46 cycles), so the observer candidate
+        // correctly remains unchanged. The declared frontier/requirement
+        // composition nevertheless differs and is the model-local intervention
+        // being evaluated; it must not be reported as hardware prediction.
+        assert_ne!(
+            replacement_launch.frontiers.resource_service,
+            independent_launch.frontiers.resource_service
+        );
+
+        let profile_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../docs/sm86_service_rate_profile_20261001.json");
+        let mut stressed: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(profile_path).unwrap()).unwrap();
+        for rate in stressed["pools"].as_object_mut().unwrap().values_mut() {
+            rate["latency_lower_cycles"] = serde_json::json!(10_000);
+            rate["latency_upper_cycles"] = serde_json::json!(20_000);
+        }
+        let stressed_file = NamedTempFile::new().unwrap();
+        std::fs::write(
+            stressed_file.path(),
+            serde_json::to_vec_pretty(&stressed).unwrap(),
+        )
+        .unwrap();
+        let mut stressed_config = replacement;
+        stressed_config.predictive_service_profile = Some(stressed_file.path().to_path_buf());
+        let stressed_report = run(&stressed_config).unwrap();
+        let stressed_launch = &stressed_report.latent_envelope.unwrap().launches[0];
+        assert!(
+            stressed_launch
+                .ncu_projection
+                .predicted_lower_cycles
+                .is_some_and(|value| {
+                    value
+                        > independent_launch
+                            .ncu_projection
+                            .predicted_lower_cycles
+                            .unwrap()
+                })
+        );
     }
 
     #[test]

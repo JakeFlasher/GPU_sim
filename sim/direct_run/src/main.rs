@@ -6,6 +6,7 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use sim_direct_run::{CacheScope, MemoryMode, RunConfig, RunError, run};
+use sim_semantics::ServiceStageRole;
 
 const USAGE: &str = "Usage: sim-run --trace DIR --control FILE --arch-card FILE \
 [--pchase-card FILE] [--mode flat|l1|l1-l2] \
@@ -18,6 +19,7 @@ const USAGE: &str = "Usage: sim-run --trace DIR --control FILE --arch-card FILE 
 [--architecture-spec FILE] \
 [--fast-frontier-only] \
 [--latent-envelope] \
+[--service-stage-role independent_post_replay|residual_closure|replacement_timing] \
 [--ncu-shaped-metrics] \
 [--ncu-csv FILE] [--ncu-launch ID] \
 [--launch-resources FILE] \
@@ -71,6 +73,7 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
     let mut native_payload_sidecar = None;
     let mut native_payload_events_path = None;
     let mut predictive_service_profile = None;
+    let mut service_stage_role = ServiceStageRole::IndependentPostReplay;
     let mut memory_service_candidates = None;
     let mut memory_admission_candidates = None;
     let mut memory_admission_feedback = None;
@@ -253,6 +256,23 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
                     "--predictive-service-profile",
                 )?));
             }
+            value if value == OsStr::new("--service-stage-role") => {
+                let raw = take_value(&mut args, "--service-stage-role")?;
+                let raw = raw.to_str().ok_or_else(|| {
+                    RunError::new("arguments", "--service-stage-role must be UTF-8")
+                })?;
+                service_stage_role = match raw {
+                    "independent_post_replay" => ServiceStageRole::IndependentPostReplay,
+                    "residual_closure" => ServiceStageRole::ResidualClosure,
+                    "replacement_timing" => ServiceStageRole::ReplacementTiming,
+                    _ => {
+                        return Err(RunError::new(
+                            "arguments",
+                            "--service-stage-role must be independent_post_replay, residual_closure, or replacement_timing",
+                        ));
+                    }
+                };
+            }
             value if value == OsStr::new("--memory-service-candidates") => {
                 memory_service_candidates = Some(PathBuf::from(take_value(
                     &mut args,
@@ -307,6 +327,7 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
         native_payload_events_path,
         latent_envelope,
         predictive_service_profile,
+        service_stage_role,
         memory_service_candidates,
         memory_admission_candidates,
         memory_admission_feedback,
@@ -501,6 +522,35 @@ mod tests {
             .unwrap()
             .unwrap()
             .latent_envelope
+        );
+    }
+
+    #[test]
+    fn service_stage_role_is_explicit_and_defaults_to_sidecar() {
+        let base = [
+            OsString::from("--trace"),
+            OsString::from("trace"),
+            OsString::from("--control"),
+            OsString::from("control"),
+            OsString::from("--arch-card"),
+            OsString::from("card"),
+        ];
+        assert_eq!(
+            parse_args(base.clone())
+                .unwrap()
+                .unwrap()
+                .service_stage_role,
+            ServiceStageRole::IndependentPostReplay
+        );
+        let replacement = parse_args(base.into_iter().chain([
+            OsString::from("--service-stage-role"),
+            OsString::from("replacement_timing"),
+        ]))
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            replacement.service_stage_role,
+            ServiceStageRole::ReplacementTiming
         );
     }
 

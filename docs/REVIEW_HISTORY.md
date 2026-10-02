@@ -228,5 +228,16 @@ completion tails, pending tokens, or any scalar/memory/cache/front-end/
 response/barrier/local-completion state it does not install. A latency-10
 variant and perturbed/empty-effect ledgers are rejected before mutation. The
 validated positive fixture remains a unit-tail issue-model transition; model
-latency summaries are not native completion. R8.4 is active on service/queue
-identifiability.
+latency summaries are not native completion.
+
+R8.4 closes the service/queue wording boundary. The v2 fitter now requires an
+explicit dependent-chain latency and never infers it from aggregate
+throughput. Queue-depth/capacity rows remain interventions but are explicitly
+unmodeled because the current profile contains no queue-delay equation;
+holdout output labels that reason. `sim-run` now exposes explicit independent-
+post-replay, residual-closure, and replacement-timing roles. The default
+sidecar leaves native/observer timing unchanged, while a selected replacement
+role activates the resource-service completion requirement. A direct model
+fixture shows both the tail-dominated unchanged candidate and a stressed
+replacement lower-endpoint shift without reading NCU targets. R8.5 is active
+on measurement identity and end-to-end cost.

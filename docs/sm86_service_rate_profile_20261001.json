@@ -60,6 +60,7 @@
     "upper_cycles": 256
   },
   "unmodeled_dimensions": [
+    "queue_depth",
     "occupancy",
     "contention"
   ]
