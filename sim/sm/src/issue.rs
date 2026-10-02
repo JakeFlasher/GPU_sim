@@ -10305,6 +10305,29 @@ impl<'a> SmCore<'a> {
             .ok_or(IssueError::CounterOverflow {
                 counter: "reference macro SMSP active cycles",
             })?;
+        for offset in 0..instruction_count {
+            let issue = first_issue
+                .checked_add(offset.checked_mul(initiation_interval_cycles).ok_or(
+                    IssueError::ReferenceMacroUnsupported {
+                        reason: "macro_effect_timing_overflow",
+                    },
+                )?)
+                .ok_or(IssueError::ReferenceMacroUnsupported {
+                    reason: "macro_effect_timing_overflow",
+                })?;
+            self.reference_issue_effects.push((
+                issue,
+                u64::try_from(warp_index).unwrap_or(u64::MAX),
+                u32::try_from(
+                    next + usize::try_from(offset).map_err(|_| {
+                        IssueError::ReferenceMacroUnsupported {
+                            reason: "macro_effect_index_out_of_range",
+                        }
+                    })?,
+                )
+                .unwrap_or(u32::MAX),
+            ));
+        }
         self.hold[subcore] = Some(warp_index);
         self.t = end_cycle;
         Ok(ReferenceScalarMacroExecution {

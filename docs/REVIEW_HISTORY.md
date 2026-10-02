@@ -195,3 +195,32 @@ R6 closes corpus, split, target-identity, and open/finite reporting hygiene. It
 does not produce a front-end-enabled native macro or a finite silicon observer
 upper. R7 now maps every paper/rebuttal claim to its evidence level and
 falsifier.
+
+## Latest panel re-review R8.0/R8.1/R8.2 — 2026-10-02 (R8.2 complete; R8.3 active)
+
+The latest independent panel re-review found that the previous R7 wording was
+still too strong in three places: the native decision was serialized but not
+consumed by the production event loop, a nonzero post boundary was paired with
+the same queue-event identity, and public/model transition APIs could accept a
+mismatched certificate or close unknown queue/cache state. The active response
+is recorded in [`latest_review_refinement_20261002.md`](../plans/latest_review_refinement_20261002.md).
+
+R8.1 closed the directly demonstrated soundness holes. Certificates now bind
+to every descriptor in the consumed region before mutation; grouped assignment
+cannot classify unknown events; observer projection fields are required and
+must equal the prediction interval; exact cache history requires temporal,
+fence, generation, owner/read-from, and completion domains; replacement
+admission and service arithmetic are checked. Adversarial tests verify
+no-mutation refusal and open queue/cache uppers.
+
+R8.2 adds a narrow, optional independently witnessed native event-loop seam.
+The reference trace accepts a typed detailed effect/exit witness, runs the
+comparator before mutation, and passes `TypedMacro` or `ExactReplay` to the
+actual `Ev::SmWake` branch. A validated two-instruction scalar fixture now
+dispatches through that branch, schedules the next wake, resumes a detailed
+suffix, and exact-falls back before mutation for a rejected or perturbed
+contract. Macro issue effects and dispatch/fallback counters are recorded.
+The retained front-end-enabled SM86 corpus has no closed witness and remains
+exact fallback; this is not native speedup or silicon causality. R8.3 is now
+active on latency/completion/front-end state closure and independently derived
+effect refinement.

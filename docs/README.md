@@ -6,13 +6,13 @@ open only the relevant technical page.
 | Need | Document |
 |---|---|
 | Modeling scope and evaluation | [Predictive contract](PREDICTIVE_CLOSURE.md) |
-| Next implementation | [Second-round refinement program](../plans/second_round_refinement_20261001.md) · [first-round history](../plans/sm86_reification_refactor_20261001.md) |
+| Next implementation | [Latest-review R8 refinement program](../plans/latest_review_refinement_20261002.md) · [Second-round history](../plans/second_round_refinement_20261001.md) · [first-round history](../plans/sm86_reification_refactor_20261001.md) |
 | Build, trace, replay | [Runbook](runbook_host.md) |
 | Focused checks | [Testing](testing.md) |
 | Review history | [Review/refactor history](REVIEW_HISTORY.md) |
 | Architecture and source map | [Architecture](ARCHITECTURE.md), [components](COMPONENTS.md) |
 | Cards and predictive profiles | [Configuration](archprofile.md) |
-| Prediction/observation schemas | [`reification_prediction_manifest_v1`](reification_prediction_manifest_v1.schema.json), [`reification_prediction_v2`](reification_prediction_v2.schema.json), [`ncu_observation_v2`](ncu_observation_v2.schema.json), [`reification_prediction_evaluation_v2`](reification_prediction_evaluation_v2.schema.json) |
+| Prediction/observation schemas | [`reification_prediction_manifest_v1`](reification_prediction_manifest_v1.schema.json), [`reification_prediction_v2`](reification_prediction_v2.schema.json), [`ncu_observation_v2`](ncu_observation_v2.schema.json), [`reification_prediction_evaluation_v2`](reification_prediction_evaluation_v2.schema.json), [`reification_native_macro_witness_v1`](reification_native_macro_witness_v1.schema.json) |
 | Third-round result | [R6 corpus and observer evaluation](review_round3_20261002/README.md) · [corpus manifest](sm86_reification_corpus_v1_20261002.json) |
 | Latent and payload APIs | [Contract](sm86_factorized_latent_contract_20260930.md) |
 | Experimental semantics | [Diagnostics](experimental_diagnostics.md) |

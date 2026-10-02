@@ -70,10 +70,11 @@ evidence. The R6 corpus and third-round claim map are in
 
 The latest independent panel re-review is being addressed by the staged
 [R8 refinement program](../plans/latest_review_refinement_20261002.md).
-R8.0 review intake and R8.1 immediate soundness guards are complete; R8.2
-production native dispatch is the next active milestone. These guards are
-direct refusal/projection checks, not evidence of native speedup or hardware
-causality.
+R8.0 review intake, R8.1 immediate soundness guards, and R8.2 production
+reference-event dispatch are complete; R8.3 native state closure is the next
+active milestone. R8.2 is a narrow independently witnessed issue-model seam:
+the retained front-end-enabled SM86 corpus still exact-falls back, and no
+native speedup or hardware causality is claimed.
 
 ## Retained measurements
 

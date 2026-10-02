@@ -84,6 +84,12 @@ from profiler measurements; black-box models are assumptions, not observations.
   interval to a typed observer projection; replacement admission and service
   arithmetic are checked; scalar sequence arithmetic checks intermediate
   additions. These are direct API/projection guards, not native speedup.
+- R8.2 is complete for a narrow independently witnessed issue-model seam. The
+  reference event loop consumes a validated `TypedMacro`/`ExactReplay` result
+  at `Ev::SmWake`, arms the next wake, resumes a detailed suffix, and refuses
+  before mutation when the typed contract/effect ledger is perturbed. The
+  retained front-end-enabled corpus has no such witness and remains exact
+  fallback; dispatch counters in the reference footer are not speedup.
 - R6 is complete: `docs/sm86_reification_corpus_v1_20261002.json` defines a
   15-workload, six-family SM86 corpus with no family crossing; prediction,
   observation, and join artifacts are retained under
@@ -114,8 +120,9 @@ a consumed closed native issue-model boundary; full front-end-enabled traces
 still record exact-replay plans. Current rankings, open
 intervals, and descriptor/macro probe remain negative/diagnostic evidence and
 black-box internals are not execution prerequisites. R7 rebuttal/
-claim-discipline is complete; R8.0 review intake and R8.1 soundness guards are
-complete. R8.2 production native dispatch is next; use
+claim-discipline is complete; R8.0 review intake, R8.1 soundness guards, and
+R8.2 witnessed production reference dispatch are complete. R8.3 native state
+closure is next; use
 [`third_round_rebuttal_20261002.md`](../plans/third_round_rebuttal_20261002.md)
 for the prior evidence map and
 [`latest_review_refinement_20261002.md`](../plans/latest_review_refinement_20261002.md)

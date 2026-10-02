@@ -39,7 +39,7 @@ verified device identity.
 |---|---|---|---|
 | R8.0 | Review intake and executable plan | This plan maps every critical/major/open finding to a code seam, test, falsifier, and claim boundary | **complete** |
 | R8.1 | Immediate soundness guards | Mismatched certificates, inconsistent grouped queues, missing observer projections, incomplete cache domains, and unchecked arithmetic refuse before mutation or finite projection | **complete** |
-| R8.2 | Production native decision path | A comparator-selected closed fixture reaches the real event loop, increments a dispatch counter, installs effects/pending state, resumes a detailed suffix, and falls back before mutation when one field is perturbed | pending |
+| R8.2 | Production native decision path | A comparator-selected closed fixture reaches the real event loop, increments a dispatch counter, installs effects/pending state, resumes a detailed suffix, and falls back before mutation when one field is perturbed | **complete** |
 | R8.3 | Native state closure and independent refinement | Nonzero scalar latency/completion/front-end state is either consumed and compared against an independently captured boundary or conservatively refused; self-match tests are not the sole evidence | pending |
 | R8.4 | Service/queue semantics and identifiability | Queue unknowns cannot close spuriously; residual/replacement roles have explicit equations and a held-out intervention, or the profile is clearly sidecar-only; latency, throughput, and queue parameters are separately identified | pending |
 | R8.5 | Measurement identity and cost utility | NCU observations are explicitly verified or labeled as manifest-labeled historical data; source/trace/control/card/launch identity is bound; parser/planner/effect/compare/RSS/wall-time cost and accepted/refused coverage are reported without speedup overclaim | pending |
@@ -131,6 +131,38 @@ verified device identity.
   matches release/completion/effect state or refuses.
 - A fabricated equal endpoint with empty effects is rejected.
 - A front-end cursor mismatch refuses before mutation.
+
+## R8.2 implementation evidence (complete 2026-10-02; narrow witness seam)
+
+- The reference trace accepts an optional, separately produced typed witness
+  (`SIM_SM_REFERENCE_TYPED_SCALAR_WITNESS`). At a pre-event boundary it runs
+  `execute_typed_scalar_macro` against that witness's detailed effects/labels/
+  exit, stores the resulting `TypedMacro` or `ExactReplay`, and exposes the
+  decision in the trace. No witness means no macro plan.
+- The event loop now consumes that result at the actual `Ev::SmWake` branch.
+  `dispatch_reference_macro_event` validates the typed contract and nonempty
+  effect ledger before mutation, calls `SmCore::execute_reference_boundary_result`,
+  arms the next wake, and then resumes detailed execution. `ExactReplay`, an
+  invalid/perturbed effect ledger, or an unsupported actor returns to the
+  ordinary detailed path without mutating the core.
+- Post-event reference records use a distinct region-end identity only when
+  the witness plan is active and the queue ordering remains structurally valid;
+  ordinary open multi-SM boundaries retain their original queue identity and
+  continue to refuse. This avoids inventing a global sequence order for a
+  local actor that ran ahead of other queued events.
+- The native actor records issue effects for macro instructions, and the
+  footer reports `native_macro_dispatches` and `native_macro_fallbacks`.
+- Reference-feature tests exercise a validated two-instruction scalar macro
+  through the event-branch dispatcher, schedule a wake, resume a detailed
+  suffix, and verify exact fallback/no mutation for both an explicit
+  `ExactReplay` result and a perturbed empty effect ledger. This is a closed
+  issue-model/native event-loop seam, not a claim that real front-end SM86
+  launches are currently compressible.
+
+The retained SM86 front-end canary still selects exact fallback: its complete
+fetch/cache/response state and independent witness are absent. The witness
+contract is a research input for a closed-region experiment, not a mandatory
+run artifact, target label, provenance gate, or silicon oracle.
 
 ## R8.4 — service/queue semantics and identifiability
 

@@ -137,14 +137,16 @@ use sim_mem::{
 };
 #[cfg(feature = "reference")]
 use sim_semantics::{
-    BoundaryStateError, DramBoundaryState, DramStateError, L2RequestKey,
-    NativeBoundaryExecutionResult, PowerBoundaryState, PowerStateError, QueueBoundaryState,
-    QueueStateError, TYPED_STATE_SCHEMA_VERSION, TypedAdmissionWitness, TypedCoreBoundaryState,
-    TypedEventBoundaryRecord, TypedEventIdentity, TypedEventPayload, TypedEventTransition,
-    TypedFillIdentity, TypedL2Source, TypedMemoryOperation, TypedMemoryOrigin, TypedMemoryRequest,
-    TypedObservationContract, TypedPendingEvent, TypedResponseIdentity, TypedResponseKind,
-    TypedScalarMacroSpec, compare_native_region_contract, execute_typed_scalar_macro,
-    native_boundary_execution_path,
+    AddressDomain, BlockBoundaryState, BoundaryStateError, Completeness, DramBoundaryState,
+    DramStateError, L2BoundaryState, L2CounterState, L2GeometryState, L2RequestKey,
+    NativeBoundaryExecutionResult, NativeBoundaryReifyReason, PowerBoundaryState, PowerStateError,
+    QueueBoundaryState, QueueStateError, TYPED_STATE_SCHEMA_VERSION, TransformInterval,
+    TypedAdmissionWitness, TypedContractKind, TypedCoreBoundaryState, TypedEventBoundaryRecord,
+    TypedEventIdentity, TypedEventPayload, TypedEventTransition, TypedFillIdentity, TypedL2Source,
+    TypedMemoryOperation, TypedMemoryOrigin, TypedMemoryRequest, TypedObservationContract,
+    TypedPendingEvent, TypedRegionContract, TypedResponseIdentity, TypedResponseKind,
+    TypedScalarMacroSpec, WarpBoundaryState, compare_native_region_contract,
+    execute_typed_scalar_macro, native_boundary_execution_path,
 };
 
 /// Stable response identity used only at the typed boundary. The process-local
@@ -1286,6 +1288,20 @@ pub enum ReferenceTraceError {
     Queue(#[from] QueueStateError),
     #[error("typed boundary structure validation failed: {0}")]
     Boundary(#[from] BoundaryStateError),
+    #[error("reference macro witness is invalid: {0}")]
+    Witness(String),
+}
+
+#[cfg(feature = "reference")]
+#[derive(Debug, Clone, serde::Deserialize)]
+struct ReferenceMacroWitness {
+    schema: String,
+    target: u32,
+    start_sequence: u64,
+    spec: TypedScalarMacroSpec,
+    detailed_internal_effects: Vec<TypedEventTransition>,
+    detailed_labels: Vec<String>,
+    detailed_exit: TypedEventBoundaryRecord,
 }
 
 #[cfg(feature = "reference")]
@@ -1296,6 +1312,11 @@ struct ReferenceTrace {
     previous_event: Option<serde_json::Value>,
     issue_effect_cursors: Vec<usize>,
     pending_typed_entry: Option<TypedEventBoundaryRecord>,
+    witness: Option<ReferenceMacroWitness>,
+    pending_native_result: Option<NativeBoundaryExecutionResult>,
+    active_native_result: Option<NativeBoundaryExecutionResult>,
+    native_macro_dispatches: u64,
+    native_macro_fallbacks: u64,
 }
 
 #[cfg(feature = "reference")]
@@ -1475,6 +1496,22 @@ impl ReferenceTrace {
             previous_event: None,
             issue_effect_cursors: Vec::new(),
             pending_typed_entry: None,
+            witness: std::env::var_os("SIM_SM_REFERENCE_TYPED_SCALAR_WITNESS")
+                .map(|path| {
+                    let bytes = std::fs::read(path)?;
+                    let witness: ReferenceMacroWitness = serde_json::from_slice(&bytes)?;
+                    if witness.schema != "reification_native_macro_witness_v1" {
+                        return Err(ReferenceTraceError::Witness(
+                            "schema must be reification_native_macro_witness_v1".to_owned(),
+                        ));
+                    }
+                    Ok(witness)
+                })
+                .transpose()?,
+            pending_native_result: None,
+            active_native_result: None,
+            native_macro_dispatches: 0,
+            native_macro_fallbacks: 0,
         };
         trace.write(&serde_json::json!({
             "kind": "header",
@@ -1488,8 +1525,37 @@ impl ReferenceTrace {
             "state_projection_complete": false,
             "state_projection_incomplete_reason": "legacy_core_debug_projections",
             "observation_contract": "boundary_projection",
+            "native_macro_witness": trace.witness.is_some(),
+            "native_macro_execution": "comparator_selected_reference_event_loop",
         }))?;
         Ok(Some(trace))
+    }
+
+    fn take_pending_native_result(&mut self) -> Option<NativeBoundaryExecutionResult> {
+        self.pending_native_result.take()
+    }
+
+    fn note_native_fallback(&mut self) {
+        self.native_macro_fallbacks = self.native_macro_fallbacks.saturating_add(1);
+    }
+
+    fn note_native_dispatch(&mut self) {
+        self.native_macro_dispatches = self.native_macro_dispatches.saturating_add(1);
+    }
+
+    fn native_result_decision(
+        result: &NativeBoundaryExecutionResult,
+    ) -> sim_semantics::NativeBoundaryRefinementDecision {
+        match result {
+            NativeBoundaryExecutionResult::TypedMacro { .. } => {
+                sim_semantics::NativeBoundaryRefinementDecision::Preserve
+            }
+            NativeBoundaryExecutionResult::ExactReplay { reason, .. } => {
+                sim_semantics::NativeBoundaryRefinementDecision::Reify {
+                    reason: reason.clone(),
+                }
+            }
+        }
     }
 
     fn write<T: serde::Serialize>(&mut self, value: &T) -> Result<(), ReferenceTraceError> {
@@ -1576,7 +1642,7 @@ impl ReferenceTrace {
             target: queued.target.0,
             payload: typed_event_payload(&queued.kind),
         });
-        let typed_queue = QueueBoundaryState {
+        let mut typed_queue = QueueBoundaryState {
             depth: u64::try_from(queue.len()).unwrap_or(u64::MAX),
             next_event_time: queue.peek_time(),
             next_sequence: queue.next_sequence(),
@@ -1786,25 +1852,6 @@ impl ReferenceTrace {
             .collect::<Vec<_>>();
         let typed_l2_power_completeness =
             TypedObservationContract::cycle_exact_power().validate(&typed_l2, power, &typed_cores);
-        let typed_boundary = TypedEventBoundaryRecord {
-            schema_version: TYPED_STATE_SCHEMA_VERSION,
-            contract: TypedObservationContract::cycle_exact_power(),
-            event: TypedEventIdentity {
-                time,
-                sequence,
-                sequence_span,
-                phase: 0,
-                target,
-                payload: typed_payload.clone(),
-            },
-            queue: typed_queue.clone(),
-            cores: typed_cores,
-            shared_l2: typed_l2.clone(),
-            dram: typed_dram,
-            power: power.clone(),
-            completeness: typed_l2_power_completeness.clone(),
-        };
-        typed_boundary.validate_structure()?;
         if self.issue_effect_cursors.len() < cores.len() {
             self.issue_effect_cursors.resize(cores.len(), 0);
         }
@@ -1840,14 +1887,92 @@ impl ReferenceTrace {
                 });
             }
         }
+        // A post-event boundary is a region-end observation, not another
+        // copy of the queue event identity. Keeping the event coordinates
+        // equal made every nonzero typed transition structurally impossible:
+        // the derived exit advanced time/sequence while the detailed post
+        // record stayed at the original event.
+        let candidate_region_end = (
+            snapshots
+                .iter()
+                .map(|snapshot| snapshot.cycle)
+                .max()
+                .unwrap_or(time),
+            effect_sequence_base.saturating_add(detailed_effect_index.saturating_add(1)),
+        );
+        let post_boundary_is_queue_ordered = boundary_phase == "post"
+            && self.active_native_result.is_some()
+            && typed_queue.pending.iter().all(|pending| {
+                (pending.time, pending.phase, pending.sequence)
+                    > (candidate_region_end.0, 0, candidate_region_end.1)
+            });
+        let (boundary_time, boundary_sequence, boundary_sequence_span) =
+            if post_boundary_is_queue_ordered {
+                typed_queue.next_sequence = Some(
+                    typed_queue
+                        .next_sequence
+                        .unwrap_or(0)
+                        .max(candidate_region_end.1.saturating_add(1)),
+                );
+                (candidate_region_end.0, candidate_region_end.1, 1)
+            } else {
+                (time, sequence, sequence_span)
+            };
+        let typed_boundary = TypedEventBoundaryRecord {
+            schema_version: TYPED_STATE_SCHEMA_VERSION,
+            contract: TypedObservationContract::cycle_exact_power(),
+            event: TypedEventIdentity {
+                time: boundary_time,
+                sequence: boundary_sequence,
+                sequence_span: boundary_sequence_span,
+                phase: 0,
+                target,
+                payload: typed_payload.clone(),
+            },
+            queue: typed_queue.clone(),
+            cores: typed_cores,
+            shared_l2: typed_l2.clone(),
+            dram: typed_dram,
+            power: power.clone(),
+            completeness: typed_l2_power_completeness.clone(),
+        };
+        typed_boundary.validate_structure()?;
         let missing_macro_decision =
             compare_native_region_contract(None, &typed_boundary, &typed_boundary);
         let native_boundary_refinement = if boundary_phase == "pre" {
             self.pending_typed_entry = Some(typed_boundary.clone());
-            missing_macro_decision
+            let witness = self
+                .witness
+                .clone()
+                .filter(|witness| witness.target == target && witness.start_sequence == sequence);
+            if let Some(witness) = witness {
+                match execute_typed_scalar_macro(
+                    &typed_boundary,
+                    &witness.spec,
+                    &witness.detailed_internal_effects,
+                    &witness.detailed_labels,
+                    &witness.detailed_exit,
+                ) {
+                    Ok(result) => {
+                        let decision = Self::native_result_decision(&result);
+                        self.pending_native_result = Some(result.clone());
+                        self.active_native_result = Some(result);
+                        decision
+                    }
+                    Err(error) => sim_semantics::NativeBoundaryRefinementDecision::Reify {
+                        reason: sim_semantics::NativeBoundaryReifyReason::SummaryStructure {
+                            error: error.to_string(),
+                        },
+                    },
+                }
+            } else {
+                missing_macro_decision
+            }
         } else if boundary_phase == "post" {
             let entry = self.pending_typed_entry.take();
-            if let (Some(entry), Some(spec)) = (entry, typed_scalar_macro_spec_from_env()) {
+            if let Some(result) = self.active_native_result.take() {
+                Self::native_result_decision(&result)
+            } else if let (Some(entry), Some(spec)) = (entry, typed_scalar_macro_spec_from_env()) {
                 match execute_typed_scalar_macro(
                     &entry,
                     &spec,
@@ -1855,12 +1980,7 @@ impl ReferenceTrace {
                     &[event.to_owned()],
                     &typed_boundary,
                 ) {
-                    Ok(NativeBoundaryExecutionResult::TypedMacro { .. }) => {
-                        sim_semantics::NativeBoundaryRefinementDecision::Preserve
-                    }
-                    Ok(NativeBoundaryExecutionResult::ExactReplay { reason, .. }) => {
-                        sim_semantics::NativeBoundaryRefinementDecision::Reify { reason }
-                    }
+                    Ok(result) => Self::native_result_decision(&result),
                     Err(error) => sim_semantics::NativeBoundaryRefinementDecision::Reify {
                         reason: sim_semantics::NativeBoundaryReifyReason::SummaryStructure {
                             error: error.to_string(),
@@ -1889,6 +2009,8 @@ impl ReferenceTrace {
             "native_boundary_refinement": native_boundary_refinement,
             "native_boundary_execution": native_boundary_execution,
             "boundary_phase": boundary_phase,
+            "region_end_time": typed_boundary.event.time,
+            "region_end_sequence": typed_boundary.event.sequence,
         }))
     }
 
@@ -1909,6 +2031,8 @@ impl ReferenceTrace {
                 "queue_clock_gap_cycles": queue.clock_gap_cycles,
                 "power_state": power,
                 "state_projection_complete": false,
+                "native_macro_dispatches": self.native_macro_dispatches,
+                "native_macro_fallbacks": self.native_macro_fallbacks,
             }),
         )?;
         self.writer.write_all(b"\n")?;
@@ -3629,29 +3753,55 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                 "pre",
             )?;
         }
+        #[cfg(feature = "reference")]
+        let mut reference_native_result = reference_trace
+            .as_mut()
+            .and_then(ReferenceTrace::take_pending_native_result);
         match ev.kind {
             Ev::SmWake => {
                 wake_due.pop_expect("SM wake", sm_ix, ev.time)?;
-                let progress = run_sm(
-                    sm_ix,
-                    &mut cores,
-                    &mut queue,
-                    &mut response_due,
-                    &mut write_ack_due,
-                    &mut wake_due,
-                    &mut unpriced,
-                    &payload_due,
-                    batch_replyless_writes,
-                    &mut scratch,
-                    &mut l1_visibility_observations,
-                    &mut l1_fence_observations,
-                    &mut l1_fill_visibility_observations,
-                    l1_visibility_queue.as_mut(),
-                    &sm_ids,
-                    params.l1_miss_latency,
-                    memory_admission_feedback,
-                )?;
-                spin.on_event(ev.time, !progress)?;
+                #[cfg(feature = "reference")]
+                let mut handled_reference_macro = false;
+                #[cfg(feature = "reference")]
+                if let Some(result) = reference_native_result.take() {
+                    let actor_count = cores.len();
+                    if dispatch_reference_macro_event(
+                        &mut cores[sm_ix],
+                        sm_ix,
+                        actor_count,
+                        &result,
+                        &mut queue,
+                        &mut wake_due,
+                        reference_trace.as_mut(),
+                    )? {
+                        handled_reference_macro = true;
+                        spin.on_event(ev.time, false)?;
+                    }
+                }
+                #[cfg(not(feature = "reference"))]
+                let handled_reference_macro = false;
+                if !handled_reference_macro {
+                    let progress = run_sm(
+                        sm_ix,
+                        &mut cores,
+                        &mut queue,
+                        &mut response_due,
+                        &mut write_ack_due,
+                        &mut wake_due,
+                        &mut unpriced,
+                        &payload_due,
+                        batch_replyless_writes,
+                        &mut scratch,
+                        &mut l1_visibility_observations,
+                        &mut l1_fence_observations,
+                        &mut l1_fill_visibility_observations,
+                        l1_visibility_queue.as_mut(),
+                        &sm_ids,
+                        params.l1_miss_latency,
+                        memory_admission_feedback,
+                    )?;
+                    spin.on_event(ev.time, !progress)?;
+                }
             }
             Ev::L1PayloadAdmission {
                 payloads,
@@ -5104,6 +5254,52 @@ fn schedule_emitted_requests(
     Ok(())
 }
 
+/// Consume one comparator result at the same event-loop boundary used by the
+/// production `SmWake` branch. `TypedMacro` mutates the actor and arms the
+/// next wake; `ExactReplay` returns false without touching the actor so the
+/// caller can execute the ordinary detailed path. The result is deliberately
+/// supplied by the typed-boundary comparator, not reconstructed from a scalar
+/// endpoint inside this dispatcher.
+#[cfg(feature = "reference")]
+fn dispatch_reference_macro_event(
+    core: &mut SmCore<'_>,
+    sm_ix: usize,
+    actor_count: usize,
+    result: &NativeBoundaryExecutionResult,
+    queue: &mut EventQueue<Ev>,
+    wake_due: &mut DueTimes,
+    mut trace: Option<&mut ReferenceTrace>,
+) -> Result<bool, SystemError> {
+    if let NativeBoundaryExecutionResult::TypedMacro { contract } = result {
+        if contract.validate().is_err() || contract.internal_effects.is_empty() {
+            if let Some(trace) = trace.as_deref_mut() {
+                trace.note_native_fallback();
+            }
+            return Ok(false);
+        }
+    }
+    let native_execution = core.execute_reference_boundary_result(result)?;
+    let Some(execution) = native_execution else {
+        if let Some(trace) = trace.as_deref_mut() {
+            trace.note_native_fallback();
+        }
+        return Ok(false);
+    };
+    if let Some(trace) = trace.as_deref_mut() {
+        trace.note_native_dispatch();
+    }
+    let target = u32::try_from(sm_ix)
+        .map_err(|_| SystemError::ActorCountOutOfRange { count: actor_count })?;
+    if wake_due
+        .next(sm_ix)
+        .is_none_or(|wake| wake > execution.end_cycle)
+    {
+        queue.schedule_at(execution.end_cycle, TargetId(target), Ev::SmWake)?;
+        wake_due.push(sm_ix, execution.end_cycle)?;
+    }
+    Ok(true)
+}
+
 /// Resume one SM actor: advance to its earliest self-affecting external
 /// event — the earlier of its next scheduled response and the lower
 /// bound of any request still awaiting L2 pricing — schedule its
@@ -5380,6 +5576,328 @@ mod tests {
     }
 
     #[cfg(feature = "reference")]
+    fn closed_scalar_dispatch_contract(instruction_count: usize) -> NativeBoundaryExecutionResult {
+        let contract = TypedObservationContract {
+            schema_version: TYPED_STATE_SCHEMA_VERSION,
+            kind: TypedContractKind::CycleExactPowerV2,
+            address_domain: AddressDomain::VirtualAbsolute,
+            power: sim_semantics::PowerModelStatus::ActivityOnly,
+        };
+        let l2 = L2BoundaryState {
+            schema_version: TYPED_STATE_SCHEMA_VERSION,
+            architecture: "sm_86".to_owned(),
+            geometry: L2GeometryState {
+                architecture: "sm_86".to_owned(),
+                capacity_bytes: 128,
+                line_bytes: 128,
+                sector_bytes: 32,
+                num_slices: 1,
+                sets_per_slice: 1,
+                associativity: 1,
+                replacement: "lru".to_owned(),
+                slice_hash: "line_mod".to_owned(),
+            },
+            address_domain: AddressDomain::VirtualAbsolute,
+            clock: 0,
+            bip_counter: 0,
+            access_discipline: None,
+            counters: L2CounterState {
+                hits: 0,
+                misses: 0,
+                lookup_hits: 0,
+                lookup_requests: 0,
+                line_misses: 0,
+                sector_fill_misses: 0,
+                write_tag_hits: 0,
+            },
+            observer_lookup_hits: 0,
+            observer_lookup_requests: 0,
+            next_generation: None,
+            sets: Vec::new(),
+            allocations: Vec::new(),
+            request_owners: Vec::new(),
+            ownership_complete: true,
+            unknown_state: Vec::new(),
+        };
+        let entry = TypedEventBoundaryRecord {
+            schema_version: TYPED_STATE_SCHEMA_VERSION,
+            contract: contract.clone(),
+            event: TypedEventIdentity {
+                time: 0,
+                sequence: 0,
+                sequence_span: 1,
+                phase: 0,
+                target: 0,
+                payload: TypedEventPayload::SmWake,
+            },
+            queue: QueueBoundaryState {
+                depth: 0,
+                next_event_time: None,
+                next_sequence: Some(1),
+                pending: Vec::new(),
+            },
+            cores: vec![TypedCoreBoundaryState {
+                sm_id: 0,
+                cycle: 0,
+                issued: 0,
+                resident_warps: 1,
+                resident_shared_memory_bytes: 0,
+                unfinished_warps: 1,
+                next_block: 1,
+                hold: [None; 4],
+                subcore_warps: vec![vec![0], Vec::new(), Vec::new(), Vec::new()],
+                outstanding_responses: 0,
+                barrier_pipe_ready: 0,
+                tensor_pipe_ready: [0; 4],
+                ldgsts_destination_pipe_ready: 0,
+                warp_states: vec![WarpBoundaryState {
+                    warp_slot: 0,
+                    next_instruction: 0,
+                    front_end_fetch_cursor: 0,
+                    instruction_buffer: Vec::new(),
+                    eligible: 0,
+                    imc_wait_until: 0,
+                    barrier_clear: [0; 6],
+                    barrier_pending: [0; 6],
+                    block: 0,
+                    arrival: 0,
+                    at_block_barrier: false,
+                    cta_barrier_ready: 0,
+                    barrier_pipeline_ready: 0,
+                    branch_pipeline_ready: 0,
+                    block_barrier_dispatch: None,
+                    block_barrier_arrival: None,
+                    done: false,
+                }],
+                block_states: vec![BlockBoundaryState {
+                    unfinished: 1,
+                    waiting: 0,
+                    warp_count: 1,
+                    shared_memory_bytes: 0,
+                    warp_slots: vec![0],
+                    first_warp: 0,
+                    admitted_warps: 1,
+                    barrier_generation: 0,
+                    barrier_first_dispatch: None,
+                    barrier_first_arrival: None,
+                    barrier_rearm_ready: 0,
+                }],
+                l1: None,
+                front_end: None,
+                memory_pipeline: None,
+                scalar_pipeline: None,
+                local_completion_time: None,
+                unprojected_timing_state: Vec::new(),
+                async_copy: Vec::new(),
+                response_owners: Vec::new(),
+            }],
+            shared_l2: l2,
+            dram: DramBoundaryState::LatencyOnly,
+            power: PowerBoundaryState::activity_only(None, None),
+            completeness: Completeness::Complete,
+        };
+        let effects = (0..instruction_count)
+            .map(|index| TypedEventTransition {
+                phase: 0,
+                event: TypedEventIdentity {
+                    time: index as u64,
+                    sequence: index as u64,
+                    sequence_span: 1,
+                    phase: 0,
+                    target: 0,
+                    payload: TypedEventPayload::SmWake,
+                },
+            })
+            .collect::<Vec<_>>();
+        let mut exit = entry.clone();
+        exit.event.time = instruction_count as u64;
+        exit.event.sequence = instruction_count as u64;
+        exit.queue.next_sequence = Some(instruction_count as u64 + 1);
+        exit.power.domains[0].last_cycle = instruction_count as u64;
+        exit.power.domains[0].clocked_cycles = instruction_count as u64;
+        exit.power.domains[0].completion_events = instruction_count as u64;
+        NativeBoundaryExecutionResult::TypedMacro {
+            contract: TypedRegionContract::new(
+                contract,
+                TransformInterval {
+                    start_cycle: 0,
+                    end_cycle: instruction_count as u64,
+                    start_sequence: 0,
+                    end_sequence: instruction_count as u64,
+                    sequence_ordered: true,
+                },
+                entry,
+                effects,
+                Vec::new(),
+                Vec::new(),
+                exit,
+            )
+            .expect("closed dispatch fixture must validate"),
+        }
+    }
+
+    #[cfg(feature = "reference")]
+    #[test]
+    fn comparator_selected_reference_event_branch_dispatches_and_resumes_suffix() {
+        let scalar = |_pc| IssueSlot {
+            pipeline_class: PipelineClass::ScalarAlu {
+                latency_cycles: 1,
+                initiation_interval_cycles: 1,
+                in_flight_capacity: 8,
+            },
+            ..slot(cb(1), "IADD3")
+        };
+        let schedule = schedule(vec![(0, scalar(0)), (16, scalar(16)), (32, scalar(32))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                async_copy_cohorts: None,
+                warp_slot: 0,
+                insts: vec![
+                    ReplayInst {
+                        pc: 0,
+                        kind: AccessKind::NonMemory,
+                    },
+                    ReplayInst {
+                        pc: 16,
+                        kind: AccessKind::NonMemory,
+                    },
+                    ReplayInst {
+                        pc: 32,
+                        kind: AccessKind::NonMemory,
+                    },
+                ],
+                sectors: Vec::new(),
+            }],
+        }];
+        let mut core = SmCore::new_with_residency(
+            &blocks,
+            &schedule,
+            &params(),
+            SharedMemoryResidency::unconstrained_fixture(),
+            SmMemMode::Flat,
+        )
+        .unwrap();
+        let mut queue = EventQueue::new();
+        let mut wake_due = DueTimes::new(1);
+        let result = closed_scalar_dispatch_contract(2);
+        assert!(
+            dispatch_reference_macro_event(
+                &mut core,
+                0,
+                1,
+                &result,
+                &mut queue,
+                &mut wake_due,
+                None,
+            )
+            .unwrap()
+        );
+        assert_eq!(core.instructions_issued(), 2);
+        let wake = queue.pop().unwrap().unwrap();
+        assert_eq!(wake.time, 2);
+        wake_due.pop_expect("SM wake", 0, wake.time).unwrap();
+        let mut requests = Vec::new();
+        core.advance(ReplayHorizon::Unbounded, &mut requests)
+            .unwrap();
+        assert_eq!(core.instructions_issued(), 3);
+    }
+
+    #[cfg(feature = "reference")]
+    #[test]
+    fn comparator_rejection_uses_exact_event_branch_without_mutation() {
+        let scalar = |_pc| IssueSlot {
+            pipeline_class: PipelineClass::ScalarAlu {
+                latency_cycles: 1,
+                initiation_interval_cycles: 1,
+                in_flight_capacity: 8,
+            },
+            ..slot(cb(1), "IADD3")
+        };
+        let schedule = schedule(vec![(0, scalar(0)), (16, scalar(16))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                async_copy_cohorts: None,
+                warp_slot: 0,
+                insts: vec![
+                    ReplayInst {
+                        pc: 0,
+                        kind: AccessKind::NonMemory,
+                    },
+                    ReplayInst {
+                        pc: 16,
+                        kind: AccessKind::NonMemory,
+                    },
+                ],
+                sectors: Vec::new(),
+            }],
+        }];
+        let mut core = SmCore::new_with_residency(
+            &blocks,
+            &schedule,
+            &params(),
+            SharedMemoryResidency::unconstrained_fixture(),
+            SmMemMode::Flat,
+        )
+        .unwrap();
+        let mut queue = EventQueue::new();
+        let mut wake_due = DueTimes::new(1);
+        let macro_result = closed_scalar_dispatch_contract(2);
+        let detailed_exit = match macro_result {
+            NativeBoundaryExecutionResult::TypedMacro { contract } => contract.exit,
+            NativeBoundaryExecutionResult::ExactReplay { .. } => unreachable!(),
+        };
+        let result = NativeBoundaryExecutionResult::ExactReplay {
+            reason: NativeBoundaryReifyReason::ProjectionMismatch,
+            detailed_exit,
+        };
+        assert!(
+            !dispatch_reference_macro_event(
+                &mut core,
+                0,
+                1,
+                &result,
+                &mut queue,
+                &mut wake_due,
+                None,
+            )
+            .unwrap()
+        );
+        assert_eq!(core.instructions_issued(), 0);
+        assert!(queue.is_empty());
+
+        let mut invalid = closed_scalar_dispatch_contract(2);
+        if let NativeBoundaryExecutionResult::TypedMacro { contract } = &mut invalid {
+            contract.internal_effects.clear();
+        }
+        let mut invalid_core = SmCore::new_with_residency(
+            &blocks,
+            &schedule,
+            &params(),
+            SharedMemoryResidency::unconstrained_fixture(),
+            SmMemMode::Flat,
+        )
+        .unwrap();
+        let mut invalid_queue = EventQueue::new();
+        let mut invalid_wake_due = DueTimes::new(1);
+        assert!(
+            !dispatch_reference_macro_event(
+                &mut invalid_core,
+                0,
+                1,
+                &invalid,
+                &mut invalid_queue,
+                &mut invalid_wake_due,
+                None,
+            )
+            .unwrap()
+        );
+        assert_eq!(invalid_core.instructions_issued(), 0);
+        assert!(invalid_queue.is_empty());
+    }
+
+    #[cfg(feature = "reference")]
     #[test]
     fn reference_trace_record_limit_has_no_off_by_one() {
         let file = tempfile::NamedTempFile::new().unwrap();
@@ -5390,6 +5908,11 @@ mod tests {
             previous_event: None,
             issue_effect_cursors: Vec::new(),
             pending_typed_entry: None,
+            witness: None,
+            pending_native_result: None,
+            active_native_result: None,
+            native_macro_dispatches: 0,
+            native_macro_fallbacks: 0,
         };
         trace.write(&serde_json::json!({"kind": "header"})).unwrap();
         trace.write(&serde_json::json!({"kind": "event"})).unwrap();
@@ -5411,6 +5934,11 @@ mod tests {
             previous_event: None,
             issue_effect_cursors: Vec::new(),
             pending_typed_entry: None,
+            witness: None,
+            pending_native_result: None,
+            active_native_result: None,
+            native_macro_dispatches: 0,
+            native_macro_fallbacks: 0,
         };
         trace
             .finish(

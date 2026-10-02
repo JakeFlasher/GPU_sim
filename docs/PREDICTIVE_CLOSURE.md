@@ -65,6 +65,18 @@ the metric, endpoint, clock, cache, launch, repetition, and independently
 checked GPU identity. Finite interval coverage is reported separately from
 open-tail refusal, and record coverage is not called execution compression.
 
+The reference-feature native lane now has an explicit optional witness input
+(`SIM_SM_REFERENCE_TYPED_SCALAR_WITNESS`, schema
+[`reification_native_macro_witness_v1.schema.json`](reification_native_macro_witness_v1.schema.json)).
+The witness contains a separately produced detailed effect/exit record. The
+reference writer derives a typed scalar summary from the pre-event boundary,
+runs the comparator before mutating `SmCore`, and hands `TypedMacro` or
+`ExactReplay` to the real `SmWake` event branch. A selected macro schedules the
+next wake and resumes the detailed suffix; a comparator rejection takes the
+ordinary detailed path. The witness is a narrow issue-model experiment, not a
+hardware oracle or a mandatory execution artifact. Without it, front-end and
+unresolved-state cases continue to serialize exact fallback.
+
 ## Abstractions
 
 - Resource demand and queue contention replace physical route reconstruction.
