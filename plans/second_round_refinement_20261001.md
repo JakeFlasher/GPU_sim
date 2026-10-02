@@ -457,6 +457,10 @@ GPU overlap models, skipping refinement, or native trace-driven simulators.
 - The typed executor explicitly refuses pending queue responses, dependency
   barriers, front-end/cache/pipeline state, and incomplete/unknown tails before
   deriving an exit.
+- Safe control-only pending tokens (`SmWake`/`AtomicCompletion`) are retained
+  in the derived exit queue with their next-sequence frontier; response or
+  barrier-bearing pending tokens remain exact fallback. This keeps pending-token
+  mapping explicit without treating unrelated queue work as zero.
 - The reference writer now captures explicit pre/post typed boundaries and the
   issued-instruction effect span for each SM wake. The pure-scalar SM86 probe
   yields one complete pre/post pair with two detailed issue effects; an opt-in
