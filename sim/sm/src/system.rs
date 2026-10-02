@@ -1311,11 +1311,16 @@ fn typed_scalar_macro_spec_from_env() -> Option<TypedScalarMacroSpec> {
         .ok()?
         .parse::<u64>()
         .ok()?;
+    let initiation_interval_cycles = std::env::var("SIM_SM_REFERENCE_TYPED_SCALAR_INTERVAL")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(1);
     let label = std::env::var("SIM_SM_REFERENCE_TYPED_SCALAR_LABEL")
         .unwrap_or_else(|_| "sm_wake".to_owned());
     Some(TypedScalarMacroSpec {
         instruction_count,
         latency_cycles,
+        initiation_interval_cycles,
         label,
     })
 }

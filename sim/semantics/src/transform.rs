@@ -224,7 +224,13 @@ pub struct TypedRegionContract {
 pub struct TypedScalarMacroSpec {
     pub instruction_count: u64,
     pub latency_cycles: u64,
+    #[serde(default = "default_macro_interval")]
+    pub initiation_interval_cycles: u64,
     pub label: String,
+}
+
+fn default_macro_interval() -> u64 {
+    1
 }
 
 pub fn derive_typed_scalar_macro_region(
@@ -250,10 +256,27 @@ pub fn derive_typed_scalar_macro_region(
             reason: "entry_must_have_one_complete_core_and_no_pending_events".to_owned(),
         });
     }
+    if spec.initiation_interval_cycles == 0 {
+        return Err(RegionContractError::UnsupportedScalarMacro {
+            reason: "initiation_interval_must_be_nonzero".to_owned(),
+        });
+    }
+    let first_issue = entry
+        .cores
+        .first()
+        .and_then(|core| core.warp_states.first())
+        .map(|warp| entry.event.time.max(warp.eligible))
+        .unwrap_or(entry.event.time);
     let mut exit = entry.clone();
-    let duration = spec
+    let last_issue_offset = spec
         .instruction_count
-        .checked_mul(spec.latency_cycles)
+        .checked_sub(1)
+        .and_then(|count| count.checked_mul(spec.initiation_interval_cycles))
+        .ok_or(RegionContractError::ScalarMacroArithmeticOverflow)?;
+    let duration = first_issue
+        .checked_sub(entry.event.time)
+        .and_then(|offset| offset.checked_add(last_issue_offset))
+        .and_then(|offset| offset.checked_add(1))
         .ok_or(RegionContractError::ScalarMacroArithmeticOverflow)?;
     let end_time = entry
         .event
@@ -273,7 +296,6 @@ pub fn derive_typed_scalar_macro_region(
         })?;
     if core.warp_states.len() != 1
         || core.warp_states[0].done
-        || !core.warp_states[0].instruction_buffer.is_empty()
         || core.warp_states[0]
             .barrier_pending
             .iter()
@@ -285,7 +307,6 @@ pub fn derive_typed_scalar_macro_region(
         || core.block_states.iter().any(|block| block.waiting != 0)
         || core.outstanding_responses != 0
         || !core.response_owners.is_empty()
-        || core.front_end.is_some()
         || core.l1.is_some()
         || core.memory_pipeline.is_some()
         || core.scalar_pipeline.is_some()
@@ -293,6 +314,30 @@ pub fn derive_typed_scalar_macro_region(
     {
         return Err(RegionContractError::UnsupportedScalarMacro {
             reason: "future_relevant_warp_or_response_state_is_not_closed".to_owned(),
+        });
+    }
+    let buffer_count = usize::try_from(spec.instruction_count)
+        .map_err(|_| RegionContractError::ScalarMacroArithmeticOverflow)?;
+    if core.front_end.is_some() {
+        if core.warp_states[0].instruction_buffer.len() < buffer_count {
+            return Err(RegionContractError::UnsupportedScalarMacro {
+                reason: "instruction_buffer_does_not_close_macro_entry".to_owned(),
+            });
+        }
+        let expected_start = core.warp_states[0].next_instruction;
+        if !core.warp_states[0].instruction_buffer[..buffer_count]
+            .iter()
+            .enumerate()
+            .all(|(index, &(instruction, _))| instruction == expected_start + index as u64)
+        {
+            return Err(RegionContractError::UnsupportedScalarMacro {
+                reason: "instruction_buffer_not_contiguous_at_macro_entry".to_owned(),
+            });
+        }
+        core.warp_states[0].instruction_buffer.drain(..buffer_count);
+    } else if !core.warp_states[0].instruction_buffer.is_empty() {
+        return Err(RegionContractError::UnsupportedScalarMacro {
+            reason: "instruction_buffer_present_without_front_end_state".to_owned(),
         });
     }
     core.issued = core
@@ -346,9 +391,11 @@ pub fn derive_typed_scalar_macro_region(
                 time: entry
                     .event
                     .time
+                    .max(first_issue)
                     .checked_add(
                         index
-                            .checked_mul(spec.latency_cycles)
+                            .checked_sub(1)
+                            .and_then(|offset| offset.checked_mul(spec.initiation_interval_cycles))
                             .ok_or(RegionContractError::ScalarMacroArithmeticOverflow)?,
                     )
                     .ok_or(RegionContractError::ScalarMacroArithmeticOverflow)?,
@@ -1435,12 +1482,13 @@ mod tests {
             &TypedScalarMacroSpec {
                 instruction_count: 2,
                 latency_cycles: 3,
+                initiation_interval_cycles: 3,
                 label: "scalar_macro_v1".to_owned(),
             },
         )
         .expect("closed scalar entry should derive a typed transition");
         assert_eq!(region.internal_effects.len(), 2);
-        assert_eq!(region.exit.event.time, 6);
+        assert_eq!(region.exit.event.time, 4);
         assert_eq!(region.exit.event.sequence, 3);
         assert_eq!(region.exit.cores[0].issued, 2);
         assert_eq!(region.exit.cores[0].warp_states[0].next_instruction, 2);
@@ -1460,6 +1508,7 @@ mod tests {
                 &TypedScalarMacroSpec {
                     instruction_count: 2,
                     latency_cycles: 3,
+                    initiation_interval_cycles: 3,
                     label: "scalar_macro_v1".to_owned(),
                 },
                 &region.internal_effects,
@@ -1475,6 +1524,7 @@ mod tests {
                 &TypedScalarMacroSpec {
                     instruction_count: 2,
                     latency_cycles: 3,
+                    initiation_interval_cycles: 3,
                     label: "scalar_macro_v1".to_owned(),
                 },
                 &[],
@@ -1491,6 +1541,7 @@ mod tests {
         let spec = TypedScalarMacroSpec {
             instruction_count: 1,
             latency_cycles: 2,
+            initiation_interval_cycles: 2,
             label: "scalar_macro_v1".to_owned(),
         };
         let mut pending = scalar_entry_boundary();
