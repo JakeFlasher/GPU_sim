@@ -33,6 +33,7 @@
         "clock_domain": {"type": "string", "minLength": 1},
         "cache_policy": {"type": "string", "minLength": 1},
         "launch_identity": {"type": "string", "minLength": 1},
+        "clock_control": {"enum": ["none", "base", "default"]},
         "repetitions": {"type": "integer", "minimum": 1},
         "hardware": {"$ref": "#/$defs/hardware"}
       },

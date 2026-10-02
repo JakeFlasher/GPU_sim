@@ -1,0 +1,155 @@
+{
+  "rows": [
+    {
+      "arch_card": "arch_profiles/cards/sm_86.json",
+      "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__embedding_gather_int32_sm80/control.json",
+      "family": "memory_embedding",
+      "pchase_card": "data/pchase/sm_86_static_card.json",
+      "split": "held_out",
+      "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__embedding_gather_int32_sm80/trace",
+      "workload": "base__embedding_gather_int32_sm80"
+    },
+    {
+      "arch_card": "arch_profiles/cards/sm_86.json",
+      "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__flash_attn_fwd_bf16_sm80/control.json",
+      "family": "attention",
+      "pchase_card": "data/pchase/sm_86_static_card.json",
+      "split": "held_out",
+      "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__flash_attn_fwd_bf16_sm80/trace",
+      "workload": "base__flash_attn_fwd_bf16_sm80"
+    },
+    {
+      "arch_card": "arch_profiles/cards/sm_86.json",
+      "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_hmma_bf16_sm80/control.json",
+      "family": "tensor_gemm",
+      "pchase_card": "data/pchase/sm_86_static_card.json",
+      "split": "development",
+      "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_hmma_bf16_sm80/trace",
+      "workload": "base__gemm_hmma_bf16_sm80"
+    },
+    {
+      "arch_card": "arch_profiles/cards/sm_86.json",
+      "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_imma_int8_sm80/control.json",
+      "family": "tensor_gemm",
+      "pchase_card": "data/pchase/sm_86_static_card.json",
+      "split": "development",
+      "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_imma_int8_sm80/trace",
+      "workload": "base__gemm_imma_int8_sm80"
+    },
+    {
+      "arch_card": "arch_profiles/cards/sm_86.json",
+      "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_sparse_2to4_bf16_sm80/control.json",
+      "family": "tensor_gemm",
+      "pchase_card": "data/pchase/sm_86_static_card.json",
+      "split": "development",
+      "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__gemm_sparse_2to4_bf16_sm80/trace",
+      "workload": "base__gemm_sparse_2to4_bf16_sm80"
+    },
+    {
+      "arch_card": "arch_profiles/cards/sm_86.json",
+      "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__layernorm_fwd_bf16_sm80/control.json",
+      "family": "normalization",
+      "pchase_card": "data/pchase/sm_86_static_card.json",
+      "split": "calibration",
+      "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__layernorm_fwd_bf16_sm80/trace",
+      "workload": "base__layernorm_fwd_bf16_sm80"
+    },
+    {
+      "arch_card": "arch_profiles/cards/sm_86.json",
+      "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__rmsnorm_fwd_bf16_sm80/control.json",
+      "family": "normalization",
+      "pchase_card": "data/pchase/sm_86_static_card.json",
+      "split": "calibration",
+      "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__rmsnorm_fwd_bf16_sm80/trace",
+      "workload": "base__rmsnorm_fwd_bf16_sm80"
+    },
+    {
+      "arch_card": "arch_profiles/cards/sm_86.json",
+      "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__silu_fwd_bf16_sm80/control.json",
+      "family": "elementwise_reduction",
+      "pchase_card": "data/pchase/sm_86_static_card.json",
+      "split": "held_out",
+      "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/base__silu_fwd_bf16_sm80/trace",
+      "workload": "base__silu_fwd_bf16_sm80"
+    },
+    {
+      "arch_card": "arch_profiles/cards/sm_86.json",
+      "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__conv2d_implicit_gemm_bf16_sm80/control.json",
+      "family": "convolution",
+      "pchase_card": "data/pchase/sm_86_static_card.json",
+      "split": "held_out",
+      "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__conv2d_implicit_gemm_bf16_sm80/trace",
+      "workload": "large__conv2d_implicit_gemm_bf16_sm80"
+    },
+    {
+      "arch_card": "arch_profiles/cards/sm_86.json",
+      "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__cross_entropy_fwd_fp32_sm80/control.json",
+      "family": "elementwise_reduction",
+      "pchase_card": "data/pchase/sm_86_static_card.json",
+      "split": "held_out",
+      "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__cross_entropy_fwd_fp32_sm80/trace",
+      "workload": "large__cross_entropy_fwd_fp32_sm80"
+    },
+    {
+      "arch_card": "arch_profiles/cards/sm_86.json",
+      "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__flash_attn_bwd_bf16_sm80/control.json",
+      "family": "attention",
+      "pchase_card": "data/pchase/sm_86_static_card.json",
+      "split": "held_out",
+      "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__flash_attn_bwd_bf16_sm80/trace",
+      "workload": "large__flash_attn_bwd_bf16_sm80"
+    },
+    {
+      "arch_card": "arch_profiles/cards/sm_86.json",
+      "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__gemm_hmma_fp16_sm80/control.json",
+      "family": "tensor_gemm",
+      "pchase_card": "data/pchase/sm_86_static_card.json",
+      "split": "development",
+      "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__gemm_hmma_fp16_sm80/trace",
+      "workload": "large__gemm_hmma_fp16_sm80"
+    },
+    {
+      "arch_card": "arch_profiles/cards/sm_86.json",
+      "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__rmsnorm_bwd_bf16_sm80/control.json",
+      "family": "normalization",
+      "pchase_card": "data/pchase/sm_86_static_card.json",
+      "split": "calibration",
+      "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__rmsnorm_bwd_bf16_sm80/trace",
+      "workload": "large__rmsnorm_bwd_bf16_sm80"
+    },
+    {
+      "arch_card": "arch_profiles/cards/sm_86.json",
+      "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__softmax_safe_bf16_sm80/control.json",
+      "family": "elementwise_reduction",
+      "pchase_card": "data/pchase/sm_86_static_card.json",
+      "split": "held_out",
+      "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__softmax_safe_bf16_sm80/trace",
+      "workload": "large__softmax_safe_bf16_sm80"
+    },
+    {
+      "arch_card": "arch_profiles/cards/sm_86.json",
+      "control": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__swiglu_fwd_bf16_sm80_n1048576/control.json",
+      "family": "elementwise_reduction",
+      "pchase_card": "data/pchase/sm_86_static_card.json",
+      "split": "held_out",
+      "trace": "results/alpha/full_3090ti_20260930_temporal_cold_live2/large__swiglu_fwd_bf16_sm80_n1048576/trace",
+      "workload": "large__swiglu_fwd_bf16_sm80_n1048576"
+    }
+  ],
+  "schema": "reification_prediction_manifest_v1",
+  "target_contract": {
+    "cache_policy": "none",
+    "clock_control": "none",
+    "clock_domain": "gpc_cycles",
+    "endpoint": "ncu_grid_completion_semaphore",
+    "hardware": {
+      "compute_capability": "8.6",
+      "device_index": 0,
+      "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+      "sm_clock_mhz": 1350
+    },
+    "launch_identity": "sm86_accuracy_campaign_v1_cache_none",
+    "metric": "gpc__cycles_elapsed.max",
+    "repetitions": 5
+  }
+}

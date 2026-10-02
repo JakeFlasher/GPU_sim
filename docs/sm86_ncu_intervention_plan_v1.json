@@ -1,0 +1,27 @@
+{
+  "schema": "sm86_ncu_intervention_plan_v1",
+  "baseline_prediction": "docs/sm86_accuracy_campaign_v1_predictions_pre_ncu.json",
+  "contrasts": [
+    {
+      "id": "cache_none_all_workloads",
+      "variable": "cache_policy",
+      "baseline": "all",
+      "variant": "none",
+      "prediction": "docs/sm86_accuracy_campaign_v1_cache_none_predictions_pre_ncu.json",
+      "workloads": ["base__embedding_gather_int32_sm80", "base__flash_attn_fwd_bf16_sm80", "base__gemm_hmma_bf16_sm80", "base__gemm_imma_int8_sm80", "base__gemm_sparse_2to4_bf16_sm80", "base__layernorm_fwd_bf16_sm80", "base__rmsnorm_fwd_bf16_sm80", "base__silu_fwd_bf16_sm80", "large__conv2d_implicit_gemm_bf16_sm80", "large__cross_entropy_fwd_fp32_sm80", "large__flash_attn_bwd_bf16_sm80", "large__gemm_hmma_fp16_sm80", "large__rmsnorm_bwd_bf16_sm80", "large__softmax_safe_bf16_sm80", "large__swiglu_fwd_bf16_sm80_n1048576"],
+      "repetitions": 5,
+      "mechanism_metrics": ["gpu__time_duration", "gpc__cycles_elapsed.max", "sm__cycles_active", "dram__sectors_read.sum", "dram__sectors_write.sum"]
+    },
+    {
+      "id": "clock_base_two_family_cases",
+      "variable": "clock_control",
+      "baseline": "none",
+      "variant": "base",
+      "prediction": "docs/sm86_accuracy_campaign_v1_clock_base_predictions_pre_ncu.json",
+      "workloads": ["base__embedding_gather_int32_sm80", "base__gemm_hmma_bf16_sm80"],
+      "repetitions": 5,
+      "mechanism_metrics": ["gpu__time_duration", "gpc__cycles_elapsed.max", "sm__cycles_active"]
+    }
+  ],
+  "causal_claim_policy": "observational_direction_and_metric_consistency_only_no_hidden_hardware_causality"
+}

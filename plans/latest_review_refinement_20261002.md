@@ -840,5 +840,31 @@ replay/all-cache/no-clock-control baseline can run.
   0.667 calibration, 1.000 development, and 0.750 held out. This is a measured
   negative accuracy boundary, not a finite hardware-accuracy claim.
 - Evidence passed: 40 affected Python tests and all A5 artifact schemas.
-  The next goal is A6: intervention falsification under the same declared
-  identity/endpoint contract, keeping every contrast separate from baseline.
+The next goal is A6: intervention falsification under the same declared
+identity/endpoint contract, keeping every contrast separate from baseline.
+
+### A6 implementation evidence (complete 2026-10-02)
+
+- A predeclared intervention plan covers a cache-policy `all→none` contrast
+  over all 15 workloads and a clock-control `none→base` contrast over two
+  representative workloads. Each has its own source-bound prediction artifact,
+  independently verified identity variant, observation artifact, and join.
+- The cache-none contrast produced 75 successful NCU report/CSV repetitions;
+  the clock-base contrast produced 10. All runs used application replay,
+  launch skip zero, warmup three, and preserved process/CSV termination data.
+- Matching counters were retained for GPU duration, GPC cycles, SM active
+  cycles, executed instructions, and DRAM sectors. Cache-none reduced target
+  GPC cycles in 13/15 workloads and increased them in 2; clock-base increased
+  target GPC cycles in both selected cases. These are observational directions,
+  not causal scheduler/cache claims.
+- Simulator projections were invariant across both intervention prediction
+  artifacts, so the validator marks both as consistent observational contrasts;
+  any future projection/counter mismatch is classified as
+  `inconsistent_refuse_causal_claim`.
+- All contrast intervals remain open; finite coverage is not applicable.
+  Cache-none lower consistency is 0.000 calibration, 1.000 development, and
+  0.625 held out; clock-base is 1.000 for both selected rows. No causal or
+  finite hardware-accuracy claim is made.
+
+The next active goal is A7: attempt a real selective path only with a complete
+independent witness, otherwise retain exact fallback as the result.

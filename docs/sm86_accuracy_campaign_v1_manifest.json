@@ -139,6 +139,7 @@
   "schema": "reification_prediction_manifest_v1",
   "target_contract": {
     "cache_policy": "all",
+    "clock_control": "none",
     "clock_domain": "gpc_cycles",
     "endpoint": "ncu_grid_completion_semaphore",
     "hardware": {

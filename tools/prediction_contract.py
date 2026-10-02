@@ -72,6 +72,8 @@ def validate_target_contract(
             f"{label} target_contract.metric must be {TARGET_METRIC!r}, "
             f"got {contract['metric']!r}"
         )
+    if "clock_control" in contract and contract["clock_control"] not in {"none", "base", "default"}:
+        raise ValueError(f"{label} target_contract.clock_control is unsupported")
     repetitions = contract.get("repetitions")
     if isinstance(repetitions, bool) or not isinstance(repetitions, int) or repetitions <= 0:
         raise ValueError(f"{label} target_contract.repetitions must be positive")

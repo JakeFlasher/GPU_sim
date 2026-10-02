@@ -234,6 +234,14 @@ applicable, with lower consistency 0.667/1.000/0.750 across
 calibration/development/held-out. A6 is next: separate intervention
 falsification.
 
+A6 is complete: a predeclared cache `all→none` contrast ran five repetitions
+for all 15 workloads and a clock `none→base` contrast ran five repetitions for
+two cases, with matching mechanism counters and separate prediction/observation
+joins. Simulator projections were invariant; directions are observational only
+and all intervals remain open. Cache-none lower consistency was
+0.000/1.000/0.625 and clock-base was 1.000 for its two rows. No causal claim
+was made. A7 is next: real selective-path witness attempt.
+
 ## Retained evidence
 
 The 2026-09-30 cold/warm campaigns completed 15/15 workloads on RTX 3090 Ti / SM86,

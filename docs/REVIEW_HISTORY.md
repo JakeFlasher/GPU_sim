@@ -414,3 +414,15 @@ pre-observation. All predicted uppers remain open, so finite coverage and
 finite point-error scoring are not applicable; lower consistency is
 0.667/1.000/0.750 for calibration/development/held-out. The next work is A6
 intervention falsification, not a finite hardware-accuracy claim.
+
+## A6 intervention falsification — 2026-10-02 (complete)
+
+A predeclared cache all→none contrast produced five repetitions for all 15
+workloads; a clock-control none→base contrast produced five repetitions for
+two representative cases. Each kept separate prediction/observation/identity
+artifacts and matching GPU-duration, GPC-cycle, SM-active, instruction, and
+DRAM-sector counters. Cache-none target cycles decreased in 13/15 cases and
+increased in two; clock-base target cycles increased in both. Simulator
+projections were invariant and every upper remains open, so the result is an
+observational direction/consistency check only. No causal hardware claim or
+finite accuracy claim is made.

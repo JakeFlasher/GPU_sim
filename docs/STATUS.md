@@ -156,7 +156,11 @@ application-replay/all-cache/no-clock-control repetitions ran for all 15
 workloads after clean identity/preflight. The 75 observations are separate
 from predictions; all intervals remain open, so finite accuracy is not
 applicable (lower consistency 0.667/1.000/0.750 across the three splits). A6
-is next: separate intervention falsification. The primary outcome is NCU
+is complete: cache `all→none` (15 workloads × five repetitions) and clock
+`none→base` (two workloads × five repetitions) contrasts preserve separate
+prediction/observation joins and matching mechanism counters. Simulator
+projections were invariant; directions remain observational-only and all
+uppers remain open. A7 is next: real selective-path witness attempt. The primary outcome is NCU
 accuracy; simulator wall-clock runtime remains secondary, with no
 compression/speedup metric.
 
