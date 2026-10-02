@@ -22,12 +22,12 @@ are deleted rather than skipped.
 | Native replay | SM86 instruction, memory, and event replay; separate frontiers |
 | Custom frontends | Bounded functional/resource experiments, separate from native timing |
 | Predictive extension | Opt-in resource/service intervals composed into a model-local frontier, cache-topology candidates, NCU candidate projection |
-| Calibration | Profile loader and offline fitter exist; v2 separates latency/throughput/queue/occupancy/contention probes and marks capacity-adjusted slopes; supplied rates remain uncalibrated |
+| Calibration | Profile loader and offline fitter exist; v2 separates latency/throughput/queue probes and records occupancy/contention as explicitly unmodeled dimensions; supplied rates remain uncalibrated |
 | Accuracy | This extension has no demonstrated family-held-out cycle accuracy or interval coverage yet |
 | Reification | Typed region contract and native-boundary comparator preserve only complete exact projections; incomplete canary boundaries fall back to replay |
 | Selective coverage | Multi-warp/order and completion-multiplicity guards refuse conservatively; fast-frontier output includes full-trace candidate/reified/uncovered counts |
 | Model macro seam | `sim-sm::ModelExecutor` consumes a certified scalar `MacroTransition`, emits explicit effects/pending completions, and resumes detailed descriptors; this is model-local and not yet wired into native `SmCore` |
-| Service composition | Typed serial admission/service composition reaches the elapsed observer projection; parallel pool policy remains explicit and model-local |
+| Service composition | Typed residual/replacement/independent-post-replay roles and a serial queue projection are explicit; full-trace demand is currently independent post-replay, so it does not silently alter the observer endpoint |
 | Cache candidates | Warp-local instrumentation order can be observed when decoded identities are complete; cross-warp order, fence scope, line generation, owner/read-from, and hardware completion remain explicit unknowns |
 | Design evaluation | Three-family calibration/development/held-out NCU join runs post-prediction; v2 target contracts check metric/endpoint/clock/cache/launch/repetition/GPU identity and family split semantics; finite intervals, open refusals, model-local partial-order ties, and 16:1 witnessed descriptor-step reduction are reported, while native memory-heavy families remain exact/refused |
 | Payload/value work | Bounded model-local identity, ordering, and conservation checks |

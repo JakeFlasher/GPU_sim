@@ -113,3 +113,19 @@ def test_v2_holdout_scores_only_identifiable_probe_modes() -> None:
     assert report["covered_count"] == 2
     assert report["mean_absolute_error_cycles"] == 0
     assert report["observations"][2]["status"] == "unmodeled"
+
+
+def test_v2_marks_occupancy_and_contention_unmodeled_without_using_their_values():
+    base = {
+        "schema": "sm86_service_probe_v2",
+        "probes": [
+            {"pool": "alu", "mode": "dependent_latency", "events": 8, "cycles": 32},
+            {"pool": "alu", "mode": "independent_throughput", "events": 16, "cycles": 48, "capacity": 2},
+            {"pool": "alu", "mode": "queue_capacity", "events": 16, "cycles": 48, "capacity": 2, "queue_depth": 8},
+        ],
+    }
+    changed = {**base, "probes": [*base["probes"], {"pool": "alu", "mode": "occupancy_sweep", "events": 8, "cycles": 999, "occupancy": 2}, {"pool": "alu", "mode": "contention_sweep", "events": 8, "cycles": 777, "contenders": 4}]}
+    first = fit_profile(base, "first")
+    second = fit_profile(changed, "second")
+    assert first["pools"] == second["pools"]
+    assert second["unmodeled_dimensions"] == ["occupancy", "contention"]

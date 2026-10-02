@@ -54,10 +54,11 @@ from profiler measurements; black-box models are assumptions, not observations.
   supplies residency only and therefore refuses rather than self-certifying.
   Multi-warp/global-order cases remain conservative refusal, and same-cycle
   effect ordering is checked independently of global sequence monotonicity.
-- Service profiles now mark capacity-adjusted throughput slopes and carry an
-  explicit serial admission/service composition; the v2 probe fitter refuses
-  aggregate-only identification and requires latency, throughput, queue,
-  occupancy, and contention probe modes.
+- Service profiles now mark capacity-adjusted throughput slopes and carry
+  explicit residual/replacement/independent service roles plus a serial queue
+  projection; the v2 probe fitter refuses
+  aggregate-only identification and requires latency, throughput, and queue
+  probe modes; occupancy/contention rows remain explicitly unmodeled.
 - Cache candidates preserve warp-local instrumentation order only when the
   producer supplies it; cross-warp order, fences, generations, owner/read-from,
   and completion remain unknown and unresolved cache history widens the

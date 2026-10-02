@@ -29,13 +29,21 @@ active unknown completion tail propagates an unknown upper endpoint; finite
 padding cannot manufacture a bound. This remains model-local composition, not
 native-state refinement or a hardware endpoint identity.
 
+The current full-trace demand path is explicitly labeled
+`independent_post_replay`: its service/queue envelope is reported separately
+and is not silently added to the observer endpoint. Residual and replacement
+timing are separate typed roles with separate tests. The queue report retains
+an open completion upper for unclassified demand and labels pool intervals as
+marginal assignments rather than a jointly feasible route schedule.
+
 Service composition is now typed as an explicit admission/service overlap
 policy. Pool rates expose their queue capacities and whether the fitted
 initiation interval already includes capacity; capacity-adjusted throughput
 probes are never divided by capacity a second time. The v2 probe fitter
-requires separate dependent-latency, independent-throughput, queue-capacity,
-occupancy, and contention observations; occupancy and contention remain
-unmodeled when the current profile schema cannot identify them.
+requires separate dependent-latency, independent-throughput, and queue-capacity
+observations. Occupancy and contention rows are accepted as holdout
+diagnostics but are emitted as explicitly unmodeled dimensions; their values do
+not silently change the fitted rate profile.
 
 The staged Phase 6 evaluation uses three current SM86 families, joins NCU only
 after prediction, and keeps open upper bounds explicit. Its conclusion is

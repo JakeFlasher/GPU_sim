@@ -58,5 +58,6 @@
   "ncu_end_padding_cycles": {
     "lower_cycles": 0,
     "upper_cycles": 256
-  }
+  },
+  "unmodeled_dimensions": ["occupancy", "contention"]
 }

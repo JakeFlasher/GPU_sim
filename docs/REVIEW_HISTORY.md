@@ -117,3 +117,15 @@ queue/assignment semantics.
 
 These are research questions, not prerequisites enforced by repository
 machinery.
+
+## Second-round R4 service semantics — 2026-10-01 (active)
+
+Service composition now carries an explicit role: residual closure,
+replacement timing, or independent post-replay. Because current trace demand
+counts the same full instruction population already represented by detailed
+replay, the live path uses `independent_post_replay` and leaves the observer
+frontier unchanged. A separate `ServiceQueueProjection` reports serial
+admission, queue depth, open completion uppers, and unresolved marginal pool
+assignment. The v2 fitter now records occupancy/contention as unmodeled rather
+than pretending their presence identifies a parameter. Joint assignment and
+interval-valued throughput uncertainty remain open R4 work.

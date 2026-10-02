@@ -987,6 +987,10 @@ pub struct ServiceRateProfile {
     pub ncu_start_padding_cycles: Option<ServiceCycleInterval>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ncu_end_padding_cycles: Option<ServiceCycleInterval>,
+    /// Probe dimensions intentionally not represented by the current rate
+    /// equation. Their presence must not be mistaken for fitted state.
+    #[serde(default)]
+    pub unmodeled_dimensions: Vec<String>,
 }
 
 impl ServiceRateProfile {
@@ -1042,6 +1046,17 @@ pub enum ServiceOverlapMode {
     ParallelPoolMax,
 }
 
+/// How an abstract service stage relates to the detailed modeled-event
+/// frontier. This is a modeling contract, not a claim about physical GPU
+/// overlap. Full-trace demand is not silently treated as residual work.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ServiceStageRole {
+    ResidualClosure,
+    ReplacementTiming,
+    IndependentPostReplay,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ServiceComposition {
@@ -1049,6 +1064,7 @@ pub struct ServiceComposition {
     pub service: FrontierBound,
     pub completion: FrontierBound,
     pub overlap: ServiceOverlapMode,
+    pub role: ServiceStageRole,
 }
 
 impl ServiceComposition {
@@ -1057,12 +1073,35 @@ impl ServiceComposition {
         service: FrontierBound,
         overlap: ServiceOverlapMode,
     ) -> Result<Self, LatentModelError> {
-        let completion = FrontierVector::compose_with_overlap(admission, service, overlap)?;
+        Self::new_with_role(
+            admission,
+            service,
+            overlap,
+            ServiceStageRole::ResidualClosure,
+        )
+    }
+
+    pub fn new_with_role(
+        admission: FrontierBound,
+        service: FrontierBound,
+        overlap: ServiceOverlapMode,
+        role: ServiceStageRole,
+    ) -> Result<Self, LatentModelError> {
+        let completion = match role {
+            ServiceStageRole::ReplacementTiming => {
+                service.validate()?;
+                service
+            }
+            ServiceStageRole::ResidualClosure | ServiceStageRole::IndependentPostReplay => {
+                FrontierVector::compose_with_overlap(admission, service, overlap)?
+            }
+        };
         Ok(Self {
             admission,
             service,
             completion,
             overlap,
+            role,
         })
     }
 }
@@ -1084,6 +1123,23 @@ pub struct ResourceServiceProjection {
     pub pools: BTreeMap<String, ServiceCycleInterval>,
     pub pool_capacities: BTreeMap<String, u32>,
     pub composition: ServiceOverlapMode,
+}
+
+/// Minimal explicit queue/frontier model for service-stage reporting. It
+/// records a serial admission convention and keeps route assignment
+/// correlation unresolved; it is not a physical scheduler simulation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ServiceQueueProjection {
+    pub schema_version: u32,
+    pub role: &'static str,
+    pub admission: FrontierBound,
+    pub issue_frontier: FrontierBound,
+    pub completion_frontier: FrontierBound,
+    pub queue_depth: FrontierBound,
+    pub demand_events: u64,
+    pub unclassified_events: u64,
+    pub assignment_semantics: &'static str,
 }
 
 /// Aggregate cache/coherence candidates that are justified by an address
@@ -1425,6 +1481,51 @@ impl ResourceDemandEnvelope {
             composition: ServiceOverlapMode::ParallelPoolMax,
         })
     }
+
+    /// Build a declared serial admission/service queue interval. The queue
+    /// uses total dynamic-record count as its depth, while per-pool route
+    /// assignment remains a marginal envelope rather than a jointly feasible
+    /// schedule. This is the explicit model convention used by R4 probes.
+    pub fn project_service_queue(
+        &self,
+        profile: &ServiceRateProfile,
+        admission: FrontierBound,
+    ) -> Result<ServiceQueueProjection, LatentModelError> {
+        let service = self.project_service_cycles(profile)?;
+        admission.validate()?;
+        let completion_lower = match admission.lower {
+            Some(base) => Some(base.checked_add(service.lower_cycles).ok_or_else(|| {
+                LatentModelError::ResourceDemandOverflow {
+                    pool: "queue_completion_lower".to_owned(),
+                }
+            })?),
+            None => None,
+        };
+        let completion_upper = match (admission.upper, service.upper_cycles) {
+            (Some(base), Some(service)) => Some(base.checked_add(service).ok_or_else(|| {
+                LatentModelError::ResourceDemandOverflow {
+                    pool: "queue_completion_upper".to_owned(),
+                }
+            })?),
+            _ => None,
+        };
+        let completion_frontier = FrontierBound {
+            lower: completion_lower,
+            upper: completion_upper,
+        };
+        completion_frontier.validate()?;
+        Ok(ServiceQueueProjection {
+            schema_version: RESOURCE_DEMAND_SCHEMA_VERSION,
+            role: "serial_admission_service_queue_model_not_hardware_schedule",
+            admission,
+            issue_frontier: admission,
+            completion_frontier,
+            queue_depth: FrontierBound::exact(self.total_events),
+            demand_events: self.total_events,
+            unclassified_events: self.unclassified_events,
+            assignment_semantics: "marginal_pool_intervals_not_joint_route_assignment",
+        })
+    }
 }
 
 fn ceil_div(numerator: u64, denominator: u64) -> Result<u64, LatentModelError> {
@@ -1718,6 +1819,7 @@ mod tests {
                 lower_cycles: 0,
                 upper_cycles: 0,
             }),
+            unmodeled_dimensions: Vec::new(),
         };
         let mut first = FrontierVector {
             endpoint_start: FrontierBound::exact(0),
@@ -1809,6 +1911,7 @@ mod tests {
             pools,
             ncu_start_padding_cycles: None,
             ncu_end_padding_cycles: None,
+            unmodeled_dimensions: Vec::new(),
         };
         assert!(profile.validate().is_ok());
         let encoded = serde_json::to_vec(&profile).unwrap();
@@ -1851,6 +1954,7 @@ mod tests {
                 lower_cycles: 1,
                 upper_cycles: 3,
             }),
+            unmodeled_dimensions: Vec::new(),
         };
         let projection = demand.project_service_cycles(&profile).unwrap();
         assert_eq!(projection.lower_cycles, 3);
@@ -1889,6 +1993,7 @@ mod tests {
             )]),
             ncu_start_padding_cycles: None,
             ncu_end_padding_cycles: None,
+            unmodeled_dimensions: Vec::new(),
         };
         let projection = demand.project_service_cycles(&profile).unwrap();
         assert_eq!(projection.lower_cycles, 14);
@@ -1920,6 +2025,7 @@ mod tests {
             )]),
             ncu_start_padding_cycles: None,
             ncu_end_padding_cycles: None,
+            unmodeled_dimensions: Vec::new(),
         };
         let projection = demand.project_service_cycles(&profile).unwrap();
         assert_eq!(projection.lower_cycles, 0);
@@ -1950,6 +2056,7 @@ mod tests {
             )]),
             ncu_start_padding_cycles: None,
             ncu_end_padding_cycles: None,
+            unmodeled_dimensions: Vec::new(),
         };
         let projection = demand.project_service_cycles(&profile).unwrap();
         assert_eq!(projection.lower_cycles, 0);
@@ -1986,6 +2093,7 @@ mod tests {
                 lower_cycles: 0,
                 upper_cycles: 0,
             }),
+            unmodeled_dimensions: Vec::new(),
         };
         for field in ["resource", "visibility", "writeback"] {
             let mut vector = FrontierVector {
@@ -2028,6 +2136,7 @@ mod tests {
                 lower_cycles: 0,
                 upper_cycles: 0,
             }),
+            unmodeled_dimensions: Vec::new(),
         };
         let base = FrontierVector {
             endpoint_start: FrontierBound::exact(0),
@@ -2067,6 +2176,71 @@ mod tests {
             FrontierBound::interval(110, 130).unwrap()
         );
         assert_ne!(serial.completion, parallel.completion);
+    }
+
+    #[test]
+    fn service_stage_role_prevents_full_trace_demand_from_being_silently_residual() {
+        let admission = FrontierBound::exact(100);
+        let service = FrontierBound::interval(20, 30).unwrap();
+        let replacement = ServiceComposition::new_with_role(
+            admission,
+            service,
+            ServiceOverlapMode::SerialAfterAdmission,
+            ServiceStageRole::ReplacementTiming,
+        )
+        .unwrap();
+        assert_eq!(replacement.role, ServiceStageRole::ReplacementTiming);
+        assert_eq!(replacement.completion, service);
+        let independent = ServiceComposition::new_with_role(
+            admission,
+            service,
+            ServiceOverlapMode::SerialAfterAdmission,
+            ServiceStageRole::IndependentPostReplay,
+        )
+        .unwrap();
+        assert_eq!(independent.role, ServiceStageRole::IndependentPostReplay);
+        assert_eq!(
+            independent.completion,
+            FrontierBound::interval(120, 130).unwrap()
+        );
+    }
+
+    #[test]
+    fn service_queue_projection_declares_depth_and_open_completion() {
+        let demand = ResourceDemandEnvelope::new(
+            3,
+            1,
+            BTreeMap::from([("alu".to_owned(), ResourceDemandInterval::interval(1, 3))]),
+            EvidenceKind::Hypothesis,
+        )
+        .unwrap();
+        let profile = ServiceRateProfile {
+            schema_version: RESOURCE_DEMAND_SCHEMA_VERSION,
+            source: "independent_probe_v1".to_owned(),
+            pools: BTreeMap::from([(
+                "alu".to_owned(),
+                ServiceRate {
+                    capacity: 1,
+                    initiation_interval_cycles: 2,
+                    capacity_already_applied: false,
+                    latency_lower_cycles: 1,
+                    latency_upper_cycles: 2,
+                },
+            )]),
+            ncu_start_padding_cycles: None,
+            ncu_end_padding_cycles: None,
+            unmodeled_dimensions: Vec::new(),
+        };
+        let queue = demand
+            .project_service_queue(&profile, FrontierBound::exact(10))
+            .unwrap();
+        assert_eq!(queue.issue_frontier, FrontierBound::exact(10));
+        assert_eq!(queue.queue_depth, FrontierBound::exact(3));
+        assert_eq!(queue.completion_frontier.upper, None);
+        assert_eq!(
+            queue.assignment_semantics,
+            "marginal_pool_intervals_not_joint_route_assignment"
+        );
     }
 
     #[test]

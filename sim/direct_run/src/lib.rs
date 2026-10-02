@@ -34,7 +34,8 @@ use sim_run::emit::{
 use sim_semantics::{
     CacheCandidateSummary, CacheWitnessDomains, ClockDomain, EndpointDescriptor, FrontierBound,
     FrontierVector, LatentFactors, LatentModelError, NcuObserverProjection,
-    ResourceServiceProjection, ServiceComposition, ServiceOverlapMode, ServiceRateProfile,
+    ResourceServiceProjection, ServiceComposition, ServiceOverlapMode, ServiceQueueProjection,
+    ServiceRateProfile, ServiceStageRole,
 };
 use sim_sm::{
     ControlSidecar, DramBw, DramStats, FastFrontierSummary, FullKernelReplayResult,
@@ -1080,6 +1081,8 @@ pub struct LatentLaunchEnvelopeReport {
     pub resource_service_projection: Option<ResourceServiceProjection>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub service_composition: Option<ServiceComposition>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service_queue_projection: Option<ServiceQueueProjection>,
     pub cache_candidates: CacheCandidateSummary,
     pub operand_bank_pressure: sim_sm::OperandBankPressure,
     pub frontiers: FrontierVector,
@@ -1136,24 +1139,34 @@ fn build_latent_envelope(
         let service_composition = resource_service_projection
             .as_ref()
             .map(|service| {
-                ServiceComposition::new(
+                ServiceComposition::new_with_role(
                     frontiers.modeled_event,
                     FrontierBound {
                         lower: Some(service.lower_cycles),
                         upper: service.upper_cycles,
                     },
                     ServiceOverlapMode::SerialAfterAdmission,
+                    ServiceStageRole::IndependentPostReplay,
                 )
             })
             .transpose()
             .map_err(at("latent service composition"))?;
-        if resource_service_projection.is_some() {
+        let service_queue_projection = service_profile
+            .map(|profile| resource_demand.project_service_queue(profile, frontiers.modeled_event))
+            .transpose()
+            .map_err(at("latent service queue projection"))?;
+        if resource_service_projection.is_some()
+            && service_composition.as_ref().is_some_and(|composition| {
+                composition.role != ServiceStageRole::IndependentPostReplay
+            })
+        {
             frontiers.resource_service = service_composition
                 .as_ref()
                 .map(|composition| composition.completion)
                 .unwrap_or_else(FrontierBound::unknown);
-            // The endpoint is elapsed from cycle zero and must include the
-            // newly composed service stage plus any active typed tail.
+            // Residual/replacement stages may feed the observer endpoint. A
+            // full-trace service projection is explicitly independent
+            // post-replay and remains a side-by-side model diagnostic.
             frontiers.endpoint_end = frontiers.simulator_completion();
             frontiers
                 .validate()
@@ -1172,6 +1185,7 @@ fn build_latent_envelope(
                 .map_err(at("latent class bounds"))?,
             resource_service_projection,
             service_composition,
+            service_queue_projection,
             cache_candidates,
             resource_demand,
             operand_bank_pressure: launch.trace_metrics.operand_bank_pressure.clone(),
@@ -3198,6 +3212,10 @@ mod tests {
             .service_composition
             .as_ref()
             .expect("profile should emit an explicit service composition");
+        let queue = launch
+            .service_queue_projection
+            .as_ref()
+            .expect("profile should emit the explicit queue projection");
         assert!(
             service
                 .upper_cycles
@@ -3210,7 +3228,14 @@ mod tests {
                 upper: service.upper_cycles,
             }
         );
-        assert_eq!(composition.completion, launch.frontiers.resource_service);
+        assert_eq!(composition.role, ServiceStageRole::IndependentPostReplay);
+        assert_eq!(launch.frontiers.resource_service, FrontierBound::unknown());
+        assert_eq!(queue.admission, launch.frontiers.modeled_event);
+        assert_eq!(queue.queue_depth.lower, Some(launch.resource_demand.total_events));
+        assert_eq!(
+            launch.ncu_projection.simulator_lower_cycles,
+            launch.frontiers.simulator_completion().lower
+        );
         assert_eq!(
             launch.ncu_projection.target_metric,
             "gpc__cycles_elapsed.max"

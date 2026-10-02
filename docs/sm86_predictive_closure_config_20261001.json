@@ -37,7 +37,7 @@
       "latest_issue",
       "expected_issue"
     ],
-    "calibration": "independent_probe_profile",
+    "calibration": "independent_probe_profile_with_explicit_unmodeled_dimensions",
     "default_replay_effect": "none"
   },
   "cache_quotient": {

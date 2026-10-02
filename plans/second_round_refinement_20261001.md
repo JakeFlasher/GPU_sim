@@ -413,3 +413,22 @@ GPU overlap models, skipping refinement, or native trace-driven simulators.
   the model-local probe with one witnessed macro dispatch and three multi-warp
   refusals, plus the prior workspace and focused evaluation checks. This closes
   the model contract only; it does not infer a hardware scheduler order.
+
+## R4 progress (active)
+
+- `ServiceStageRole` now distinguishes residual closure, replacement timing,
+  and independent post-replay service. The current full-trace demand path is
+  explicitly `IndependentPostReplay`, so it no longer silently adds a second
+  cost to the observer endpoint. Replacement timing is a separate tested
+  composition, not an implicit interpretation.
+- `ServiceQueueProjection` reports a serial admission/frontier convention,
+  queue depth, open completion uppers, and the unresolved marginal-pool
+  assignment semantics. It is a model-local queue envelope, not a GPU
+  scheduler trace.
+- The v2 fitter now requires only latency/throughput/queue probes for the
+  fitted rate equation. Occupancy/contention rows are retained as explicitly
+  unmodeled dimensions and changing only those values leaves fitted rates
+  unchanged; holdout reports them as unmodeled.
+- Remaining R4 work is joint assignment/queue correlation and independent
+  uncertainty intervals; no service-rate or queue result is a silicon timing
+  claim.

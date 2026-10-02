@@ -4,9 +4,10 @@
 ``sm86_service_probe_v1`` remains a compatibility format for old aggregate
 probes.  New work should use ``sm86_service_probe_v2`` and provide separate
 dependent-chain latency, independent-stream throughput, queue-capacity,
-occupancy, and contention observations.  The fitter refuses to manufacture a
-queue/occupancy parameter from one aggregate slope.  It never accepts NCU
-scores or workload identity fields.
+occupancy, and contention observations. The fitter refuses to manufacture a
+queue/occupancy parameter from one aggregate slope; occupancy and contention
+remain explicitly unmodeled rather than acting as an identification gate. It
+never accepts NCU scores or workload identity fields.
 """
 from __future__ import annotations
 
@@ -77,6 +78,7 @@ def _fit_v1(raw: dict[str, Any], source: str) -> dict[str, Any]:
         "pools": pools,
         "ncu_start_padding_cycles": None,
         "ncu_end_padding_cycles": None,
+        "unmodeled_dimensions": [],
     }
 
 
@@ -137,10 +139,6 @@ def _fit_v2(raw: dict[str, Any], source: str) -> dict[str, Any]:
         missing = required - modes.keys()
         if missing:
             raise ValueError(f"pool {pool} is missing probe modes: {sorted(missing)}")
-        if "occupancy_sweep" not in modes:
-            raise ValueError(f"pool {pool} requires an occupancy_sweep")
-        if "contention_sweep" not in modes:
-            raise ValueError(f"pool {pool} requires a contention_sweep")
         capacities = {entry["capacity"] for entry in modes["queue_capacity"]}
         throughput_capacities = {
             entry["capacity"] for entry in modes["independent_throughput"]
@@ -170,6 +168,7 @@ def _fit_v2(raw: dict[str, Any], source: str) -> dict[str, Any]:
         "pools": pools,
         "ncu_start_padding_cycles": None,
         "ncu_end_padding_cycles": None,
+        "unmodeled_dimensions": ["occupancy", "contention"],
     }
 
 

@@ -27,7 +27,7 @@ pub use latent::{
     LatentSummary, LatentWorld, LatentWorldSet, MechanismEnvelope, MustMay, NcuObserverProjection,
     RESOURCE_DEMAND_SCHEMA_VERSION, ResourceDemandEnvelope, ResourceDemandInterval,
     ResourceServiceProjection, ServiceComposition, ServiceCycleInterval, ServiceOverlapMode,
-    ServiceRate, ServiceRateProfile,
+    ServiceQueueProjection, ServiceRate, ServiceRateProfile, ServiceStageRole,
 };
 pub use observation::{
     OBSERVATION_SCHEMA_VERSION, ObservationContract, ObservationContractError,
