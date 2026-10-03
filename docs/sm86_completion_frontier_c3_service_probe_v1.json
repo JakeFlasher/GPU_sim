@@ -1,16 +1,16 @@
 {
   "contract": "docs/sm86_completion_frontier_contract_v1.json",
   "finite_interval_covered_rows": 0,
-  "finite_model_rows": 2,
-  "interpretation": "Withdrawn finite-upper/held-out claim: tail flags cleared without complete state; manual padding, not a fitted observer model; kernel variants are not family-held-out. Historical numbers retained; do not use as current accuracy evidence.",
-  "open_rows": 0,
+  "finite_model_rows": 0,
+  "interpretation": "Withdrawn historical attempt. The service queue drained model-local requests but did not establish physical completion; prior finite rows came from an unsound tail closure/manual padding. Numerical files remain historical only.",
+  "open_rows": 2,
   "profile": "docs/sm86_service_rate_profile_20261001.json",
   "rows": [
     {
       "case": "small_store_0_b1_i8",
       "completion_frontier": {
         "cycles": 1775,
-        "status": "complete"
+        "status": "withdrawn_historical_attempt"
       },
       "finite_interval_covered": false,
       "ncu_target_cycles": [
@@ -21,9 +21,9 @@
         3316.0
       ],
       "ncu_target_median": 3310.0,
-      "open_lower_consistent": true,
+      "open_lower_consistent": null,
       "predicted_lower_cycles": 1775,
-      "predicted_upper_cycles": 2287,
+      "predicted_upper_cycles": null,
       "service_model": {
         "carded_dram": true,
         "coherence_capacity_sectors": 4,
@@ -38,7 +38,7 @@
       "case": "small_store_4_b1_i8",
       "completion_frontier": {
         "cycles": 1782,
-        "status": "complete"
+        "status": "withdrawn_historical_attempt"
       },
       "finite_interval_covered": false,
       "ncu_target_cycles": [
@@ -49,9 +49,9 @@
         3332.0
       ],
       "ncu_target_median": 3318.0,
-      "open_lower_consistent": true,
+      "open_lower_consistent": null,
       "predicted_lower_cycles": 1782,
-      "predicted_upper_cycles": 2294,
+      "predicted_upper_cycles": null,
       "service_model": {
         "carded_dram": true,
         "coherence_capacity_sectors": 4,
@@ -64,5 +64,5 @@
     }
   ],
   "schema": "sm86_completion_frontier_c3_service_probe_v1",
-  "status": "finite_model_probe_but_observer_miss"
+  "status": "withdrawn_historical_attempt"
 }

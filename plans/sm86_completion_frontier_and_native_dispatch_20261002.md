@@ -206,6 +206,12 @@ correctness (this performance campaign uses timing shapes) or finite accuracy;
 all replay tails remain explicit. C7 remains partial until the other inventoried
 populations receive bounded campaign dispositions.
 
+Historical C3 store/service artifacts were also normalized: their schemas now
+use explicit `withdrawn_historical_attempt`/`withdrawn_do_not_use` statuses
+instead of encoding finite completion as current state. Raw numerical files
+remain available for review, but they cannot be mistaken for active accuracy
+evidence.
+
 C6 now has a real same-shape scalar negative slice. The fixed-latency
 `w4_d4_split` trace uses the exact 64-generation trace cubin for correctness,
 NVBit, replay, and five NCU captures. Correctness passes; the analyzer refuses

@@ -1,8 +1,8 @@
 {
   "evaluation": "docs/sm86_completion_frontier_c3_store2_evaluation_v1.json",
-  "finite_upper_model_status": "complete_explicit_service_queues",
+  "finite_upper_model_status": "withdrawn_do_not_use",
   "identity": "docs/sm86_completion_frontier_c3_store2_identity.json",
-  "interpretation": "Withdrawn finite-upper/held-out claim: tail flags cleared without complete state; manual padding, not a fitted observer model; kernel variants are not family-held-out. Historical numbers retained; do not use as current accuracy evidence.",
+  "interpretation": "Withdrawn historical attempt. Tail flags were cleared without complete ownership/order state and padding was manual, not calibrated. Numerical files remain historical only; no finite-upper, held-out, or accuracy claim is active.",
   "mean_point_ape_pct": 50.17725661303518,
   "mechanism_metrics": {
     "dram__sectors_read.sum": [
@@ -41,7 +41,7 @@
       216.0
     ]
   },
-  "median_coverage": true,
+  "median_coverage": null,
   "model_interval": {
     "lower_cycles": 1827,
     "upper_cycles": 3683
@@ -61,5 +61,5 @@
   "prediction": "docs/sm86_completion_frontier_c3_store2_prediction_pre_ncu_v1.json",
   "raw_repetition_coverage": 0.8,
   "schema": "sm86_completion_frontier_c3_store2_holdout_v1",
-  "status": "held_out_finite_median_but_repeat_dispersion"
+  "status": "withdrawn_historical_attempt"
 }
