@@ -935,10 +935,20 @@ instructions. NCU gpc cycles are 568531,567884,568408,568964,568350 (median
 reduction RMW and dirty-writeback/coherence tails remain open and native dispatch
 is zero. Evidence: docs/sm86_c7_simbench_global_atomic_max_histogram_direct_live_v1.json.
 
-### C7-S28 — next active milestone
+### C7-S28 — atomic max return slice — complete
 
-Run one additional unrun SM86 SimBench row from the remaining atomic/control
-population (prefer global_atomic_max_return_used or dram_streaming_dot_product).
-Preserve checked correctness, exact binary/arguments, fresh NVBit, replay, and
+The repaired global_atomic_max_return_used binary checks identity output and
+final atomicMax histogram with disjoint finite return sinks; SASS contains
+ATOMG.E.MAX. Replay has full one-block coverage and 46,882 records, and NCU
+reports the same instruction count. NCU gpc cycles are
+1060971,1060224,1060648,1060929,1060243 (median 1060648), while simulator
+lower is 916220, so lower-bound consistency is true; tails remain open and
+native dispatch is zero. Evidence: `docs/sm86_c7_simbench_global_atomic_max_return_used_direct_live_v1.json`.
+
+### C7-S29 — next active milestone
+
+Run one additional unrun SM86 SimBench row from the remaining memory/control
+population (prefer dram_streaming_dot_product or rmsnorm_fwd_bf16). Preserve
+checked correctness, exact binary/arguments, fresh NVBit, replay, and
 five-repetition NCU; retain every unsupported-SASS, OOM/OOD, or falsifying
 outcome without tuning scored parameters.
