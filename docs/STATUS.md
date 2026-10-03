@@ -242,7 +242,7 @@ open dirty-writeback/coherence tails; no native macro dispatch was requested.
 
 The C7 inventory lists 15 portable rows, 31 SM86-capable rows among 92
 SimBench rows, 34 research-probe directories, and 203 SOL baseline problems.
-Portable timing paths and sixteen direct SimBench slices have completed:
+Portable timing paths and seventeen direct SimBench slices have completed:
 `fp32_fma_dep_chain`, `cp_async_shared_tile_copy`, `global_atomic_histogram`,
 `global_vectorized_128b_copy`, `bf16_hmma_gemm_traceable`,
 `global_scalar_32b_copy`, `global_atomic_return_used`,
@@ -250,9 +250,9 @@ Portable timing paths and sixteen direct SimBench slices have completed:
 `shared_bank_conflict_stride`, `l2_thrash_pointer_chase`,
 `l2_persisting_window_sweep`, `l2_prefetch_hint_sweep`, and
 `warm_cold_pair_relaunch`, and
-`carveout_sensitivity_probe`. These check outputs at the captured shape; the FP32
+`carveout_sensitivity_probe`, and `working_set_capacity_sweep`. These check outputs at the captured shape; the FP32
 direct slice is timing-only (its separate correctness-shape run does not
-validate that captured shape). All sixteen retain open tails and zero native
+validate that captured shape). All seventeen retain open tails and zero native
 macro dispatch. The inventory is
 `docs/sm86_c7_workload_population_inventory_v1.json`.
 
@@ -290,6 +290,11 @@ kernels from libcublasLt.so have no stable static control sidecar, and traced
 records cannot be silently crosswalked to NCU instruction counts. See
 `docs/sm86_c7_simbench_vendor_sgemm_cublas_blocked_live_v1.json` and
 `docs/sm86_c7_simbench_vendor_sgemm_strided_batched_cublas_blocked_live_v1.json`.
+
+C7-S22 working-set capacity is complete: the repaired anchor identity checks
+pass at a 1MiB working set, replay/NCU match at 789,888 instructions, and
+simulator lower 143,555 exceeds NCU median 129,756 by 13,799 cycles (10.63%).
+See `docs/sm86_c7_simbench_working_set_capacity_sweep_direct_live_v1.json`.
 
 The `async_visibility_phase` probe now independently recomputes and checks its
 returned lane-0 token from the deterministic source initialization; it no

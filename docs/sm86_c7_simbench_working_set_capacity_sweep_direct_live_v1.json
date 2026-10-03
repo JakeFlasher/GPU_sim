@@ -1,0 +1,229 @@
+{
+  "schema": "sm86_c7_simbench_working_set_capacity_sweep_direct_live_v1",
+  "status": "correctness_trace_replay_ncu_complete_native_dispatch_refused",
+  "host_observation": "0, NVIDIA GeForce RTX 3090 Ti, GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c, 8.6, 615.71.09",
+  "host_identity": {
+    "device_index": 0,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "compute_capability": "8.6",
+    "driver": "615.71.09",
+    "pstate": "P0",
+    "graphics_clock_mhz": 1350,
+    "memory_clock_mhz": 10501
+  },
+  "identity": {
+    "source": "workloads/simbench_bw/l1/working_set_capacity_sweep",
+    "binary": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s22_workingset_20261003/working_set_capacity_sweep_run",
+    "binary_sha256": "fa93359ba9b8d0ed2be423dac53b5809ab3cde9c10792f10191f9b0d8f7ecf74",
+    "control": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s22_workingset_20261003/control.json",
+    "control_sha256": "225cf82e65a4bb35bfb3d7a9a6f17bef2bc36d1699cf4e73c48d222360baef01",
+    "trace": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s22_workingset_20261003/trace",
+    "trace_stats": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s22_workingset_20261003/trace/stats.csv",
+    "args": [
+      "--working-set-bytes",
+      "1048576",
+      "--accesses",
+      "256",
+      "--warps",
+      "32",
+      "--seed",
+      "42",
+      "--shape-point",
+      "trace_00",
+      "--summary"
+    ],
+    "kernel": "working_set_capacity_sweep_kernel",
+    "metric": "gpc__cycles_elapsed.max",
+    "ncu_repeats": 5,
+    "ncu_cache": "all",
+    "ncu_clock": "none"
+  },
+  "correctness": {
+    "status": "passed",
+    "correct": true,
+    "shape_point": "trace_00",
+    "mismatch_count": 0,
+    "validation": "host anchor identity output checked after launch/error handling"
+  },
+  "trace": {
+    "stats": {
+      "device_id": 0,
+      "stream_id": 7,
+      "kernel id": "kernel-1.trace",
+      "kernel mangled name": "working_set_capacity_sweep_kernel",
+      "grid_dimX": 32,
+      "grid_dimY": 1,
+      "grid_dimZ": 1,
+      "#blocks": 32,
+      "block_dimX": 32,
+      "block_dimY": 1,
+      "block_dimZ": 1,
+      "#threads": 32,
+      "total_insts": 2795424,
+      "total_reported_insts": 2795424
+    },
+    "records_replayed": 789888,
+    "independent_tail_facts": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s22_workingset_20261003/tail_facts.json"
+  },
+  "simulator": {
+    "records": 789888,
+    "instructions": 789888,
+    "completion_lower_bound_cycles": 143555,
+    "completion_status": "incomplete_unmodeled_retirement_tails",
+    "unmodeled_tails": {
+      "reduction_read_modify_write": false,
+      "dirty_writeback": true,
+      "coherence": true,
+      "async_copy_shared_visibility": false
+    },
+    "gpc_observation_frontier": {
+      "lower_bound_cycles": 143555,
+      "envelope_cycles": 1816,
+      "grid_blocks": 32,
+      "grid_log2": 5,
+      "cycles": 145371,
+      "role": "architecture_scoped_gpc_observation_boundary_not_timing_crosswalk"
+    }
+  },
+  "fast_frontier": {
+    "device_id": 0,
+    "stream_id": 7,
+    "kernel_id": 1,
+    "function_unique_id": 1,
+    "kernel_name": "working_set_capacity_sweep_kernel___0",
+    "summary": {
+      "contract": "sm86_fast_exact_scalar_regions_v1",
+      "architecture": "sm_86",
+      "blocks_seen": 32,
+      "warps_seen": 32,
+      "eligible_warps": 0,
+      "candidate_regions": 0,
+      "certified_regions": 0,
+      "reified_regions": 0,
+      "candidate_instructions": 0,
+      "collapsed_instructions": 0,
+      "exact_execution_steps": 0,
+      "summarized_execution_steps": 0,
+      "macro_dispatches": 0,
+      "maximum_exact_final_cycle": 0,
+      "maximum_summarized_final_cycle": 0,
+      "terminal_state_matches": true,
+      "coverage": {
+        "trace_records": 789888,
+        "candidate_records": 0,
+        "summarized_records": 0,
+        "reified_records": 0,
+        "uncovered_records": 789888
+      },
+      "refusal_reasons": {
+        "nonfull_predicate_population": 32
+      }
+    }
+  },
+  "tail_facts": {
+    "records": 789888,
+    "memory_records": 41568,
+    "cross_sm_line_topology": 1280,
+    "address_operands_unknown": 31,
+    "hardware_completion_token_observed": false,
+    "global_event_order_observed": false
+  },
+  "ncu": {
+    "metric": "gpc__cycles_elapsed.max",
+    "values": [
+      129756.0,
+      129914.0,
+      129648.0,
+      130077.0,
+      129710.0
+    ],
+    "median": 129756.0,
+    "min": 129648.0,
+    "max": 130077.0,
+    "stdev": 173.68074159215234,
+    "rows": [
+      {
+        "ID": "0",
+        "Kernel Name": "working_set_capacity_sweep_kernel",
+        "Grid Size": "(32, 1, 1)",
+        "Block Size": "(32, 1, 1)",
+        "Device": "0",
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 129756.0,
+        "gpu__time_duration.sum": 96.16,
+        "sm__cycles_active.max": 127771.0,
+        "smsp__inst_executed.sum": 789888.0,
+        "dram__sectors_read.sum": 9868.0,
+        "dram__sectors_write.sum": 0.0
+      },
+      {
+        "ID": "0",
+        "Kernel Name": "working_set_capacity_sweep_kernel",
+        "Grid Size": "(32, 1, 1)",
+        "Block Size": "(32, 1, 1)",
+        "Device": "0",
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 129914.0,
+        "gpu__time_duration.sum": 96.288,
+        "sm__cycles_active.max": 127942.0,
+        "smsp__inst_executed.sum": 789888.0,
+        "dram__sectors_read.sum": 7996.0,
+        "dram__sectors_write.sum": 0.0
+      },
+      {
+        "ID": "0",
+        "Kernel Name": "working_set_capacity_sweep_kernel",
+        "Grid Size": "(32, 1, 1)",
+        "Block Size": "(32, 1, 1)",
+        "Device": "0",
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 129648.0,
+        "gpu__time_duration.sum": 96.064,
+        "sm__cycles_active.max": 127679.0,
+        "smsp__inst_executed.sum": 789888.0,
+        "dram__sectors_read.sum": 9272.0,
+        "dram__sectors_write.sum": 12.0
+      },
+      {
+        "ID": "0",
+        "Kernel Name": "working_set_capacity_sweep_kernel",
+        "Grid Size": "(32, 1, 1)",
+        "Block Size": "(32, 1, 1)",
+        "Device": "0",
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 130077.0,
+        "gpu__time_duration.sum": 96.416,
+        "sm__cycles_active.max": 128123.0,
+        "smsp__inst_executed.sum": 789888.0,
+        "dram__sectors_read.sum": 7996.0,
+        "dram__sectors_write.sum": 12.0
+      },
+      {
+        "ID": "0",
+        "Kernel Name": "working_set_capacity_sweep_kernel",
+        "Grid Size": "(32, 1, 1)",
+        "Block Size": "(32, 1, 1)",
+        "Device": "0",
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 129710.0,
+        "gpu__time_duration.sum": 96.128,
+        "sm__cycles_active.max": 127745.0,
+        "smsp__inst_executed.sum": 789888.0,
+        "dram__sectors_read.sum": 8172.0,
+        "dram__sectors_write.sum": 40.0
+      }
+    ]
+  },
+  "comparison": {
+    "hardware_completion": "not_observed",
+    "native_macro_dispatches": 0,
+    "lower_bound_cycles": 143555,
+    "ncu_median_cycles": 129756.0,
+    "lower_bound_consistency": false,
+    "gap_cycles": 13799.0,
+    "gap_fraction": 0.10634575665094485,
+    "point_estimator": "not_claimed"
+  },
+  "interpretation": "The repaired working_set_capacity_sweep binary passes host anchor identity-output checks at working_set=1MiB, accesses=256, warps=32, produces fresh NVBit/replay/five-NCU evidence, and has full 32-block replay coverage. Replay has 789888 records and NCU reports the same 789888 warp instructions. NCU gpc cycles are 129756,129914,129648,130077,129710 (median 129756), while simulator lower is 143555: lower-bound consistency is false by 13799 cycles (10.63% above the hardware median). This is a real memory-capacity lower-bound falsifier; dirty-writeback/coherence tails remain open and native dispatch is zero."
+}

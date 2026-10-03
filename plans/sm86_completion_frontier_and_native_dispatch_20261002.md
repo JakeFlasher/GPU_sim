@@ -869,10 +869,21 @@ crosswalked to NCU. No simulator endpoint, native dispatch, or accuracy
 comparison is claimed. Evidence:
 `docs/sm86_c7_simbench_vendor_sgemm_strided_batched_cublas_blocked_live_v1.json`.
 
-### C7-S22 — next active milestone
+### C7-S22 — working-set capacity slice — complete
 
-Run one additional unrun SM86 SimBench row from the remaining non-vendor
-population (prefer l2_thrash_pointer_chase variants or working_set_capacity_sweep).
+The repaired working_set_capacity_sweep binary passes anchor identity-output
+checks at working_set=1MiB, accesses=256, warps=32, with full 32-block replay
+coverage and Compute Sanitizer-safe execution. Replay has 789,888 records and
+NCU reports the same 789,888 warp instructions. NCU gpc cycles are
+129756,129914,129648,130077,129710 (median 129756), while simulator lower is
+143555: lower-bound consistency is false by 13,799 cycles (10.63%). This is a
+real memory-capacity falsifier; tails remain open and native dispatch is zero.
+Evidence: `docs/sm86_c7_simbench_working_set_capacity_sweep_direct_live_v1.json`.
+
+### C7-S23 — next active milestone
+
+Run one additional unrun SM86 SimBench row from the remaining memory/control
+population (prefer dram_stream_stride_mix or local_dynamic_index_array).
 Preserve checked correctness, exact binary/arguments, fresh NVBit, replay, and
 five-repetition NCU; retain every unsupported-SASS, OOM/OOD, or falsifying
 outcome without tuning scored parameters.
