@@ -1,0 +1,17 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://gpu-simulator.local/schemas/sm86_c7_research_probe_issue_port_control_matrix_live_v1.schema.json",
+  "title":"SM86 issue-port research-probe matrix live result",
+  "type":"object",
+  "required":["schema","status","host_identity","identity","summary","cells","interpretation"],
+  "properties":{
+    "schema":{"const":"sm86_c7_research_probe_issue_port_control_matrix_live_v1"},
+    "status":{"const":"68_cell_correctness_nvbit_replay_ncu_complete_native_dispatch_refused"},
+    "host_identity":{"type":"object","additionalProperties":true},
+    "identity":{"type":"object","additionalProperties":true},
+    "summary":{"type":"object","required":["cells","correctness_passed","full_trace_cells","ncu_complete_cells","instruction_crosswalk_cells","lower_bound_consistent_cells","lower_bound_falsifier_cells","native_macro_dispatches"],"additionalProperties":true},
+    "cells":{"type":"array","minItems":68,"items":{"type":"object","additionalProperties":true}},
+    "interpretation":{"type":"string","minLength":1}
+  },
+  "additionalProperties":false
+}

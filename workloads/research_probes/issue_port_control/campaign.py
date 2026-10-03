@@ -24,6 +24,11 @@ DEFAULT_OUTPUT = (
 )
 LONG_BINARY = HERE / "issue_port_control"
 TRACE_BINARY = HERE / "issue_port_control_trace"
+# The trace/replay/NCU contract is one exact executable.  The old campaign
+# mixed the 8,192-generation long binary with the 64-generation trace binary,
+# which made its timing rows incomparable.  Keep the long binary available for
+# historical/manual use, but all scored campaign actions use this matched path.
+MATCHED_BINARY = TRACE_BINARY
 
 
 def load_base_campaign():
@@ -137,8 +142,9 @@ def emit_manifest(output: Path) -> None:
             "schema_version": 1,
             "cells": [{**asdict(cell), "key": cell.key} for cell in configured_cells()],
             "ncu_metrics": list(METRICS),
-            "long_generations": 8192,
-            "trace_generations": 64,
+            "matched_binary": str(MATCHED_BINARY),
+            "matched_generations": 64,
+            "legacy_long_binary_not_used": True,
             "identification_lengths": [4, 16, 64],
             "held_out_lengths": [8, 32],
             "identification_widths": [1, 4, 8],
@@ -210,7 +216,7 @@ def run_source(output: Path, cells: Sequence[Cell], force: bool) -> None:
             "none",
             "--section",
             "SourceCounters",
-            *cell.target(LONG_BINARY, 1),
+            *cell.target(MATCHED_BINARY, 1),
         ]
         BASE.run_captured(command, destination, timeout=1200)
         if not report.is_file():
@@ -349,6 +355,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser().parse_args(argv)
     output = args.output_root.resolve()
     try:
+        # Correctness, NCU, source, static, and NVBit must all consume the
+        # same 64-generation binary.  This assignment updates the imported
+        # shared campaign helpers without changing the separately retained
+        # long executable on disk.
+        BASE.LONG_BINARY = MATCHED_BINARY
+        BASE.TRACE_BINARY = MATCHED_BINARY
         cells = selected_cells(args.cells)
         emit_manifest(output)
         if args.action == "manifest":

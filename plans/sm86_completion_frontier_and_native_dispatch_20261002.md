@@ -1046,11 +1046,23 @@ Evidence: `docs/sm86_c7_research_probe_issue_port_control_live_v1.json` and
 its schema. This is a probe-slice timing comparison, not a point-accuracy or
 speedup claim.
 
-### C7-S33D — next active milestone
+### C7-S33D — matched issue-port 68-cell matrix — complete
 
-Expand the matched issue-port family across its declared 68-cell matrix,
-starting with correctness and static-control closure, then capture NVBit,
-replay, and five NCU repetitions for cells that pass. Use the trace binary for
-both trace and NCU; keep long-binary observations separate. If the matrix
-cannot complete within bounded trace/profile budgets, retain a per-cell typed
-disposition instead of shrinking shapes or substituting a different binary.
+The campaign interface was repaired so correctness, NVBit, replay, static
+control, and NCU all use the same 64-generation trace executable; the legacy
+8,192-generation binary is no longer mixed into scored rows. All 68 cells pass
+seven correctness trials, produce full NVBit coverage, replay deterministically,
+and have five NCU repetitions with instruction-count crosswalks. Aggregate
+result: 68/68 complete, 65 lower-bound-consistent cells, and 3 real
+lower-bound falsifiers; native macro dispatch remains zero and all completion
+uppers remain open. Evidence:
+`docs/sm86_c7_research_probe_issue_port_control_matrix_live_v1.json` and its
+schema. NVBit active-thread totals remain separate from warp-record counts.
+
+### C7-S33E — next active milestone
+
+Select the next bounded native probe family (prefer a memory/fence or barrier
+probe with an existing host correctness contract). Repair any stale binary/
+argument mismatch first, then run a matched native/NVBit/replay/five-NCU
+vertical slice. Preserve unsupported tracer/SASS paths and open completion
+tails; do not extrapolate the issue-port result to other probe families.

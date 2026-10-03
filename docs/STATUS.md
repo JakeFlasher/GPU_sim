@@ -295,7 +295,7 @@ unobservable. The corrected shared-bank shape uses SM86 dynamic shared-memory
 opt-in (65,536 bytes against default 49,152 and opt-in 101,376), superseding
 its old false OOD disposition.
 
-The research-probe population was re-enumerated from the current tree: 42 directories are present (31 Makefile CUDA probes, 6 source/preserved-binary rows, and 5 analysis-only rows). The bounded inventory is `docs/sm86_c7_research_probe_inventory_v1.json`; all 31 Makefile probes build successfully with the pinned CUDA 13.2/GCC 14/sm_86 matrix recorded in `docs/sm86_c7_research_probe_build_matrix_v1.json`. One matched `issue_port_control` vertical cell (`w1_p10_l16`) now also has correctness, NVBit, replay, and five-NCU evidence in `docs/sm86_c7_research_probe_issue_port_control_live_v1.json`; the remaining probe matrix is not yet claimed.
+The research-probe population was re-enumerated from the current tree: 42 directories are present (31 Makefile CUDA probes, 6 source/preserved-binary rows, and 5 analysis-only rows). The bounded inventory is `docs/sm86_c7_research_probe_inventory_v1.json`; all 31 Makefile probes build successfully with the pinned CUDA 13.2/GCC 14/sm_86 matrix recorded in `docs/sm86_c7_research_probe_build_matrix_v1.json`. The matched `issue_port_control` family is now complete for all 68 cells: correctness, NVBit, replay, five NCU repetitions, and per-cell instruction crosswalks are recorded in `docs/sm86_c7_research_probe_issue_port_control_matrix_live_v1.json`; 65 lower-bound-consistent cells and 3 falsifiers remain open-tail evidence, with zero native dispatch.
 
 The remaining BF16 cuBLAS control row is now also dispositioned in
 `docs/sm86_c7_simbench_vendor_gemm_cublas_blocked_live_v1.json`: host BF16
