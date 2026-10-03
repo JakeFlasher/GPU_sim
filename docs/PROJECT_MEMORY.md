@@ -397,6 +397,12 @@ and matches 118,976 replay/NCU instructions, but simulator lower 59,545 is
 error claim is made. See
 `docs/sm86_c7_simbench_l2_thrash_pointer_chase_direct_live_v1.json`.
 
+C7-S13 persisting-window sweep is a second real lower-bound falsifier: the
+checked 1MiB allocation/524,288-byte effective window matches 159,200
+replay/NCU instructions, but simulator lower 31,173 is 1,416 cycles (4.76%)
+above NCU median 29,757. No post-score tuning or point-error claim is made.
+See `docs/sm86_c7_simbench_l2_persisting_window_sweep_direct_live_v1.json`.
+
 C7-S8 FP16 HMMA is complete: the checked FP16-cast reference, fresh NVBit
 trace, replay, and five NCU captures match at 404 warp instructions. NCU
 median is 4,934 cycles versus the simulator lower bound 3,337; dirty-writeback

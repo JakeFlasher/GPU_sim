@@ -80,7 +80,7 @@ Three distinct questions must not be conflated:
 | C4 | Independently fit mechanism/observer models using new calibration-only probes, then materialize predictions on untouched cases. No ad-hoc padding or post-score model selection | partial: async group + destination-layout calibration |
 | C5 | Live held-out evaluation of point error, signed bias, finite statistical interval coverage/width, repeat dispersion and OOD; keep semantic tails separate | partial: two controlled async/layout holdouts |
 | C6 | Real scalar native region transition with full front-end/pipeline continuation differential and pre-mutation fallback; extend only after the first real positive case | pending |
-| C7 | Inventory all available workload families (portable, native probes, SOL/other rosters). Full live campaign over the declared supported population; failures remain in coverage denominator | partial: 15-row portable population plus 11 direct SimBench rows complete; INT8/TF32 replay blockers, one shared-shape OOD disposition, and one lower-bound falsifier remain |
+| C7 | Inventory all available workload families (portable, native probes, SOL/other rosters). Full live campaign over the declared supported population; failures remain in coverage denominator | partial: 15-row portable population plus 12 direct SimBench rows complete; INT8/TF32 replay blockers, one shared-shape OOD disposition, and two lower-bound falsifiers remain |
 | C8 | Rerun corrected workload failures, remove obsolete interfaces, synchronize supported claims, results and runbook; no unfinished mechanism called complete | pending |
 
 C0-R/C1-R repair the previous work; they do not finish C3/C5/C6. C7 is not
@@ -537,7 +537,7 @@ docs/sm86_c7_simbench_l2_thrash_pointer_chase_direct_live_v1.json and its
 schema. This closes only this slice; C3/C5/C6 and the wider C7 campaign remain
 open.
 
-### C7-S13 — next active milestone
+### C7-S13 — execution specification
 
 Run one additional direct SM86 SimBench row from the remaining memory/control
 population (prefer l2_persisting_window_sweep or warm_cold_pair_relaunch).
@@ -706,3 +706,28 @@ the full 15-row portable C7 live pipeline completes with 75 NCU captures,
 15 NVBit traces, and 30 simulator replays. C3/C4/C5 remain partial: tails,
 absolute endpoint bias, native selective dispatch, and non-portable populations
 are still open.
+### C7-S13 — direct SimBench persisting-window slice — complete
+
+The repaired l2_persisting_window_sweep row passes exact identity-output checks
+at allocation=1MiB, effective persistence window=524288 bytes, accesses=64,
+warps=32, and completes fresh NVBit, replay, and five NCU captures. Replay has
+full 32-block coverage and 159,200 records; NCU reports the same 159,200 warp
+instructions. NCU gpc cycles were 30197,29757,29747,29616,29965 (median
+29757), while simulator completion lower bound is 31173: lower-bound
+consistency is false by 1,416 cycles (4.76% above the hardware median). This
+is a real lower-bound falsifier, not a point-error score or a post-score tuning
+target. The independent extractor reports 256 cross-SM line-topology events
+and 31 unknown address operands, with no hardware completion token or global
+instrumentation order. Dirty-writeback and coherence tails remain open; native
+dispatch remains zero. Evidence:
+docs/sm86_c7_simbench_l2_persisting_window_sweep_direct_live_v1.json and its
+schema. This closes only this slice; C3/C5/C6 and the wider C7 campaign remain
+open.
+
+### C7-S14 — next active milestone
+
+Run one additional direct SM86 SimBench row from the remaining control/memory
+population (prefer warm_cold_pair_relaunch or l2_prefetch_hint_sweep).
+Preserve checked correctness, exact binary/arguments, fresh NVBit, replay, and
+five-repetition NCU; retain every unsupported-SASS, OOM/OOD, or falsifying
+disposition without tuning scored parameters.
