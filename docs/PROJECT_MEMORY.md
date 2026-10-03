@@ -1,6 +1,6 @@
 # Continuation memory
 
-Updated 2026-10-02. Start here, then [STATUS](STATUS.md); read only the
+Updated 2026-10-03. Start here, then [STATUS](STATUS.md); read only the
 contract/source needed for the task.
 
 ## Research scope
@@ -271,37 +271,24 @@ finite coverage not applicable. A8.6 handoff synchronization is complete; A8
 is complete and A9 is not started. Real native dispatch and finite hardware
 accuracy remain falsifiers.
 
-The next active research plan is
-`plans/sm86_completion_frontier_and_native_dispatch_20261002.md`. It treats
-the open upper as a completion-contract problem: dirty writeback, visibility,
-coherence, and asynchronous-copy tails must be closed or remain explicitly
-open before finite interval coverage is possible. The full 15-row live
-campaign is deferred until a vertical tail-completion case earns a finite
-upper; no native macro dispatch is currently observed.
+## Current continuation (2026-10-03)
 
-C0 of that program is complete. `docs/sm86_completion_frontier_contract_v1.json`
-separates issue, SM-active, visibility, writeback, coherence, and NCU
-frontiers; `tools/report_sm86_completion_frontier.py` reports finite eligibility
-only when all declared tails are closed. The A8 vertical report remains open
-for dirty writeback and coherence. C1 is the active next milestone.
+Use `plans/sm86_completion_frontier_and_native_dispatch_20261002.md`.
+No goal tools; track milestones in the plan. **C0-R is complete**: repair the
+2026-10-02 unsupported tail closure before any new finite-upper claim.
+`close_explicit_hierarchy_tails` inferred completion from one timestamp and
+coarse topology. It is being removed; unknown tails must stay open. The
+hand-chosen 1600-cycle padding / store-2 result is not a valid calibrated
+family-held-out accuracy result. C1 async compared a 64-group trace with
+16384-group NCU; C1 message-passing used managed memory and polling. Neither
+establishes the claimed matched visibility comparison. Raw results remain
+retained; earlier C1/C3 completion claims are superseded by these corrections.
 
-C1 is complete as a live tail matrix: 13 small read/atomic/reduction/control/
-store cases, a device-scope fence/message-passing case, and an async-copy wait
-case all completed correctness, NVBit, replay, prediction-first ordering, and
-five NCU observations. Every row remains open for dirty writeback or
-coherence; the message-passing target median was 214207 GPC cycles and the
-async target median was 4459994 cycles. These are observations, not fitted
-parameters. The next seam is a mechanism-local writeback/coherence service
-intervention. C3's explicit service probe closes two store-case simulator
-frontiers but misses independent NCU medians: predicted intervals
-`1775..2287`/`1782..2294` versus medians `3310`/`3318`. A disjoint store-2
-holdout with calibration padding covers its median (`1827..3683` vs `3667`),
-but only 4/5 raw repetitions (one `3721`) and 50.18% lower-point APE. The
-service model is therefore not promoted to hardware accuracy; C2 tail-witness
-work remains active. `tools/report_sm86_tail_witness.py` makes the missing
-cross-SM temporal order, line generation, owner/read-from, fence scope, and
-hardware completion domains explicit; a model-local complete flag alone cannot
-authorize native dispatch.
+Separate model-completion state, empirical NCU prediction intervals, and
+native model-transition equivalence. Private silicon cache tokens are not a
+prerequisite to statistical prediction or a memory-free native differential;
+a finite empirical interval must not clear semantic unknown tails.
+C1-R matched async recapture now proves a model mismatch (same 64-group binary: simulator lower 84866 vs NCU median 20946); resident-device message passing remains an open lower-bound case (1753 vs 4321). Neither is a finite-accuracy result. Next: same-binary/shape fresh controls + NVBit/replay/NCU for C1-R; implement actual completion obligations before calibrated independent accuracy scoring.
 
 ## Retained evidence
 

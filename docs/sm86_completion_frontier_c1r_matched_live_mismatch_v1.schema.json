@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpu-simulator.local/schemas/sm86_completion_frontier_c1r_matched_live_mismatch_v1.schema.json",
+  "title": "Matched C1-R live model mismatch",
+  "type": "object",
+  "required": ["schema", "status", "contract", "row"],
+  "properties": {
+    "schema": {"type": "string", "pattern": "^sm86_completion_frontier_c1r_(async|message_device)_v1$"},
+    "status": {"const": "matched_live_model_mismatch"},
+    "contract": {"const": "docs/sm86_completion_frontier_contract_v1.json"},
+    "row": {
+      "type": "object",
+      "required": ["case", "binary", "same_binary_for_native_nvbit_ncu", "ncu_target_cycles", "ncu_median_cycles", "simulator_lower_bound_cycles", "simulator_completion", "simulator_records", "ncu_launch_selection", "finite_interval_coverage", "open_lower_consistency", "interpretation"],
+      "properties": {
+        "case": {"type": "string"},
+        "binary": {"type": "string"},
+        "same_binary_for_native_nvbit_ncu": {"const": true},
+        "ncu_target_cycles": {"type": "array", "minItems": 5, "maxItems": 5, "items": {"type": "number", "minimum": 0}},
+        "ncu_median_cycles": {"type": "number", "minimum": 0},
+        "mechanism_metrics": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "number", "minimum": 0}}},
+        "simulator_lower_bound_cycles": {"type": "integer", "minimum": 0},
+        "simulator_completion": {"type": "object", "required": ["status", "unmodeled_tails"], "additionalProperties": true},
+        "simulator_records": {"type": "integer", "minimum": 1},
+        "kernel_name": {"type": "string"},
+        "ncu_launch_selection": {"type": "object", "required": ["mode", "launch_skip", "launch_count"], "properties": {"mode": {"const": "application"}, "launch_skip": {"type": "integer", "minimum": 0}, "launch_count": {"const": 1}}, "additionalProperties": false},
+        "finite_interval_coverage": {"const": null},
+        "open_lower_consistency": {"type": "boolean"},
+        "interpretation": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

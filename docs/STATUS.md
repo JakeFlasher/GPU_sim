@@ -180,37 +180,17 @@ and point error are not applicable. Simulator dirty-writeback/coherence tails
 remain open and native macro dispatch is zero. A8.6 handoff synchronization is
 complete; A8 is complete and A9 is the next phase (not started).
 
-The next research priority is the completion-frontier program in
-[`sm86_completion_frontier_and_native_dispatch_20261002.md`](../plans/sm86_completion_frontier_and_native_dispatch_20261002.md).
-It must close or explicitly bound dirty-writeback, visibility, coherence, and
-asynchronous-copy tails before a finite upper or production native dispatch
-is claimed. The broad 15-row campaign is deferred until its vertical
-tail-completion case succeeds.
+## Completion program correction — 2026-10-03
 
-C0 of that program is complete: the endpoint/tail contract and diagnostic
-frontier report are schema-checked and report the A8 vertical row as open for
-`dirty_writeback` and `coherence`; the NCU target is not consumed. C1 is now
-the active research milestone: live tail microbenchmarks.
-
-C1 is complete as a live matrix: 13 small read/atomic/reduction/control/store
-cases plus device-scope message-passing and async-copy-wait cases completed
-native correctness, fresh NVBit tracing, simulator replay, prediction-first
-ordering, and five NCU repetitions. All 15 tail rows remain open; no finite
-upper is claimed. The compact results are
-`sm86_completion_frontier_c1_small_summary_v1.json` and
-`sm86_completion_frontier_c1_visibility_summary_v1.json`. The next C1 work is
-the writeback/coherence service intervention, not the broad 15-row campaign.
-
-C3 has partial model-local evidence: explicitly configured writeback/coherence
-queues close two store-case simulator frontiers, but the resulting finite
-intervals (`1775..2287` and `1782..2294`) miss independent NCU medians `3310`
-and `3318`. A disjoint store-2 holdout with calibration padding produced a
-finite median interval (`1827..3683`) covering its NCU median `3667`, but only
-4/5 raw repetitions (one reached `3721`) and 50.18% lower-point APE. This is
-observer-model evidence, not a hardware-accuracy claim; C2 tail-witness work
-remains active. The tail-witness report keeps cross-SM temporal order, line
-generation, owner/read-from, fence scope, and hardware completion open even
-when the model-local service queue drains.
+The active [plan](../plans/sm86_completion_frontier_and_native_dispatch_20261002.md)
+reopens C0/C1/C3. The previous tail-flag clearing used insufficient counters;
+the 1600-cycle padding has no reproducible calibration; the async comparison
+mixed 64- and 16384-group binaries; managed-memory message-passing timings
+were not isolated coherence measurements. Previous finite-upper and C1
+completion claims are withdrawn. Raw measurements remain historical data.
+C0-R repairs soundness, then C1-R repairs matched live comparisons. Finite
+statistical prediction and exact semantic completion are separate questions.
+C1-R matched async recapture is a real negative model result: same 64-group binary/arguments/control, target trace records equal NCU instruction counts, but simulator lower 84866 exceeds NCU median 20946. A resident-device message-passing recapture has simulator lower 1753 below NCU median 4321 and remains open. Both are retained as mismatch evidence; no finite upper or tuning claim. C0-R is verified on a live store trace; the same service configuration drains modeled queues but leaves dirty-writeback/coherence open. C1-R is active for matched async/fence recaptures. Full completion and real native selective dispatch remain unachieved.
 
 The first A5 preflight correctly rejected the dirty checkout; after the
 coherent implementation was committed and rebuilt, independent identity and

@@ -2,7 +2,7 @@
   "evaluation": "docs/sm86_completion_frontier_c3_store2_evaluation_v1.json",
   "finite_upper_model_status": "complete_explicit_service_queues",
   "identity": "docs/sm86_completion_frontier_c3_store2_identity.json",
-  "interpretation": "calibration padding from a disjoint store case yields a finite held_out median interval, but one of five NCU repetitions exceeds the upper; this is not yet a stable hardware-accuracy result",
+  "interpretation": "Withdrawn finite-upper/held-out claim: tail flags cleared without complete state; manual padding, not a fitted observer model; kernel variants are not family-held-out. Historical numbers retained; do not use as current accuracy evidence.",
   "mean_point_ape_pct": 50.17725661303518,
   "mechanism_metrics": {
     "dram__sectors_read.sum": [

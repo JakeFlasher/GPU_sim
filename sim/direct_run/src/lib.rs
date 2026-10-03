@@ -2920,6 +2920,24 @@ mod tests {
     }
 
     #[test]
+    fn explicit_service_queues_do_not_erase_native_tail_unknowns() {
+        let mut config = fixture(MemoryMode::L1L2);
+        config.carded_dram_bandwidth = true;
+        config.dirty_writeback_capacity_sectors = Some(4);
+        config.coherence_service_cycles = Some(4);
+        config.coherence_capacity_sectors = Some(4);
+        let report = run(&config).unwrap();
+        let json = serde_json::to_value(&report).unwrap();
+        let completion = &json["launches"][0]["timing"]["completion_frontier"];
+        assert_eq!(
+            completion["status"],
+            "incomplete_unmodeled_retirement_tails"
+        );
+        assert_eq!(completion["unmodeled_tails"]["dirty_writeback"], true);
+        assert_eq!(completion["unmodeled_tails"]["coherence"], true);
+    }
+
+    #[test]
     fn event_time_payloads_require_explicit_writeback_replay_configuration() {
         let mut config = fixture(MemoryMode::Flat);
         config.native_payload_events = Some(vec![L1PayloadAdmissionEvent {

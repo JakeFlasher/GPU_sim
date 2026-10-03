@@ -135,7 +135,7 @@
   ],
   "contract": "docs/sm86_completion_frontier_contract_v1.json",
   "finite_interval_rows": 0,
-  "interpretation": "both live visibility classes complete correctness_NVBit_replay_NCU; both remain open for dirty_writeback_or_coherence and no finite upper is claimed",
+  "interpretation": "Withdrawn matched-comparison claim: async trace=64 groups vs NCU=16384; message passing managed-memory/polling not isolated. Historical numbers retained; do not use as current accuracy evidence.",
   "next_cases": [
     "closed_visibility_service_model",
     "writeback_queue_intervention",

@@ -39,14 +39,14 @@ def test_open_tail_never_becomes_finite_upper():
     row = report["rows"][0]
     assert report["finite_upper_eligible_launches"] == 0
     assert row["finite_upper_eligible"] is False
-    assert row["open_dimensions"] == ["dirty_writeback"]
+    assert row["open_dimensions"] == ["dirty_writeback", "ncu_endpoint_upper_not_established"]
     assert row["ncu_target_is_not_used"] is True
 
 
-def test_complete_frontier_can_be_finite_without_observations():
+def test_complete_model_and_gpc_point_do_not_establish_observer_upper():
     report = report_frontiers(_document("complete"), _contract())
-    assert report["finite_upper_eligible_launches"] == 1
-    assert report["rows"][0]["open_dimensions"] == []
+    assert report["finite_upper_eligible_launches"] == 0
+    assert report["rows"][0]["open_dimensions"] == ["ncu_endpoint_upper_not_established"]
 
 
 def test_missing_tail_fields_are_rejected():

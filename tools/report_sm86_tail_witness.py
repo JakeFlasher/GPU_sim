@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Report which completion-witness domains a simulator trace actually closes."""
+"""Summarize absent domains in simulator output (not independent extraction).
+
+This legacy report supplies no witness to native replay. It cannot determine
+hardware ownership, and is not an eligibility test for a model transition.
+"""
 
 from __future__ import annotations
 

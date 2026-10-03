@@ -2978,56 +2978,6 @@ fn require_system_tail_consistency(
     Ok(())
 }
 
-/// Close writeback/coherence tail flags only for the explicit, full-coverage
-/// service configuration that actually drained those queues. Store/atomic
-/// access classes conservatively set these flags during ordinary replay; this
-/// helper is the narrow model-local proof that the opt-in queues consumed the
-/// corresponding tail. It never uses an NCU value and never closes a tail when
-/// ownership, order, or completion evidence is unknown.
-fn close_explicit_hierarchy_tails(
-    replay: &mut FoldedKernelReplay,
-    mode: ReplayMemMode,
-    full_coverage: bool,
-) {
-    if !full_coverage {
-        return;
-    }
-    let ReplayMemMode::L1SharedL2 {
-        dram: DramBw::CardedWriteback { .. },
-        coherence: Some(_),
-        ..
-    } = mode
-    else {
-        return;
-    };
-    let Some(dram) = replay.dram.as_ref() else {
-        return;
-    };
-    let writeback_closed = (dram.maximum_terminal_l2_dirty_sectors == 0
-        && dram.maximum_terminal_l1_dirty_sectors == 0)
-        || dram.writeback_completion_frontier.is_some();
-    let coherence_observation = &replay.trace_metrics.coherence;
-    let coherence_closed = coherence_observation.unknown_sm_or_line_records == 0
-        && (coherence_observation.cross_sm_lines == 0
-            || dram.coherence_completion_frontier.is_some())
-        && (coherence_observation.cross_sm_lines == 0
-            || coherence_observation.instrumentation_order_missing_records == 0);
-    for result in replay.per_sm.values_mut() {
-        if writeback_closed {
-            result.unmodeled_tails.dirty_writeback = false;
-        }
-        if coherence_closed {
-            result.unmodeled_tails.coherence = false;
-        }
-    }
-    if writeback_closed {
-        replay.unmodeled_tails.dirty_writeback = false;
-    }
-    if coherence_closed {
-        replay.unmodeled_tails.coherence = false;
-    }
-}
-
 fn classify_kernel_result(
     coverage: ExtractedCoverage,
     configuration: ReplayConfiguration,
@@ -3858,11 +3808,10 @@ fn replay_kernel_with_schedule_and_l2_and_candidates_with_payload_events(
     };
     replay.front_end = front_end;
     replay.trace_metrics = trace_metrics;
-    close_explicit_hierarchy_tails(
-        &mut replay,
-        mode,
-        matches!(&coverage, ExtractedCoverage::Full(_)),
-    );
+    // A drained hypothetical service queue is not a completion relation for
+    // native stores/atomics. Keep the system's unknown tails: one completion
+    // timestamp or the absence of traced cross-SM sharing cannot prove that
+    // all write/visibility obligations were represented.
     Ok(classify_kernel_result(coverage, configuration, replay))
 }
 

@@ -68,16 +68,20 @@ def report_frontiers(document: Mapping[str, Any], contract: Mapping[str, Any]) -
             raise ValueError(f"launch {index} has unsupported completion status {status!r}")
         gpc = timing.get("gpc_observation_frontier")
         gpc_lower = gpc.get("lower_bound_cycles") if isinstance(gpc, Mapping) else None
-        gpc_upper = gpc.get("cycles") if isinstance(gpc, Mapping) else None
+        gpc_point = gpc.get("cycles") if isinstance(gpc, Mapping) else None
         open_dimensions = [key for key, active in tails.items() if active]
-        finite_upper = not open_dimensions and gpc_upper is not None
+        # This field is a point (terminal model time + launch envelope), not
+        # an upper bound. A complete model event stream is not an NCU upper
+        # either. This report has no endpoint-error or statistical model input.
+        open_dimensions.append("ncu_endpoint_upper_not_established")
+        finite_upper = False
         rows.append({
             "launch_index": index,
             "kernel_name": launch.get("kernel_name"),
             "completion_status": status,
             "modeled_lower_bound_cycles": lower,
             "gpc_observation_lower_bound_cycles": gpc_lower,
-            "gpc_observation_cycles": gpc_upper,
+            "gpc_observation_cycles": gpc_point,
             "finite_upper_eligible": finite_upper,
             "open_dimensions": open_dimensions,
             "ncu_target_is_not_used": True,

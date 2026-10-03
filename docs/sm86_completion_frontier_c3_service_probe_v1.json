@@ -2,7 +2,7 @@
   "contract": "docs/sm86_completion_frontier_contract_v1.json",
   "finite_interval_covered_rows": 0,
   "finite_model_rows": 2,
-  "interpretation": "explicit model-local writeback/coherence queues close the simulator frontier, but the independent NCU target lies above the declared interval on both rows; do not promote the service profile or endpoint padding to hardware accuracy",
+  "interpretation": "Withdrawn finite-upper/held-out claim: tail flags cleared without complete state; manual padding, not a fitted observer model; kernel variants are not family-held-out. Historical numbers retained; do not use as current accuracy evidence.",
   "open_rows": 0,
   "profile": "docs/sm86_service_rate_profile_20261001.json",
   "rows": [

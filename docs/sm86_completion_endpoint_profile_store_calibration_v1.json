@@ -58,7 +58,7 @@
     }
   },
   "schema_version": 1,
-  "source": "abstract_sm86_probe_profile_v1_unvalidated_independent_rate_example",
+  "source": "withdrawn_manual_padding_not_calibrated_do_not_use_for_accuracy",
   "unmodeled_dimensions": [
     "queue_depth",
     "occupancy",

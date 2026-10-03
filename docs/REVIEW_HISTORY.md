@@ -488,3 +488,27 @@ than promoted. A disjoint store-2 holdout covers its median but not every raw
 repetition (4/5), so repeat dispersion remains unresolved. The tail-witness
 report also keeps ownership, generation, fence scope, and hardware completion
 open for the same trace.
+
+## Correction — 2026-10-03
+
+C0/C1/C3 completion claims above are superseded. The tail-clearing heuristic
+used a completion timestamp/topology counts instead of a complete relation.
+It has been removed. Identical real store replay keeps queue events but the
+observer upper is open again. The async trace/profile used 64 vs 16384 groups;
+message passing included managed-memory migration and variable polling. The
+1600-cycle padding was manual and the store-pattern variant was not a
+family-held-out embedding workload. Raw data is retained, but those summaries
+do not establish matched prediction accuracy, native closure, or calibration.
+The revised plan repairs these defects before proceeding; C2/C3 are unfinished.
+
+## C0-R correction — 2026-10-03
+
+Removed the unsound replay tail-clearing heuristic. A live store-2 rerun with
+explicit service parameters drains modeled writeback/coherence queues but keeps
+semantic dirty-writeback/coherence tails and the observer upper open. Previous
+finite-upper/C3 claims are withdrawn. C1-R is active for matched async/fence
+recaptures; old raw results remain historical.
+
+## C1-R matched recaptures — 2026-10-03
+
+A same-binary 64-group async recapture matched native/NVBit/NCU launch shape and instruction count, but simulator lower 84866 exceeded NCU median 20946: a direct timing-model mismatch. A resident-device message-passing recapture had lower 1753 vs NCU median 4321 and remains open. Both are retained without tuning or finite-upper claims.
