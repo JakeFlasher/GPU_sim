@@ -77,8 +77,8 @@ Three distinct questions must not be conflated:
 | C1-R | Matched resident-memory/async/fence probes: same binary/shape/launch, fresh control sidecar, full trace counts and NCU launch/count comparison; retain mismatches | active — async source-token repair landed; fence/visibility families remain |
 | C2 | Independent **trace** extraction of stores, scopes, masks, allocations, async groups and synchronization. Separate observed facts, derived partial orders and unknowns; no invented global order | complete for observed-fact layer; native witness/effect relation open |
 | C3 | Implement missing native completion obligations: per-request acknowledgements, scoped waits, copy completion, correct outstanding-work drain; demonstrate live memory/fence/copy cases plus perturbation differentials | active — model-local drains pass; physical tails remain open |
-| C4 | Independently fit mechanism/observer models using new calibration-only probes, then materialize predictions on untouched cases. No ad-hoc padding or post-score model selection | partial: async group calibration |
-| C5 | Live held-out evaluation of point error, signed bias, finite statistical interval coverage/width, repeat dispersion and OOD; keep semantic tails separate | partial: one holdout |
+| C4 | Independently fit mechanism/observer models using new calibration-only probes, then materialize predictions on untouched cases. No ad-hoc padding or post-score model selection | partial: async group + destination-layout calibration |
+| C5 | Live held-out evaluation of point error, signed bias, finite statistical interval coverage/width, repeat dispersion and OOD; keep semantic tails separate | partial: two controlled async/layout holdouts |
 | C6 | Real scalar native region transition with full front-end/pipeline continuation differential and pre-mutation fallback; extend only after the first real positive case | pending |
 | C7 | Inventory all available workload families (portable, native probes, SOL/other rosters). Full live campaign over the declared supported population; failures remain in coverage denominator | pending |
 | C8 | Rerun corrected workload failures, remove obsolete interfaces, synchronize supported claims, results and runbook; no unfinished mechanism called complete | pending |
@@ -167,6 +167,18 @@ simulator predicts a 4,096-cycle layout delta; five fresh NCU medians differ by
 and 3.87% high and hardware completion tokens remain unknown. This is narrow
 model-local differential evidence, not a global predictor or semantic hardware
 upper. See `docs/sm86_completion_frontier_c3_async_destination_layout_pair_v1.json`.
+
+C4/C5 now also has a declared layout holdout. Compact/conflict NCU repeats
+were used as calibration for an OLS observer over trace-derived destination
+wavefronts; the severe target prediction `24,476.2..24,902.2` (point
+`24,689.2`) was materialized before any severe NCU capture. Five fresh severe
+NCU values are `24,822,24,855,24,875,24,891,24,840` (median `24,855`), so the
+interval covers the median and point APE is 0.667%. The prediction and joined
+holdout are separated in
+`docs/sm86_completion_frontier_c4_destination_layout_prediction_pre_ncu_v1.json`
+and `docs/sm86_completion_frontier_c4_destination_layout_holdout_v1.json`.
+This remains one controlled layout family; it is not a semantic completion
+upper or a general hardware-accuracy result.
 
 The next source-side repair corrected a concrete granularity error in the
 model-local LDGSTS return ledger. The old code charged the eight-cycle

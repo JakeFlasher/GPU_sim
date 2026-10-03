@@ -1,0 +1,57 @@
+{
+  "identity": {
+    "binary": "workloads/research_probes/async_source_only/async_source_only",
+    "binary_sha256": "72775e59d465a8b9d7437d5cfa8a1946ecae006eec45018c4594e2c795e03637",
+    "target_args": [
+      "--groups",
+      "64",
+      "--depth",
+      "4",
+      "--route",
+      "l1",
+      "--layout",
+      "severe",
+      "--markers",
+      "on"
+    ],
+    "target_control": "results/alpha/c3_source_severe_20261003/control.json",
+    "target_nvbit": "results/alpha/c3_source_severe_20261003/nvbit",
+    "target_tail_facts": "docs/sm86_c3_source_severe_tail_facts_v1.json"
+  },
+  "interpretation": "The severe-layout NCU observation was collected only after the prediction artifact was materialized. The five repeats have median 24,855 cycles; the 24,476..24,902 empirical interval covers the median, and point APE is 0.667%. This is one controlled layout holdout and observer statistics only; semantic model completion and hardware completion remain separate.",
+  "observation": {
+    "hardware_completion": "not_observed",
+    "interval_covered": true,
+    "ncu_median_cycles": 24855.0,
+    "ncu_values": [
+      24822.0,
+      24855.0,
+      24875.0,
+      24891.0,
+      24840.0
+    ],
+    "prediction_absolute_percentage_error": 0.006670690002011638,
+    "prediction_error_cycles": 165.79999999999927,
+    "target_ncu_values_collected_after_prediction": true
+  },
+  "prediction": "docs/sm86_completion_frontier_c4_destination_layout_prediction_pre_ncu_v1.json",
+  "prediction_summary": {
+    "interval_lower_cycles": 24476.2,
+    "interval_role": "empirical_observer_prediction_not_semantic_completion_upper",
+    "interval_upper_cycles": 24902.2,
+    "interval_width_cycles": 426.0,
+    "point_cycles": 24689.2
+  },
+  "schema": "sm86_completion_frontier_c4_destination_layout_holdout_v1",
+  "status": "held_out_observation_joined_after_prediction",
+  "target_features": {
+    "destination_wavefronts": 8192,
+    "ncu_values_not_consumed": true,
+    "simulator_completion": {
+      "cycles": 25523,
+      "status": "complete"
+    },
+    "simulator_model_local_endpoint_cycles": 25523,
+    "trace_records": 1039
+  }
+}

@@ -213,6 +213,16 @@ median 12,616 (4.91% point error), while hardware completion tokens and fence
 scope remain unobserved. This is a narrow positive model case, not a general
 hardware-accuracy or writeback/coherence result.
 
+C4/C5 now has a second declared holdout: compact/conflict calibration predicted
+the severe destination-layout target at `24,476.2..24,902.2` cycles before
+profiling. Five fresh severe NCU values are 24,822/24,855/24,875/24,891/24,840
+(median 24,855); the interval covers the median and point APE is 0.667%. The
+prediction and post-observation join are separated in
+`docs/sm86_completion_frontier_c4_destination_layout_prediction_pre_ncu_v1.json`
+and `docs/sm86_completion_frontier_c4_destination_layout_holdout_v1.json`.
+This is one controlled layout family, not a semantic upper or global accuracy
+claim.
+
 A matched one-warp `c00`/`c11` differential is retained in
 `docs/sm86_completion_frontier_c3_async_endpoint_differential_warp1_v1.json`.
 Five fresh NCU medians are 7,194 and 14,668 cycles (7,474-cycle increment),

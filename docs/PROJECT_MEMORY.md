@@ -318,7 +318,12 @@ The same binary/depth/route/launch changes destination wavefronts 2,048→4,096;
 the repaired simulator predicts a 4,096-cycle delta and five fresh NCU medians
 show 4,070 cycles (26-cycle, 0.64% delta error). Absolute endpoints remain
 4.91%/3.87% high and hardware completion tokens remain unknown, so this is a
-narrow model-local differential result.
+narrow model-local differential result. A second C4/C5 layout holdout is now
+separated into prediction and observation documents: compact/conflict NCU
+calibration predicted severe at 24,476.2..24,902.2 cycles before profiling;
+five severe NCU repeats have median 24,855, interval coverage true, and point
+APE 0.667%. This remains a controlled observer result, not a semantic upper or
+global accuracy claim.
 
 ## Retained evidence
 

@@ -1,0 +1,16 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://gpu-simulator.local/schemas/sm86_completion_frontier_c4_destination_layout_holdout_v1.schema.json",
+  "title":"SM86 destination-layout severe holdout",
+  "type":"object",
+  "required":["schema","status","prediction","identity","prediction_summary","observation","interpretation"],
+  "properties":{
+    "schema":{"const":"sm86_completion_frontier_c4_destination_layout_holdout_v1"},
+    "status":{"const":"held_out_observation_joined_after_prediction"},
+    "prediction":{"type":"string"},"identity":{"type":"object","additionalProperties":true},"target_features":{"type":"object","additionalProperties":true},
+    "prediction_summary":{"type":"object","required":["point_cycles","interval_lower_cycles","interval_upper_cycles"],"properties":{"point_cycles":{"type":"number"},"interval_lower_cycles":{"type":"number"},"interval_upper_cycles":{"type":"number"}},"additionalProperties":true},
+    "observation":{"type":"object","required":["ncu_values","ncu_median_cycles","prediction_error_cycles","prediction_absolute_percentage_error","interval_covered"],"properties":{"ncu_values":{"type":"array","minItems":5,"items":{"type":"number"}},"ncu_median_cycles":{"type":"number"},"prediction_error_cycles":{"type":"number"},"prediction_absolute_percentage_error":{"type":"number"},"interval_covered":{"type":"boolean"},"hardware_completion":{"const":"not_observed"}},"additionalProperties":true},
+    "interpretation":{"type":"string","minLength":1}
+  },
+  "additionalProperties":false
+}
