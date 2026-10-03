@@ -5,11 +5,13 @@ slug = "global_atomic_and_histogram"
 # array driven by a seeded sample stream (return ignored -> RED.E.AND). The verified
 # output is the identity round-trip on the seeded buffer; reference is a seeded
 # tensor of the same axis-product envelope. Same geometry as the add-based
-# atomics pair.
+# atomics pair. Keep the timing shape bounded: the old billion-operation shape
+# could allocate gigabytes and produce an impractical trace without adding a
+# distinct mechanism observation.
 
 [[timing_shapes]]
 name = "timing_00"
-axes = { samples = 1048576, bins = 1024 }
+axes = { samples = 16384, bins = 256 }
 launch_config = { grid = [1, 1, 1], block = [32, 1, 1] }
 warm_up_iters = 5
 repeat_iters = 30

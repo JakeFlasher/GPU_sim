@@ -22,13 +22,12 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    `docs/sm86_c7_simbench_dram_streaming_dot_product_direct_live_v1.json`;
    the former tiny `trace_00` run is only a smoke check.
    [Ampere shared memory](https://docs.nvidia.com/cuda/ampere-tuning-guide/#unified-shared-memory-l1-texture-cache)
-3. **C7-S30 complete; C7-S31 next.** RMSNorm now has a shape-consistent
-   one-block-per-row interface, bounded BF16 host validation, and a complete
-   live native/NVBit/replay/five-NCU slice. The two remaining runnable SM86
-   rows are `global_atomic_and_histogram` and `vendor_gemm_cublas`; capture the
-   former next and preserve the latter's vendor-module disposition if it
-   cannot be replayed. No timing/card parameter is selected from scored NCU
-   targets.
+3. **C7-S31 complete; C7-S32 next.** The atomic-AND reduction row now checks
+   its deterministic histogram and uses a bounded timing shape instead of the
+   stale billion-operation allocation. The only unrun SM86 roster row is the
+   BF16 cuBLAS control row; capture its correctness/NVBit/NCU surface and keep
+   replay blocked if the vendor module still lacks a stable crosswalk. No
+   timing/card parameter is selected from scored NCU targets.
 
 ## Outcome
 
@@ -107,7 +106,7 @@ Three distinct questions must not be conflated:
 | C4 | Independently fit mechanism/observer models using new calibration-only probes, then materialize predictions on untouched cases. No ad-hoc padding or post-score model selection | partial: async group + destination-layout calibration |
 | C5 | Live held-out evaluation of point error, signed bias, finite statistical interval coverage/width, repeat dispersion and OOD; keep semantic tails separate | partial: two controlled async/layout holdouts |
 | C6 | Real scalar native region transition with full front-end/pipeline continuation differential and pre-mutation fallback; extend only after the first real positive case | pending |
-| C7 | Inventory all available workload families (portable, native probes, SOL/other rosters). Full live campaign over the declared supported population; failures remain in coverage denominator | partial: 15-row portable population plus 25 direct SimBench rows complete; INT8/TF32 replay blockers, four vendor/tensor blockers, two runnable SM86 rows, and SOL/native-probe populations remain |
+| C7 | Inventory all available workload families (portable, native probes, SOL/other rosters). Full live campaign over the declared supported population; failures remain in coverage denominator | partial: 15-row portable population plus 26 direct SimBench rows complete; INT8/TF32 replay blockers, four vendor/tensor blockers, one vendor-control row, and SOL/native-probe populations remain |
 | C8 | Rerun corrected workload failures, remove obsolete interfaces, synchronize supported claims, results and runbook; no unfinished mechanism called complete | pending |
 
 C0-R/C1-R repair the previous work; they do not finish C3/C5/C6. C7 is not
@@ -982,10 +981,26 @@ and fast-frontier candidates/native dispatch remain zero. Evidence:
 `docs/sm86_c7_simbench_rmsnorm_fwd_bf16_direct_live_v1.json` and its schema.
 This is not a point-accuracy or speedup claim.
 
-### C7-S31 — next active milestone
+### C7-S31 — atomic-AND histogram slice — complete
 
-Capture `global_atomic_and_histogram` with the same correctness-first
-native/NVBit/replay/five-NCU path. It is the last unblocked atomic row in the
-declared SM86 SimBench roster; keep output/histogram checks disjoint from
-timing observations and retain open tails or lower-bound falsifiers without
-model tuning.
+The repaired `global_atomic_and_histogram` driver now uses checked integer
+parsing, bounded index/allocation arithmetic, launch-error checks, host
+allocation checks, and deterministic final histogram validation. Its former
+billion-operation timing shape was reduced to `samples=16384,bins=256` in the
+shape contract to avoid an OOM/impractical-trace path; the captured `trace_00`
+row remains `samples=1024,bins=64`. Fresh host validation and Compute
+Sanitizer pass; SASS contains `RED.E.AND`, NVBit/replay cover one block with
+42,874 warp records, and NCU reports the same count. Five NCU gpc cycles are
+568244,568570,568083,567453,568196 (median 568196); simulator lower is
+436096, so lower-bound consistency is true. Dirty-writeback/coherence tails
+remain open and native dispatch is zero. Evidence:
+`docs/sm86_c7_simbench_global_atomic_and_histogram_direct_live_v1.json` and
+its schema. This is not a point-accuracy or speedup claim.
+
+### C7-S32 — next active milestone
+
+Capture the `vendor_gemm_cublas` control row's correctness, fresh NVBit, and
+five NCU repetitions with exact arguments. Attempt detailed replay only if the
+trace has a stable static module/control sidecar; otherwise record a typed
+vendor-library replay blocker rather than crosswalking dynamic records to NCU
+or calling the control row a simulator result.

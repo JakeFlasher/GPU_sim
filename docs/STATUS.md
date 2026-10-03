@@ -242,7 +242,7 @@ open dirty-writeback/coherence tails; no native macro dispatch was requested.
 
 The C7 inventory lists 15 portable rows, 31 SM86-capable rows among 92
 SimBench rows, 34 research-probe directories, and 203 SOL baseline problems.
-Portable timing paths and twenty-five direct SimBench slices have completed:
+Portable timing paths and twenty-six direct SimBench slices have completed:
 `fp32_fma_dep_chain`, `cp_async_shared_tile_copy`, `global_atomic_histogram`,
 `global_vectorized_128b_copy`, `bf16_hmma_gemm_traceable`,
 `global_scalar_32b_copy`, `global_atomic_return_used`,
@@ -250,9 +250,9 @@ Portable timing paths and twenty-five direct SimBench slices have completed:
 `shared_bank_conflict_stride`, `l2_thrash_pointer_chase`,
 `l2_persisting_window_sweep`, `l2_prefetch_hint_sweep`, and
 `warm_cold_pair_relaunch`, and
-`carveout_sensitivity_probe`, and `working_set_capacity_sweep`, and `dram_stream_stride_mix`, and `local_dynamic_index_array`, and `local_volatile_array`, `register_spill_local_mem`, and `global_atomic_max_histogram`, and `global_atomic_max_return_used`, and `rmsnorm_fwd_bf16`. These check outputs at the captured shape; the FP32
+`carveout_sensitivity_probe`, and `working_set_capacity_sweep`, and `dram_stream_stride_mix`, and `local_dynamic_index_array`, and `local_volatile_array`, `register_spill_local_mem`, and `global_atomic_max_histogram`, and `global_atomic_max_return_used`, and `rmsnorm_fwd_bf16`, and `global_atomic_and_histogram`. These check outputs at the captured shape; the FP32
 direct slice is timing-only (its separate correctness-shape run does not
-validate that captured shape). All twenty-five retain open tails and zero native
+validate that captured shape). All twenty-six retain open tails and zero native
 macro dispatch. The inventory is
 `docs/sm86_c7_workload_population_inventory_v1.json`.
 
@@ -264,6 +264,15 @@ blocks with 297,600 warp instructions, and five NCU gpc-cycle values are
 7714/7579/7548/7524/7562 (median 7562). Its simulator lower bound is 5345,
 so lower-bound consistency is true; dirty-writeback/coherence and native
 dispatch remain open.
+
+The bounded `global_atomic_and_histogram` slice is recorded in
+`docs/sm86_c7_simbench_global_atomic_and_histogram_direct_live_v1.json`. The
+repaired driver checks the identity output and deterministic bitwise-AND
+histogram, emits RED.E.AND, and avoids the old billion-operation timing shape
+that could cause OOM or impractical traces. Replay has 42,874 warp records;
+NCU cycles are 568244/568570/568083/567453/568196 (median 568196), while the
+simulator lower is 436096. Dirty-writeback/coherence and native dispatch remain
+open.
 
 The full-shape `rmsnorm_fwd_bf16` slice is recorded in
 `docs/sm86_c7_simbench_rmsnorm_fwd_bf16_direct_live_v1.json`. Its repaired
