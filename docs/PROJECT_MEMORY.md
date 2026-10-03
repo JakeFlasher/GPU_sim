@@ -312,6 +312,14 @@ endpoints are 5,995 and 17,394, and direct unprofiled clock64 repeats give a
 arbitration but does not identify a scalar async parameter; no further timing
 fit is justified from it.
 
+An independent cache-all source-only compact/conflict layout pair is now
+retained in `docs/sm86_completion_frontier_c3_async_destination_layout_pair_v1.json`.
+The same binary/depth/route/launch changes destination wavefronts 2,048→4,096;
+the repaired simulator predicts a 4,096-cycle delta and five fresh NCU medians
+show 4,070 cycles (26-cycle, 0.64% delta error). Absolute endpoints remain
+4.91%/3.87% high and hardware completion tokens remain unknown, so this is a
+narrow model-local differential result.
+
 ## Retained evidence
 
 The 2026-09-30 cold/warm campaigns completed 15/15 workloads on RTX 3090 Ti / SM86,

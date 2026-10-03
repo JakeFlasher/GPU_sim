@@ -1,0 +1,17 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://gpu-simulator.local/schemas/sm86_completion_frontier_c3_async_destination_layout_pair_v1.schema.json",
+  "title":"SM86 async destination-layout pair",
+  "type":"object",
+  "required":["schema","status","identity","compact","conflict","delta","interpretation"],
+  "properties":{
+    "schema":{"const":"sm86_completion_frontier_c3_async_destination_layout_pair_v1"},
+    "status":{"const":"narrow_layout_delta_live_match_absolute_endpoint_mismatch"},
+    "identity":{"type":"object","additionalProperties":true},
+    "compact":{"type":"object","required":["simulator","ncu"],"additionalProperties":true},
+    "conflict":{"type":"object","required":["simulator","ncu"],"additionalProperties":true},
+    "delta":{"type":"object","required":["simulator_cycles","ncu_median_cycles","absolute_delta_error_cycles","absolute_delta_error_fraction"],"properties":{"simulator_cycles":{"type":"number"},"ncu_median_cycles":{"type":"number"},"absolute_delta_error_cycles":{"type":"number"},"absolute_delta_error_fraction":{"type":"number"}},"additionalProperties":true},
+    "interpretation":{"type":"string","minLength":1}
+  },
+  "additionalProperties":false
+}

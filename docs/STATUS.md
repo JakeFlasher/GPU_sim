@@ -222,6 +222,14 @@ increment. This does not identify the missing async mechanism: the simulator
 lies between the direct-clock and NCU differentials, so no scalar parameter is
 changed from this comparison.
 
+An independent cache-all source-only layout pair is now recorded in
+`docs/sm86_completion_frontier_c3_async_destination_layout_pair_v1.json`.
+Compact/conflict variants retain the same binary, depth, route, and launch;
+destination wavefronts change 2,048→4,096. The simulator predicts a 4,096-cycle
+delta and five fresh NCU medians show 4,070 cycles (26-cycle, 0.64% delta
+error). Absolute endpoints remain 4.91%/3.87% high, so this is narrow
+model-local differential evidence, not a general hardware upper or predictor.
+
 ## Retained measurements
 
 2026-09-30 RTX 3090 Ti campaigns used driver 615.71.09, 1350/10501 MHz, P0,

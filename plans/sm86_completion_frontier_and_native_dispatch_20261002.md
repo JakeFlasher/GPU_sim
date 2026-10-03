@@ -158,6 +158,16 @@ clock differential but above the NCU GPC endpoint; neither endpoint alone
 identifies the missing async mechanism. The result is retained in
 `docs/sm86_completion_frontier_c3_async_endpoint_differential_warp1_v1.json`.
 
+An independent cache-all source-only layout pair now tests the destination
+projection without changing the binary, depth, source route, or launch shape.
+Compact and conflict variants preserve 256 LDGSTS instructions and source
+cycles, while destination wavefronts change from 2,048 to 4,096. The repaired
+simulator predicts a 4,096-cycle layout delta; five fresh NCU medians differ by
+4,070 cycles (26-cycle, 0.64% delta error). Absolute endpoints remain 4.91%
+and 3.87% high and hardware completion tokens remain unknown. This is narrow
+model-local differential evidence, not a global predictor or semantic hardware
+upper. See `docs/sm86_completion_frontier_c3_async_destination_layout_pair_v1.json`.
+
 The next source-side repair corrected a concrete granularity error in the
 model-local LDGSTS return ledger. The old code charged the eight-cycle
 architecture-local token once per returned 32-byte sector; the raw trace
