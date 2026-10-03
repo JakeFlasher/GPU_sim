@@ -75,7 +75,7 @@ Three distinct questions must not be conflated:
 |---|---|---|
 | C0-R | Remove unsound flag/upper inference; rerun identical real store trace and preserve service events while upper stays open; correct prior claims | complete |
 | C1-R | Matched resident-memory/async/fence probes: same binary/shape/launch, fresh control sidecar, full trace counts and NCU launch/count comparison; retain mismatches | active |
-| C2 | Independent **trace** extraction of stores, scopes, masks, allocations, async groups and synchronization. Separate observed facts, derived partial orders and unknowns; no invented global order | pending |
+| C2 | Independent **trace** extraction of stores, scopes, masks, allocations, async groups and synchronization. Separate observed facts, derived partial orders and unknowns; no invented global order | active |
 | C3 | Implement missing native completion obligations: per-request acknowledgements, scoped waits, copy completion, correct outstanding-work drain; demonstrate live memory/fence/copy cases plus perturbation differentials | pending |
 | C4 | Independently fit mechanism/observer models using new calibration-only probes, then materialize predictions on untouched cases. No ad-hoc padding or post-score model selection | pending |
 | C5 | Live held-out evaluation of point error, signed bias, finite statistical interval coverage/width, repeat dispersion and OOD; keep semantic tails separate | pending |
@@ -147,6 +147,18 @@ independently closed. The repaired matched async output has null predicted
 lower/upper and is retained as
 `docs/sm86_completion_frontier_c3_async_refusal_v1.json`. This fixes the
 previous 84866-cycle false lower; it is not an accuracy result.
+
+### C2 — observed tail facts — active
+
+`tools/extract_sm86_tail_facts.py` is a separate raw-protobuf plus static-SASS
+extraction pass. Fresh resident-device message and matched async traces now
+report store/atomic/fence/async-opcode facts, masks, allocation IDs, payload
+coverage and cross-SM topology while explicitly leaving line generation,
+owner/read-from, fence semantics and hardware completion unknown. Reports:
+`docs/sm86_c2_message_device_tail_facts_v1.json` and
+`docs/sm86_c2_async_tail_facts_v1.json`. This is observed-fact evidence, not
+an independent native witness; C2 remains active until an independently
+constructed effect/continuation relation exists.
 
 ## C2/C3 technical seams
 

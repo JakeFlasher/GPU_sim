@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpu-simulator.local/schemas/sm86_tail_facts_v1.schema.json",
+  "title": "SM86 observed tail facts",
+  "type": "object",
+  "required": ["schema", "source", "coverage", "facts", "launches", "interpretation"],
+  "properties": {
+    "schema": {"const": "sm86_tail_facts_v1"},
+    "source": {"type": "object", "required": ["trace", "control", "extraction"], "properties": {"trace": {"type": "string"}, "control": {"type": "string"}, "extraction": {"type": "string"}}, "additionalProperties": false},
+    "coverage": {"type": "object", "required": ["payload_files", "launches", "kind"], "properties": {"payload_files": {"type": "integer", "minimum": 1}, "launches": {"type": "integer", "minimum": 1}, "kind": {"type": "string"}}, "additionalProperties": false},
+    "facts": {"type": "object", "required": ["records", "memory_records", "stores", "atomics", "reductions", "async_copies", "allocation_ids", "cross_sm_line_topology", "active_mask_missing_records", "predicate_mask_missing_records", "fence_opcodes_observed", "async_protocol_opcodes_observed", "line_generation_observed", "owner_read_from_observed", "fence_scope_semantics_closed", "hardware_completion_token_observed"], "properties": {"records": {"type": "integer"}, "memory_records": {"type": "integer"}, "stores": {"type": "integer"}, "atomics": {"type": "integer"}, "reductions": {"type": "integer"}, "async_copies": {"type": "integer"}, "allocation_ids": {"type": "array", "items": {"type": "integer"}}, "cross_sm_line_topology": {"type": "integer"}, "active_mask_missing_records": {"type": "integer"}, "predicate_mask_missing_records": {"type": "integer"}, "fence_opcodes_observed": {"type": "array", "items": {"type": "string"}}, "async_protocol_opcodes_observed": {"type": "array", "items": {"type": "string"}}, "line_generation_observed": {"type": "boolean"}, "owner_read_from_observed": {"type": "boolean"}, "fence_scope_semantics_closed": {"type": "boolean"}, "hardware_completion_token_observed": {"type": "boolean"}}, "additionalProperties": false},
+    "launches": {"type": "array", "items": {"type": "object"}},
+    "interpretation": {"type": "string", "minLength": 1}
+  },
+  "additionalProperties": false
+}

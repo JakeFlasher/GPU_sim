@@ -1,0 +1,75 @@
+{
+  "coverage": {
+    "kind": "full_unsampled_input_assumed_from_payload_roster",
+    "launches": 2,
+    "payload_files": 3
+  },
+  "facts": {
+    "active_mask_missing_records": 0,
+    "allocation_ids": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "async_copies": 2048,
+    "async_protocol_opcodes_observed": [
+      "LDGDEPBAR",
+      "LDGSTS.E.128 [R11+0x200], [R4.64]",
+      "LDGSTS.E.128 [R11+0x400], [R4.64]",
+      "LDGSTS.E.128 [R11+0x600], [R4.64]",
+      "LDGSTS.E.128 [R11+0x800], [R4.64]",
+      "LDGSTS.E.128 [R11+0xa00], [R4.64]",
+      "LDGSTS.E.128 [R11+0xc00], [R4.64]",
+      "LDGSTS.E.128 [R11+0xe00], [R4.64]",
+      "LDGSTS.E.128 [R11], [R4.64]"
+    ],
+    "atomics": 4,
+    "cross_sm_line_topology": 0,
+    "fence_opcodes_observed": [
+      "BAR.SYNC.DEFER_BLOCKING 0x0",
+      "DEPBAR.LE SB0, 0x0",
+      "LDGDEPBAR"
+    ],
+    "fence_scope_semantics_closed": false,
+    "hardware_completion_token_observed": false,
+    "line_generation_observed": false,
+    "memory_records": 2840,
+    "owner_read_from_observed": false,
+    "predicate_mask_missing_records": 0,
+    "records": 9400,
+    "reductions": 0,
+    "stores": 12
+  },
+  "interpretation": "observed_trace_facts_only_unknown_owner_read_from_generation_scope_and_hardware_completion_remain_open",
+  "launches": [
+    {
+      "device_id": 0,
+      "kernel_id": 1,
+      "memory_records": 8,
+      "records": 296,
+      "sm_ids": [
+        0,
+        2
+      ],
+      "stream_id": 7
+    },
+    {
+      "device_id": 0,
+      "kernel_id": 2,
+      "memory_records": 2832,
+      "records": 9104,
+      "sm_ids": [
+        0
+      ],
+      "stream_id": 7
+    }
+  ],
+  "schema": "sm86_tail_facts_v1",
+  "source": {
+    "control": "results/alpha/c1r_async_matched_20261003/control.json",
+    "extraction": "raw_protobuf_plus_static_control_separate_pass",
+    "trace": "results/alpha/c1r_async_matched_20261003/trace"
+  }
+}

@@ -1,0 +1,217 @@
+{
+  "coverage": {
+    "kind": "full_unsampled_input_assumed_from_payload_roster",
+    "launches": 16,
+    "payload_files": 32
+  },
+  "facts": {
+    "active_mask_missing_records": 0,
+    "allocation_ids": [
+      1,
+      2,
+      3
+    ],
+    "async_copies": 0,
+    "async_protocol_opcodes_observed": [],
+    "atomics": 32,
+    "cross_sm_line_topology": 0,
+    "fence_opcodes_observed": [
+      "ERRBAR",
+      "MEMBAR.SC.GPU"
+    ],
+    "fence_scope_semantics_closed": false,
+    "hardware_completion_token_observed": false,
+    "line_generation_observed": false,
+    "memory_records": 80,
+    "owner_read_from_observed": false,
+    "predicate_mask_missing_records": 0,
+    "records": 752,
+    "reductions": 0,
+    "stores": 32
+  },
+  "interpretation": "observed_trace_facts_only_unknown_owner_read_from_generation_scope_and_hardware_completion_remain_open",
+  "launches": [
+    {
+      "device_id": 0,
+      "kernel_id": 1,
+      "memory_records": 5,
+      "records": 47,
+      "sm_ids": [
+        0,
+        2
+      ],
+      "stream_id": 7
+    },
+    {
+      "device_id": 0,
+      "kernel_id": 10,
+      "memory_records": 5,
+      "records": 47,
+      "sm_ids": [
+        0,
+        2
+      ],
+      "stream_id": 7
+    },
+    {
+      "device_id": 0,
+      "kernel_id": 11,
+      "memory_records": 5,
+      "records": 47,
+      "sm_ids": [
+        0,
+        2
+      ],
+      "stream_id": 7
+    },
+    {
+      "device_id": 0,
+      "kernel_id": 12,
+      "memory_records": 5,
+      "records": 47,
+      "sm_ids": [
+        0,
+        2
+      ],
+      "stream_id": 7
+    },
+    {
+      "device_id": 0,
+      "kernel_id": 13,
+      "memory_records": 5,
+      "records": 47,
+      "sm_ids": [
+        0,
+        2
+      ],
+      "stream_id": 7
+    },
+    {
+      "device_id": 0,
+      "kernel_id": 14,
+      "memory_records": 5,
+      "records": 47,
+      "sm_ids": [
+        0,
+        2
+      ],
+      "stream_id": 7
+    },
+    {
+      "device_id": 0,
+      "kernel_id": 15,
+      "memory_records": 5,
+      "records": 47,
+      "sm_ids": [
+        0,
+        2
+      ],
+      "stream_id": 7
+    },
+    {
+      "device_id": 0,
+      "kernel_id": 16,
+      "memory_records": 5,
+      "records": 47,
+      "sm_ids": [
+        0,
+        2
+      ],
+      "stream_id": 7
+    },
+    {
+      "device_id": 0,
+      "kernel_id": 2,
+      "memory_records": 5,
+      "records": 47,
+      "sm_ids": [
+        0,
+        2
+      ],
+      "stream_id": 7
+    },
+    {
+      "device_id": 0,
+      "kernel_id": 3,
+      "memory_records": 5,
+      "records": 47,
+      "sm_ids": [
+        0,
+        2
+      ],
+      "stream_id": 7
+    },
+    {
+      "device_id": 0,
+      "kernel_id": 4,
+      "memory_records": 5,
+      "records": 47,
+      "sm_ids": [
+        0,
+        2
+      ],
+      "stream_id": 7
+    },
+    {
+      "device_id": 0,
+      "kernel_id": 5,
+      "memory_records": 5,
+      "records": 47,
+      "sm_ids": [
+        0,
+        2
+      ],
+      "stream_id": 7
+    },
+    {
+      "device_id": 0,
+      "kernel_id": 6,
+      "memory_records": 5,
+      "records": 47,
+      "sm_ids": [
+        0,
+        2
+      ],
+      "stream_id": 7
+    },
+    {
+      "device_id": 0,
+      "kernel_id": 7,
+      "memory_records": 5,
+      "records": 47,
+      "sm_ids": [
+        0,
+        2
+      ],
+      "stream_id": 7
+    },
+    {
+      "device_id": 0,
+      "kernel_id": 8,
+      "memory_records": 5,
+      "records": 47,
+      "sm_ids": [
+        0,
+        2
+      ],
+      "stream_id": 7
+    },
+    {
+      "device_id": 0,
+      "kernel_id": 9,
+      "memory_records": 5,
+      "records": 47,
+      "sm_ids": [
+        0,
+        2
+      ],
+      "stream_id": 7
+    }
+  ],
+  "schema": "sm86_tail_facts_v1",
+  "source": {
+    "control": "results/alpha/c1r_message_device_20261003/control.json",
+    "extraction": "raw_protobuf_plus_static_control_separate_pass",
+    "trace": "results/alpha/c1r_message_device_20261003/trace"
+  }
+}
