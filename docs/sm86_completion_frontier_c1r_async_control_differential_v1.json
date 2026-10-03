@@ -1,0 +1,58 @@
+{
+  "async_case": {
+    "ncu_median": 20946.0,
+    "ncu_target_cycles": [
+      20937.0,
+      20950.0,
+      20937.0,
+      20953.0,
+      20946.0
+    ],
+    "sim": {
+      "completion": {
+        "lower_bound_cycles": 84866,
+        "status": "incomplete_unmodeled_retirement_tails",
+        "unmodeled_tails": {
+          "async_copy_shared_visibility": false,
+          "coherence": true,
+          "dirty_writeback": true,
+          "reduction_read_modify_write": false
+        }
+      },
+      "lower": 84866,
+      "records": 9104
+    },
+    "sim_minus_ncu_median": 63920.0
+  },
+  "binary": "workloads/research_probes/async_barrier_overlap/async_barrier_overlap_trace",
+  "control_case": {
+    "ncu_median": 7186.0,
+    "ncu_target_cycles": [
+      7243.0,
+      7182.0,
+      7186.0,
+      7186.0,
+      7181.0
+    ],
+    "sim": {
+      "completion": {
+        "lower_bound_cycles": 6014,
+        "status": "incomplete_unmodeled_retirement_tails",
+        "unmodeled_tails": {
+          "async_copy_shared_visibility": false,
+          "coherence": true,
+          "dirty_writeback": true,
+          "reduction_read_modify_write": false
+        }
+      },
+      "lower": 6014,
+      "records": 4984
+    },
+    "sim_minus_ncu_median": -1172.0
+  },
+  "delta_ncu_median_cycles": 13760.0,
+  "delta_simulator_lower_cycles": 78852,
+  "interpretation": "same binary and launch protocol isolate async completion model: NCU delta is modest while simulator delta is large; do not tune on target NCU; investigate async-group scheduling/throughput against independent source/visibility probes",
+  "schema": "sm86_completion_frontier_c1r_async_control_differential_v1",
+  "status": "matched_control_differential_complete"
+}

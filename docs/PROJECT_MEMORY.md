@@ -288,7 +288,7 @@ Separate model-completion state, empirical NCU prediction intervals, and
 native model-transition equivalence. Private silicon cache tokens are not a
 prerequisite to statistical prediction or a memory-free native differential;
 a finite empirical interval must not clear semantic unknown tails.
-C1-R matched async recapture now proves a model mismatch (same 64-group binary: simulator lower 84866 vs NCU median 20946); resident-device message passing remains an open lower-bound case (1753 vs 4321). Neither is a finite-accuracy result. Next: same-binary/shape fresh controls + NVBit/replay/NCU for C1-R; implement actual completion obligations before calibrated independent accuracy scoring.
+C1-R matched async/control differential now proves a model mismatch: NCU delta 13760 vs simulator lower-bound delta 78852; C1-R matched async recapture now proves a model mismatch (same 64-group binary: simulator lower 84866 vs NCU median 20946); resident-device message passing remains an open lower-bound case (1753 vs 4321). Neither is a finite-accuracy result. Next: same-binary/shape fresh controls + NVBit/replay/NCU for C1-R; implement actual completion obligations before calibrated independent accuracy scoring.
 
 ## Retained evidence
 

@@ -133,7 +133,12 @@ conservative on the lower bound for this case, but no finite upper or native
 dispatch is claimed.
 
 C1-R remains active for fence/async model repair and matched mechanism
-validation; neither slice supplies a finite completion upper.
+validation; neither slice supplies a finite completion upper. A same-binary
+`c00` control differential makes the async mismatch actionable: NCU median
+delta `13760` cycles (`c11 - c00`) versus simulator lower-bound delta `78852`
+cycles. This points to the async-group scheduling/completion model, not a
+generic launch envelope. The differential is retained in
+`docs/sm86_completion_frontier_c1r_async_control_differential_v1.json`.
 
 ## C2/C3 technical seams
 
