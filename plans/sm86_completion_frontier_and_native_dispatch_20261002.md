@@ -1099,11 +1099,22 @@ native dispatch is zero. Evidence:
 `docs/sm86_c7_research_probe_store_ack_frontier_live_v1.json` and its schema.
 This is not a point-accuracy or speedup claim.
 
-### C7-S33H — next active milestone
+### C7-S33H — matched store-ack 30-arm matrix — complete
 
-Expand `store_ack_frontier` over its bounded cell/arm matrix, using explicit
-trace arms rather than the campaign's paired prewarm path. Match each traced
-arm to its NCU executable, crosswalk warp records, and retain the write-ack
-candidate as a separate model intervention—not as hardware completion proof.
-Keep the remaining probe families outside the supported denominator until
-their own launch contracts are captured.
+All ten declared `store_ack_frontier` cells and three explicit arms were
+captured with one-arm trace-only launches, full NVBit coverage, deterministic
+replay, and five NCU repetitions per arm (30 arms, 150 NCU rows). Instruction
+counts crosswalk per arm with no failures; all 30 simulator lower bounds remain
+below their NCU medians. The write-ack candidate remains a model intervention,
+not a hardware completion oracle; completion/writeback/coherence uppers and
+native dispatch remain open. Evidence:
+`docs/sm86_c7_research_probe_store_ack_frontier_matrix_live_v1.json` and its
+schema.
+
+### C7-S33I — next active milestone
+
+Select the next bounded probe family, prioritizing `barrier_pipeline` or
+`memory_retirement_service`. Repair any stale campaign contract before capture,
+then run its complete declared matrix with matched binary/arguments, host
+correctness, NVBit, replay, five NCU repetitions, and per-cell instruction
+crosswalks. Keep all open-tail and unsupported outcomes explicit.

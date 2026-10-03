@@ -1,7 +1,7 @@
 {
   "schema": "sm86_c7_research_probe_inventory_v1",
   "architecture": "sm_86",
-  "status": "inventory_build_matrix_and_three_probe_vertical_slices_complete",
+  "status": "inventory_build_matrix_and_three_probe_campaigns_complete",
   "root": "workloads/research_probes",
   "population": {
     "directory_count": 42,
@@ -942,10 +942,11 @@
           "stdout": "results/alpha/c7_s33_probe_build_20261003/store_ack_frontier.stdout",
           "stderr": "results/alpha/c7_s33_probe_build_20261003/store_ack_frontier.stderr"
         },
-        "live_status": "one_vertical_slice_complete",
-        "live_artifact": "docs/sm86_c7_research_probe_store_ack_frontier_live_v1.json",
+        "live_status": "30_arm_matrix_complete",
+        "live_artifact": "docs/sm86_c7_research_probe_store_ack_frontier_matrix_live_v1.json",
         "live_cell": "b1_d4_l32_line_unique_g0_store_none",
-        "disposition": "matched correctness/NVBit/replay/five-NCU complete; matrix expansion pending"
+        "disposition": "matched correctness/NVBit/replay/150 NCU rows complete; all 30 lower-bound-consistent; open tails",
+        "live_cells": 30
       },
       {
         "name": "task_done_boundary",
@@ -1007,8 +1008,8 @@
     },
     {
       "probe": "store_ack_frontier",
-      "cell": "b1_d4_l32_line_unique_g0_store_none",
-      "artifact": "docs/sm86_c7_research_probe_store_ack_frontier_live_v1.json",
+      "cells": 30,
+      "artifact": "docs/sm86_c7_research_probe_store_ack_frontier_matrix_live_v1.json",
       "status": "complete"
     }
   ]

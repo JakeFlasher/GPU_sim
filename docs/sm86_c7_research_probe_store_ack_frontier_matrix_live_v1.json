@@ -1,0 +1,1537 @@
+{
+  "schema": "sm86_c7_research_probe_store_ack_frontier_matrix_live_v1",
+  "status": "30_arm_cells_correctness_nvbit_replay_ncu_complete_native_dispatch_refused",
+  "host_identity": {
+    "device_index": 0,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "compute_capability": "8.6",
+    "driver": "615.71.09",
+    "pstate": "P0",
+    "graphics_clock_mhz": 1350,
+    "memory_clock_mhz": 10501
+  },
+  "identity": {
+    "source": "workloads/research_probes/store_ack_frontier",
+    "binary": "workloads/research_probes/store_ack_frontier/store_ack_frontier_trace",
+    "control": "results/alpha/c7_s33_store_ack_matrix_20261003/control.json",
+    "ncu_metric": "gpc__cycles_elapsed.max",
+    "ncu_repeats": 5,
+    "ncu_replay_mode": "application",
+    "ncu_clock_control": "none",
+    "ncu_cache_control": "all",
+    "trace_only_contract": "one explicit arm and one trial per trace"
+  },
+  "summary": {
+    "cells": 30,
+    "ncu_rows": 150,
+    "instruction_crosswalk_cells": 30,
+    "lower_bound_consistent_cells": 30,
+    "lower_bound_falsifier_cells": 0,
+    "native_macro_dispatches": 0,
+    "problems": []
+  },
+  "cells": [
+    {
+      "cell": "b1_d4_l32_line_unique_g0",
+      "arm": "control",
+      "trace": {
+        "thread_instructions": 1913,
+        "warp_records": 662,
+        "kernel": "_Z15store_ack_probePjPyS0_iiiii"
+      },
+      "simulator": {
+        "records": 662,
+        "lower_bound_cycles": 5238,
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        }
+      },
+      "tail_facts": {
+        "records": 662,
+        "memory_records": 9,
+        "stores": 5,
+        "address_operands_unknown": 4,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false
+      },
+      "ncu": {
+        "values": [
+          6776.0,
+          6749.0,
+          6761.0,
+          6756.0,
+          6758.0
+        ],
+        "median": 6758.0,
+        "instruction_count": 662,
+        "kernel": "store_ack_probe(unsigned int *, unsigned long long *, unsigned long long *, int, int, int, int, int)",
+        "metric": "gpc__cycles_elapsed.max",
+        "clock_control": "none",
+        "cache_control": "all"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 1520.0,
+        "gap_fraction": 0.22491861497484464,
+        "native_macro_dispatches": 0,
+        "hardware_completion": "not_observed",
+        "point_estimator": "not_claimed"
+      }
+    },
+    {
+      "cell": "b1_d4_l32_line_unique_g0",
+      "arm": "store_none",
+      "trace": {
+        "thread_instructions": 1913,
+        "warp_records": 662,
+        "kernel": "_Z15store_ack_probePjPyS0_iiiii"
+      },
+      "simulator": {
+        "records": 662,
+        "lower_bound_cycles": 5238,
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        }
+      },
+      "tail_facts": {
+        "records": 662,
+        "memory_records": 9,
+        "stores": 9,
+        "address_operands_unknown": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false
+      },
+      "ncu": {
+        "values": [
+          6887.0,
+          6893.0,
+          6925.0,
+          6901.0,
+          6887.0
+        ],
+        "median": 6893.0,
+        "instruction_count": 662,
+        "kernel": "store_ack_probe(unsigned int *, unsigned long long *, unsigned long long *, int, int, int, int, int)",
+        "metric": "gpc__cycles_elapsed.max",
+        "clock_control": "none",
+        "cache_control": "all"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 1655.0,
+        "gap_fraction": 0.24009865080516465,
+        "native_macro_dispatches": 0,
+        "hardware_completion": "not_observed",
+        "point_estimator": "not_claimed"
+      }
+    },
+    {
+      "cell": "b1_d4_l32_line_unique_g0",
+      "arm": "store_device",
+      "trace": {
+        "thread_instructions": 1916,
+        "warp_records": 665,
+        "kernel": "_Z15store_ack_probePjPyS0_iiiii"
+      },
+      "simulator": {
+        "records": 665,
+        "lower_bound_cycles": 5250,
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        }
+      },
+      "tail_facts": {
+        "records": 665,
+        "memory_records": 9,
+        "stores": 9,
+        "address_operands_unknown": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false
+      },
+      "ncu": {
+        "values": [
+          7396.0,
+          7400.0,
+          7454.0,
+          7407.0,
+          7414.0
+        ],
+        "median": 7407.0,
+        "instruction_count": 665,
+        "kernel": "store_ack_probe(unsigned int *, unsigned long long *, unsigned long long *, int, int, int, int, int)",
+        "metric": "gpc__cycles_elapsed.max",
+        "clock_control": "none",
+        "cache_control": "all"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 2157.0,
+        "gap_fraction": 0.2912110166059133,
+        "native_macro_dispatches": 0,
+        "hardware_completion": "not_observed",
+        "point_estimator": "not_claimed"
+      }
+    },
+    {
+      "cell": "b1_d16_l32_line_unique_g0",
+      "arm": "control",
+      "trace": {
+        "thread_instructions": 3017,
+        "warp_records": 962,
+        "kernel": "_Z15store_ack_probePjPyS0_iiiii"
+      },
+      "simulator": {
+        "records": 962,
+        "lower_bound_cycles": 6006,
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        }
+      },
+      "tail_facts": {
+        "records": 962,
+        "memory_records": 21,
+        "stores": 5,
+        "address_operands_unknown": 16,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false
+      },
+      "ncu": {
+        "values": [
+          7519.0,
+          7503.0,
+          7504.0,
+          7505.0,
+          7495.0
+        ],
+        "median": 7504.0,
+        "instruction_count": 962,
+        "kernel": "store_ack_probe(unsigned int *, unsigned long long *, unsigned long long *, int, int, int, int, int)",
+        "metric": "gpc__cycles_elapsed.max",
+        "clock_control": "none",
+        "cache_control": "all"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 1498.0,
+        "gap_fraction": 0.19962686567164178,
+        "native_macro_dispatches": 0,
+        "hardware_completion": "not_observed",
+        "point_estimator": "not_claimed"
+      }
+    },
+    {
+      "cell": "b1_d16_l32_line_unique_g0",
+      "arm": "store_none",
+      "trace": {
+        "thread_instructions": 3017,
+        "warp_records": 962,
+        "kernel": "_Z15store_ack_probePjPyS0_iiiii"
+      },
+      "simulator": {
+        "records": 962,
+        "lower_bound_cycles": 6006,
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        }
+      },
+      "tail_facts": {
+        "records": 962,
+        "memory_records": 21,
+        "stores": 21,
+        "address_operands_unknown": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false
+      },
+      "ncu": {
+        "values": [
+          7894.0,
+          7729.0,
+          7666.0,
+          7691.0,
+          7678.0
+        ],
+        "median": 7691.0,
+        "instruction_count": 962,
+        "kernel": "store_ack_probe(unsigned int *, unsigned long long *, unsigned long long *, int, int, int, int, int)",
+        "metric": "gpc__cycles_elapsed.max",
+        "clock_control": "none",
+        "cache_control": "all"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 1685.0,
+        "gap_fraction": 0.21908724483162137,
+        "native_macro_dispatches": 0,
+        "hardware_completion": "not_observed",
+        "point_estimator": "not_claimed"
+      }
+    },
+    {
+      "cell": "b1_d16_l32_line_unique_g0",
+      "arm": "store_device",
+      "trace": {
+        "thread_instructions": 3020,
+        "warp_records": 965,
+        "kernel": "_Z15store_ack_probePjPyS0_iiiii"
+      },
+      "simulator": {
+        "records": 965,
+        "lower_bound_cycles": 6018,
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        }
+      },
+      "tail_facts": {
+        "records": 965,
+        "memory_records": 21,
+        "stores": 21,
+        "address_operands_unknown": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false
+      },
+      "ncu": {
+        "values": [
+          8190.0,
+          8189.0,
+          8184.0,
+          8201.0,
+          8162.0
+        ],
+        "median": 8189.0,
+        "instruction_count": 965,
+        "kernel": "store_ack_probe(unsigned int *, unsigned long long *, unsigned long long *, int, int, int, int, int)",
+        "metric": "gpc__cycles_elapsed.max",
+        "clock_control": "none",
+        "cache_control": "all"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 2171.0,
+        "gap_fraction": 0.26511173525460985,
+        "native_macro_dispatches": 0,
+        "hardware_completion": "not_observed",
+        "point_estimator": "not_claimed"
+      }
+    },
+    {
+      "cell": "b84_d4_l32_line_unique_g0",
+      "arm": "control",
+      "trace": {
+        "thread_instructions": 160692,
+        "warp_records": 55608,
+        "kernel": "_Z15store_ack_probePjPyS0_iiiii"
+      },
+      "simulator": {
+        "records": 55608,
+        "lower_bound_cycles": 5238,
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 84,
+          "population_blocks": 84
+        }
+      },
+      "tail_facts": {
+        "records": 55608,
+        "memory_records": 756,
+        "stores": 420,
+        "address_operands_unknown": 336,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false
+      },
+      "ncu": {
+        "values": [
+          6766.0,
+          6754.0,
+          6819.0,
+          6762.0,
+          6733.0
+        ],
+        "median": 6762.0,
+        "instruction_count": 55608,
+        "kernel": "store_ack_probe(unsigned int *, unsigned long long *, unsigned long long *, int, int, int, int, int)",
+        "metric": "gpc__cycles_elapsed.max",
+        "clock_control": "none",
+        "cache_control": "all"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 1524.0,
+        "gap_fraction": 0.225377107364685,
+        "native_macro_dispatches": 0,
+        "hardware_completion": "not_observed",
+        "point_estimator": "not_claimed"
+      }
+    },
+    {
+      "cell": "b84_d4_l32_line_unique_g0",
+      "arm": "store_none",
+      "trace": {
+        "thread_instructions": 160692,
+        "warp_records": 55608,
+        "kernel": "_Z15store_ack_probePjPyS0_iiiii"
+      },
+      "simulator": {
+        "records": 55608,
+        "lower_bound_cycles": 5238,
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 84,
+          "population_blocks": 84
+        }
+      },
+      "tail_facts": {
+        "records": 55608,
+        "memory_records": 756,
+        "stores": 756,
+        "address_operands_unknown": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false
+      },
+      "ncu": {
+        "values": [
+          7376.0,
+          7410.0,
+          7428.0,
+          7396.0,
+          7428.0
+        ],
+        "median": 7410.0,
+        "instruction_count": 55608,
+        "kernel": "store_ack_probe(unsigned int *, unsigned long long *, unsigned long long *, int, int, int, int, int)",
+        "metric": "gpc__cycles_elapsed.max",
+        "clock_control": "none",
+        "cache_control": "all"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 2172.0,
+        "gap_fraction": 0.2931174089068826,
+        "native_macro_dispatches": 0,
+        "hardware_completion": "not_observed",
+        "point_estimator": "not_claimed"
+      }
+    },
+    {
+      "cell": "b84_d4_l32_line_unique_g0",
+      "arm": "store_device",
+      "trace": {
+        "thread_instructions": 160944,
+        "warp_records": 55860,
+        "kernel": "_Z15store_ack_probePjPyS0_iiiii"
+      },
+      "simulator": {
+        "records": 55860,
+        "lower_bound_cycles": 5250,
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 84,
+          "population_blocks": 84
+        }
+      },
+      "tail_facts": {
+        "records": 55860,
+        "memory_records": 756,
+        "stores": 756,
+        "address_operands_unknown": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false
+      },
+      "ncu": {
+        "values": [
+          8075.0,
+          7980.0,
+          8004.0,
+          8002.0,
+          8023.0
+        ],
+        "median": 8004.0,
+        "instruction_count": 55860,
+        "kernel": "store_ack_probe(unsigned int *, unsigned long long *, unsigned long long *, int, int, int, int, int)",
+        "metric": "gpc__cycles_elapsed.max",
+        "clock_control": "none",
+        "cache_control": "all"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 2754.0,
+        "gap_fraction": 0.34407796101949023,
+        "native_macro_dispatches": 0,
+        "hardware_completion": "not_observed",
+        "point_estimator": "not_claimed"
+      }
+    },
+    {
+      "cell": "b84_d16_l32_line_unique_g0",
+      "arm": "control",
+      "trace": {
+        "thread_instructions": 253428,
+        "warp_records": 80808,
+        "kernel": "_Z15store_ack_probePjPyS0_iiiii"
+      },
+      "simulator": {
+        "records": 80808,
+        "lower_bound_cycles": 6006,
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 84,
+          "population_blocks": 84
+        }
+      },
+      "tail_facts": {
+        "records": 80808,
+        "memory_records": 1764,
+        "stores": 420,
+        "address_operands_unknown": 1344,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false
+      },
+      "ncu": {
+        "values": [
+          7486.0,
+          7483.0,
+          7480.0,
+          7713.0,
+          7535.0
+        ],
+        "median": 7486.0,
+        "instruction_count": 80808,
+        "kernel": "store_ack_probe(unsigned int *, unsigned long long *, unsigned long long *, int, int, int, int, int)",
+        "metric": "gpc__cycles_elapsed.max",
+        "clock_control": "none",
+        "cache_control": "all"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 1480.0,
+        "gap_fraction": 0.19770237777184077,
+        "native_macro_dispatches": 0,
+        "hardware_completion": "not_observed",
+        "point_estimator": "not_claimed"
+      }
+    },
+    {
+      "cell": "b84_d16_l32_line_unique_g0",
+      "arm": "store_none",
+      "trace": {
+        "thread_instructions": 253428,
+        "warp_records": 80808,
+        "kernel": "_Z15store_ack_probePjPyS0_iiiii"
+      },
+      "simulator": {
+        "records": 80808,
+        "lower_bound_cycles": 6006,
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 84,
+          "population_blocks": 84
+        }
+      },
+      "tail_facts": {
+        "records": 80808,
+        "memory_records": 1764,
+        "stores": 1764,
+        "address_operands_unknown": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false
+      },
+      "ncu": {
+        "values": [
+          10953.0,
+          11138.0,
+          10879.0,
+          10986.0,
+          11112.0
+        ],
+        "median": 10986.0,
+        "instruction_count": 80808,
+        "kernel": "store_ack_probe(unsigned int *, unsigned long long *, unsigned long long *, int, int, int, int, int)",
+        "metric": "gpc__cycles_elapsed.max",
+        "clock_control": "none",
+        "cache_control": "all"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 4980.0,
+        "gap_fraction": 0.4533042053522665,
+        "native_macro_dispatches": 0,
+        "hardware_completion": "not_observed",
+        "point_estimator": "not_claimed"
+      }
+    },
+    {
+      "cell": "b84_d16_l32_line_unique_g0",
+      "arm": "store_device",
+      "trace": {
+        "thread_instructions": 253680,
+        "warp_records": 81060,
+        "kernel": "_Z15store_ack_probePjPyS0_iiiii"
+      },
+      "simulator": {
+        "records": 81060,
+        "lower_bound_cycles": 6018,
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 84,
+          "population_blocks": 84
+        }
+      },
+      "tail_facts": {
+        "records": 81060,
+        "memory_records": 1764,
+        "stores": 1764,
+        "address_operands_unknown": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false
+      },
+      "ncu": {
+        "values": [
+          11801.0,
+          12429.0,
+          11909.0,
+          11540.0,
+          11557.0
+        ],
+        "median": 11801.0,
+        "instruction_count": 81060,
+        "kernel": "store_ack_probe(unsigned int *, unsigned long long *, unsigned long long *, int, int, int, int, int)",
+        "metric": "gpc__cycles_elapsed.max",
+        "clock_control": "none",
+        "cache_control": "all"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 5783.0,
+        "gap_fraction": 0.4900432166765528,
+        "native_macro_dispatches": 0,
+        "hardware_completion": "not_observed",
+        "point_estimator": "not_claimed"
+      }
+    },
+    {
+      "cell": "b1_d16_l0_line_unique_g0",
+      "arm": "control",
+      "trace": {
+        "thread_instructions": 3017,
+        "warp_records": 962,
+        "kernel": "_Z15store_ack_probePjPyS0_iiiii"
+      },
+      "simulator": {
+        "records": 962,
+        "lower_bound_cycles": 6006,
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        }
+      },
+      "tail_facts": {
+        "records": 962,
+        "memory_records": 21,
+        "stores": 5,
+        "address_operands_unknown": 16,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false
+      },
+      "ncu": {
+        "values": [
+          7525.0,
+          7497.0,
+          7500.0,
+          7512.0,
+          7643.0
+        ],
+        "median": 7512.0,
+        "instruction_count": 962,
+        "kernel": "store_ack_probe(unsigned int *, unsigned long long *, unsigned long long *, int, int, int, int, int)",
+        "metric": "gpc__cycles_elapsed.max",
+        "clock_control": "none",
+        "cache_control": "all"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 1506.0,
+        "gap_fraction": 0.20047923322683706,
+        "native_macro_dispatches": 0,
+        "hardware_completion": "not_observed",
+        "point_estimator": "not_claimed"
+      }
+    },
+    {
+      "cell": "b1_d16_l0_line_unique_g0",
+      "arm": "store_none",
+      "trace": {
+        "thread_instructions": 3017,
+        "warp_records": 962,
+        "kernel": "_Z15store_ack_probePjPyS0_iiiii"
+      },
+      "simulator": {
+        "records": 962,
+        "lower_bound_cycles": 6006,
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        }
+      },
+      "tail_facts": {
+        "records": 962,
+        "memory_records": 21,
+        "stores": 5,
+        "address_operands_unknown": 16,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false
+      },
+      "ncu": {
+        "values": [
+          7503.0,
+          7539.0,
+          7510.0,
+          7509.0,
+          7523.0
+        ],
+        "median": 7510.0,
+        "instruction_count": 962,
+        "kernel": "store_ack_probe(unsigned int *, unsigned long long *, unsigned long long *, int, int, int, int, int)",
+        "metric": "gpc__cycles_elapsed.max",
+        "clock_control": "none",
+        "cache_control": "all"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 1504.0,
+        "gap_fraction": 0.20026631158455394,
+        "native_macro_dispatches": 0,
+        "hardware_completion": "not_observed",
+        "point_estimator": "not_claimed"
+      }
+    },
+    {
+      "cell": "b1_d16_l0_line_unique_g0",
+      "arm": "store_device",
+      "trace": {
+        "thread_instructions": 3020,
+        "warp_records": 965,
+        "kernel": "_Z15store_ack_probePjPyS0_iiiii"
+      },
+      "simulator": {
+        "records": 965,
+        "lower_bound_cycles": 6018,
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        }
+      },
+      "tail_facts": {
+        "records": 965,
+        "memory_records": 21,
+        "stores": 5,
+        "address_operands_unknown": 16,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false
+      },
+      "ncu": {
+        "values": [
+          7688.0,
+          7923.0,
+          7687.0,
+          7711.0,
+          7712.0
+        ],
+        "median": 7711.0,
+        "instruction_count": 965,
+        "kernel": "store_ack_probe(unsigned int *, unsigned long long *, unsigned long long *, int, int, int, int, int)",
+        "metric": "gpc__cycles_elapsed.max",
+        "clock_control": "none",
+        "cache_control": "all"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 1693.0,
+        "gap_fraction": 0.21955647775904552,
+        "native_macro_dispatches": 0,
+        "hardware_completion": "not_observed",
+        "point_estimator": "not_claimed"
+      }
+    },
+    {
+      "cell": "b1_d64_l32_line_unique_g0",
+      "arm": "control",
+      "trace": {
+        "thread_instructions": 7433,
+        "warp_records": 2162,
+        "kernel": "_Z15store_ack_probePjPyS0_iiiii"
+      },
+      "simulator": {
+        "records": 2162,
+        "lower_bound_cycles": 9078,
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        }
+      },
+      "tail_facts": {
+        "records": 2162,
+        "memory_records": 69,
+        "stores": 5,
+        "address_operands_unknown": 64,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false
+      },
+      "ncu": {
+        "values": [
+          10479.0,
+          10501.0,
+          10485.0,
+          10605.0,
+          10473.0
+        ],
+        "median": 10485.0,
+        "instruction_count": 2162,
+        "kernel": "store_ack_probe(unsigned int *, unsigned long long *, unsigned long long *, int, int, int, int, int)",
+        "metric": "gpc__cycles_elapsed.max",
+        "clock_control": "none",
+        "cache_control": "all"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 1407.0,
+        "gap_fraction": 0.13419170243204578,
+        "native_macro_dispatches": 0,
+        "hardware_completion": "not_observed",
+        "point_estimator": "not_claimed"
+      }
+    },
+    {
+      "cell": "b1_d64_l32_line_unique_g0",
+      "arm": "store_none",
+      "trace": {
+        "thread_instructions": 7433,
+        "warp_records": 2162,
+        "kernel": "_Z15store_ack_probePjPyS0_iiiii"
+      },
+      "simulator": {
+        "records": 2162,
+        "lower_bound_cycles": 9078,
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        }
+      },
+      "tail_facts": {
+        "records": 2162,
+        "memory_records": 69,
+        "stores": 69,
+        "address_operands_unknown": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false
+      },
+      "ncu": {
+        "values": [
+          10763.0,
+          10766.0,
+          10740.0,
+          10756.0,
+          10739.0
+        ],
+        "median": 10756.0,
+        "instruction_count": 2162,
+        "kernel": "store_ack_probe(unsigned int *, unsigned long long *, unsigned long long *, int, int, int, int, int)",
+        "metric": "gpc__cycles_elapsed.max",
+        "clock_control": "none",
+        "cache_control": "all"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 1678.0,
+        "gap_fraction": 0.15600595016734845,
+        "native_macro_dispatches": 0,
+        "hardware_completion": "not_observed",
+        "point_estimator": "not_claimed"
+      }
+    },
+    {
+      "cell": "b1_d64_l32_line_unique_g0",
+      "arm": "store_device",
+      "trace": {
+        "thread_instructions": 7436,
+        "warp_records": 2165,
+        "kernel": "_Z15store_ack_probePjPyS0_iiiii"
+      },
+      "simulator": {
+        "records": 2165,
+        "lower_bound_cycles": 9090,
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        }
+      },
+      "tail_facts": {
+        "records": 2165,
+        "memory_records": 69,
+        "stores": 69,
+        "address_operands_unknown": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false
+      },
+      "ncu": {
+        "values": [
+          11309.0,
+          11284.0,
+          11264.0,
+          11316.0,
+          11287.0
+        ],
+        "median": 11287.0,
+        "instruction_count": 2165,
+        "kernel": "store_ack_probe(unsigned int *, unsigned long long *, unsigned long long *, int, int, int, int, int)",
+        "metric": "gpc__cycles_elapsed.max",
+        "clock_control": "none",
+        "cache_control": "all"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 2197.0,
+        "gap_fraction": 0.19464871090635244,
+        "native_macro_dispatches": 0,
+        "hardware_completion": "not_observed",
+        "point_estimator": "not_claimed"
+      }
+    },
+    {
+      "cell": "b1_d16_l8_line_unique_g0",
+      "arm": "control",
+      "trace": {
+        "thread_instructions": 3017,
+        "warp_records": 962,
+        "kernel": "_Z15store_ack_probePjPyS0_iiiii"
+      },
+      "simulator": {
+        "records": 962,
+        "lower_bound_cycles": 6006,
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        }
+      },
+      "tail_facts": {
+        "records": 962,
+        "memory_records": 21,
+        "stores": 5,
+        "address_operands_unknown": 16,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false
+      },
+      "ncu": {
+        "values": [
+          7491.0,
+          7513.0,
+          7498.0,
+          7494.0,
+          7531.0
+        ],
+        "median": 7498.0,
+        "instruction_count": 962,
+        "kernel": "store_ack_probe(unsigned int *, unsigned long long *, unsigned long long *, int, int, int, int, int)",
+        "metric": "gpc__cycles_elapsed.max",
+        "clock_control": "none",
+        "cache_control": "all"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 1492.0,
+        "gap_fraction": 0.19898639637236595,
+        "native_macro_dispatches": 0,
+        "hardware_completion": "not_observed",
+        "point_estimator": "not_claimed"
+      }
+    },
+    {
+      "cell": "b1_d16_l8_line_unique_g0",
+      "arm": "store_none",
+      "trace": {
+        "thread_instructions": 3017,
+        "warp_records": 962,
+        "kernel": "_Z15store_ack_probePjPyS0_iiiii"
+      },
+      "simulator": {
+        "records": 962,
+        "lower_bound_cycles": 6006,
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        }
+      },
+      "tail_facts": {
+        "records": 962,
+        "memory_records": 21,
+        "stores": 21,
+        "address_operands_unknown": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false
+      },
+      "ncu": {
+        "values": [
+          7253.0,
+          7302.0,
+          7257.0,
+          7253.0,
+          7258.0
+        ],
+        "median": 7257.0,
+        "instruction_count": 962,
+        "kernel": "store_ack_probe(unsigned int *, unsigned long long *, unsigned long long *, int, int, int, int, int)",
+        "metric": "gpc__cycles_elapsed.max",
+        "clock_control": "none",
+        "cache_control": "all"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 1251.0,
+        "gap_fraction": 0.17238528317486565,
+        "native_macro_dispatches": 0,
+        "hardware_completion": "not_observed",
+        "point_estimator": "not_claimed"
+      }
+    },
+    {
+      "cell": "b1_d16_l8_line_unique_g0",
+      "arm": "store_device",
+      "trace": {
+        "thread_instructions": 3020,
+        "warp_records": 965,
+        "kernel": "_Z15store_ack_probePjPyS0_iiiii"
+      },
+      "simulator": {
+        "records": 965,
+        "lower_bound_cycles": 6018,
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        }
+      },
+      "tail_facts": {
+        "records": 965,
+        "memory_records": 21,
+        "stores": 21,
+        "address_operands_unknown": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false
+      },
+      "ncu": {
+        "values": [
+          7543.0,
+          7548.0,
+          7539.0,
+          7540.0,
+          7541.0
+        ],
+        "median": 7541.0,
+        "instruction_count": 965,
+        "kernel": "store_ack_probe(unsigned int *, unsigned long long *, unsigned long long *, int, int, int, int, int)",
+        "metric": "gpc__cycles_elapsed.max",
+        "clock_control": "none",
+        "cache_control": "all"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 1523.0,
+        "gap_fraction": 0.2019626044291208,
+        "native_macro_dispatches": 0,
+        "hardware_completion": "not_observed",
+        "point_estimator": "not_claimed"
+      }
+    },
+    {
+      "cell": "b1_d32_l32_line_reuse_g0",
+      "arm": "control",
+      "trace": {
+        "thread_instructions": 4489,
+        "warp_records": 1362,
+        "kernel": "_Z15store_ack_probePjPyS0_iiiii"
+      },
+      "simulator": {
+        "records": 1362,
+        "lower_bound_cycles": 7030,
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        }
+      },
+      "tail_facts": {
+        "records": 1362,
+        "memory_records": 37,
+        "stores": 5,
+        "address_operands_unknown": 32,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false
+      },
+      "ncu": {
+        "values": [
+          8506.0,
+          8544.0,
+          8546.0,
+          8532.0,
+          8557.0
+        ],
+        "median": 8544.0,
+        "instruction_count": 1362,
+        "kernel": "store_ack_probe(unsigned int *, unsigned long long *, unsigned long long *, int, int, int, int, int)",
+        "metric": "gpc__cycles_elapsed.max",
+        "clock_control": "none",
+        "cache_control": "all"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 1514.0,
+        "gap_fraction": 0.1772003745318352,
+        "native_macro_dispatches": 0,
+        "hardware_completion": "not_observed",
+        "point_estimator": "not_claimed"
+      }
+    },
+    {
+      "cell": "b1_d32_l32_line_reuse_g0",
+      "arm": "store_none",
+      "trace": {
+        "thread_instructions": 4489,
+        "warp_records": 1362,
+        "kernel": "_Z15store_ack_probePjPyS0_iiiii"
+      },
+      "simulator": {
+        "records": 1362,
+        "lower_bound_cycles": 7030,
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        }
+      },
+      "tail_facts": {
+        "records": 1362,
+        "memory_records": 37,
+        "stores": 37,
+        "address_operands_unknown": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false
+      },
+      "ncu": {
+        "values": [
+          8680.0,
+          8692.0,
+          8809.0,
+          8728.0,
+          8699.0
+        ],
+        "median": 8699.0,
+        "instruction_count": 1362,
+        "kernel": "store_ack_probe(unsigned int *, unsigned long long *, unsigned long long *, int, int, int, int, int)",
+        "metric": "gpc__cycles_elapsed.max",
+        "clock_control": "none",
+        "cache_control": "all"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 1669.0,
+        "gap_fraction": 0.1918611334636165,
+        "native_macro_dispatches": 0,
+        "hardware_completion": "not_observed",
+        "point_estimator": "not_claimed"
+      }
+    },
+    {
+      "cell": "b1_d32_l32_line_reuse_g0",
+      "arm": "store_device",
+      "trace": {
+        "thread_instructions": 4492,
+        "warp_records": 1365,
+        "kernel": "_Z15store_ack_probePjPyS0_iiiii"
+      },
+      "simulator": {
+        "records": 1365,
+        "lower_bound_cycles": 7042,
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        }
+      },
+      "tail_facts": {
+        "records": 1365,
+        "memory_records": 37,
+        "stores": 37,
+        "address_operands_unknown": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false
+      },
+      "ncu": {
+        "values": [
+          9196.0,
+          9205.0,
+          9234.0,
+          9288.0,
+          9217.0
+        ],
+        "median": 9217.0,
+        "instruction_count": 1365,
+        "kernel": "store_ack_probe(unsigned int *, unsigned long long *, unsigned long long *, int, int, int, int, int)",
+        "metric": "gpc__cycles_elapsed.max",
+        "clock_control": "none",
+        "cache_control": "all"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 2175.0,
+        "gap_fraction": 0.23597699902354347,
+        "native_macro_dispatches": 0,
+        "hardware_completion": "not_observed",
+        "point_estimator": "not_claimed"
+      }
+    },
+    {
+      "cell": "b1_d32_l32_line_unique_g64",
+      "arm": "control",
+      "trace": {
+        "thread_instructions": 27145,
+        "warp_records": 9586,
+        "kernel": "_Z15store_ack_probePjPyS0_iiiii"
+      },
+      "simulator": {
+        "records": 9586,
+        "lower_bound_cycles": 62486,
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        }
+      },
+      "tail_facts": {
+        "records": 9586,
+        "memory_records": 37,
+        "stores": 5,
+        "address_operands_unknown": 32,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false
+      },
+      "ncu": {
+        "values": [
+          63637.0,
+          63646.0,
+          63700.0,
+          63642.0,
+          63657.0
+        ],
+        "median": 63646.0,
+        "instruction_count": 9586,
+        "kernel": "store_ack_probe(unsigned int *, unsigned long long *, unsigned long long *, int, int, int, int, int)",
+        "metric": "gpc__cycles_elapsed.max",
+        "clock_control": "none",
+        "cache_control": "all"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 1160.0,
+        "gap_fraction": 0.018225811519969833,
+        "native_macro_dispatches": 0,
+        "hardware_completion": "not_observed",
+        "point_estimator": "not_claimed"
+      }
+    },
+    {
+      "cell": "b1_d32_l32_line_unique_g64",
+      "arm": "store_none",
+      "trace": {
+        "thread_instructions": 27145,
+        "warp_records": 9586,
+        "kernel": "_Z15store_ack_probePjPyS0_iiiii"
+      },
+      "simulator": {
+        "records": 9586,
+        "lower_bound_cycles": 62486,
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        }
+      },
+      "tail_facts": {
+        "records": 9586,
+        "memory_records": 37,
+        "stores": 37,
+        "address_operands_unknown": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false
+      },
+      "ncu": {
+        "values": [
+          63464.0,
+          63465.0,
+          63451.0,
+          63472.0,
+          63480.0
+        ],
+        "median": 63465.0,
+        "instruction_count": 9586,
+        "kernel": "store_ack_probe(unsigned int *, unsigned long long *, unsigned long long *, int, int, int, int, int)",
+        "metric": "gpc__cycles_elapsed.max",
+        "clock_control": "none",
+        "cache_control": "all"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 979.0,
+        "gap_fraction": 0.015425825258016229,
+        "native_macro_dispatches": 0,
+        "hardware_completion": "not_observed",
+        "point_estimator": "not_claimed"
+      }
+    },
+    {
+      "cell": "b1_d32_l32_line_unique_g64",
+      "arm": "store_device",
+      "trace": {
+        "thread_instructions": 27148,
+        "warp_records": 9589,
+        "kernel": "_Z15store_ack_probePjPyS0_iiiii"
+      },
+      "simulator": {
+        "records": 9589,
+        "lower_bound_cycles": 62498,
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        }
+      },
+      "tail_facts": {
+        "records": 9589,
+        "memory_records": 37,
+        "stores": 37,
+        "address_operands_unknown": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false
+      },
+      "ncu": {
+        "values": [
+          63776.0,
+          63798.0,
+          63821.0,
+          63753.0,
+          63774.0
+        ],
+        "median": 63776.0,
+        "instruction_count": 9589,
+        "kernel": "store_ack_probe(unsigned int *, unsigned long long *, unsigned long long *, int, int, int, int, int)",
+        "metric": "gpc__cycles_elapsed.max",
+        "clock_control": "none",
+        "cache_control": "all"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 1278.0,
+        "gap_fraction": 0.020038886101354743,
+        "native_macro_dispatches": 0,
+        "hardware_completion": "not_observed",
+        "point_estimator": "not_claimed"
+      }
+    },
+    {
+      "cell": "b84_d64_l32_line_unique_g0",
+      "arm": "control",
+      "trace": {
+        "thread_instructions": 624372,
+        "warp_records": 181608,
+        "kernel": "_Z15store_ack_probePjPyS0_iiiii"
+      },
+      "simulator": {
+        "records": 181608,
+        "lower_bound_cycles": 9078,
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 84,
+          "population_blocks": 84
+        }
+      },
+      "tail_facts": {
+        "records": 181608,
+        "memory_records": 5796,
+        "stores": 420,
+        "address_operands_unknown": 5376,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false
+      },
+      "ncu": {
+        "values": [
+          10482.0,
+          10501.0,
+          10457.0,
+          10485.0,
+          10511.0
+        ],
+        "median": 10485.0,
+        "instruction_count": 181608,
+        "kernel": "store_ack_probe(unsigned int *, unsigned long long *, unsigned long long *, int, int, int, int, int)",
+        "metric": "gpc__cycles_elapsed.max",
+        "clock_control": "none",
+        "cache_control": "all"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 1407.0,
+        "gap_fraction": 0.13419170243204578,
+        "native_macro_dispatches": 0,
+        "hardware_completion": "not_observed",
+        "point_estimator": "not_claimed"
+      }
+    },
+    {
+      "cell": "b84_d64_l32_line_unique_g0",
+      "arm": "store_none",
+      "trace": {
+        "thread_instructions": 624372,
+        "warp_records": 181608,
+        "kernel": "_Z15store_ack_probePjPyS0_iiiii"
+      },
+      "simulator": {
+        "records": 181608,
+        "lower_bound_cycles": 9078,
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 84,
+          "population_blocks": 84
+        }
+      },
+      "tail_facts": {
+        "records": 181608,
+        "memory_records": 5796,
+        "stores": 5796,
+        "address_operands_unknown": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false
+      },
+      "ncu": {
+        "values": [
+          21751.0,
+          21724.0,
+          23131.0,
+          21893.0,
+          22310.0
+        ],
+        "median": 21893.0,
+        "instruction_count": 181608,
+        "kernel": "store_ack_probe(unsigned int *, unsigned long long *, unsigned long long *, int, int, int, int, int)",
+        "metric": "gpc__cycles_elapsed.max",
+        "clock_control": "none",
+        "cache_control": "all"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 12815.0,
+        "gap_fraction": 0.5853469145388938,
+        "native_macro_dispatches": 0,
+        "hardware_completion": "not_observed",
+        "point_estimator": "not_claimed"
+      }
+    },
+    {
+      "cell": "b84_d64_l32_line_unique_g0",
+      "arm": "store_device",
+      "trace": {
+        "thread_instructions": 624624,
+        "warp_records": 181860,
+        "kernel": "_Z15store_ack_probePjPyS0_iiiii"
+      },
+      "simulator": {
+        "records": 181860,
+        "lower_bound_cycles": 9090,
+        "completion_status": "incomplete_unmodeled_retirement_tails",
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 84,
+          "population_blocks": 84
+        }
+      },
+      "tail_facts": {
+        "records": 181860,
+        "memory_records": 5796,
+        "stores": 5796,
+        "address_operands_unknown": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false
+      },
+      "ncu": {
+        "values": [
+          22270.0,
+          22748.0,
+          22538.0,
+          22850.0,
+          23078.0
+        ],
+        "median": 22748.0,
+        "instruction_count": 181860,
+        "kernel": "store_ack_probe(unsigned int *, unsigned long long *, unsigned long long *, int, int, int, int, int)",
+        "metric": "gpc__cycles_elapsed.max",
+        "clock_control": "none",
+        "cache_control": "all"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 13658.0,
+        "gap_fraction": 0.6004044311587832,
+        "native_macro_dispatches": 0,
+        "hardware_completion": "not_observed",
+        "point_estimator": "not_claimed"
+      }
+    }
+  ],
+  "interpretation": "All ten declared store_ack_frontier cells and three explicit arms use matched trace-only launches for NVBit, replay, and five NCU repetitions. NCU instruction counts crosswalk to simulator warp records per arm; active-thread trace totals remain separate. The write-ack candidate is not used as a hardware-completion oracle, and all completion uppers/native dispatch remain open."
+}
