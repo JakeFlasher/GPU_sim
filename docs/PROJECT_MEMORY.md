@@ -351,29 +351,22 @@ not complete yet; probes/SOL/other suites and correctness joins remain to be
 inventoried. Portable replay tails remain open and native macro dispatch was
 not requested.
 
-The C7 population inventory is explicit in
-`docs/sm86_c7_workload_population_inventory_v1.json`: 15 active portable-LCD
-rows, 92 SimBench-BW rows (31 SM86-gated), 34 research-probe directories, and
-203 SOL baseline problem directories. The portable 15 and five direct SimBench
-rows have completed bounded slices; the remaining populations need bounded
-shape/memory/OOM dispositions before a repository-wide campaign claim.
-
-Five SM86 SimBench direct slices now pass their workload correctness checks.
-`fp32_fma_dep_chain` and `cp_async_shared_tile_copy` each completed native
-timing, NVBit, replay, and five same-binary NCU runs; `global_atomic_histogram`
-completed the same pipeline and additionally passed an independent histogram
-check; `global_vectorized_128b_copy` completed the same pipeline and passed an
-independent identity-output check; `bf16_hmma_gemm_traceable` completed the
-same pipeline with an independent BF16-cast reference check. All five analyzers
-refused all candidates and native dispatch was zero.
-The active wrapper still rejects repository-contained tracers and requires an
-unavailable runtime sidecar, so that wrapper path remains blocked. Direct results:
-`docs/sm86_c7_simbench_fp32_direct_live_v1.json` and
-`docs/sm86_c7_simbench_cp_async_direct_live_v1.json`,
-`docs/sm86_c7_simbench_global_atomic_histogram_direct_live_v1.json`, and
-`docs/sm86_c7_simbench_global_vectorized_128b_copy_direct_live_v1.json`, and
-`docs/sm86_c7_simbench_bf16_hmma_gemm_direct_live_v1.json`; wrapper blocker:
-`docs/sm86_c7_simbench_population_slice_v1.json`.
+The C7 inventory lists 15 portable rows, 31 SM86-capable rows among 92
+SimBench rows, 34 research-probe directories, and 203 SOL baseline problems.
+Portable timing paths and six direct SimBench slices have completed:
+`fp32_fma_dep_chain`, `cp_async_shared_tile_copy`, `global_atomic_histogram`,
+`global_vectorized_128b_copy`, `bf16_hmma_gemm_traceable`, and
+`global_scalar_32b_copy`. The latter five check outputs at the captured shape;
+the FP32 direct slice is timing-only (its separate correctness-shape run does
+not validate that captured shape). All six retain open tails and zero native
+macro dispatch. Instruction counts match NCU in the scalar/vector/atomic/BF16
+slices; that does not identify the cause of their timing gaps. Results and
+remaining populations: `docs/sm86_c7_workload_population_inventory_v1.json`.
+The legacy wrapper's external-tracer/runtime-sidecar requirements remain
+obsolete blockers; direct local captures do not depend on those procedures.
+C7-S5 scalar copy is complete (11,809 instructions; model lower 245,262,
+NCU median 249,151). Next: C7-S6 returning-atomic race repair and full live
+capture. Full-population accuracy and C3/C5/C6 are not complete.
 
 ## Retained evidence
 
