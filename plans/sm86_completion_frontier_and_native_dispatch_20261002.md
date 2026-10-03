@@ -198,6 +198,14 @@ directories, and 203 SOL baseline problem directories. Only the portable 15
 have the completed full pipeline; the other populations remain pending and
 must receive memory/shape/OOM dispositions before any repository-wide claim.
 
+The portable slice has now been executed live, not merely inventoried:
+`docs/sm86_c7_full_live_campaign_v1.json` records 15/15 successful rows,
+75 NCU captures, 15 NVBit traces, and 30 deterministic simulator replays with
+zero OOM/OOD/timeout/failed-stage outcomes. It intentionally does not claim
+correctness (this performance campaign uses timing shapes) or finite accuracy;
+all replay tails remain explicit. C7 remains partial until the other inventoried
+populations receive bounded campaign dispositions.
+
 C6 now has a real same-shape scalar negative slice. The fixed-latency
 `w4_d4_split` trace uses the exact 64-generation trace cubin for correctness,
 NVBit, replay, and five NCU captures. Correctness passes; the analyzer refuses
