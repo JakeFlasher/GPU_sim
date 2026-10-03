@@ -70,6 +70,10 @@ def report_frontiers(document: Mapping[str, Any], contract: Mapping[str, Any]) -
         gpc_lower = gpc.get("lower_bound_cycles") if isinstance(gpc, Mapping) else None
         gpc_point = gpc.get("cycles") if isinstance(gpc, Mapping) else None
         open_dimensions = [key for key, active in tails.items() if active]
+        readiness = timing.get("readiness")
+        async_groups = readiness.get("async_groups") if isinstance(readiness, Mapping) else None
+        if isinstance(async_groups, Mapping) and async_groups.get("groups_committed", 0) != 0:
+            open_dimensions.append("async_completion_model_unvalidated")
         # This field is a point (terminal model time + launch envelope), not
         # an upper bound. A complete model event stream is not an NCU upper
         # either. This report has no endpoint-error or statistical model input.

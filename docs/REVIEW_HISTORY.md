@@ -514,3 +514,5 @@ recaptures; old raw results remain historical.
 A same-binary 64-group async recapture matched native/NVBit/NCU launch shape and instruction count, but simulator lower 84866 exceeded NCU median 20946: a direct timing-model mismatch. A resident-device message-passing recapture had lower 1753 vs NCU median 4321 and remains open. Both are retained without tuning or finite-upper claims.
 
 The matched async/control differential is retained: the same 64-group binary yields NCU delta 13760 cycles but simulator lower-bound delta 78852 cycles. Investigate async scheduling/completion, not the launch envelope.
+
+C3 async repair: matched async groups now widen timing frontiers and refuse prediction intervals after the control differential. The prior false lower is not tuned; raw evidence remains.

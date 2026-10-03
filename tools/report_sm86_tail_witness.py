@@ -38,6 +38,9 @@ def report_tail_witness(document: Mapping[str, Any]) -> dict[str, Any]:
         )
         coherence = _require_mapping(trace_metrics.get("coherence"), f"launch {index}.trace_metrics.coherence")
         completion = _require_mapping(_require_mapping(launch.get("timing"), f"launch {index}.timing").get("completion_frontier"), f"launch {index}.completion_frontier")
+        timing = _require_mapping(launch.get("timing"), f"launch {index}.timing")
+        readiness = _require_mapping(timing.get("readiness", {}), f"launch {index}.readiness")
+        async_groups = _require_mapping(readiness.get("async_groups", {}), f"launch {index}.async_groups")
         tails = _require_mapping(completion.get("unmodeled_tails", {}), f"launch {index}.unmodeled_tails")
         open_domains: list[str] = []
         facts = {
@@ -50,6 +53,7 @@ def report_tail_witness(document: Mapping[str, Any]) -> dict[str, Any]:
             "owner_read_from": False,
             "fence_scope": False,
             "hardware_completion_token": False,
+            "async_completion_model_validated": async_groups.get("groups_committed", 0) == 0,
             "simulator_tail_flags_empty": completion.get("status") == "complete" and not any(tails.values()),
         }
         for domain, closed in facts.items():

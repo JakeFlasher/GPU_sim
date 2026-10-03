@@ -140,6 +140,14 @@ cycles. This points to the async-group scheduling/completion model, not a
 generic launch envelope. The differential is retained in
 `docs/sm86_completion_frontier_c1r_async_control_differential_v1.json`.
 
+The first C3 repair is conservative: when an SM86 trace contains async-copy
+groups, `TimingReport::latent_frontiers` now widens issue/modeled/typed-tail
+frontiers and refuses a prediction lower until the async completion model is
+independently closed. The repaired matched async output has null predicted
+lower/upper and is retained as
+`docs/sm86_completion_frontier_c3_async_refusal_v1.json`. This fixes the
+previous 84866-cycle false lower; it is not an accuracy result.
+
 ## C2/C3 technical seams
 
 `sim/sm/src/issue.rs`: response ownership, `memory_write_ack`, GPU MEMBAR,

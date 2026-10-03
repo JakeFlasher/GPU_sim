@@ -1361,10 +1361,21 @@ impl TimingReport {
     /// frontier contract. Hardware/profiler endpoints are intentionally left
     /// unknown; this method does not create a CUDA-event or NCU conversion.
     pub fn latent_frontiers(&self) -> Result<FrontierVector, LatentModelError> {
-        let modeled_event = self
-            .terminal_modeled_event_time
-            .map_or_else(FrontierBound::unknown, FrontierBound::exact);
+        // The current SM86 LDGSTS source/destination timing is a diagnostic
+        // hypothesis. A live same-binary control differential shows that its
+        // completion frontier can overshoot the NCU target by a large amount;
+        // do not expose that hypothesis as a prediction lower bound until C3
+        // closes an independent async completion witness.
+        let async_completion_unvalidated =
+            self.readiness.diagnostics.async_groups.groups_committed != 0;
+        let modeled_event = if async_completion_unvalidated {
+            FrontierBound::unknown()
+        } else {
+            self.terminal_modeled_event_time
+                .map_or_else(FrontierBound::unknown, FrontierBound::exact)
+        };
         let typed_tail = match &self.completion_frontier {
+            _ if async_completion_unvalidated => FrontierBound::unknown(),
             CompletionFrontierReport::Complete { cycles } => {
                 cycles.map_or_else(FrontierBound::unknown, FrontierBound::exact)
             }
@@ -1374,7 +1385,11 @@ impl TimingReport {
             } => lower_bound_cycles.map_or_else(FrontierBound::unknown, FrontierBound::lower_bound),
         };
         let vector = FrontierVector {
-            issue: FrontierBound::exact(self.diagnostic_last_issue_cycles),
+            issue: if async_completion_unvalidated {
+                FrontierBound::unknown()
+            } else {
+                FrontierBound::exact(self.diagnostic_last_issue_cycles)
+            },
             modeled_event,
             resource_service: FrontierBound::unknown(),
             launch_envelope: FrontierBound::unknown(),
