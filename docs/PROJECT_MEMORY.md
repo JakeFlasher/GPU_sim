@@ -353,7 +353,7 @@ not requested.
 
 The C7 inventory lists 15 portable rows, 31 SM86-capable rows among 92
 SimBench rows, 34 research-probe directories, and 203 SOL baseline problems.
-Portable timing paths and twenty-three direct SimBench slices have completed:
+Portable timing paths and twenty-four direct SimBench slices have completed:
 `fp32_fma_dep_chain`, `cp_async_shared_tile_copy`, `global_atomic_histogram`,
 `global_vectorized_128b_copy`, `bf16_hmma_gemm_traceable`,
 `global_scalar_32b_copy`, `global_atomic_return_used`,
@@ -363,9 +363,18 @@ Portable timing paths and twenty-three direct SimBench slices have completed:
 `warm_cold_pair_relaunch`, and
 `carveout_sensitivity_probe`, and `working_set_capacity_sweep`, and `dram_stream_stride_mix`, and `local_dynamic_index_array`, and `local_volatile_array`, `register_spill_local_mem`, and `global_atomic_max_histogram`, and `global_atomic_max_return_used`. These check outputs at the captured shape; the FP32
 direct slice is timing-only (its separate correctness-shape run does not
-validate that captured shape). All twenty-three retain open tails and zero native
+validate that captured shape). All twenty-four retain open tails and zero native
 macro dispatch. The inventory is
 `docs/sm86_c7_workload_population_inventory_v1.json`.
+
+The full-shape `dram_streaming_dot_product` slice is additionally recorded in
+`docs/sm86_c7_simbench_dram_streaming_dot_product_direct_live_v1.json`:
+argument/launch/allocation guards and a per-block roundoff-bounded reference
+check pass, Compute Sanitizer reports zero errors, NVBit/replay cover all 128
+blocks with 297,600 warp instructions, and five NCU gpc-cycle values are
+7714/7579/7548/7524/7562 (median 7562). Its simulator lower bound is 5345,
+so lower-bound consistency is true; dirty-writeback/coherence and native
+dispatch remain open.
 
 Two tensor rows (INT8 IMMA and TF32 HMMA) pass host correctness, NVBit, and NCU
 but are blocked before simulator timing because their SM86 pipeline models are

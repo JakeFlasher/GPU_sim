@@ -13,16 +13,20 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    replay, with every endpoint and simulator runtime recorded before NCU.
    The fast analyzer's single-launch limitation is not a detailed replay failure.
    [NCU cache control](https://docs.nvidia.com/nsight-compute/ProfilingGuide/index.html#cache-control)
-2. **C7-S16b active — finish recent evidence-defect cleanup before expanding coverage.**
-   C7-S16a corrected and recaptured C7-S13's sink reference. C7-S14 emits
-   CCTL.E.PF2 in SASS; correct its false “unobserved prefetch” statement.
-   C7-S10's 64 KiB request now has the documented SM86 dynamic-shared-memory
-   opt-in and a corrected original-shape recapture. Keep the superseded
-   pre-opt-in artifact historical, not active evidence.
+2. **C7-S29 complete — full-shape DRAM streaming dot-product slice.** The
+   timing-shape binary was hardened against malformed/overflowing arguments,
+   allocation failure, launch errors, and unbounded FP32 reference error.
+   Native validation, Compute Sanitizer, fresh NVBit tracing, detailed replay,
+   and five independent application-replay NCU captures use the same
+   `n=131072, passes=4, blocks=128, threads=256` launch. The active artifact is
+   `docs/sm86_c7_simbench_dram_streaming_dot_product_direct_live_v1.json`;
+   the former tiny `trace_00` run is only a smoke check.
    [Ampere shared memory](https://docs.nvidia.com/cuda/ampere-tuning-guide/#unified-shared-memory-l1-texture-cache)
-3. **C7-S21 complete; C7-S22 next.** Tensor/vendor refusals and
-   measured timing mismatches stay open deliverables, not completed mechanisms.
-   No timing/card parameter is selected from these scored NCU targets.
+3. **C7-S30 next — repair and capture `rmsnorm_fwd_bf16`.** Use its declared
+   SM86 timing shape, first make host correctness and memory safety explicit,
+   then run the same native/NVBit/replay/five-NCU path. Tensor/vendor refusals
+   and measured timing mismatches stay open deliverables, not completed
+   mechanisms. No timing/card parameter is selected from scored NCU targets.
 
 ## Outcome
 
@@ -101,7 +105,7 @@ Three distinct questions must not be conflated:
 | C4 | Independently fit mechanism/observer models using new calibration-only probes, then materialize predictions on untouched cases. No ad-hoc padding or post-score model selection | partial: async group + destination-layout calibration |
 | C5 | Live held-out evaluation of point error, signed bias, finite statistical interval coverage/width, repeat dispersion and OOD; keep semantic tails separate | partial: two controlled async/layout holdouts |
 | C6 | Real scalar native region transition with full front-end/pipeline continuation differential and pre-mutation fallback; extend only after the first real positive case | pending |
-| C7 | Inventory all available workload families (portable, native probes, SOL/other rosters). Full live campaign over the declared supported population; failures remain in coverage denominator | partial: 15-row portable population plus 14 direct SimBench rows complete; INT8/TF32 replay blockers, one shared-shape OOD disposition, and three lower-bound falsifiers remain |
+| C7 | Inventory all available workload families (portable, native probes, SOL/other rosters). Full live campaign over the declared supported population; failures remain in coverage denominator | partial: 15-row portable population plus 24 direct SimBench rows complete; INT8/TF32 replay blockers, four vendor/tensor blockers, remaining SM86 rows, and SOL/native-probe populations remain |
 | C8 | Rerun corrected workload failures, remove obsolete interfaces, synchronize supported claims, results and runbook; no unfinished mechanism called complete | pending |
 
 C0-R/C1-R repair the previous work; they do not finish C3/C5/C6. C7 is not
@@ -945,10 +949,27 @@ reports the same instruction count. NCU gpc cycles are
 lower is 916220, so lower-bound consistency is true; tails remain open and
 native dispatch is zero. Evidence: `docs/sm86_c7_simbench_global_atomic_max_return_used_direct_live_v1.json`.
 
-### C7-S29 — next active milestone
+### C7-S29 — full-shape DRAM streaming dot-product slice — complete
 
-Run one additional unrun SM86 SimBench row from the remaining memory/control
-population (prefer dram_streaming_dot_product or rmsnorm_fwd_bf16). Preserve
-checked correctness, exact binary/arguments, fresh NVBit, replay, and
-five-repetition NCU; retain every unsupported-SASS, OOM/OOD, or falsifying
-outcome without tuning scored parameters.
+The hardened `dram_streaming_dot_product` timing-shape binary validates
+`n=131072, passes=4, blocks=128, threads=256` with per-block floating-point
+roundoff checks, launch/error checks, bounded allocation arithmetic, and zero
+Compute Sanitizer errors. Fresh NVBit covers all 128 blocks; detailed replay
+has 297,600 warp records and the five NCU rows report the same 297,600
+`smsp__inst_executed.sum` instructions. NCU gpc cycles are
+7714,7579,7548,7524,7562 (median 7562); simulator lower is 5345, so
+lower-bound consistency is true. The completion upper remains open because
+dirty-writeback and coherence are unobserved; fast-frontier candidates and
+native macro dispatch remain zero. Evidence:
+`docs/sm86_c7_simbench_dram_streaming_dot_product_direct_live_v1.json` and
+its schema. This is not a point-accuracy or speedup claim.
+
+### C7-S30 — next active milestone
+
+Repair and capture the declared SM86 `rmsnorm_fwd_bf16` row. First make its
+host correctness, argument bounds, allocation checks, and launch-error
+handling explicit; then use the same binary/arguments for native execution,
+fresh NVBit, detailed replay, independent tail extraction, and five
+application-replay NCU repetitions. Keep unsupported paths, OOM/OOD, open
+tails, and any lower-bound falsifier explicit; do not tune from scored NCU
+values.
