@@ -516,3 +516,5 @@ A same-binary 64-group async recapture matched native/NVBit/NCU launch shape and
 The matched async/control differential is retained: the same 64-group binary yields NCU delta 13760 cycles but simulator lower-bound delta 78852 cycles. Investigate async scheduling/completion, not the launch envelope.
 
 C3 async repair: matched async groups now widen timing frontiers and refuse prediction intervals after the control differential. The prior false lower is not tuned; raw evidence remains.
+
+C4/C5 exploratory observer calibration: group16/32 NCU repeats predicted a new group128 interval before profiling; all five group128 repeats were covered (point error 0.396%). The interval is statistical observer evidence only; simulator semantic completion remains open.

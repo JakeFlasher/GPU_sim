@@ -160,6 +160,22 @@ owner/read-from, fence semantics and hardware completion unknown. Reports:
 an independent native witness; C2 remains active until an independently
 constructed effect/continuation relation exists.
 
+### C4/C5 exploratory observer calibration — positive statistical slice
+
+Using only the five NCU repeats from compile-time group counts 16 and 32, an
+ordinary least-squares observer model was materialized **before** profiling a
+new group-128 binary. Its predicted interval was `37737..38655` cycles. The
+five group-128 NCU values were `38353,38339,38348,38338,38395`: raw coverage
+1.0 and point error 0.396%. This is recorded in
+`docs/sm86_async_observer_calibration_holdout_v1.json`.
+
+This is the first finite empirical NCU interval in the corrected program, but
+it is not a semantic completion upper: the simulator group-128 lower bound is
+168898 and dirty-writeback/coherence remain open. The calibration covers one
+controlled async-group dimension, not workload-family generalization. C4/C5
+remain active for independent families, OOD behavior, repeat dispersion, and
+mechanism counters.
+
 ## C2/C3 technical seams
 
 `sim/sm/src/issue.rs`: response ownership, `memory_write_ack`, GPU MEMBAR,

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpu-simulator.local/schemas/sm86_async_observer_calibration_holdout_v1.schema.json",
+  "title": "SM86 async empirical observer holdout",
+  "type": "object",
+  "required": ["schema", "status", "calibration_prediction", "calibration_groups", "holdout_group", "binary", "trace", "control", "ncu_target_metric", "ncu_target_cycles", "ncu_median_cycles", "empirical_interval", "simulator_diagnostic", "interpretation"],
+  "properties": {
+    "schema": {"const": "sm86_async_observer_calibration_holdout_v1"},
+    "status": {"const": "finite_empirical_observer_interval_holdout"},
+    "calibration_prediction": {"type": "string"},
+    "calibration_groups": {"const": [16, 32]},
+    "holdout_group": {"const": 128},
+    "binary": {"type": "string"}, "trace": {"type": "string"}, "control": {"type": "string"}, "ncu_root": {"type": "string"},
+    "ncu_target_metric": {"const": "gpc__cycles_elapsed.max"},
+    "ncu_target_cycles": {"type": "array", "minItems": 5, "maxItems": 5, "items": {"type": "number", "minimum": 0}},
+    "ncu_median_cycles": {"type": "number", "minimum": 0}, "ncu_min_cycles": {"type": "number", "minimum": 0}, "ncu_max_cycles": {"type": "number", "minimum": 0},
+    "ncu_mechanism_metrics": {"type": "object", "additionalProperties": {"type": "array", "items": {"type": "number", "minimum": 0}}},
+    "empirical_interval": {"type": "object", "required": ["lower_cycles", "point_cycles", "upper_cycles", "raw_repetition_coverage", "median_coverage", "point_ape_pct"], "properties": {"lower_cycles": {"type": "integer", "minimum": 0}, "point_cycles": {"type": "integer", "minimum": 0}, "upper_cycles": {"type": "integer", "minimum": 0}, "raw_repetition_coverage": {"type": "number", "minimum": 0, "maximum": 1}, "median_coverage": {"const": true}, "point_ape_pct": {"type": "number", "minimum": 0}}, "additionalProperties": false},
+    "simulator_diagnostic": {"type": "object", "required": ["lower_bound_cycles", "completion", "semantic_interval_status", "ncu_values_not_consumed_by_simulator"], "properties": {"lower_bound_cycles": {"type": "integer", "minimum": 0}, "completion": {"type": "object"}, "semantic_interval_status": {"const": "open"}, "ncu_values_not_consumed_by_simulator": {"const": true}}, "additionalProperties": false},
+    "interpretation": {"type": "string", "minLength": 1}
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,86 @@
+{
+  "binary": "results/alpha/c1r_async_g128_holdout_20261003/async_trace",
+  "calibration_groups": [
+    16,
+    32
+  ],
+  "calibration_prediction": "docs/sm86_async_observer_calibration_prediction_pre_ncu_v1.json",
+  "control": "results/alpha/c1r_async_g128_holdout_20261003/control.json",
+  "empirical_interval": {
+    "lower_cycles": 37737,
+    "median_coverage": true,
+    "point_ape_pct": 0.39637008448941274,
+    "point_cycles": 38196,
+    "raw_repetition_coverage": 1.0,
+    "upper_cycles": 38655
+  },
+  "holdout_group": 128,
+  "interpretation": "finite empirical observer interval covers all five holdout repeats; it is a statistical observer prediction from disjoint group calibration, not a semantic writeback/coherence completion upper and not native dispatch evidence",
+  "ncu_max_cycles": 38395.0,
+  "ncu_mechanism_metrics": {
+    "dram__sectors_read.sum": [
+      184.0,
+      140.0,
+      168.0,
+      332.0,
+      140.0
+    ],
+    "dram__sectors_write.sum": [
+      12.0,
+      0.0,
+      120.0,
+      0.0,
+      0.0
+    ],
+    "gpu__time_duration.max": [
+      28448.0,
+      28448.0,
+      28448.0,
+      28416.0,
+      28480.0
+    ],
+    "sm__cycles_active.max": [
+      36760.0,
+      36733.0,
+      36745.0,
+      36741.0,
+      36792.0
+    ],
+    "sm__inst_executed.sum": [
+      18064.0,
+      18064.0,
+      18064.0,
+      18064.0,
+      18064.0
+    ]
+  },
+  "ncu_median_cycles": 38348.0,
+  "ncu_min_cycles": 38338.0,
+  "ncu_root": "results/alpha/c1r_async_g128_holdout_20261003",
+  "ncu_target_cycles": [
+    38353.0,
+    38339.0,
+    38348.0,
+    38338.0,
+    38395.0
+  ],
+  "ncu_target_metric": "gpc__cycles_elapsed.max",
+  "schema": "sm86_async_observer_calibration_holdout_v1",
+  "simulator_diagnostic": {
+    "completion": {
+      "lower_bound_cycles": 168898,
+      "status": "incomplete_unmodeled_retirement_tails",
+      "unmodeled_tails": {
+        "async_copy_shared_visibility": false,
+        "coherence": true,
+        "dirty_writeback": true,
+        "reduction_read_modify_write": false
+      }
+    },
+    "lower_bound_cycles": 168898,
+    "ncu_values_not_consumed_by_simulator": true,
+    "semantic_interval_status": "open"
+  },
+  "status": "finite_empirical_observer_interval_holdout",
+  "trace": "results/alpha/c1r_async_g128_holdout_20261003/trace"
+}
