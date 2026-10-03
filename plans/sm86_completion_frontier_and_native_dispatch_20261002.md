@@ -1031,11 +1031,26 @@ not treated as live evidence. The six source/preserved-binary rows and five
 analysis-only rows remain separate until they have a reproducible bounded
 launch contract.
 
-### C7-S33C — next active milestone
+### C7-S33C — issue-port vertical slice — complete
 
-Run the first correctness-first native/NVBit/replay/NCU slice from the
-buildable probe population, beginning with one `issue_port_control` cell. Use
-the probe's own host output check and exact binary/arguments, capture its
-static SASS/control surface, and retain any tracer or unsupported-pipeline
-failure without substituting a custom or stale binary. Expand to the remaining
-cells only after this vertical slice has a stable completion disposition.
+The matched `issue_port_control_trace` cell `w1_p10_l16` (dependent IADD,
+length 16, one warp, 64 generations) passes seven host correctness trials,
+fresh NVBit tracing, full replay, independent tail extraction, and five
+same-binary application-replay NCU captures. Replay has 3,034 warp records;
+NCU gpc cycles are 9977,9987,9983,9975,9969 (median 9977), while the
+simulator completion lower is 7159, so lower-bound consistency is true. The
+earlier long 8,192-generation binary measurement was excluded because it was
+not the traced executable. The auxiliary enhanced SASS parser skipped its
+large input, but the primary payload and static control sidecar are present.
+Evidence: `docs/sm86_c7_research_probe_issue_port_control_live_v1.json` and
+its schema. This is a probe-slice timing comparison, not a point-accuracy or
+speedup claim.
+
+### C7-S33D — next active milestone
+
+Expand the matched issue-port family across its declared 68-cell matrix,
+starting with correctness and static-control closure, then capture NVBit,
+replay, and five NCU repetitions for cells that pass. Use the trace binary for
+both trace and NCU; keep long-binary observations separate. If the matrix
+cannot complete within bounded trace/profile budgets, retain a per-cell typed
+disposition instead of shrinking shapes or substituting a different binary.

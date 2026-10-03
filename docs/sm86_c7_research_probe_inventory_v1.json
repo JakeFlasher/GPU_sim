@@ -1,7 +1,7 @@
 {
   "schema": "sm86_c7_research_probe_inventory_v1",
   "architecture": "sm_86",
-  "status": "inventory_and_makefile_build_matrix_complete",
+  "status": "inventory_build_matrix_and_one_live_vertical_slice_complete",
   "root": "workloads/research_probes",
   "population": {
     "directory_count": 42,
@@ -609,7 +609,11 @@
         "build_logs": {
           "stdout": "results/alpha/c7_s33_probe_build_20261003/issue_port_control.stdout",
           "stderr": "results/alpha/c7_s33_probe_build_20261003/issue_port_control.stderr"
-        }
+        },
+        "live_status": "one_vertical_slice_complete",
+        "live_artifact": "docs/sm86_c7_research_probe_issue_port_control_live_v1.json",
+        "live_cell": "w1_p10_l16",
+        "disposition": "matched correctness/NVBit/replay/five-NCU; matrix expansion pending"
       },
       {
         "name": "l1tex_admission_backpressure",
@@ -977,5 +981,13 @@
     "attempted_makefiles": 31,
     "passed": 31,
     "failed": 0
-  }
+  },
+  "live_slices": [
+    {
+      "probe": "issue_port_control",
+      "cell": "w1_p10_l16",
+      "artifact": "docs/sm86_c7_research_probe_issue_port_control_live_v1.json",
+      "status": "complete"
+    }
+  ]
 }

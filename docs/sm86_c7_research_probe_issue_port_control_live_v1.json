@@ -1,0 +1,243 @@
+{
+  "schema": "sm86_c7_research_probe_issue_port_control_live_v1",
+  "status": "correctness_trace_replay_ncu_complete_native_dispatch_refused",
+  "host_identity": {
+    "device_index": 0,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "compute_capability": "8.6",
+    "driver": "615.71.09",
+    "pstate": "P0",
+    "graphics_clock_mhz": 1350,
+    "memory_clock_mhz": 10501
+  },
+  "identity": {
+    "source": "workloads/research_probes/issue_port_control",
+    "binary": "workloads/research_probes/issue_port_control/issue_port_control_trace",
+    "control": "results/alpha/c7_s33_issuep10_20261003/sass/issue_port_control_trace.control_bits.json",
+    "trace": "results/alpha/c7_s33_issuep10_20261003/nvbit/w1_p10_l16",
+    "args": [
+      "p10",
+      "16",
+      "1",
+      "1"
+    ],
+    "correctness_args": [
+      "p10",
+      "16",
+      "1",
+      "7"
+    ],
+    "kernel": "_Z18issue_port_controlILi1ELi16EEvPyPjS1_",
+    "metric": "gpc__cycles_elapsed.max",
+    "ncu_repeats": 5,
+    "ncu_cache": "all",
+    "ncu_clock": "none",
+    "replay_mode": "application"
+  },
+  "correctness": {
+    "status": "passed",
+    "correct": true,
+    "protocol": "p10_dependent_iadd",
+    "length": 16,
+    "warps": 1,
+    "generations": 64,
+    "static_ops_per_generation": 32,
+    "checksum": 3918555301,
+    "samples_cycles": [
+      [
+        6981
+      ],
+      [
+        6981
+      ],
+      [
+        6981
+      ],
+      [
+        6981
+      ],
+      [
+        6981
+      ],
+      [
+        6981
+      ],
+      [
+        6981
+      ]
+    ],
+    "validation": "matched trace binary host checksum and seven repeated correctness trials"
+  },
+  "static": {
+    "control_functions": 45,
+    "decoded_instructions": 5136,
+    "trace_function_entries": [
+      {
+        "pc": 0,
+        "predicate": null,
+        "opcode_text": "IMAD.MOV.U32 R1, RZ, RZ, c[0x0][0x28]",
+        "low_word": "0x00000a00ff017624",
+        "high_word": "0x000fe400078e00ff",
+        "control": {
+          "stall": 2,
+          "yield_flag": 1,
+          "write_barrier": 7,
+          "read_barrier": 7,
+          "wait_mask": 0,
+          "reuse": 0
+        },
+        "status": "decoded"
+      }
+    ],
+    "sass_path": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s33_issuep10_20261003/sass/issue_port_control_trace.sass.txt"
+  },
+  "trace": {
+    "status": "passed",
+    "stats": {
+      "device_id": 0,
+      "stream_id": 7,
+      "kernel id": "kernel-1.trace",
+      "kernel mangled name": "_Z18issue_port_controlILi1ELi16EEvPyPjS1_",
+      "grid_dimX": 1,
+      "grid_dimY": 1,
+      "grid_dimZ": 1,
+      "#blocks": 1,
+      "block_dimX": 32,
+      "block_dimY": 1,
+      "block_dimZ": 1,
+      "#threads": 32,
+      "total_insts": 11909,
+      "total_reported_insts": 11909
+    },
+    "records_replayed": 3034,
+    "independent_tail_facts": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s33_issuep10_20261003/tail_facts.json",
+    "enhanced_tracer_note": "primary payload is present; auxiliary SASS/RFU parser skipped the >64KB input threshold"
+  },
+  "simulator": {
+    "records": 3034,
+    "instructions": 3034,
+    "completion_lower_bound_cycles": 7159,
+    "completion_status": "incomplete_unmodeled_retirement_tails",
+    "unmodeled_tails": {
+      "reduction_read_modify_write": false,
+      "dirty_writeback": true,
+      "coherence": true,
+      "async_copy_shared_visibility": false
+    }
+  },
+  "tail_facts": {
+    "records": 3034,
+    "memory_records": 3,
+    "stores": 3,
+    "atomics": 0,
+    "address_operands_unknown": 0,
+    "hardware_completion_token_observed": false,
+    "global_event_order_observed": false
+  },
+  "ncu": {
+    "metric": "gpc__cycles_elapsed.max",
+    "values": [
+      9977.0,
+      9987.0,
+      9983.0,
+      9975.0,
+      9969.0
+    ],
+    "median": 9977.0,
+    "min": 9969.0,
+    "max": 9987.0,
+    "stdev": 7.014271166700072,
+    "rows": [
+      {
+        "ID": 0,
+        "Kernel Name": "void issue_port_control<1, 16>(unsigned long long *, unsigned int *, unsigned int *)",
+        "Grid Size": "(1, 1, 1)",
+        "Block Size": "(32, 1, 1)",
+        "Device": 0,
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 9977.0,
+        "gpu__time_duration.sum": 7424.0,
+        "sm__cycles_active.max": 7926.0,
+        "smsp__inst_executed.sum": 3034.0,
+        "smsp__inst_executed_pipe_alu.sum": 2886.0,
+        "smsp__inst_executed_pipe_fma.sum": 75.0
+      },
+      {
+        "ID": 0,
+        "Kernel Name": "void issue_port_control<1, 16>(unsigned long long *, unsigned int *, unsigned int *)",
+        "Grid Size": "(1, 1, 1)",
+        "Block Size": "(32, 1, 1)",
+        "Device": 0,
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 9987.0,
+        "gpu__time_duration.sum": 7424.0,
+        "sm__cycles_active.max": 7925.0,
+        "smsp__inst_executed.sum": 3034.0,
+        "smsp__inst_executed_pipe_alu.sum": 2886.0,
+        "smsp__inst_executed_pipe_fma.sum": 75.0
+      },
+      {
+        "ID": 0,
+        "Kernel Name": "void issue_port_control<1, 16>(unsigned long long *, unsigned int *, unsigned int *)",
+        "Grid Size": "(1, 1, 1)",
+        "Block Size": "(32, 1, 1)",
+        "Device": 0,
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 9983.0,
+        "gpu__time_duration.sum": 7424.0,
+        "sm__cycles_active.max": 7928.0,
+        "smsp__inst_executed.sum": 3034.0,
+        "smsp__inst_executed_pipe_alu.sum": 2886.0,
+        "smsp__inst_executed_pipe_fma.sum": 75.0
+      },
+      {
+        "ID": 0,
+        "Kernel Name": "void issue_port_control<1, 16>(unsigned long long *, unsigned int *, unsigned int *)",
+        "Grid Size": "(1, 1, 1)",
+        "Block Size": "(32, 1, 1)",
+        "Device": 0,
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 9975.0,
+        "gpu__time_duration.sum": 7424.0,
+        "sm__cycles_active.max": 7916.0,
+        "smsp__inst_executed.sum": 3034.0,
+        "smsp__inst_executed_pipe_alu.sum": 2886.0,
+        "smsp__inst_executed_pipe_fma.sum": 75.0
+      },
+      {
+        "ID": 0,
+        "Kernel Name": "void issue_port_control<1, 16>(unsigned long long *, unsigned int *, unsigned int *)",
+        "Grid Size": "(1, 1, 1)",
+        "Block Size": "(32, 1, 1)",
+        "Device": 0,
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 9969.0,
+        "gpu__time_duration.sum": 7424.0,
+        "sm__cycles_active.max": 7915.0,
+        "smsp__inst_executed.sum": 3034.0,
+        "smsp__inst_executed_pipe_alu.sum": 2886.0,
+        "smsp__inst_executed_pipe_fma.sum": 75.0
+      }
+    ],
+    "matched_binary": "workloads/research_probes/issue_port_control/issue_port_control_trace",
+    "matched_generations": 64,
+    "unmatched_attempt": {
+      "status": "excluded",
+      "binary": "workloads/research_probes/issue_port_control/issue_port_control",
+      "generations": 8192,
+      "reason": "different executable; its 895939-cycle observation cannot be compared with the 64-generation trace"
+    }
+  },
+  "comparison": {
+    "hardware_completion": "not_observed",
+    "native_macro_dispatches": 0,
+    "lower_bound_cycles": 7159,
+    "ncu_median_cycles": 9977.0,
+    "lower_bound_consistency": true,
+    "gap_cycles": 2818.0,
+    "gap_fraction": 0.2824496341585647,
+    "point_estimator": "not_claimed"
+  },
+  "interpretation": "The matched issue_port_control trace binary (p10 dependent IADD, length 16, one warp, 64 generations) passes seven host correctness trials, fresh NVBit, full replay, and five same-binary NCU captures. Replay has 3034 warp records; NCU reports 3034 instructions and gpc cycles 9977,9987,9983,9975,9969 (median 9977). Simulator lower is 7159, so lower-bound consistency is true; the completion upper remains open and native macro dispatch is zero. The earlier 8192-generation binary measurement is retained as an excluded unmatched attempt. This is a probe-slice timing comparison, not a point-accuracy or speedup claim."
+}
