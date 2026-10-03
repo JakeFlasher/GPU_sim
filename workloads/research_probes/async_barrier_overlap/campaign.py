@@ -25,6 +25,10 @@ DEFAULT_OUTPUT = (
 )
 LONG_BINARY = HERE / "async_barrier_overlap"
 TRACE_BINARY = HERE / "async_barrier_overlap_trace"
+# Keep correctness, NCU, NVBit, and replay on the same 64-group executable.
+# The legacy 16,384-group binary remains available for manual stress runs but
+# must not be mixed into a scored trace/NCU comparison.
+MATCHED_BINARY = TRACE_BINARY
 
 METRICS = (
     "gpc__cycles_elapsed.max",
@@ -170,8 +174,9 @@ def emit_manifest(output: Path) -> None:
             "schema_version": 1,
             "cells": [{**asdict(cell), "key": cell.key} for cell in configured_cells()],
             "ncu_metrics": list(METRICS),
-            "long_groups": 16384,
-            "trace_groups": 64,
+            "matched_binary": str(MATCHED_BINARY),
+            "matched_groups": 64,
+            "legacy_long_binary_not_used": True,
         },
     )
     commands = {
@@ -342,7 +347,7 @@ def run_source_counters(output: Path, cells: Sequence[Cell], force: bool) -> Non
             "none",
             "--section",
             "SourceCounters",
-            *cell.target(LONG_BINARY, 1),
+            *cell.target(MATCHED_BINARY, 1),
         ]
         run_captured(command, destination, timeout=1200)
         if not report.is_file():
@@ -534,8 +539,13 @@ def run_simulator(output: Path, cells: Sequence[Cell], force: bool) -> None:
         if launch["coverage"].get("kind") != "full":
             raise RuntimeError(f"{cell.key}: replay does not have full block coverage")
         readiness = launch.get("timing", {}).get("readiness", {})
-        if readiness.get("schema_version") != 1:
-            raise RuntimeError(f"{cell.key}: readiness schema v1 is missing")
+        # The simulator's readiness schema is versioned and has advanced past
+        # the probe's original v1 check.  Require a present positive version,
+        # not one stale literal, while retaining the recorded version in the
+        # replay summary below.
+        readiness_version = readiness.get("schema_version")
+        if not isinstance(readiness_version, int) or readiness_version < 1:
+            raise RuntimeError(f"{cell.key}: readiness schema is missing or invalid")
         write_json(
             destination / "replay.json",
             {
@@ -579,6 +589,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     output = args.output_root.resolve()
     try:
         cells = selected_cells(args.cells)
+        # The helpers below refer to module globals; point both names to the
+        # exact bounded binary before any action so long/trace generations
+        # cannot silently diverge.
+        globals()["LONG_BINARY"] = MATCHED_BINARY
+        globals()["TRACE_BINARY"] = MATCHED_BINARY
         emit_manifest(output)
         if args.action == "manifest":
             print(output / "metadata" / "matrix.json")

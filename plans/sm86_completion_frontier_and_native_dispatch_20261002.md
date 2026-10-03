@@ -1059,10 +1059,25 @@ uppers remain open. Evidence:
 `docs/sm86_c7_research_probe_issue_port_control_matrix_live_v1.json` and its
 schema. NVBit active-thread totals remain separate from warp-record counts.
 
-### C7-S33E — next active milestone
+### C7-S33E — async barrier vertical slice — complete
 
-Select the next bounded native probe family (prefer a memory/fence or barrier
-probe with an existing host correctness contract). Repair any stale binary/
-argument mismatch first, then run a matched native/NVBit/replay/five-NCU
-vertical slice. Preserve unsupported tracer/SASS paths and open completion
-tails; do not extrapolate the issue-port result to other probe families.
+The async-barrier campaign was repaired to use its bounded 64-group trace
+binary for correctness, NCU, NVBit, and replay; the legacy 16,384-group binary
+is no longer mixed into scored rows. Cell `w4_c11_l1_g0` passes seven host
+correctness trials, fresh NVBit, full deterministic replay, independent async
+tail extraction, and five NCU repetitions. Replay and NCU both report 9,104
+warp instructions; NCU gpc cycles are 21278,21246,21262,21689,21254 (median
+21262), while simulator lower is 24386, a real lower-bound falsifier. Async
+copy protocol facts are present, but hardware completion/writeback/coherence
+tails remain open. The simulator readiness schema check was updated from a
+stale literal v1 requirement to positive-version validation. Evidence:
+`docs/sm86_c7_research_probe_async_barrier_overlap_live_v1.json` and its
+schema. This is not a point-accuracy or speedup claim.
+
+### C7-S33F — next active milestone
+
+Expand the async-barrier family across its declared 36-cell matrix, using the
+same matched trace binary and five-NCU contract. Keep per-cell correctness,
+async-lane facts, replay coverage, lower-bound consistency, and open tails
+separate; do not infer a fixed barrier latency or extrapolate from this one
+falsifier.
