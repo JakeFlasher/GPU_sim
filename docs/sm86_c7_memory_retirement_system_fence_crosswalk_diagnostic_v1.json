@@ -145,5 +145,10 @@
       }
     }
   },
-  "interpretation": "The system-fence binary adds three visible SASS instructions in NVBit (MEMBAR, ERRBAR, CCTL), but NCU reports twelve additional warp-instruction executions relative to the no-fence control. Pipe/op counters show deltas in branch, ALU, LSU, texture, and global-store categories rather than a single visible opcode. This is an NCU-versus-trace metric-semantics/counter-replay mismatch; no simulator padding or hidden instruction synthesis is applied, and the eight affected matrix rows remain crosswalk exclusions."
+  "interpretation": "The matched system-fence binary adds three visible SASS instructions in NVBit (MEMBAR, ERRBAR, CCTL), and NCU SourceCounters lists those source PCs but reports zero direct source execution for them. NCU smsp__inst_executed.sum nevertheless rises by twelve warp instructions, with pipe/op deltas across branch, ALU, LSU, texture, and global-store categories. This is an unresolved NCU-versus-trace counter/replay semantic mismatch; simulator padding and hidden-instruction synthesis are explicitly rejected, and affected rows remain crosswalk exclusions.",
+  "source_counter_check": {
+    "control_source_csv": "results/alpha/c7_s33_memret_crosswalk_20261003/control/source.csv",
+    "system_fence_source_csv": "results/alpha/c7_s33_memret_crosswalk_20261003/system/source.csv",
+    "observation": "NCU SourceCounters lists MEMBAR.SC.SYS, ERRBAR, and CCTL.IVALL as visible source instructions, but each has zero direct source instruction execution in the exported source rows; the total smsp__inst_executed.sum still rises by 12."
+  }
 }

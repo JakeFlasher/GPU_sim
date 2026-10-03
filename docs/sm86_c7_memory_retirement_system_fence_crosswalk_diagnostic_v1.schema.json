@@ -41,6 +41,10 @@
     },
     "binary": {
       "type": "string"
+    },
+    "source_counter_check": {
+      "type": "object",
+      "additionalProperties": true
     }
   },
   "additionalProperties": false
