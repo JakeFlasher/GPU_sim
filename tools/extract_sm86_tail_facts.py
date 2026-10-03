@@ -20,10 +20,61 @@ sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "workloads/simbench_bw/_pb_generated"))
 import threadblock_pb2
 import trace_pb2
-from tools.nvbit_tracer.import_trace_contract import _reconstruct_lane_vector
 
 SCHEMA = "sm86_tail_facts_v1"
 WAIT = re.compile(r"^DEPBAR\.LE\s+SB0,\s*(0x[0-9a-fA-F]+|[0-9]+)(?:\s|,|$)")
+LANE_SENTINEL = -1
+LANES = 32
+I64_MAX = (1 << 63) - 1
+
+
+def _active_lanes(mask: int) -> list[int]:
+    return [lane for lane in range(LANES) if (mask >> lane) & 1]
+
+
+def _decode_addresses(address: Any, mask: int) -> tuple[list[int] | None, str | None]:
+    """Independent bounded decoder for the three trace compression formats."""
+    active = _active_lanes(mask)
+    fmt = int(address.compression_format)
+    if fmt == 0:
+        if len(address.addrs) != LANES:
+            return None, "list_all_length"
+        return list(address.addrs), None
+    if fmt == 1:
+        if address.addrs:
+            return None, "base_stride_shape"
+        if not active:
+            return [LANE_SENTINEL] * LANES, None
+        if len(active) < 2:
+            return None, "base_stride_shape"
+        if active != list(range(active[0], active[0] + len(active))):
+            return None, "base_stride_noncontiguous"
+        if int(address.base_address) > I64_MAX:
+            return None, "base_stride_base_out_of_range"
+        vector = [LANE_SENTINEL] * LANES
+        for index, lane in enumerate(active):
+            value = int(address.base_address) + index * int(address.stride)
+            if not -I64_MAX - 1 <= value <= I64_MAX:
+                return None, "base_stride_value_out_of_range"
+            vector[lane] = value
+        return vector, None
+    if fmt == 2:
+        if len(address.addrs) != max(0, len(active) - 1):
+            return None, "base_delta_length"
+        if not active:
+            return [LANE_SENTINEL] * LANES, None
+        value = int(address.base_address)
+        if value > I64_MAX:
+            return None, "base_delta_base_out_of_range"
+        vector = [LANE_SENTINEL] * LANES
+        vector[active[0]] = value
+        for index, lane in enumerate(active[1:]):
+            value += int(address.addrs[index])
+            if not -I64_MAX - 1 <= value <= I64_MAX:
+                return None, "base_delta_value_out_of_range"
+            vector[lane] = value
+        return vector, None
+    return None, "unknown_compression_format"
 
 
 def _identity(path: Path, root: Path) -> tuple[int, int, int]:
@@ -243,7 +294,7 @@ def extract_tail_facts(trace: Path, control: Path) -> dict[str, Any]:
                     lanes = address.lane_mask if _present(address, "lane_mask") else mask
                     if lanes & ~mask:
                         raise ValueError(f"operand widens instruction mask in {payload}")
-                    vector, error = _reconstruct_lane_vector(address, lanes)
+                    vector, error = _decode_addresses(address, lanes)
                     if error:
                         raise ValueError(f"{payload}: {error}")
                     space = address.address_space if _present(address, "address_space") else None
