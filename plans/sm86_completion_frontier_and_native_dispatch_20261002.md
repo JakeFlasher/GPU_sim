@@ -1111,10 +1111,22 @@ native dispatch remain open. Evidence:
 `docs/sm86_c7_research_probe_store_ack_frontier_matrix_live_v1.json` and its
 schema.
 
-### C7-S33I — next active milestone
+### C7-S33I — memory-retirement vertical slice — complete
 
-Select the next bounded probe family, prioritizing `barrier_pipeline` or
-`memory_retirement_service`. Repair any stale campaign contract before capture,
-then run its complete declared matrix with matched binary/arguments, host
-correctness, NVBit, replay, five NCU repetitions, and per-cell instruction
-crosswalks. Keep all open-tail and unsupported outcomes explicit.
+The matched `memory_retirement_service` store/none/line_stream cell
+`b1_store_none_line_stream_d4_l32` passes seven host correctness trials, fresh
+NVBit, full replay, independent tail extraction, and five NCU captures. Replay
+and NCU both report 1,178 warp instructions; NCU gpc cycles are
+11464,11391,11370,11363,11402 (median 11391), while simulator lower is 9064,
+so lower-bound consistency is true. Memory retirement/writeback/coherence
+completion remains open and native dispatch is zero. Evidence:
+`docs/sm86_c7_research_probe_memory_retirement_service_live_v1.json` and its
+schema.
+
+### C7-S33J — next active milestone
+
+Expand `memory_retirement_service` over its declared 102-cell matrix with
+matched trace binary, host correctness, NVBit, replay, five NCU repetitions,
+and per-cell instruction crosswalks. Treat fence/tail/layout changes as
+mechanism-local observations; do not call lower-bound consistency a hardware
+completion result.

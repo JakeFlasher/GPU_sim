@@ -1,7 +1,7 @@
 {
   "schema": "sm86_c7_research_probe_inventory_v1",
   "architecture": "sm_86",
-  "status": "inventory_build_matrix_and_three_probe_campaigns_complete",
+  "status": "inventory_build_matrix_and_four_probe_campaign_stages_complete",
   "root": "workloads/research_probes",
   "population": {
     "directory_count": 42,
@@ -762,7 +762,11 @@
         "build_logs": {
           "stdout": "results/alpha/c7_s33_probe_build_20261003/memory_retirement_service.stdout",
           "stderr": "results/alpha/c7_s33_probe_build_20261003/memory_retirement_service.stderr"
-        }
+        },
+        "live_status": "one_vertical_slice_complete",
+        "live_artifact": "docs/sm86_c7_research_probe_memory_retirement_service_live_v1.json",
+        "live_cell": "b1_store_none_line_stream_d4_l32",
+        "disposition": "matched correctness/NVBit/replay/five-NCU complete; lower-bound consistent; matrix expansion pending"
       },
       {
         "name": "phasefuse_scaling",
@@ -1010,6 +1014,12 @@
       "probe": "store_ack_frontier",
       "cells": 30,
       "artifact": "docs/sm86_c7_research_probe_store_ack_frontier_matrix_live_v1.json",
+      "status": "complete"
+    },
+    {
+      "probe": "memory_retirement_service",
+      "cell": "b1_store_none_line_stream_d4_l32",
+      "artifact": "docs/sm86_c7_research_probe_memory_retirement_service_live_v1.json",
       "status": "complete"
     }
   ]
