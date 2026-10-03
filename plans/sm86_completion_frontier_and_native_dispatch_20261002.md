@@ -914,10 +914,21 @@ is 524608: lower-bound consistency is false by 102,134 cycles (24.18%). This
 is a real local-memory falsifier; tails remain open and native dispatch is zero.
 Evidence: `docs/sm86_c7_simbench_local_volatile_array_direct_live_v1.json`.
 
-### C7-S26 — next active milestone
+### C7-S26 — register-spill local-memory slice — complete
 
-Run one additional unrun SM86 SimBench row from the remaining local/control
-population (prefer register_spill_local_mem or global_atomic_max_histogram).
+The register_spill_local_mem build uses -maxrregcount=32 and reports STACK 424
+bytes plus STL traffic. Host identity output passes with independent float-print
+tolerance; replay has full 64-block coverage and 271,680 records, and NCU
+reports the same instruction count. NCU gpc cycles are
+23036,23073,23002,23206,23117 (median 23073), while simulator lower is 30010:
+lower-bound consistency is false by 6,937 cycles (30.08%). This is a real
+spill/local-memory falsifier; tails remain open and native dispatch is zero.
+Evidence: `docs/sm86_c7_simbench_register_spill_local_mem_direct_live_v1.json`.
+
+### C7-S27 — next active milestone
+
+Run one additional unrun SM86 SimBench row from the remaining control/atomic
+population (prefer global_atomic_max_histogram or global_atomic_max_return_used).
 Preserve checked correctness, exact binary/arguments, fresh NVBit, replay, and
 five-repetition NCU; retain every unsupported-SASS, OOM/OOD, or falsifying
 outcome without tuning scored parameters.

@@ -1,6 +1,6 @@
 {
   "host_architecture": "sm86",
-  "interpretation": "The portable 15-row population has a completed bounded live pipeline. Twenty SimBench SM86 rows now have direct timing-shape native/NVBit/replay/five-NCU slices, including repaired local dynamic/volatile local-memory, DRAM stream, working-set, carveout, atomic-AND, shared-bank opt-in, persisting-window, prefetch-hint, pointer-chase, and warm/cold workloads. Nine memory/control rows are real lower-bound falsifiers. Four rows are replay blockers: INT8 IMMA, TF32 HMMA, and two cuBLAS vendor kernels lack usable SM86 static/pipeline control. The active wrapper remains blocked by external tracer/runtime-sidecar requirements. This inventory prevents calling the slices a full repository campaign; remaining SimBench rows, research probes, and SOL populations remain explicit.",
+  "interpretation": "The portable 15-row population has a completed bounded live pipeline. Twenty-one SimBench SM86 rows now have direct timing-shape native/NVBit/replay/five-NCU slices, including repaired local dynamic/volatile/spill local-memory, DRAM stream, working-set, carveout, atomic-AND, shared-bank opt-in, persisting-window, prefetch-hint, pointer-chase, and warm/cold workloads. Ten memory/control rows are real lower-bound falsifiers. Four rows are replay blockers: INT8 IMMA, TF32 HMMA, and two cuBLAS vendor kernels lack usable SM86 static/pipeline control. The active wrapper remains blocked by external tracer/runtime-sidecar requirements. This inventory prevents calling the slices a full repository campaign; remaining SimBench rows, research probes, and SOL populations remain explicit.",
   "populations": {
     "portable_lcd": {
       "active_count": 15,
@@ -65,7 +65,7 @@
     },
     "simbench_bw": {
       "direct_slice_artifact": "docs/sm86_c7_simbench_fp32_direct_live_v1.json",
-      "live_pipeline_status": "twenty direct SM86 rows complete; four vendor/tensor replay blockers; nine memory/control lower-bound falsifiers; corrected artifacts active; warm/cold complete; remaining rows pending",
+      "live_pipeline_status": "twenty-one direct SM86 rows complete; four vendor/tensor replay blockers; ten memory/control lower-bound falsifiers; corrected artifacts active; warm/cold complete; remaining rows pending",
       "roster_rows": 92,
       "sm86_arch_rows": 31,
       "sm86_arch_rows_list": [
@@ -122,7 +122,8 @@
         "docs/sm86_c7_simbench_working_set_capacity_sweep_direct_live_v1.json",
         "docs/sm86_c7_simbench_dram_stream_stride_mix_direct_live_v1.json",
         "docs/sm86_c7_simbench_local_dynamic_index_array_direct_live_v1.json",
-        "docs/sm86_c7_simbench_local_volatile_array_direct_live_v1.json"
+        "docs/sm86_c7_simbench_local_volatile_array_direct_live_v1.json",
+        "docs/sm86_c7_simbench_register_spill_local_mem_direct_live_v1.json"
       ],
       "direct_sm86_rows_completed": [
         "fp32_fma_dep_chain",
@@ -144,7 +145,8 @@
         "working_set_capacity_sweep",
         "dram_stream_stride_mix",
         "local_dynamic_index_array",
-        "local_volatile_array"
+        "local_volatile_array",
+        "register_spill_local_mem"
       ],
       "blocked_slice_artifacts": [
         "docs/sm86_c7_simbench_int8_imma_gemm_blocked_live_v1.json",
