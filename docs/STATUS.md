@@ -273,6 +273,12 @@ refuses IMMA.16832.S8.S8 because the SM86 execution-pipeline model is missing.
 No simulator endpoint or accuracy comparison is claimed. See
 `docs/sm86_c7_simbench_int8_imma_gemm_blocked_live_v1.json`.
 
+C7-S11 TF32 HMMA is another bounded replay blocker: correctness, NVBit trace,
+and five NCU captures complete (588 instructions; NCU median 6,373), but
+sim-run refuses HMMA.1688.F32.TF32 because the SM86 execution-pipeline
+model is missing. No simulator endpoint or accuracy comparison is claimed.
+See `docs/sm86_c7_simbench_tf32_hmma_gemm_blocked_live_v1.json`.
+
 C7-S8 FP16 HMMA is complete: the checked FP16-cast reference, fresh NVBit
 trace, replay, and five NCU captures match at 404 warp instructions. NCU
 median is 4,934 cycles versus the simulator lower bound 3,337; dirty-writeback

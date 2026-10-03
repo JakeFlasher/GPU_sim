@@ -80,7 +80,7 @@ Three distinct questions must not be conflated:
 | C4 | Independently fit mechanism/observer models using new calibration-only probes, then materialize predictions on untouched cases. No ad-hoc padding or post-score model selection | partial: async group + destination-layout calibration |
 | C5 | Live held-out evaluation of point error, signed bias, finite statistical interval coverage/width, repeat dispersion and OOD; keep semantic tails separate | partial: two controlled async/layout holdouts |
 | C6 | Real scalar native region transition with full front-end/pipeline continuation differential and pre-mutation fallback; extend only after the first real positive case | pending |
-| C7 | Inventory all available workload families (portable, native probes, SOL/other rosters). Full live campaign over the declared supported population; failures remain in coverage denominator | partial: 15-row portable population plus 9 direct SimBench rows complete; one IMMA blocker and remaining populations pending |
+| C7 | Inventory all available workload families (portable, native probes, SOL/other rosters). Full live campaign over the declared supported population; failures remain in coverage denominator | partial: 15-row portable population plus 10 direct SimBench rows complete; INT8/TF32 replay blockers and one shared-shape OOD disposition remain |
 | C8 | Rerun corrected workload failures, remove obsolete interfaces, synchronize supported claims, results and runbook; no unfinished mechanism called complete | pending |
 
 C0-R/C1-R repair the previous work; they do not finish C3/C5/C6. C7 is not
@@ -488,12 +488,35 @@ docs/sm86_c7_simbench_shared_bank_conflict_stride_direct_live_v1.json and its
 schema. This closes only this slice; C3/C5/C6 and the wider C7 campaign
 remain open.
 
-### C7-S11 — next active milestone
+### C7-S11 — execution specification
 
 Run one additional direct SM86 SimBench row from the remaining tensor/control
 populations (prefer tf32_hmma_gemm_traceable or l2_thrash_pointer_chase).
 Preserve checked correctness, exact binary/arguments, fresh NVBit, replay, and
 five-repetition NCU; retain every unsupported-SASS or OOM/OOD disposition.
+
+### C7-S11 — TF32 HMMA blocked disposition — complete
+
+The exact rebuilt tf32_hmma_gemm_traceable binary passes host TF32-rounded
+reference correctness, produces a fresh NVBit trace with 588 records and 32
+HMMA instructions, and completes five same-binary NCU captures:
+6621,6328,6373,6360,6417 cycles (median 6373). The independent extractor
+observes 112 cross-SM line-topology events but no hardware completion token or
+global instrumentation order. Replay is explicitly blocked before any timing
+frontier because sim-run reports that HMMA.1688.F32.TF32 has no SM86
+execution-pipeline model. No simulator endpoint, fast-frontier result, native
+dispatch, or accuracy comparison is claimed. Evidence:
+docs/sm86_c7_simbench_tf32_hmma_gemm_blocked_live_v1.json and its schema.
+This is an explicit unsupported-SASS disposition, not a silently substituted
+shape or a passing pipeline row.
+
+### C7-S12 — next active milestone
+
+Run one additional direct SM86 SimBench row from the remaining control or
+memory populations (prefer l2_thrash_pointer_chase or
+global_atomic_and_return_used). Preserve checked correctness, exact
+binary/arguments, fresh NVBit, replay, and five-repetition NCU; retain every
+unsupported-SASS or OOM/OOD disposition.
 
 The active SimBench wrapper still rejects the repository-contained NVBit
 tracer because it requires an external split-v2 tracer root; see
