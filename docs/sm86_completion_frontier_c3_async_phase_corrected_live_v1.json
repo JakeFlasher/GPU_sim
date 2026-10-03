@@ -1,0 +1,298 @@
+{
+  "comparison": {
+    "hardware_completion": "not_observed",
+    "point_absolute_percentage_error": 0.09887141313483011,
+    "point_error_cycles": 1647.0
+  },
+  "direct_correctness": {
+    "correct": true,
+    "depth": 4,
+    "expected_token": 1359893119,
+    "groups": 64,
+    "issue_cycles": 2496,
+    "layout": "compact",
+    "result_store_after_intervals": true,
+    "route": "l1",
+    "sum_consistent": true,
+    "token": 1359893119,
+    "token_correct": true,
+    "total_cycles": 8179,
+    "wait_cycles": 5683,
+    "workload": "async_visibility_phase"
+  },
+  "identity": {
+    "args": [
+      "--groups",
+      "64",
+      "--depth",
+      "4",
+      "--route",
+      "l1",
+      "--layout",
+      "compact",
+      "--markers",
+      "on"
+    ],
+    "binary": "workloads/research_probes/async_source_only/async_visibility_phase",
+    "binary_sha256": "6bd0fcc67026b37533924dd833c3435b75ee2cae5ca9047cc7e9d681726958b0",
+    "control": "results/alpha/c3_source_phase_repair_20261003/control.json",
+    "nvbit": "results/alpha/c3_source_phase_repair_20261003/nvbit",
+    "source": "workloads/research_probes/async_source_only/async_visibility_phase.cu"
+  },
+  "interpretation": "The corrected phase probe independently validates its copied-data token and interval arithmetic before the result store. A fresh NVBit trace, replay, and five fresh NCU runs complete; the simulator endpoint remains 9.9 percent above the NCU GPC endpoint and the store-induced dirty-writeback/coherence tails remain open. This is correctness and mismatch evidence, not a completion upper.",
+  "ncu": {
+    "median": 16658.0,
+    "metric": "gpc__cycles_elapsed.max",
+    "rows": [
+      {
+        "Block Size": "(32, 1, 1)",
+        "CC": "8.6",
+        "Device": "0",
+        "Grid Size": "(1, 1, 1)",
+        "Kernel Name": "void visibility_phase_kernel<4, 0, 0, 0>(const char *, int, PhaseResult *)",
+        "dram__sectors_read.sum": "252",
+        "gpc__cycles_elapsed.max": "16625",
+        "lts__t_sectors_srcunit_tex.sum": "129",
+        "sm__cycles_active.sum": "14915",
+        "smsp__inst_executed_op_global_st.sum": "4",
+        "smsp__inst_executed_op_ldgsts.sum": "256"
+      },
+      {
+        "Block Size": "(32, 1, 1)",
+        "CC": "8.6",
+        "Device": "0",
+        "Grid Size": "(1, 1, 1)",
+        "Kernel Name": "void visibility_phase_kernel<4, 0, 0, 0>(const char *, int, PhaseResult *)",
+        "dram__sectors_read.sum": "252",
+        "gpc__cycles_elapsed.max": "16658",
+        "lts__t_sectors_srcunit_tex.sum": "129",
+        "sm__cycles_active.sum": "14912",
+        "smsp__inst_executed_op_global_st.sum": "4",
+        "smsp__inst_executed_op_ldgsts.sum": "256"
+      },
+      {
+        "Block Size": "(32, 1, 1)",
+        "CC": "8.6",
+        "Device": "0",
+        "Grid Size": "(1, 1, 1)",
+        "Kernel Name": "void visibility_phase_kernel<4, 0, 0, 0>(const char *, int, PhaseResult *)",
+        "dram__sectors_read.sum": "252",
+        "gpc__cycles_elapsed.max": "16641",
+        "lts__t_sectors_srcunit_tex.sum": "129",
+        "sm__cycles_active.sum": "14908",
+        "smsp__inst_executed_op_global_st.sum": "4",
+        "smsp__inst_executed_op_ldgsts.sum": "256"
+      },
+      {
+        "Block Size": "(32, 1, 1)",
+        "CC": "8.6",
+        "Device": "0",
+        "Grid Size": "(1, 1, 1)",
+        "Kernel Name": "void visibility_phase_kernel<4, 0, 0, 0>(const char *, int, PhaseResult *)",
+        "dram__sectors_read.sum": "252",
+        "gpc__cycles_elapsed.max": "16700",
+        "lts__t_sectors_srcunit_tex.sum": "129",
+        "sm__cycles_active.sum": "14940",
+        "smsp__inst_executed_op_global_st.sum": "4",
+        "smsp__inst_executed_op_ldgsts.sum": "256"
+      },
+      {
+        "Block Size": "(32, 1, 1)",
+        "CC": "8.6",
+        "Device": "0",
+        "Grid Size": "(1, 1, 1)",
+        "Kernel Name": "void visibility_phase_kernel<4, 0, 0, 0>(const char *, int, PhaseResult *)",
+        "dram__sectors_read.sum": "624",
+        "gpc__cycles_elapsed.max": "16668",
+        "lts__t_sectors_srcunit_tex.sum": "129",
+        "sm__cycles_active.sum": "14956",
+        "smsp__inst_executed_op_global_st.sum": "4",
+        "smsp__inst_executed_op_ldgsts.sum": "256"
+      }
+    ],
+    "values": [
+      16625.0,
+      16658.0,
+      16641.0,
+      16700.0,
+      16668.0
+    ]
+  },
+  "schema": "sm86_completion_frontier_c3_async_phase_corrected_live_v1",
+  "simulator": {
+    "async_groups": {
+      "completion_hidden_before_wait_cycles": 0,
+      "destination_groups_observed": 64,
+      "destination_local_cycles": 5312,
+      "destination_local_limited_groups": 64,
+      "destination_sm_service_cycles": 0,
+      "destination_sm_service_limited_groups": 0,
+      "destination_wavefronts_observed": 2048,
+      "groups_committed": 64,
+      "groups_waited": 64,
+      "source_cycles": 3067,
+      "source_limited_groups": 0
+    },
+    "records": 2088,
+    "timing": {
+      "completion_frontier": {
+        "lower_bound_cycles": 18305,
+        "status": "incomplete_unmodeled_retirement_tails",
+        "unmodeled_tails": {
+          "async_copy_shared_visibility": false,
+          "coherence": true,
+          "dirty_writeback": true,
+          "reduction_read_modify_write": false
+        }
+      },
+      "diagnostic_last_issue_cycles": 18292,
+      "gpc_observation_frontier": {
+        "cycles": 20081,
+        "envelope_cycles": 1776,
+        "grid_blocks": 1,
+        "grid_log2": 0,
+        "lower_bound_cycles": 18305,
+        "role": "architecture_scoped_gpc_observation_boundary_not_timing_crosswalk"
+      },
+      "last_processed_modeled_system_event_time": 18305,
+      "readiness": {
+        "async_groups": {
+          "completion_hidden_before_wait_cycles": 0,
+          "destination_groups_observed": 64,
+          "destination_local_cycles": 5312,
+          "destination_local_limited_groups": 64,
+          "destination_sm_service_cycles": 0,
+          "destination_sm_service_limited_groups": 0,
+          "destination_wavefronts_observed": 2048,
+          "groups_committed": 64,
+          "groups_waited": 64,
+          "source_cycles": 3067,
+          "source_limited_groups": 0
+        },
+        "clock_issue": {
+          "maximum_first_to_last_issue_cycles": 16991,
+          "reads_issued": 192,
+          "warps_with_interval": 1
+        },
+        "constraint_exposure_cycles": {
+          "async_destination_local": 8379,
+          "async_destination_sm_service": 0,
+          "async_source": 0,
+          "control_stall": 6268,
+          "cta_barrier_rendezvous": 0,
+          "dependence_counter_l1tex": 0,
+          "dependence_counter_non_memory_write": 25,
+          "dependence_counter_read": 832,
+          "dependence_counter_shared_write": 2112,
+          "dependence_counter_unknown_origin": 0,
+          "eligible_not_selected": 732,
+          "instruction_front_end": 324,
+          "pipeline_branch": 202,
+          "pipeline_tensor": 0
+        },
+        "control_pipeline": {
+          "branch_instructions_issued": 65,
+          "branch_resolution_cycles": 202
+        },
+        "cta_barriers": {
+          "generations": 0,
+          "max_arrival_spread_cycles": 0,
+          "releases_after_participant_retirement": 0,
+          "total_arrival_spread_cycles": 0,
+          "total_rendezvous_warp_cycles": 0
+        },
+        "delayed_ready_issues": 3,
+        "global_memory_issue": {
+          "atomic_ideal_wavefronts": 0,
+          "atomic_instructions": 0,
+          "atomic_l2_requests": 0,
+          "atomic_sectors": 0,
+          "atomic_unique_lines": 0,
+          "first_issue_timestamp_sum": 18276,
+          "last_issue_timestamp_sum": 18289,
+          "load_ideal_wavefronts": 0,
+          "load_instructions": 0,
+          "load_sectors": 0,
+          "load_unique_lines": 0,
+          "max_issue_span_cycles": 13,
+          "reduction_ideal_wavefronts": 0,
+          "reduction_instructions": 0,
+          "reduction_l2_requests": 0,
+          "reduction_sectors": 0,
+          "reduction_unique_lines": 0,
+          "store_ideal_wavefronts": 4,
+          "store_instructions": 4,
+          "store_sectors": 4,
+          "store_unique_lines": 4,
+          "total_issue_span_cycles": 13
+        },
+        "immediate_constant_cache": {
+          "lines_filled": 3,
+          "lookup_hits": 70,
+          "lookup_misses": 3,
+          "maximum_pending_lines": 1,
+          "miss_wait_cycles": 3,
+          "miss_wait_events": 3,
+          "pending_merges": 0,
+          "pending_tag_hits": 0,
+          "references": 73,
+          "tag_misses": 3
+        },
+        "instruction_front_end": {
+          "demand_l0_hits": 2079,
+          "demand_l0_misses": 1,
+          "demand_l1_hits": 0,
+          "demand_l1_misses": 1,
+          "demand_stream_buffer_hits": 8,
+          "instructions_fetched": 2088,
+          "maximum_fetch_latency_cycles": 324,
+          "prefetch_l1_hits": 0,
+          "prefetch_l1_misses": 16,
+          "prefetch_requests": 16,
+          "stream_restarts": 1
+        },
+        "limiting_cycles": {
+          "async_destination_local": 8379,
+          "async_destination_sm_service": 0,
+          "async_source": 0,
+          "control_stall": 5877,
+          "cta_barrier_rendezvous": 0,
+          "dependence_counter_l1tex": 0,
+          "dependence_counter_non_memory_write": 25,
+          "dependence_counter_read": 832,
+          "dependence_counter_shared_write": 2112,
+          "dependence_counter_unknown_origin": 0,
+          "eligible_not_selected": 732,
+          "instruction_front_end": 324,
+          "pipeline_branch": 10,
+          "pipeline_tensor": 0
+        },
+        "memory_issue_pipeline": {
+          "instructions_admitted": 516,
+          "maximum_operand_pipeline_delay_cycles": 0,
+          "maximum_queue_occupancy": 4,
+          "maximum_shared_queue_delay_cycles": 0,
+          "operand_pipeline_delay_cycles": 0,
+          "shared_queue_delay_cycles": 0,
+          "terminal_shared_accept_cycle": 18305
+        },
+        "schema_version": 25,
+        "tied_limiting_causes": 0
+      },
+      "sm_active_observation_frontier": {
+        "envelope_cycles": 0,
+        "issue_cycles": 18292,
+        "issue_lower_bound_cycles": 18292,
+        "role": "architecture_scoped_sm_active_observation_boundary_not_raw_lower_bound",
+        "terminal_cycles": 18305,
+        "terminal_lower_bound_cycles": 18305
+      },
+      "sm_active_terminal_frontier": {
+        "cycles": 18305,
+        "role": "causal_sm_active_terminal_lower_bound_excludes_write_ack_and_service_only_events"
+      },
+      "terminal_modeled_event_time": 18305
+    }
+  },
+  "status": "corrected_probe_live_ncu_mismatch"
+}

@@ -188,6 +188,12 @@ cache-all conflict, and streaming severe) pass both checks. Existing phase
 captures remain historical because the executable changed; no old capture is
 retroactively relabeled.
 
+The corrected phase binary then completed one fresh NVBit + replay + five-NCU
+path. Its direct run independently reports the expected token and interval
+sum; the simulator endpoint is 18,305 cycles versus NCU median 16,658 (9.89%
+APE), with the result-store writeback/coherence tails open. Artifact:
+`docs/sm86_completion_frontier_c3_async_phase_corrected_live_v1.json`.
+
 The next source-side repair corrected a concrete granularity error in the
 model-local LDGSTS return ledger. The old code charged the eight-cycle
 architecture-local token once per returned 32-byte sector; the raw trace

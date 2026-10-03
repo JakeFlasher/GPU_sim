@@ -230,6 +230,12 @@ cache-all compact, cache-all conflict, and streaming severe all pass token and
 interval-sum checks. Prior phase captures are historical because the binary
 changed.
 
+The corrected phase binary also completed a fresh NVBit/replay/five-NCU path;
+its independently checked direct token is correct, simulator endpoint is
+18,305 cycles, and NCU median is 16,658 (9.89% APE). The result-store’s
+writeback/coherence tails remain open. See
+`docs/sm86_completion_frontier_c3_async_phase_corrected_live_v1.json`.
+
 A matched one-warp `c00`/`c11` differential is retained in
 `docs/sm86_completion_frontier_c3_async_endpoint_differential_warp1_v1.json`.
 Five fresh NCU medians are 7,194 and 14,668 cycles (7,474-cycle increment),

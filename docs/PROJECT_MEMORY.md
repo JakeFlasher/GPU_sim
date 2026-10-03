@@ -328,6 +328,11 @@ recompute its deterministic lane-0 token on the host before reporting
 `correct`; compact/conflict/streaming-severe direct runs pass the check. Older
 phase captures are historical because the binary changed.
 
+The corrected phase binary has one fresh NVBit/replay/five-NCU path with an
+independently checked direct token. Its simulator endpoint is 18,305 cycles
+versus NCU median 16,658 (9.89% APE); result-store writeback/coherence tails
+remain open.
+
 ## Retained evidence
 
 The 2026-09-30 cold/warm campaigns completed 15/15 workloads on RTX 3090 Ti / SM86,
