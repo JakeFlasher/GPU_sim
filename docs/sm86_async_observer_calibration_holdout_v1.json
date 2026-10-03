@@ -15,6 +15,7 @@
     "upper_cycles": 38655
   },
   "holdout_group": 128,
+  "identity": "docs/sm86_async_observer_calibration_holdout_identity.json",
   "interpretation": "finite empirical observer interval covers all five holdout repeats; it is a statistical observer prediction from disjoint group calibration, not a semantic writeback/coherence completion upper and not native dispatch evidence",
   "ncu_max_cycles": 38395.0,
   "ncu_mechanism_metrics": {

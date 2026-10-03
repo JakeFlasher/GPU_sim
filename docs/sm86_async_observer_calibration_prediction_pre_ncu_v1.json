@@ -28,6 +28,7 @@
     "slope_cycles_per_group": 270.1
   },
   "holdout_group": 128,
+  "identity": "docs/sm86_async_observer_calibration_holdout_identity.json",
   "interpretation": "calibration uses only group_16_and_group_32; group_128 observation is not yet collected; interval is empirical observer prediction, not semantic completion upper",
   "ncu_values_for_holdout_consumed": false,
   "prediction": {

@@ -3,11 +3,12 @@
   "$id": "https://gpu-simulator.local/schemas/sm86_async_observer_calibration_holdout_v1.schema.json",
   "title": "SM86 async empirical observer holdout",
   "type": "object",
-  "required": ["schema", "status", "calibration_prediction", "calibration_groups", "holdout_group", "binary", "trace", "control", "ncu_target_metric", "ncu_target_cycles", "ncu_median_cycles", "empirical_interval", "simulator_diagnostic", "interpretation"],
+  "required": ["schema", "status", "calibration_prediction", "identity", "calibration_groups", "holdout_group", "binary", "trace", "control", "ncu_target_metric", "ncu_target_cycles", "ncu_median_cycles", "empirical_interval", "simulator_diagnostic", "interpretation"],
   "properties": {
     "schema": {"const": "sm86_async_observer_calibration_holdout_v1"},
     "status": {"const": "finite_empirical_observer_interval_holdout"},
     "calibration_prediction": {"type": "string"},
+    "identity": {"type": "string"},
     "calibration_groups": {"const": [16, 32]},
     "holdout_group": {"const": 128},
     "binary": {"type": "string"}, "trace": {"type": "string"}, "control": {"type": "string"}, "ncu_root": {"type": "string"},
