@@ -1,0 +1,16 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://gpu-simulator.local/schemas/sm86_c7_full_live_campaign_v1.schema.json",
+  "title":"SM86 full portable live campaign",
+  "type":"object",
+  "required":["schema","status","campaign","host_observation","rows","interpretation"],
+  "properties":{
+    "schema":{"const":"sm86_c7_full_live_campaign_v1"},
+    "status":{"const":"15_of_15_pipeline_runs_completed"},
+    "campaign":{"type":"object","required":["pipeline","ncus_collected","traces_collected","simulator_replays","failures"],"properties":{"pipeline":{"type":"array","minItems":4,"items":{"type":"string"}},"ncus_collected":{"const":75},"traces_collected":{"const":15},"simulator_replays":{"const":30},"failures":{"type":"object","properties":{"oom":{"const":0},"out_of_domain":{"const":0},"timeouts":{"const":0},"failed_stages":{"const":0}},"additionalProperties":true}},"additionalProperties":true},
+    "host_observation":{"type":"object","additionalProperties":true},
+    "rows":{"type":"array","minItems":15,"items":{"type":"object","required":["workload","status","ncu_repetitions","trace_present","replay_repetitions","failed_stages"],"properties":{"workload":{"type":"string"},"status":{"const":"completed"},"ncu_repetitions":{"const":5},"trace_present":{"const":true},"replay_repetitions":{"const":2},"failed_stages":{"type":"string"}},"additionalProperties":true}},
+    "interpretation":{"type":"string","minLength":1}
+  },
+  "additionalProperties":false
+}

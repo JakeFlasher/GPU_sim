@@ -342,6 +342,15 @@ model-local writeback sectors and 2 coherence transactions but leaves both
 dirty-writeback/coherence tail flags true, proving queue drain is not hardware
 completion.
 
+C7’s first population slice is complete for all 15 portable-LCD workloads:
+native timing, NVBit, two simulator replays, and five NCU repetitions per row
+finished in 389 seconds with zero OOM/OOD/timeouts/failed stages. Raw data is
+`results/alpha/c7_full_live_20261003_run/` and the tracked summary is
+`docs/sm86_c7_full_live_campaign_v1.json`. The full repository population is
+not complete yet; probes/SOL/other suites and correctness joins remain to be
+inventoried. Portable replay tails remain open and native macro dispatch was
+not requested.
+
 ## Retained evidence
 
 The 2026-09-30 cold/warm campaigns completed 15/15 workloads on RTX 3090 Ti / SM86,

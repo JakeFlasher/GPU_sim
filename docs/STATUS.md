@@ -230,6 +230,16 @@ fast analyzer refuses all candidates for nonfull active/predicate populations
 (zero native dispatches). Simulator endpoint 3,578 versus NCU median 6,812 is
 47.5% low; prior 8,192-generation NCU rows are excluded.
 
+C7’s portable population slice is complete: the full 15-row live campaign ran
+native timing, NVBit tracing, two simulator replays, and five fresh NCU runs
+per row in 389 seconds, with 15/15 completed and zero OOM/OOD/timeouts or
+failed stages. Raw data is under
+`results/alpha/c7_full_live_20261003_run/`; tracked summary:
+`docs/sm86_c7_full_live_campaign_v1.json`. This is not yet the full repository
+population: native probes, fixed-latency rosters, SOL/other suites, and
+correctness-mode joins remain to be inventoried. Portable replay rows retain
+open dirty-writeback/coherence tails; no native macro dispatch was requested.
+
 The `async_visibility_phase` probe now independently recomputes and checks its
 returned lane-0 token from the deterministic source initialization; it no
 longer prints an unconditional correctness boolean. Fresh direct runs for

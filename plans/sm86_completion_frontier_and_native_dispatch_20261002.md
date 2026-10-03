@@ -80,7 +80,7 @@ Three distinct questions must not be conflated:
 | C4 | Independently fit mechanism/observer models using new calibration-only probes, then materialize predictions on untouched cases. No ad-hoc padding or post-score model selection | partial: async group + destination-layout calibration |
 | C5 | Live held-out evaluation of point error, signed bias, finite statistical interval coverage/width, repeat dispersion and OOD; keep semantic tails separate | partial: two controlled async/layout holdouts |
 | C6 | Real scalar native region transition with full front-end/pipeline continuation differential and pre-mutation fallback; extend only after the first real positive case | pending |
-| C7 | Inventory all available workload families (portable, native probes, SOL/other rosters). Full live campaign over the declared supported population; failures remain in coverage denominator | pending |
+| C7 | Inventory all available workload families (portable, native probes, SOL/other rosters). Full live campaign over the declared supported population; failures remain in coverage denominator | partial: 15-row portable population complete; probe/SOL inventory pending |
 | C8 | Rerun corrected workload failures, remove obsolete interfaces, synchronize supported claims, results and runbook; no unfinished mechanism called complete | pending |
 
 C0-R/C1-R repair the previous work; they do not finish C3/C5/C6. C7 is not
@@ -179,6 +179,17 @@ holdout are separated in
 and `docs/sm86_completion_frontier_c4_destination_layout_holdout_v1.json`.
 This remains one controlled layout family; it is not a semantic completion
 upper or a general hardware-accuracy result.
+
+The first C7 population slice is complete for the declared 15 portable-LCD
+workloads. The live campaign ran native timing, NVBit tracing, two simulator
+replays, and five fresh NCU repetitions for every row in 389 seconds; all
+15/15 completed with zero OOM/OOD/timeout/failed-stage outcomes. The raw
+campaign is under `results/alpha/c7_full_live_20261003_run/` and its tracked
+summary is `docs/sm86_c7_full_live_campaign_v1.json`. It is not yet the full
+repository campaign: native probes, fixed-latency rosters, SOL/other suites,
+and correctness-mode joins still need an explicit population inventory. All
+portable replay rows retain open dirty-writeback/coherence tails and the
+campaign did not request native macro dispatch.
 
 C6 now has a real same-shape scalar negative slice. The fixed-latency
 `w4_d4_split` trace uses the exact 64-generation trace cubin for correctness,
