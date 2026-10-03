@@ -80,7 +80,7 @@ Three distinct questions must not be conflated:
 | C4 | Independently fit mechanism/observer models using new calibration-only probes, then materialize predictions on untouched cases. No ad-hoc padding or post-score model selection | partial: async group + destination-layout calibration |
 | C5 | Live held-out evaluation of point error, signed bias, finite statistical interval coverage/width, repeat dispersion and OOD; keep semantic tails separate | partial: two controlled async/layout holdouts |
 | C6 | Real scalar native region transition with full front-end/pipeline continuation differential and pre-mutation fallback; extend only after the first real positive case | pending |
-| C7 | Inventory all available workload families (portable, native probes, SOL/other rosters). Full live campaign over the declared supported population; failures remain in coverage denominator | partial: 15-row portable population plus 3 direct SimBench rows complete; remaining populations pending |
+| C7 | Inventory all available workload families (portable, native probes, SOL/other rosters). Full live campaign over the declared supported population; failures remain in coverage denominator | partial: 15-row portable population plus 4 direct SimBench rows complete; remaining populations pending |
 | C8 | Rerun corrected workload failures, remove obsolete interfaces, synchronize supported claims, results and runbook; no unfinished mechanism called complete | pending |
 
 C0-R/C1-R repair the previous work; they do not finish C3/C5/C6. C7 is not
@@ -258,7 +258,7 @@ native macro dispatch remains zero. Evidence and schema:
 `docs/sm86_c7_simbench_global_atomic_histogram_direct_live_v1.schema.json`.
 This closes only this slice; C3/C5/C6 and the wider C7 campaign remain open.
 
-### C7-S3 — next active milestone
+### C7-S3 — execution specification
 
 Run one additional direct SM86 SimBench row from a distinct scalar-memory or
 tensor family (prefer `global_vectorized_128b_copy` or
@@ -267,11 +267,39 @@ five-repetition NCU contract. Preserve exact binary/argument identity and
 record any OOM/OOD/unsupported-SASS disposition without silently shrinking
 the shape.
 
+### C7-S3 — direct SimBench vectorized-memory slice — complete
+
+`global_vectorized_128b_copy` now has a direct SM86 timing-shape slice using
+one rebuilt binary and identical `samples=1024,bins=64,seed=42` arguments for
+correctness, NVBit, replay, and five fresh NCU application captures. The host
+identity-output check passed with zero mismatches; the SASS contains
+`LDG.E.128`/`STG.E.128`. Replay has one-block coverage and 2,977 records, and
+NCU reports the same 2,977 warp instructions. NCU
+`gpc__cycles_elapsed.max` is `74859,74473,74887,75352,75109` (median
+`74887`); the simulator completion lower bound is `63246`, so lower-bound
+consistency is true but no point estimator or finite upper is claimed. The
+independent extractor observes 512 vector loads and 512 vector stores but no
+hardware completion token, owner/read-from relation, or global instrumentation
+order. Dirty-writeback and coherence tails remain open. The fast analyzer
+refuses the one warp for a nonfull predicate population; native macro dispatch
+remains zero. Evidence and schema:
+`docs/sm86_c7_simbench_global_vectorized_128b_copy_direct_live_v1.json` and
+`docs/sm86_c7_simbench_global_vectorized_128b_copy_direct_live_v1.schema.json`.
+This closes only this slice; C3/C5/C6 and the wider C7 campaign remain open.
+
+### C7-S4 — next active milestone
+
+Run one additional direct SM86 SimBench row from a tensor or scalar-compute
+family (prefer `bf16_hmma_gemm_traceable` or `fp16_hmma_gemm_traceable`) with
+the same checked correctness, fresh NVBit, replay, and five-repetition NCU
+contract. Preserve exact binary/argument identity and record any
+OOM/OOD/unsupported-SASS disposition without silently shrinking the shape.
+
 The active SimBench wrapper still rejects the repository-contained NVBit
 tracer because it requires an external split-v2 tracer root; see
 `docs/sm86_c7_simbench_population_slice_v1.json`. The blocker is recorded,
 not bypassed with a hidden tracer or substituted shape. It does not invalidate
-the two direct bounded slices, which use the repository tracer explicitly and
+the four direct bounded slices, which use the repository tracer explicitly and
 retain their own exact binary/trace/control identities.
 
 The wrapper blocker did not prevent a direct bounded timing-shape check: the
