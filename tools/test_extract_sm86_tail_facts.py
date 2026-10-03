@@ -17,6 +17,9 @@ def test_live_message_trace_reports_fence_and_unknown_domains():
     assert report["facts"]["stores"] > 0
     assert report["facts"]["atomics"] > 0
     assert any("MEMBAR" in value for value in report["facts"]["fence_opcodes_observed"])
+    assert report["facts"]["same_warp_program_order_edges"] > 0
+    assert report["facts"]["static_opcode_ambiguity_records"] == 0
+    assert report["facts"]["global_event_order_observed"] is False
     assert report["facts"]["owner_read_from_observed"] is False
     assert report["facts"]["hardware_completion_token_observed"] is False
 
@@ -27,5 +30,9 @@ def test_live_async_trace_reports_copy_protocol_and_unknown_completion():
         ROOT / "results/alpha/c1r_async_matched_20261003/control.json",
     )
     assert report["facts"]["async_copies"] > 0
+    assert report["facts"]["protocol_record_counts"]["async_issue_records"] > 0
+    assert report["facts"]["protocol_record_counts"]["async_wait_records"] > 0
+    assert report["facts"]["same_warp_program_order_edges"] > 0
+    assert report["facts"]["static_opcode_records"] == report["facts"]["records"]
     assert report["facts"]["fence_scope_semantics_closed"] is False
     assert report["facts"]["hardware_completion_token_observed"] is False

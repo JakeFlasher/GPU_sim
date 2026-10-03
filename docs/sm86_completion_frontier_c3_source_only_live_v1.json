@@ -1,0 +1,204 @@
+{
+  "comparison": {
+    "hardware_completion": "not_observed",
+    "ncu_values_collected_after_model_change": true,
+    "ncu_values_used_for_implementation_selection": false,
+    "point_absolute_percentage_error": 0.04906467977171845,
+    "point_error_cycles": 619.0,
+    "semantic_upper_status": "finite_for_current_modeled_effects_only"
+  },
+  "identity": {
+    "binary": {
+      "path": "workloads/research_probes/async_source_only/async_source_only",
+      "sha256": "72775e59d465a8b9d7437d5cfa8a1946ecae006eec45018c4594e2c795e03637"
+    },
+    "campaign_binding": {
+      "argv": [
+        "/home/jakeshea/GPU_simulator_rebase/workloads/research_probes/async_source_only/async_source_only",
+        "--groups",
+        "64",
+        "--depth",
+        "4",
+        "--route",
+        "l1",
+        "--layout",
+        "compact",
+        "--markers",
+        "on"
+      ],
+      "async_order_enabled": false,
+      "binary": {
+        "path": "/home/jakeshea/GPU_simulator_rebase/workloads/research_probes/async_source_only/async_source_only"
+      },
+      "bursts": 16384,
+      "cell": "l1_compact_d4_g64",
+      "gpu": "0",
+      "mode": "direct",
+      "order": "forward",
+      "output_contract": {
+        "error": null,
+        "passed": true,
+        "payload_file_count": 1,
+        "required_outputs": [
+          "dynamic_trace.pb",
+          "stats.csv",
+          "extra_info/traced_kernel_modules.json",
+          "extra_info/enhanced_execution_info.json"
+        ],
+        "version": 1
+      },
+      "paths": {
+        "dynamic_trace.pb": "dynamic_trace.pb",
+        "extra_info/enhanced_execution_info.json": "extra_info/enhanced_execution_info.json",
+        "extra_info/traced_kernel_modules.json": "extra_info/traced_kernel_modules.json",
+        "stats.csv": "stats.csv"
+      },
+      "repetition": 1,
+      "runtime_manifest": {
+        "path": "/home/jakeshea/GPU_simulator_rebase/tools/nvbit_tracer/tracer_tool.nvbit-runtime-manifest.json"
+      },
+      "schema_version": 1,
+      "skip_enhanced_tracer": false,
+      "tracer": {
+        "path": "/home/jakeshea/GPU_simulator_rebase/tools/nvbit_tracer/tracer_tool/tracer_tool.so"
+      },
+      "warmup": 64
+    },
+    "capture_complete": {
+      "complete": true,
+      "completed_at": "2026-10-03T09:32:34.270568+00:00",
+      "key": "l1_compact_d4_g64",
+      "kind": "ldgsts_nvbit_capture",
+      "required_files": [
+        "dynamic_trace.pb",
+        "stats.csv",
+        "extra_info/traced_kernel_modules.json",
+        "extra_info/enhanced_execution_info.json",
+        "environment.json",
+        "campaign_binding.json",
+        "command.txt"
+      ]
+    },
+    "control": "results/alpha/c3_source_only_20261003/control.json",
+    "nvbit_capture": "results/alpha/c3_source_only_20261003/nvbit_fresh",
+    "source": "workloads/research_probes/async_source_only/async_source_only.cu"
+  },
+  "interpretation": "A fresh NVBit trace and five fresh NCU application-replay captures of a store-free cache-all async-copy kernel complete the simulator model with no dirty-writeback/coherence or reduction tails. The simulator endpoint is 13235 cycles versus NCU median 12616 (4.91 percent point error). This validates only this narrow model-local source/destination case; the trace still lacks hardware ownership/read-from/fence-scope/completion tokens, so it is not a silicon completion proof or general accuracy claim.",
+  "launch": {
+    "args": [
+      "--groups",
+      "64",
+      "--depth",
+      "4",
+      "--route",
+      "l1",
+      "--layout",
+      "compact",
+      "--markers",
+      "on"
+    ],
+    "ncu_ldgsts_instructions": 256,
+    "simulator_async_diagnostics": {
+      "completion_hidden_before_wait_cycles": 0,
+      "destination_groups_observed": 64,
+      "destination_local_cycles": 5312,
+      "destination_local_limited_groups": 64,
+      "destination_sm_service_cycles": 0,
+      "destination_sm_service_limited_groups": 0,
+      "destination_wavefronts_observed": 2048,
+      "groups_committed": 64,
+      "groups_waited": 64,
+      "source_cycles": 3771,
+      "source_limited_groups": 0
+    },
+    "simulator_completion": {
+      "cycles": 13235,
+      "status": "complete"
+    },
+    "simulator_lower_cycles": 13235,
+    "tail_facts": "docs/sm86_c3_source_only_tail_facts_v1.json",
+    "trace_records": 1039
+  },
+  "ncu": {
+    "identity_checks": {
+      "cc": "8.6",
+      "device": "0",
+      "kernel": "void source_only_kernel<4, false, false, 0>(const char *, int)",
+      "same_block_grid": true
+    },
+    "median": 12616.0,
+    "metric": "gpc__cycles_elapsed.max",
+    "repetitions": 5,
+    "rows": [
+      {
+        "Block Size": "(32, 1, 1)",
+        "CC": "8.6",
+        "Device": "0",
+        "Grid Size": "(1, 1, 1)",
+        "Kernel Name": "void source_only_kernel<4, 0, 0, 0>(const char *, int)",
+        "dram__sectors_read.sum": "228",
+        "gpc__cycles_elapsed.max": "12635",
+        "lts__t_sectors_srcunit_tex.sum": "128",
+        "sm__cycles_active.sum": "10875",
+        "smsp__inst_executed_op_ldgsts.sum": "256"
+      },
+      {
+        "Block Size": "(32, 1, 1)",
+        "CC": "8.6",
+        "Device": "0",
+        "Grid Size": "(1, 1, 1)",
+        "Kernel Name": "void source_only_kernel<4, 0, 0, 0>(const char *, int)",
+        "dram__sectors_read.sum": "340",
+        "gpc__cycles_elapsed.max": "12608",
+        "lts__t_sectors_srcunit_tex.sum": "128",
+        "sm__cycles_active.sum": "10863",
+        "smsp__inst_executed_op_ldgsts.sum": "256"
+      },
+      {
+        "Block Size": "(32, 1, 1)",
+        "CC": "8.6",
+        "Device": "0",
+        "Grid Size": "(1, 1, 1)",
+        "Kernel Name": "void source_only_kernel<4, 0, 0, 0>(const char *, int)",
+        "dram__sectors_read.sum": "232",
+        "gpc__cycles_elapsed.max": "12616",
+        "lts__t_sectors_srcunit_tex.sum": "128",
+        "sm__cycles_active.sum": "10878",
+        "smsp__inst_executed_op_ldgsts.sum": "256"
+      },
+      {
+        "Block Size": "(32, 1, 1)",
+        "CC": "8.6",
+        "Device": "0",
+        "Grid Size": "(1, 1, 1)",
+        "Kernel Name": "void source_only_kernel<4, 0, 0, 0>(const char *, int)",
+        "dram__sectors_read.sum": "232",
+        "gpc__cycles_elapsed.max": "12608",
+        "lts__t_sectors_srcunit_tex.sum": "128",
+        "sm__cycles_active.sum": "10866",
+        "smsp__inst_executed_op_ldgsts.sum": "256"
+      },
+      {
+        "Block Size": "(32, 1, 1)",
+        "CC": "8.6",
+        "Device": "0",
+        "Grid Size": "(1, 1, 1)",
+        "Kernel Name": "void source_only_kernel<4, 0, 0, 0>(const char *, int)",
+        "dram__sectors_read.sum": "228",
+        "gpc__cycles_elapsed.max": "12883",
+        "lts__t_sectors_srcunit_tex.sum": "128",
+        "sm__cycles_active.sum": "11126",
+        "smsp__inst_executed_op_ldgsts.sum": "256"
+      }
+    ],
+    "values": [
+      12635.0,
+      12608.0,
+      12616.0,
+      12608.0,
+      12883.0
+    ]
+  },
+  "schema": "sm86_completion_frontier_c3_source_only_live_v1",
+  "status": "positive_model_completion_open_hardware_observation"
+}

@@ -290,6 +290,28 @@ prerequisite to statistical prediction or a memory-free native differential;
 a finite empirical interval must not clear semantic unknown tails.
 C4/C5 exploratory slice now has a finite empirical interval: group16/32 calibration predicted group128 37737..38655, covering all 5 NCU repeats (median/point error 0.396%). The simulator semantic lower is 168898 and tails remain open, so this is not a completion upper. C1-R matched async/control differential now proves a model mismatch: NCU delta 13760 vs simulator lower-bound delta 78852; C1-R matched async recapture now proves a model mismatch (same 64-group binary: simulator lower 84866 vs NCU median 20946); resident-device message passing remains an open lower-bound case (1753 vs 4321). Neither is a finite-accuracy result. C3 now widens async timing frontiers and refuses predicted lower/upper after the matched mismatch; next: same-binary/shape fresh controls + NVBit/replay/NCU for C1-R; implement actual completion obligations before calibrated independent accuracy scoring.
 
+The observed-fact layer of C2 is now complete: the independent raw-protobuf /
+static-SASS extractor reports deterministic same-warp order edges, static
+function-id/PC joins, protocol counts, masks, allocation ids, and explicit
+absence of global instrumentation order. The C3 source-token repair charges
+one cacheable LDGSTS return-service token per coalesced warp instruction,
+rather than per sector. Fresh post-change group-sweep evidence is retained in
+`docs/sm86_completion_frontier_c3_async_source_token_repair_v1.json`; the
+group-128 model remains 46,978 versus NCU median 38,348, so C3 is still open.
+A fresh store-free source-only NVBit/NCU capture is a narrow positive
+model-completion case (13,235 modeled cycles versus NCU median 12,616) in
+`docs/sm86_completion_frontier_c3_source_only_live_v1.json`; it does not expose
+hardware ownership/read-from/fence-scope/completion tokens and does not close
+the writeback/coherence problem.
+
+A matched one-warp c00/c11 differential is retained in
+`docs/sm86_completion_frontier_c3_async_endpoint_differential_warp1_v1.json`:
+five fresh NCU medians are 7,194 and 14,668 cycles, repaired simulator
+endpoints are 5,995 and 17,394, and direct unprofiled clock64 repeats give a
+13,386-cycle increment. This separates endpoint disagreement from multi-warp
+arbitration but does not identify a scalar async parameter; no further timing
+fit is justified from it.
+
 ## Retained evidence
 
 The 2026-09-30 cold/warm campaigns completed 15/15 workloads on RTX 3090 Ti / SM86,

@@ -198,6 +198,30 @@ preflight passed. The first collection command retained a historical launch
 skip and produced no profiled kernels; the corrected skip-zero campaign
 completed all 75 repetitions and is the retained baseline.
 
+### Completion-frontier continuation — 2026-10-03
+
+The C3 async source-token repair is recorded in
+`docs/sm86_completion_frontier_c3_async_source_token_repair_v1.json`. The
+cacheable LDGSTS return ledger now charges one service token per coalesced
+warp-level instruction rather than per 32-byte sector. A fresh post-change
+group sweep gives model cycles 7,442/13,090/24,386/46,978 for groups
+16/32/64/128 versus NCU medians 7,904/12,254/20,949/38,348; the mismatch is
+reduced but remains. A fresh NVBit plus five-process NCU source-only capture is
+retained in `docs/sm86_completion_frontier_c3_source_only_live_v1.json`: the
+store-free case has finite model-local completion at 13,235 cycles versus NCU
+median 12,616 (4.91% point error), while hardware completion tokens and fence
+scope remain unobserved. This is a narrow positive model case, not a general
+hardware-accuracy or writeback/coherence result.
+
+A matched one-warp `c00`/`c11` differential is retained in
+`docs/sm86_completion_frontier_c3_async_endpoint_differential_warp1_v1.json`.
+Five fresh NCU medians are 7,194 and 14,668 cycles (7,474-cycle increment),
+while repaired simulator endpoints are 5,995 and 17,394 (11,399-cycle
+increment); direct unprofiled `clock64` repeats give a 13,386-cycle
+increment. This does not identify the missing async mechanism: the simulator
+lies between the direct-clock and NCU differentials, so no scalar parameter is
+changed from this comparison.
+
 ## Retained measurements
 
 2026-09-30 RTX 3090 Ti campaigns used driver 615.71.09, 1350/10501 MHz, P0,

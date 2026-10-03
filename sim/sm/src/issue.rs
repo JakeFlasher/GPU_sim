@@ -11816,6 +11816,12 @@ impl<'a> SmCore<'a> {
                     .map_or(0, |service| service.interval_cycles);
                 let mut hit_service_ready =
                     self.shared_write_lookup_runtime.async_l1_hit_service_ready[subcore];
+                // The return-port token is per warp-level LDGSTS source
+                // instruction, not per 32-byte sector.  The trace `len`
+                // already represents the sectors coalesced by one SASS
+                // instruction; charging the interval once for every sector
+                // multiplies the source frontier by the payload width.
+                let mut instruction_hit_service_time = None;
                 let range = off..off + usize::from(len);
                 let delivery_work = async_copy_completion_work(kind).unwrap_or(0);
                 let async_group = if source_active {
@@ -11864,6 +11870,8 @@ impl<'a> SmCore<'a> {
                         Ok(Some(ready)) => {
                             let ready = if hit_service_interval == 0 {
                                 ready
+                            } else if let Some(serviced) = instruction_hit_service_time {
+                                serviced
                             } else {
                                 let serviced = ready.max(hit_service_ready);
                                 hit_service_ready = serviced
@@ -11871,6 +11879,7 @@ impl<'a> SmCore<'a> {
                                     .ok_or(IssueError::CounterOverflow {
                                         counter: "async L1 hit service timeline",
                                     })?;
+                                instruction_hit_service_time = Some(serviced);
                                 serviced
                             };
                             if let Some(group) = async_group {
@@ -15119,7 +15128,7 @@ impl<'a> SmCore<'a> {
         }
 
         // Stay allocation-free on the normal path.  The exact shadow is only
-        // needed when charging every possible observed sector could overflow
+        // needed when charging every possible observed instruction could overflow
         // the current service frontier.
         let mut needs_shadow = false;
         for (subcore, pick) in picks.iter().enumerate() {
@@ -15156,16 +15165,8 @@ impl<'a> SmCore<'a> {
                 needs_shadow = true;
                 continue;
             };
-            let Some(additional) = interval.checked_mul(u64::from(len) - 1) else {
-                needs_shadow = true;
-                continue;
-            };
             let frontier = self.shared_write_lookup_runtime.async_l1_hit_service_ready[subcore];
-            let Some(first_service) = frontier.max(hit_ready).checked_add(interval) else {
-                needs_shadow = true;
-                continue;
-            };
-            if first_service.checked_add(additional).is_none() {
+            if frontier.max(hit_ready).checked_add(interval).is_none() {
                 needs_shadow = true;
             }
         }
@@ -15233,6 +15234,7 @@ impl<'a> SmCore<'a> {
                             .ok_or(IssueError::CounterOverflow {
                                 counter: "issue sector cursor",
                             })?;
+                    let mut instruction_hit_service_charged = false;
                     for &sector in sectors {
                         let access = access_shared_l1(
                             &mut shadow,
@@ -15246,12 +15248,19 @@ impl<'a> SmCore<'a> {
                             && observe_ready
                             && let SharedL1Access::Hit { ready: Some(ready) } = access
                         {
-                            let serviced = ready.max(service_ready[subcore]);
-                            service_ready[subcore] = serviced.checked_add(interval).ok_or(
-                                IssueError::CounterOverflow {
-                                    counter: "async L1 hit service timeline",
-                                },
-                            )?;
+                            // One source-return service token covers the
+                            // whole coalesced LDGSTS instruction.
+                            if !instruction_hit_service_charged {
+                                if service_ready[subcore] < ready {
+                                    service_ready[subcore] = ready;
+                                }
+                                service_ready[subcore] = service_ready[subcore]
+                                    .checked_add(interval)
+                                    .ok_or(IssueError::CounterOverflow {
+                                        counter: "async L1 hit service timeline",
+                                    })?;
+                                instruction_hit_service_charged = true;
+                            }
                         }
                         if matches!(access, SharedL1Access::Stalled) {
                             break;
@@ -23229,6 +23238,54 @@ mod tests {
         });
         assert_eq!(after_group, before_group);
         assert!(requests.is_empty());
+    }
+
+    #[test]
+    fn async_l1_hit_service_charges_one_token_per_coalesced_instruction() {
+        let run = |len: u16| {
+            let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "LDGSTS.E"))]);
+            let blocks = vec![BlockReplay {
+                launch_index: 0,
+                warps: vec![WarpReplay {
+                    async_copy_cohorts: None,
+                    warp_slot: 0,
+                    insts: vec![async_copy_inst(0, 0, len)],
+                    sectors: (0..usize::from(len)).map(|value| value as i64).collect(),
+                }],
+            }];
+            let mut p = params();
+            p.ldgsts_l1_hit_return_service = Some(LdgstsL1HitReturnService { interval_cycles: 1 });
+            let mut core = shared_core(&blocks, &sched, &p);
+            {
+                let MemModel::L1Shared(st) = &mut core.mem else {
+                    panic!("fixture must use shared L1");
+                };
+                let EvAccess::MissRequest { fill } = st
+                    .l1
+                    .access_eligible_ev(MemoryOrigin::Global, 0, 0)
+                    .unwrap()
+                else {
+                    panic!("cold source must allocate an L1 fill");
+                };
+                st.l1.complete_fill(fill).unwrap();
+                for sector in 1..usize::from(len) {
+                    assert!(matches!(
+                        st.l1
+                            .access_eligible_ev(MemoryOrigin::Global, 0, sector as u64)
+                            .unwrap(),
+                        EvAccess::Hit { .. }
+                    ));
+                }
+            }
+            let mut requests = Vec::new();
+            assert!(core.issue_cycle(&mut requests).is_ok());
+            core.shared_write_lookup_runtime.async_l1_hit_service_ready[0]
+        };
+
+        // A coalesced two-sector instruction consumes the same single source
+        // return token as a one-sector instruction; charging per sector would
+        // make these frontiers differ.
+        assert_eq!(run(2), run(1));
     }
 
     #[test]

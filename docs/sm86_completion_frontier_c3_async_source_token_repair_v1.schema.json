@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpu-simulator.local/schemas/sm86_completion_frontier_c3_async_source_token_repair_v1.schema.json",
+  "title": "SM86 async source-token repair live mismatch",
+  "type": "object",
+  "required": ["schema", "status", "protocol", "identity", "change", "cells", "interpretation"],
+  "properties": {
+    "schema": {"const": "sm86_completion_frontier_c3_async_source_token_repair_v1"},
+    "status": {"const": "mechanism_repair_live_mismatch_remains"},
+    "protocol": {"type": "object", "required": ["ncu_values_collected_before_this_repair", "ncu_values_used_for_implementation_selection"], "properties": {"ncu_values_collected_before_this_repair": {"const": true}, "ncu_values_used_for_implementation_selection": {"const": false}}, "additionalProperties": true},
+    "identity": {"type": "object", "additionalProperties": true},
+    "change": {"type": "object", "required": ["old_rule", "new_rule", "reason", "scope"], "additionalProperties": true},
+    "cells": {"type": "array", "minItems": 4, "items": {"type": "object", "required": ["name", "compile_time_groups", "ncu_gpc_cycles", "ncu_median_cycles", "post_repair_simulator_lower_cycles", "completion"], "properties": {"name": {"type": "string"}, "compile_time_groups": {"type": "integer", "minimum": 1}, "ncu_gpc_cycles": {"type": "array", "minItems": 5, "items": {"type": "number"}}, "ncu_median_cycles": {"type": "number"}, "post_repair_simulator_lower_cycles": {"type": "integer", "minimum": 0}, "completion": {"type": "object"}}, "additionalProperties": true}},
+    "interpretation": {"type": "string", "minLength": 1}
+  },
+  "additionalProperties": false
+}

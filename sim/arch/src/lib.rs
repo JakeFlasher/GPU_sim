@@ -592,9 +592,10 @@ impl ArchId {
     /// Source-side L1TEX return cadence for cacheable non-bulk asynchronous
     /// copies.  The Ampere SM86 memory structure has a banked source-return
     /// path; the released Huerta model's four-bank/half-warp service and the
-    /// independent source-hit assay resolve to one accepted source hit every
-    /// eight SM cycles for this replay granularity.  This is a source-return
-    /// service capability, not a cache tag or hit-count rule.
+    /// independent source-hit assay resolve to one accepted warp-level
+    /// cacheable LDGSTS source instruction every eight SM cycles for this
+    /// replay granularity.  Its sectors are one coalesced source transaction;
+    /// this is not a per-sector latency, cache tag, or hit-count rule.
     pub const fn ldgsts_l1_hit_return_service(self) -> Capability<LdgstsL1HitReturnService> {
         match self {
             Self::Sm86 => {

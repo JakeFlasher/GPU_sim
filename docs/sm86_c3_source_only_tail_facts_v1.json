@@ -1,0 +1,84 @@
+{
+  "coverage": {
+    "kind": "full_unsampled_input_assumed_from_payload_roster",
+    "launches": 1,
+    "payload_files": 1
+  },
+  "facts": {
+    "active_mask_missing_records": 0,
+    "allocation_ids": [
+      1
+    ],
+    "async_copies": 256,
+    "async_protocol_opcodes_observed": [
+      "LDGDEPBAR",
+      "LDGSTS.E.128"
+    ],
+    "atomics": 0,
+    "cross_sm_line_topology": 0,
+    "fence_opcodes_observed": [
+      "DEPBAR.LE",
+      "LDGDEPBAR"
+    ],
+    "fence_scope_semantics_closed": false,
+    "global_event_order_observed": false,
+    "hardware_completion_token_observed": false,
+    "instrumentation_order_records": 0,
+    "instrumentation_order_strictly_unique": true,
+    "instrumentation_order_unique": 0,
+    "line_generation_observed": false,
+    "memory_records": 704,
+    "opcode_heads_observed": {
+      "BRA": 64,
+      "DEPBAR": 64,
+      "EXIT": 3,
+      "IADD3": 66,
+      "IMAD": 5,
+      "ISETP": 66,
+      "LDGDEPBAR": 64,
+      "LDGSTS": 256,
+      "LDS": 448,
+      "S2R": 1,
+      "SHF": 1,
+      "ULDC": 1
+    },
+    "owner_read_from_observed": false,
+    "predicate_mask_missing_records": 0,
+    "protocol_record_counts": {
+      "async_commit_records": 64,
+      "async_issue_records": 256,
+      "async_wait_records": 64,
+      "fence_records": 128
+    },
+    "records": 1039,
+    "reductions": 0,
+    "same_warp_program_order_edges": 1038,
+    "static_opcode_ambiguity_records": 0,
+    "static_opcode_records": 1039,
+    "stores": 0
+  },
+  "interpretation": "observed_trace_facts_only_unknown_owner_read_from_generation_scope_and_hardware_completion_remain_open",
+  "launches": [
+    {
+      "device_id": 0,
+      "instrumentation_order_records": 0,
+      "kernel_id": 1,
+      "memory_records": 704,
+      "records": 1039,
+      "same_warp_program_order_edges": 1038,
+      "sm_ids": [
+        0
+      ],
+      "static_opcode_ambiguity_records": 0,
+      "static_opcode_records": 1039,
+      "stream_id": 7,
+      "warps": 1
+    }
+  ],
+  "schema": "sm86_tail_facts_v1",
+  "source": {
+    "control": "results/alpha/c3_source_only_20261003/control.json",
+    "extraction": "raw_protobuf_plus_static_control_separate_pass",
+    "trace": "results/alpha/c3_source_only_20261003/nvbit_fresh"
+  }
+}

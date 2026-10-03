@@ -1,0 +1,99 @@
+{
+  "cases": {
+    "c00": {
+      "direct_clock_cycles": [
+        4390,
+        4391,
+        4386,
+        4386,
+        4386,
+        4386,
+        4386
+      ],
+      "direct_clock_median": 4386,
+      "direct_clock_minus_baseline": null,
+      "ncu_gpc_cycles": [
+        7194.0,
+        7163.0,
+        7226.0,
+        7199.0,
+        7172.0
+      ],
+      "ncu_gpc_median": 7194.0,
+      "simulator_model_lower_cycles": 5995
+    },
+    "c11": {
+      "direct_clock_cycles": [
+        17774,
+        17647,
+        17773,
+        17652,
+        17772,
+        17647,
+        17773
+      ],
+      "direct_clock_median": 17772,
+      "direct_clock_minus_baseline": null,
+      "ncu_gpc_cycles": [
+        14673.0,
+        14660.0,
+        14668.0,
+        14667.0,
+        14695.0
+      ],
+      "ncu_gpc_median": 14668.0,
+      "simulator_model_lower_cycles": 17394
+    }
+  },
+  "completion": {
+    "c00": {
+      "lower_bound_cycles": 5995,
+      "status": "incomplete_unmodeled_retirement_tails",
+      "unmodeled_tails": {
+        "async_copy_shared_visibility": false,
+        "coherence": true,
+        "dirty_writeback": true,
+        "reduction_read_modify_write": false
+      }
+    },
+    "c11": {
+      "lower_bound_cycles": 17394,
+      "status": "incomplete_unmodeled_retirement_tails",
+      "unmodeled_tails": {
+        "async_copy_shared_visibility": false,
+        "coherence": true,
+        "dirty_writeback": true,
+        "reduction_read_modify_write": false
+      }
+    }
+  },
+  "differentials": {
+    "direct_clock_c11_minus_c00": 13386,
+    "direct_ratio": 4.051983584131327,
+    "ncu_gpc_c11_minus_c00": 7474.0,
+    "ncu_ratio": 2.038921323324993,
+    "simulator_c11_minus_c00": 11399,
+    "simulator_ratio": 2.901417848206839
+  },
+  "hardware_completion": "not_observed",
+  "identity": {
+    "arguments_common": [
+      "l1",
+      "0",
+      "1",
+      "1"
+    ],
+    "binary": "workloads/research_probes/async_barrier_overlap/async_barrier_overlap_trace",
+    "binary_sha256": "99e752acb20072c6f80326e5d4171df8907570ee147d02c4c2fa7596a3b57db0",
+    "ncu_metric": "gpc__cycles_elapsed.max",
+    "ncu_replay": "application/cache-all/clock-none/launch-skip-1/count-1",
+    "protocol_pairs": [
+      "c00",
+      "c11"
+    ],
+    "simulator_trace_controls": "same async_barrier_overlap_trace binary static control sidecar per capture"
+  },
+  "interpretation": "The same-binary one-warp differential separates endpoint effects from multi-warp destination arbitration. The repaired simulator is below the direct clock differential but above the NCU GPC differential: simulator async increment 11,399 cycles, direct clock increment 13,386, and NCU increment 7474.0 cycles. This is negative accuracy evidence and does not justify changing the model to match target NCU values; source/destination timing and profiler endpoint semantics remain separate.",
+  "schema": "sm86_completion_frontier_c3_async_endpoint_differential_warp1_v1",
+  "status": "matched_one_warp_endpoint_differential_negative_for_ncu_endpoint"
+}

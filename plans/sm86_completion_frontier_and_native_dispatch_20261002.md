@@ -74,9 +74,9 @@ Three distinct questions must not be conflated:
 | Milestone | Concrete outcome and real completion bar | State |
 |---|---|---|
 | C0-R | Remove unsound flag/upper inference; rerun identical real store trace and preserve service events while upper stays open; correct prior claims | complete |
-| C1-R | Matched resident-memory/async/fence probes: same binary/shape/launch, fresh control sidecar, full trace counts and NCU launch/count comparison; retain mismatches | active |
-| C2 | Independent **trace** extraction of stores, scopes, masks, allocations, async groups and synchronization. Separate observed facts, derived partial orders and unknowns; no invented global order | active |
-| C3 | Implement missing native completion obligations: per-request acknowledgements, scoped waits, copy completion, correct outstanding-work drain; demonstrate live memory/fence/copy cases plus perturbation differentials | pending |
+| C1-R | Matched resident-memory/async/fence probes: same binary/shape/launch, fresh control sidecar, full trace counts and NCU launch/count comparison; retain mismatches | active — async source-token repair landed; fence/visibility families remain |
+| C2 | Independent **trace** extraction of stores, scopes, masks, allocations, async groups and synchronization. Separate observed facts, derived partial orders and unknowns; no invented global order | complete for observed-fact layer; native witness/effect relation open |
+| C3 | Implement missing native completion obligations: per-request acknowledgements, scoped waits, copy completion, correct outstanding-work drain; demonstrate live memory/fence/copy cases plus perturbation differentials | active — model-local drains pass; physical tails remain open |
 | C4 | Independently fit mechanism/observer models using new calibration-only probes, then materialize predictions on untouched cases. No ad-hoc padding or post-score model selection | partial: async group calibration |
 | C5 | Live held-out evaluation of point error, signed bias, finite statistical interval coverage/width, repeat dispersion and OOD; keep semantic tails separate | partial: one holdout |
 | C6 | Real scalar native region transition with full front-end/pipeline continuation differential and pre-mutation fallback; extend only after the first real positive case | pending |
@@ -148,7 +148,30 @@ lower/upper and is retained as
 `docs/sm86_completion_frontier_c3_async_refusal_v1.json`. This fixes the
 previous 84866-cycle false lower; it is not an accuracy result.
 
-### C2 — observed tail facts — active
+A matched one-warp `c00`/`c11` live differential separates this mechanism from
+multi-warp destination arbitration. For the same `async_barrier_overlap_trace`
+binary and `l1 0 1 1` launch, five fresh NCU medians are 7,194 cycles (c00)
+and 14,668 cycles (c11), a 7,474-cycle increment; the repaired simulator is
+5,995 and 17,394, an 11,399-cycle increment. Unprofiled native `clock64`
+repeats give a 13,386-cycle increment. Thus the simulator is below the direct
+clock differential but above the NCU GPC endpoint; neither endpoint alone
+identifies the missing async mechanism. The result is retained in
+`docs/sm86_completion_frontier_c3_async_endpoint_differential_warp1_v1.json`.
+
+The next source-side repair corrected a concrete granularity error in the
+model-local LDGSTS return ledger. The old code charged the eight-cycle
+architecture-local token once per returned 32-byte sector; the raw trace
+represents each warp-level LDGSTS as one coalesced source instruction with a
+sector span. The new code charges one token per coalesced instruction and
+shares its service timestamp across that instruction's sectors, with a
+transactional overflow test. On the same previously captured live sweep the
+post-repair lower bounds are 7,442/13,090/24,386 cycles for groups
+16/32/64 and 46,978 for the untouched group-128 holdout; NCU medians are
+7,904/12,254/20,949/38,348. The controlled mismatch is reduced but not
+closed, and all dirty-writeback/coherence tails remain open. Artifact:
+`docs/sm86_completion_frontier_c3_async_source_token_repair_v1.json`.
+
+### C2 — observed tail facts — fact layer complete
 
 `tools/extract_sm86_tail_facts.py` is a separate raw-protobuf plus static-SASS
 extraction pass. Fresh resident-device message and matched async traces now
@@ -156,9 +179,12 @@ report store/atomic/fence/async-opcode facts, masks, allocation IDs, payload
 coverage and cross-SM topology while explicitly leaving line generation,
 owner/read-from, fence semantics and hardware completion unknown. Reports:
 `docs/sm86_c2_message_device_tail_facts_v1.json` and
-`docs/sm86_c2_async_tail_facts_v1.json`. This is observed-fact evidence, not
-an independent native witness; C2 remains active until an independently
-constructed effect/continuation relation exists.
+`docs/sm86_c2_async_tail_facts_v1.json`. The extractor now uses the tracer's
+static function-id/PC map when available, reports deterministic same-warp
+program-order edges and protocol counts, and explicitly records that no
+global instrumentation order was present in either capture. This closes the
+observed-fact deliverable. It is still not an independent native witness;
+effect/continuation construction belongs to C3/C6.
 
 ### C4/C5 exploratory observer calibration — positive statistical slice
 
@@ -224,3 +250,16 @@ queue counters/topology. The identical real store-2 trace drains 36 modeled
 sectors but retains dirty-writeback/coherence uncertainty and an open observer
 upper. Prior finite-upper claims are withdrawn. C1-R is now active: recapture
 matched async/fence cases with fresh controls and exact launch selection.
+
+2026-10-03 continuation: C2's observed-fact extractor is now deterministic and
+reports raw dynamic order edges, static opcode joins, fence/async protocol
+counts, and explicit absence of global instrumentation order. The cacheable
+LDGSTS source-return ledger was repaired to charge one service token per
+coalesced warp instruction rather than per sector. Focused Rust tests pass; a
+fresh release replay of the captured group sweep terminates and retains the
+same open writeback/coherence tails. The repair is a live mechanism result,
+not a tuned NCU fit: group-128 remains 46,978 modeled cycles versus NCU median
+38,348, so C3 remains active for source/destination scheduling and completion
+semantics. Next seam: independently validate the repaired source/destination
+decomposition on a new source-only live capture before any further timing
+change, then exercise fence/visibility service perturbations.
