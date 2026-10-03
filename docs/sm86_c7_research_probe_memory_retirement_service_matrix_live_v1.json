@@ -28,7 +28,7 @@
     "replay_blocked_cells": 0,
     "ncu_complete_cells": 102,
     "instruction_crosswalk_cells": 94,
-    "lower_bound_consistent_cells": 102,
+    "lower_bound_consistent_cells": 94,
     "lower_bound_falsifier_cells": 0,
     "native_macro_dispatches": 0,
     "problems": [
@@ -96,7 +96,9 @@
         ],
         "replay": 132804
       }
-    ]
+    ],
+    "instruction_crosswalk_failures": 8,
+    "lower_bound_consistent_observation_cells": 102
   },
   "cells": [
     {
@@ -151,7 +153,9 @@
         "gap_fraction": 0.2134684865515857,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -206,7 +210,9 @@
         "gap_fraction": 0.21237441559733414,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -261,7 +267,9 @@
         "gap_fraction": 0.2077285398442757,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -316,7 +324,9 @@
         "gap_fraction": 0.19114654002713705,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -371,7 +381,9 @@
         "gap_fraction": 0.2143358395989975,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -426,7 +438,9 @@
         "gap_fraction": 0.21346975265719678,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -481,7 +495,9 @@
         "gap_fraction": 0.2074237907491105,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -536,7 +552,9 @@
         "gap_fraction": 0.19142082061715837,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -591,7 +609,9 @@
         "gap_fraction": 0.23303303303303302,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -646,7 +666,9 @@
         "gap_fraction": 0.22714701601164483,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -701,7 +723,9 @@
         "gap_fraction": 0.19127798507462687,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -756,7 +780,9 @@
         "gap_fraction": 0.15287649188681776,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -811,7 +837,9 @@
         "gap_fraction": 0.2423934231714552,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -866,7 +894,9 @@
         "gap_fraction": 0.23162083936324168,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -921,7 +951,9 @@
         "gap_fraction": 0.24214345032562612,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -976,7 +1008,9 @@
         "gap_fraction": 0.2075021954585372,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -1031,7 +1065,9 @@
         "gap_fraction": 0.23336322869955156,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -1086,7 +1122,9 @@
         "gap_fraction": 0.20344494243782407,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -1141,7 +1179,9 @@
         "gap_fraction": 0.194848419072426,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -1196,7 +1236,9 @@
         "gap_fraction": 0.1737777588338093,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -1251,7 +1293,9 @@
         "gap_fraction": 0.23630840704011435,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -1306,7 +1350,9 @@
         "gap_fraction": 0.23348837209302326,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -1361,7 +1407,9 @@
         "gap_fraction": 0.2718707060132173,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -1416,7 +1464,9 @@
         "gap_fraction": 0.20466108649269654,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -1471,7 +1521,9 @@
         "gap_fraction": 0.19286037053773158,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -1526,7 +1578,9 @@
         "gap_fraction": 0.16811823700184744,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -1581,7 +1635,9 @@
         "gap_fraction": 0.16303324400666327,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -1636,7 +1692,9 @@
         "gap_fraction": 0.15055548461243776,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -1691,7 +1749,9 @@
         "gap_fraction": 0.19497025419145483,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -1746,7 +1806,9 @@
         "gap_fraction": 0.1729928284065069,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -1801,7 +1863,9 @@
         "gap_fraction": 0.3249605701267597,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -1856,7 +1920,9 @@
         "gap_fraction": 0.38487146291843904,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -1911,7 +1977,9 @@
         "gap_fraction": 0.12921856167135395,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -1966,7 +2034,9 @@
         "gap_fraction": 0.14455572549213083,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -2021,7 +2091,9 @@
         "gap_fraction": 0.08775743085366516,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -2076,7 +2148,9 @@
         "gap_fraction": 0.08859934853420195,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -2131,7 +2205,9 @@
         "gap_fraction": 0.09165674710529163,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -2186,7 +2262,9 @@
         "gap_fraction": 0.07981322619176892,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -2241,7 +2319,9 @@
         "gap_fraction": 0.0809110629067245,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -2296,7 +2376,9 @@
         "gap_fraction": 0.07986318475487268,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -2351,7 +2433,9 @@
         "gap_fraction": 0.14001587144132527,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -2406,7 +2490,9 @@
         "gap_fraction": 0.1570734078755469,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -2461,7 +2547,9 @@
         "gap_fraction": 0.10820717131474103,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -2516,7 +2604,9 @@
         "gap_fraction": 0.109484404837683,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -2571,7 +2661,9 @@
         "gap_fraction": 0.10868064773028935,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -2626,7 +2718,9 @@
         "gap_fraction": 0.09994689325544344,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -2681,7 +2775,9 @@
         "gap_fraction": 0.10180719698977159,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -2736,7 +2832,9 @@
         "gap_fraction": 0.09913357784510711,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -2791,7 +2889,9 @@
         "gap_fraction": 0.20284495021337126,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -2846,7 +2946,9 @@
         "gap_fraction": 0.20250462501778854,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -2901,7 +3003,9 @@
         "gap_fraction": 0.1617242193030756,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -2956,7 +3060,9 @@
         "gap_fraction": 0.16225139533055577,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -3011,7 +3117,9 @@
         "gap_fraction": 0.14818394137070146,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -3066,7 +3174,9 @@
         "gap_fraction": 0.20102651839178784,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -3121,7 +3231,9 @@
         "gap_fraction": 0.20176625596467487,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -3176,7 +3288,9 @@
         "gap_fraction": 0.1639601474856829,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -3231,7 +3345,9 @@
         "gap_fraction": 0.1642879548306148,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -3286,7 +3402,9 @@
         "gap_fraction": 0.15064643057897695,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -3341,7 +3459,9 @@
         "gap_fraction": 0.1728772578580572,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -3396,7 +3516,9 @@
         "gap_fraction": 0.17323002558999148,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -3451,7 +3573,9 @@
         "gap_fraction": 0.12977819726285983,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -3506,7 +3630,9 @@
         "gap_fraction": 0.12984663782933542,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -3561,7 +3687,9 @@
         "gap_fraction": 0.11614252392825546,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -3616,7 +3744,9 @@
         "gap_fraction": 0.12209620649198279,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -3671,7 +3801,9 @@
         "gap_fraction": 0.12106499608457322,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -3726,7 +3858,9 @@
         "gap_fraction": 0.10850791620022389,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -3781,7 +3915,9 @@
         "gap_fraction": 0.17164019656719606,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -3836,7 +3972,9 @@
         "gap_fraction": 0.1728772578580572,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -3891,7 +4029,9 @@
         "gap_fraction": 0.1319629687745175,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -3946,7 +4086,9 @@
         "gap_fraction": 0.13243942601740766,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -4001,7 +4143,9 @@
         "gap_fraction": 0.11876503608660786,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -4056,7 +4200,9 @@
         "gap_fraction": 0.12346739554861383,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -4111,7 +4257,9 @@
         "gap_fraction": 0.12476606363069245,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -4166,7 +4314,9 @@
         "gap_fraction": 0.11021548284118117,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -4221,7 +4371,9 @@
         "gap_fraction": 0.37156604934817883,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -4276,7 +4428,9 @@
         "gap_fraction": 0.5032292218104817,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -4331,7 +4485,9 @@
         "gap_fraction": 0.3762079306897701,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -4386,7 +4542,9 @@
         "gap_fraction": 0.5073498530029399,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -4441,7 +4599,9 @@
         "gap_fraction": 0.19757288737605447,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -4496,7 +4656,9 @@
         "gap_fraction": 0.17707633758674726,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -4551,7 +4713,9 @@
         "gap_fraction": 0.21283391405342625,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -4606,7 +4770,9 @@
         "gap_fraction": 0.17770221904080172,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -4661,7 +4827,9 @@
         "gap_fraction": 0.18062130177514793,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -4716,7 +4884,9 @@
         "gap_fraction": 0.16573772684710394,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -4771,7 +4941,9 @@
         "gap_fraction": 0.17922501296584425,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -4826,7 +4998,9 @@
         "gap_fraction": 0.16644390982803173,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -4881,7 +5055,9 @@
         "gap_fraction": 0.22080619276880958,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -4931,12 +5107,19 @@
         "cache_control": "all"
       },
       "comparison": {
-        "lower_bound_consistency": true,
-        "gap_cycles": 4579.0,
-        "gap_fraction": 0.35681446271331724,
+        "lower_bound_consistency": null,
+        "gap_cycles": null,
+        "gap_fraction": null,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "mismatch",
+        "score_applicable": false,
+        "raw_lower_bound_comparison": {
+          "lower_bound_consistency": true,
+          "gap_cycles": 4579.0,
+          "gap_fraction": 0.35681446271331724
+        }
       }
     },
     {
@@ -4991,7 +5174,9 @@
         "gap_fraction": 0.21984877126654065,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -5041,12 +5226,19 @@
         "cache_control": "all"
       },
       "comparison": {
-        "lower_bound_consistency": true,
-        "gap_cycles": 8783.0,
-        "gap_fraction": 0.5155250337500734,
+        "lower_bound_consistency": null,
+        "gap_cycles": null,
+        "gap_fraction": null,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "mismatch",
+        "score_applicable": false,
+        "raw_lower_bound_comparison": {
+          "lower_bound_consistency": true,
+          "gap_cycles": 8783.0,
+          "gap_fraction": 0.5155250337500734
+        }
       }
     },
     {
@@ -5101,7 +5293,9 @@
         "gap_fraction": 0.18752925756015354,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -5151,12 +5345,19 @@
         "cache_control": "all"
       },
       "comparison": {
-        "lower_bound_consistency": true,
-        "gap_cycles": 6085.0,
-        "gap_fraction": 0.2595879015400367,
+        "lower_bound_consistency": null,
+        "gap_cycles": null,
+        "gap_fraction": null,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "mismatch",
+        "score_applicable": false,
+        "raw_lower_bound_comparison": {
+          "lower_bound_consistency": true,
+          "gap_cycles": 6085.0,
+          "gap_fraction": 0.2595879015400367
+        }
       }
     },
     {
@@ -5211,7 +5412,9 @@
         "gap_fraction": 0.23501410437235543,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -5261,12 +5464,19 @@
         "cache_control": "all"
       },
       "comparison": {
-        "lower_bound_consistency": true,
-        "gap_cycles": 9400.0,
-        "gap_fraction": 0.35132306772312755,
+        "lower_bound_consistency": null,
+        "gap_cycles": null,
+        "gap_fraction": null,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "mismatch",
+        "score_applicable": false,
+        "raw_lower_bound_comparison": {
+          "lower_bound_consistency": true,
+          "gap_cycles": 9400.0,
+          "gap_fraction": 0.35132306772312755
+        }
       }
     },
     {
@@ -5321,7 +5531,9 @@
         "gap_fraction": 0.20981699531848488,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -5371,12 +5583,19 @@
         "cache_control": "all"
       },
       "comparison": {
-        "lower_bound_consistency": true,
-        "gap_cycles": 4598.0,
-        "gap_fraction": 0.29215910535010803,
+        "lower_bound_consistency": null,
+        "gap_cycles": null,
+        "gap_fraction": null,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "mismatch",
+        "score_applicable": false,
+        "raw_lower_bound_comparison": {
+          "lower_bound_consistency": true,
+          "gap_cycles": 4598.0,
+          "gap_fraction": 0.29215910535010803
+        }
       }
     },
     {
@@ -5431,7 +5650,9 @@
         "gap_fraction": 0.2948474490441828,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -5481,12 +5702,19 @@
         "cache_control": "all"
       },
       "comparison": {
-        "lower_bound_consistency": true,
-        "gap_cycles": 9235.0,
-        "gap_fraction": 0.4532515337423313,
+        "lower_bound_consistency": null,
+        "gap_cycles": null,
+        "gap_fraction": null,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "mismatch",
+        "score_applicable": false,
+        "raw_lower_bound_comparison": {
+          "lower_bound_consistency": true,
+          "gap_cycles": 9235.0,
+          "gap_fraction": 0.4532515337423313
+        }
       }
     },
     {
@@ -5541,7 +5769,9 @@
         "gap_fraction": 0.1761015257379153,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -5591,12 +5821,19 @@
         "cache_control": "all"
       },
       "comparison": {
-        "lower_bound_consistency": true,
-        "gap_cycles": 4236.0,
-        "gap_fraction": 0.2682370820668693,
+        "lower_bound_consistency": null,
+        "gap_cycles": null,
+        "gap_fraction": null,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "mismatch",
+        "score_applicable": false,
+        "raw_lower_bound_comparison": {
+          "lower_bound_consistency": true,
+          "gap_cycles": 4236.0,
+          "gap_fraction": 0.2682370820668693
+        }
       }
     },
     {
@@ -5651,7 +5888,9 @@
         "gap_fraction": 0.3326017903551834,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "matched",
+        "score_applicable": true
       }
     },
     {
@@ -5701,14 +5940,21 @@
         "cache_control": "all"
       },
       "comparison": {
-        "lower_bound_consistency": true,
-        "gap_cycles": 9612.0,
-        "gap_fraction": 0.45408163265306123,
+        "lower_bound_consistency": null,
+        "gap_cycles": null,
+        "gap_fraction": null,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
-        "point_estimator": "not_claimed"
+        "point_estimator": "not_claimed",
+        "instruction_crosswalk": "mismatch",
+        "score_applicable": false,
+        "raw_lower_bound_comparison": {
+          "lower_bound_consistency": true,
+          "gap_cycles": 9612.0,
+          "gap_fraction": 0.45408163265306123
+        }
       }
     }
   ],
-  "interpretation": "All 102 declared memory_retirement_service cells pass host correctness, fresh NVBit capture, and five NCU repetitions. Replay now completes all 102 cells after the simulator parks CCTL.IVALL behind pending external L1-fill responses when a response horizon exists. Eight system-fence cells retain explicit NCU/replay instruction-count mismatches (NCU includes nine additional warp instructions per CTA); they are crosswalk failures, not silently scored rows. Lower-bound consistency is reported only where instruction identity matches; completion uppers and native dispatch remain open."
+  "interpretation": "All 102 declared memory_retirement_service cells pass host correctness, fresh NVBit capture, and five NCU repetitions. Replay completes all 102 cells after the CCTL.IVALL pending-fill repair. Ninety-four cells have matching simulator/NCU instruction identity; eight system-fence cells retain an explicit crosswalk mismatch (NCU reports nine additional warp instructions per CTA) and are not scored for lower-bound consistency. Completion uppers and native dispatch remain open."
 }

@@ -38,7 +38,8 @@
         "instruction_crosswalk_cells",
         "lower_bound_consistent_cells",
         "lower_bound_falsifier_cells",
-        "native_macro_dispatches"
+        "native_macro_dispatches",
+        "instruction_crosswalk_failures"
       ],
       "additionalProperties": true
     },
