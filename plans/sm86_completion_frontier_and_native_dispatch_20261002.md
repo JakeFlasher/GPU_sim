@@ -180,6 +180,14 @@ and `docs/sm86_completion_frontier_c4_destination_layout_holdout_v1.json`.
 This remains one controlled layout family; it is not a semantic completion
 upper or a general hardware-accuracy result.
 
+The phase-assay probe itself was corrected before another capture: its
+`correct` field now compares the returned lane-0 token against a host
+recomputation from the deterministic source initialization, in addition to
+checking interval-sum arithmetic. Three direct SM86 runs (cache-all compact,
+cache-all conflict, and streaming severe) pass both checks. Existing phase
+captures remain historical because the executable changed; no old capture is
+retroactively relabeled.
+
 The next source-side repair corrected a concrete granularity error in the
 model-local LDGSTS return ledger. The old code charged the eight-cycle
 architecture-local token once per returned 32-byte sector; the raw trace

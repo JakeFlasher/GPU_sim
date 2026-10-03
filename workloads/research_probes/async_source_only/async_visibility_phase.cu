@@ -208,6 +208,28 @@ int parse_int(const char* text) {
     return static_cast<int>(value);
 }
 
+std::uint32_t source_word(std::size_t index) {
+    return static_cast<std::uint32_t>(index) * 1664525u +
+           1013904223u ^ 0x9e3779b9u;
+}
+
+std::uint32_t expected_lane_zero_token(int groups, int depth, bool streaming) {
+    std::uint32_t token = 0x510e527fu;
+    for (int group = 0; group < groups; ++group) {
+        const std::size_t source_group = streaming
+            ? static_cast<std::size_t>(group) * depth * kSourcePositionStride
+            : 0u;
+        const std::size_t word = source_group / sizeof(std::uint32_t);
+        const std::uint32_t x = source_word(word + 0u);
+        const std::uint32_t y = source_word(word + 1u);
+        const std::uint32_t z = source_word(word + 2u);
+        const std::uint32_t w = source_word(word + 3u);
+        token ^= x + (y << 3) + (z << 7) + (w << 11) +
+                 static_cast<std::uint32_t>(group);
+    }
+    return token;
+}
+
 int main(int argc, char** argv) {
     int groups = kDefaultGroups;
     int depth = 4;
@@ -254,8 +276,7 @@ int main(int argc, char** argv) {
     std::vector<std::uint32_t> host_source(
         chunks * kSourcePositionStride / sizeof(std::uint32_t));
     for (std::size_t i = 0; i < host_source.size(); ++i) {
-        host_source[i] = static_cast<std::uint32_t>(i) * 1664525u +
-                         1013904223u ^ 0x9e3779b9u;
+        host_source[i] = source_word(i);
     }
     char* source = nullptr;
     PhaseResult* device_result = nullptr;
@@ -276,23 +297,31 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaMemcpy(&host_result, device_result, sizeof(PhaseResult),
                           cudaMemcpyDeviceToHost));
 
+    const bool sum_consistent =
+        host_result.issue_cycles + host_result.wait_cycles == host_result.total_cycles;
+    const std::uint32_t expected_token =
+        expected_lane_zero_token(groups, depth, streaming);
+    const bool token_correct = host_result.token == expected_token;
+    const bool correct = sum_consistent && token_correct;
+
     std::printf(
         "{\"workload\":\"async_visibility_phase\",\"depth\":%d,"
         "\"route\":\"%s\",\"layout\":\"%s\",\"groups\":%d,"
         "\"issue_cycles\":%llu,\"wait_cycles\":%llu,\"total_cycles\":%llu,"
         "\"sum_consistent\":%s,\"result_store_after_intervals\":true,"
-        "\"token\":%u,\"correct\":true}\n",
+        "\"token\":%u,\"expected_token\":%u,\"token_correct\":%s,"
+        "\"correct\":%s}\n",
         depth, streaming ? "dram" : (bypass ? "l2" : "l1"),
         layout == 0
             ? "compact"
             : (layout == 1 ? "conflict" : (layout == 2 ? "severe" : "skew")),
         groups, host_result.issue_cycles, host_result.wait_cycles,
         host_result.total_cycles,
-        host_result.issue_cycles + host_result.wait_cycles == host_result.total_cycles
-            ? "true" : "false",
-        host_result.token);
+        sum_consistent ? "true" : "false",
+        host_result.token, expected_token, token_correct ? "true" : "false",
+        correct ? "true" : "false");
 
     CUDA_CHECK(cudaFree(device_result));
     CUDA_CHECK(cudaFree(source));
-    return 0;
+    return correct ? 0 : 1;
 }

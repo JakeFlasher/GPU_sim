@@ -223,6 +223,13 @@ and `docs/sm86_completion_frontier_c4_destination_layout_holdout_v1.json`.
 This is one controlled layout family, not a semantic upper or global accuracy
 claim.
 
+The `async_visibility_phase` probe now independently recomputes and checks its
+returned lane-0 token from the deterministic source initialization; it no
+longer prints an unconditional correctness boolean. Fresh direct runs for
+cache-all compact, cache-all conflict, and streaming severe all pass token and
+interval-sum checks. Prior phase captures are historical because the binary
+changed.
+
 A matched one-warp `c00`/`c11` differential is retained in
 `docs/sm86_completion_frontier_c3_async_endpoint_differential_warp1_v1.json`.
 Five fresh NCU medians are 7,194 and 14,668 cycles (7,474-cycle increment),
