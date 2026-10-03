@@ -242,7 +242,7 @@ open dirty-writeback/coherence tails; no native macro dispatch was requested.
 
 The C7 inventory lists 15 portable rows, 31 SM86-capable rows among 92
 SimBench rows, 34 research-probe directories, and 203 SOL baseline problems.
-Portable timing paths and twenty-one direct SimBench slices have completed:
+Portable timing paths and twenty-two direct SimBench slices have completed:
 `fp32_fma_dep_chain`, `cp_async_shared_tile_copy`, `global_atomic_histogram`,
 `global_vectorized_128b_copy`, `bf16_hmma_gemm_traceable`,
 `global_scalar_32b_copy`, `global_atomic_return_used`,
@@ -250,9 +250,9 @@ Portable timing paths and twenty-one direct SimBench slices have completed:
 `shared_bank_conflict_stride`, `l2_thrash_pointer_chase`,
 `l2_persisting_window_sweep`, `l2_prefetch_hint_sweep`, and
 `warm_cold_pair_relaunch`, and
-`carveout_sensitivity_probe`, and `working_set_capacity_sweep`, and `dram_stream_stride_mix`, and `local_dynamic_index_array`, and `local_volatile_array`, `register_spill_local_mem`. These check outputs at the captured shape; the FP32
+`carveout_sensitivity_probe`, and `working_set_capacity_sweep`, and `dram_stream_stride_mix`, and `local_dynamic_index_array`, and `local_volatile_array`, `register_spill_local_mem`, and `global_atomic_max_histogram`. These check outputs at the captured shape; the FP32
 direct slice is timing-only (its separate correctness-shape run does not
-validate that captured shape). All twenty-one retain open tails and zero native
+validate that captured shape). All twenty-two retain open tails and zero native
 macro dispatch. The inventory is
 `docs/sm86_c7_workload_population_inventory_v1.json`.
 
@@ -301,6 +301,8 @@ C7-S24 local dynamic-index is complete: STL/LDL local traffic is exposed, replay
 C7-S25 local volatile-array is complete: STL local traffic is exposed, replay/NCU match at 29,017 instructions, and simulator lower 524,608 exceeds NCU median 422,474 by 102,134 cycles (24.18%). See `docs/sm86_c7_simbench_local_volatile_array_direct_live_v1.json`.
 
 C7-S26 register-spill local memory is complete: -maxrregcount=32 exposes 424-byte STACK/STL traffic, replay/NCU match at 271,680 instructions, and simulator lower 30,010 exceeds NCU median 23,073 by 6,937 cycles (30.08%). See `docs/sm86_c7_simbench_register_spill_local_mem_direct_live_v1.json`.
+
+C7-S27 atomic max histogram is complete: deterministic RED.MAX histogram checks pass, replay/NCU match at 42,874 instructions, and simulator lower 436,096 is below NCU median 568,408 while tails remain open. See `docs/sm86_c7_simbench_global_atomic_max_histogram_direct_live_v1.json`.
 
 C7-S23 DRAM stream stride is complete: replay/NCU match at 1,716,864
 instructions, while simulator lower 550,005 exceeds NCU median 419,040 by

@@ -925,10 +925,20 @@ lower-bound consistency is false by 6,937 cycles (30.08%). This is a real
 spill/local-memory falsifier; tails remain open and native dispatch is zero.
 Evidence: `docs/sm86_c7_simbench_register_spill_local_mem_direct_live_v1.json`.
 
-### C7-S27 — next active milestone
+### C7-S27 — atomic max histogram slice — complete
 
-Run one additional unrun SM86 SimBench row from the remaining control/atomic
-population (prefer global_atomic_max_histogram or global_atomic_max_return_used).
+The repaired global_atomic_max_histogram binary checks identity output and the
+deterministic final atomicMax histogram; fresh SASS emits RED.MAX. Replay has
+full one-block coverage and 42,874 records, and NCU reports the same
+instructions. NCU gpc cycles are 568531,567884,568408,568964,568350 (median
+568408), while simulator lower is 436096, so lower-bound consistency is true;
+reduction RMW and dirty-writeback/coherence tails remain open and native dispatch
+is zero. Evidence: docs/sm86_c7_simbench_global_atomic_max_histogram_direct_live_v1.json.
+
+### C7-S28 — next active milestone
+
+Run one additional unrun SM86 SimBench row from the remaining atomic/control
+population (prefer global_atomic_max_return_used or dram_streaming_dot_product).
 Preserve checked correctness, exact binary/arguments, fresh NVBit, replay, and
 five-repetition NCU; retain every unsupported-SASS, OOM/OOD, or falsifying
 outcome without tuning scored parameters.
