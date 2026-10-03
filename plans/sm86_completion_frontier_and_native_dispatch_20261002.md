@@ -22,12 +22,12 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    `docs/sm86_c7_simbench_dram_streaming_dot_product_direct_live_v1.json`;
    the former tiny `trace_00` run is only a smoke check.
    [Ampere shared memory](https://docs.nvidia.com/cuda/ampere-tuning-guide/#unified-shared-memory-l1-texture-cache)
-3. **C7-S33J complete; C7-S33K active.** All four probe families sampled so
+3. **C7-S33K complete; C7-S33L active.** All four probe families sampled so
    far have live evidence: 68 issue-port cells, 36 async-barrier cells, 30
-   store-ack arms, and 102 memory-retirement cells. The remaining blockers are
-   four L1 pending-fill invalidation replays and six system-fence instruction
-   crosswalk mismatches. Repair those blockers before expanding to another
-   family; no timing/card parameter is selected from scored NCU targets.
+   store-ack arms, and 102 memory-retirement cells. CCTL pending-fill replay
+   blockers are repaired; eight system-fence instruction crosswalk mismatches
+   remain. Investigate those mismatches before expanding to another family; no
+   timing/card parameter is selected from scored NCU targets.
 
 ## Outcome
 
@@ -1122,25 +1122,31 @@ completion remains open and native dispatch is zero. Evidence:
 `docs/sm86_c7_research_probe_memory_retirement_service_live_v1.json` and its
 schema.
 
-### C7-S33J — memory-retirement 102-cell matrix — complete with blockers
+### C7-S33J — memory-retirement 102-cell matrix — complete
 
 All 102 declared cells pass host correctness, fresh NVBit capture, and five
-NCU repetitions. Replay completes 98 cells with per-cell instruction
-crosswalks. Four load/system-or-device fence cells remain explicit replay
-blockers because `CCTL.IVALL` encounters pending L1 fills; six system-fence
-cells have NCU/replay instruction-count mismatches and are retained as
-crosswalk failures rather than scored. The readiness change now waits on
-timed pending fills before cache invalidation, while untimed/event-driven
-fills remain conservative blockers. No hardware completion upper or native
-dispatch is claimed. Evidence:
+NCU repetitions. Replay now completes all 102 cells after the simulator parks
+`CCTL.IVALL` behind the next external L1-fill response horizon when a pending
+fill has no local timestamp. Eight system-fence cells retain explicit NCU/replay
+instruction-count mismatches (NCU reports nine additional warp instructions
+per CTA); these are crosswalk failures, not silently scored rows. Lower-bound
+consistency is reported only where instruction identity matches. Evidence:
 `docs/sm86_c7_research_probe_memory_retirement_service_matrix_live_v1.json`
-and its schema.
+and its schema. Completion uppers and native dispatch remain open.
 
-### C7-S33K — next active milestone
+### C7-S33K — CCTL pending-fill repair — complete
 
-Repair the remaining four `CCTL.IVALL` pending-fill blockers without dropping
-or inventing response tokens. The implementation must distinguish timed fills
-that can be parked until completion from event-driven fills that lack an
-observable deadline; the latter should remain typed refusal. Re-run the four
-blocked cells and the six instruction-mismatch cells before expanding another
-probe family.
+The replay seam now refuses to mutate L1 on an untimed pending fill. It parks
+the SM at the system-provided response horizon, then retries `CCTL.IVALL`
+after the response is consumed; timed fills use the cache's explicit due-time
+frontier. Focused sim-mem/sim-sm tests pass (199 + 493 tests), and all four
+previous CCTL replay blockers now complete. No invented completion token or
+upper bound was added.
+
+### C7-S33L — next active milestone
+
+Investigate the eight system-fence NCU/replay instruction-count mismatches.
+Compare static/dynamic opcode populations and NCU metric semantics first; do
+not pad simulator records or reinterpret NCU values. Either establish a
+matched instruction identity contract or retain those rows as explicit
+crosswalk exclusions before expanding another probe family.

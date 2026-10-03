@@ -1,10 +1,59 @@
 {
-  "$schema":"https://json-schema.org/draft/2020-12/schema",
-  "$id":"https://gpu-simulator.local/schemas/sm86_c7_research_probe_memory_retirement_service_matrix_live_v1.schema.json",
-  "title":"SM86 memory retirement research-probe matrix live result",
-  "type":"object",
-  "required":["schema","status","host_identity","identity","summary","cells","interpretation"],
-  "properties":{
-    "schema":{"const":"sm86_c7_research_probe_memory_retirement_service_matrix_live_v1"},"status":{"const":"102_cell_correctness_nvbit_ncu_complete_replay_partially_blocked_native_dispatch_refused"},"host_identity":{"type":"object","additionalProperties":true},"identity":{"type":"object","additionalProperties":true},"summary":{"type":"object","required":["cells","correctness_passed","replay_complete_cells","replay_blocked_cells","ncu_complete_cells","instruction_crosswalk_cells","lower_bound_consistent_cells","lower_bound_falsifier_cells","native_macro_dispatches"],"additionalProperties":true},"cells":{"type":"array","minItems":102,"items":{"type":"object","additionalProperties":true}},"interpretation":{"type":"string","minLength":1}
-  },"additionalProperties":false
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpu-simulator.local/schemas/sm86_c7_research_probe_memory_retirement_service_matrix_live_v1.schema.json",
+  "title": "SM86 memory retirement research-probe matrix live result",
+  "type": "object",
+  "required": [
+    "schema",
+    "status",
+    "host_identity",
+    "identity",
+    "summary",
+    "cells",
+    "interpretation"
+  ],
+  "properties": {
+    "schema": {
+      "const": "sm86_c7_research_probe_memory_retirement_service_matrix_live_v1"
+    },
+    "status": {
+      "const": "102_cell_correctness_nvbit_ncu_complete_replay_complete_crosswalk_partial_native_dispatch_refused"
+    },
+    "host_identity": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "summary": {
+      "type": "object",
+      "required": [
+        "cells",
+        "correctness_passed",
+        "replay_complete_cells",
+        "replay_blocked_cells",
+        "ncu_complete_cells",
+        "instruction_crosswalk_cells",
+        "lower_bound_consistent_cells",
+        "lower_bound_falsifier_cells",
+        "native_macro_dispatches"
+      ],
+      "additionalProperties": true
+    },
+    "cells": {
+      "type": "array",
+      "minItems": 102,
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "interpretation": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": false
 }

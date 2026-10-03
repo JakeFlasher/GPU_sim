@@ -2383,30 +2383,33 @@ impl L1Cache {
     /// only the admitted `CCTL.IVALL`-style operation: pending fills and dirty
     /// sectors refuse because the SM event layer must first account for their
     /// response/writeback ordering.
-    pub fn invalidate_all(&mut self) -> Result<u64, L1AccessError> {
+    pub fn preflight_invalidate_all(&self) -> Result<u64, L1AccessError> {
         if !self.line_fills.is_empty() || !self.sector_fills.is_empty() {
             return Err(L1AccessError::InvalidationAllPendingFill);
         }
         if let Some((&line, &dirty_mask)) = self.dirty.iter().next() {
             return Err(L1AccessError::DirtyResidencyBlocksInvalidation { line, dirty_mask });
         }
-        let sectors = self
+        Ok(self
             .sectors
             .values()
             .map(|mask| u64::from(mask.count_ones()))
-            .sum();
+            .sum())
+    }
+
+    pub fn invalidate_all(&mut self) -> Result<u64, L1AccessError> {
+        let sectors = self.preflight_invalidate_all()?;
         self.by_stamp.clear();
         self.stamp_of.clear();
         self.sectors.clear();
         Ok(sectors)
     }
 
-    /// Earliest timestamp at which all currently timed L1 fills have become
-    /// eligible for completion.  A `None` result means either that no fill is
-    /// pending or that at least one fill is event-driven/untimed; callers
-    /// must not invent a cycle in the latter case.
-    pub fn pending_fill_ready_at(&self) -> Option<u64> {
-        self.min_fill_due
+    /// Pending line/sector fills prevent invalidation even when they have no
+    /// local timestamp. Event-mode callers must wait for response events,
+    /// never mistake the absence of a timed deadline for an empty cache.
+    pub fn has_pending_fills(&self) -> bool {
+        !self.line_fills.is_empty() || !self.sector_fills.is_empty()
     }
 
     fn commit_due_fills(

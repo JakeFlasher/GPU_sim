@@ -12873,30 +12873,6 @@ impl<'a> SmCore<'a> {
             )?;
         }
 
-        // CCTL.IVALL is a cache-state transition, not an ordinary issue-only
-        // instruction.  Do not attempt to invalidate a cache while an earlier
-        // L1 fill token is still pending: the cache layer deliberately rejects
-        // that mutation.  Timed fills provide a real readiness frontier; an
-        // untimed/event-driven pending fill remains conservative refusal.
-        if slot.is_cctl_invalidate_all()
-            && let MemModel::L1Shared(state) = &self.mem
-            && let Some(until) = state.l1.pending_fill_ready_at()
-        {
-            observe_readiness_constraint(
-                projected,
-                base,
-                until,
-                // Reuse the compact memory-issue readiness bucket so this
-                // added cache-fill frontier does not enlarge the hot
-                // diagnostics struct; the pending-fill contract is retained
-                // by the explicit comment and readiness constraint.
-                ReadinessCause::MemoryIssueQueue,
-                &mut ready_at,
-                &mut limiting,
-                &mut tied,
-            )?;
-        }
-
         observe_readiness_constraint(
             projected,
             base,
@@ -13923,6 +13899,20 @@ impl<'a> SmCore<'a> {
     /// preserved at the transaction boundary.
     fn issue_ready_at<const CHECK_ASYNC: bool>(&self, subcore: usize, warp: usize) -> Option<u64> {
         let mut warp_ready = self.warps[warp].ready_at()?;
+        if self.warps[warp]
+            .next_slot
+            .is_some_and(IssueSlot::is_cctl_invalidate_all)
+            && let MemModel::L1Shared(state) = &self.mem
+            && (state.l1.has_pending_fills() || !state.retry.is_empty())
+        {
+            // Model-local serialization for whole-cache invalidation. Every
+            // accepted fill (including an unobserved/no-scoreboard load) and
+            // deferred lookup must finish through its normal response path.
+            // Returning None blocks only this warp; siblings remain eligible
+            // and the existing event loop wakes us on external responses.
+            // This is not a hardware CCTL latency or completion-upper claim.
+            return None;
+        }
         if self.instruction_front_end.is_some() {
             warp_ready = warp_ready.max(self.warps[warp].instruction_front_end_ready_at()?);
         }
@@ -15885,11 +15875,27 @@ impl<'a> SmCore<'a> {
     fn issue_cycle(&mut self, out: &mut Vec<MemRequest>) -> Result<bool, IssueError> {
         let t = self.t;
         self.last_issue_picks = [None; SUB_CORES];
-        let selected = if self.has_async_copy_protocol {
+        let mut selected = if self.has_async_copy_protocol {
             self.pick_warps_with_memory_admission::<true>(t)
         } else {
             self.pick_warps_with_memory_admission::<false>(t)
         };
+        if matches!(self.mem, MemModel::L1Shared(_))
+            && let Some(subcore) = selected.iter().position(|pick| {
+                pick.is_some_and(|warp| {
+                    self.warps[warp]
+                        .next_slot
+                        .is_some_and(IssueSlot::is_cctl_invalidate_all)
+                })
+            })
+        {
+            // An invalidation is one cache-state boundary. Do not allow a
+            // sibling picked in this same transaction to allocate a new fill
+            // between the readiness check and invalidate_all().
+            let warp = selected[subcore];
+            selected = [None; SUB_CORES];
+            selected[subcore] = warp;
+        }
         let imc_plan = self.preflight_immediate_constant(selected, t)?;
         let picks = imc_plan.picks;
         let effective_picks = picks;
@@ -15949,6 +15955,13 @@ impl<'a> SmCore<'a> {
             let slot = w
                 .next_slot
                 .ok_or(IssueError::MissingIssueSlot { warp: wix })?;
+            if slot.is_cctl_invalidate_all()
+                && let MemModel::L1Shared(state) = &self.mem
+            {
+                // Dirty-resident mode still requires a real writeback path;
+                // preserve its typed error before any issue-state mutation.
+                state.l1.preflight_invalidate_all()?;
+            }
             let reaches_end = w.next_issue_retires()?;
             // Final BAR.SYNC participates in the CTA rendezvous and retires
             // only once that generation releases.

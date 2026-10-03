@@ -1,6 +1,6 @@
 {
   "schema": "sm86_c7_research_probe_memory_retirement_service_matrix_live_v1",
-  "status": "102_cell_correctness_nvbit_ncu_complete_replay_partially_blocked_native_dispatch_refused",
+  "status": "102_cell_correctness_nvbit_ncu_complete_replay_complete_crosswalk_partial_native_dispatch_refused",
   "host_identity": {
     "device_index": 0,
     "name": "NVIDIA GeForce RTX 3090 Ti",
@@ -24,11 +24,11 @@
   "summary": {
     "cells": 102,
     "correctness_passed": 102,
-    "replay_complete_cells": 98,
-    "replay_blocked_cells": 4,
+    "replay_complete_cells": 102,
+    "replay_blocked_cells": 0,
     "ncu_complete_cells": 102,
-    "instruction_crosswalk_cells": 92,
-    "lower_bound_consistent_cells": 98,
+    "instruction_crosswalk_cells": 94,
+    "lower_bound_consistent_cells": 102,
     "lower_bound_falsifier_cells": 0,
     "native_macro_dispatches": 0,
     "problems": [
@@ -49,24 +49,20 @@
         "replay": 92736
       },
       {
-        "cell": "b1_load_device_line_stream_d16_l32",
-        "kind": "replay_blocked",
-        "stderr": "replay: L1 access failed: L1-wide invalidation overlaps one or more pending fills\n"
-      },
-      {
         "cell": "b1_load_system_line_stream_d16_l32",
-        "kind": "replay_blocked",
-        "stderr": "replay: L1 access failed: L1-wide invalidation overlaps one or more pending fills\n"
-      },
-      {
-        "cell": "b84_load_device_line_stream_d16_l32",
-        "kind": "replay_blocked",
-        "stderr": "replay: L1 access failed: L1-wide invalidation overlaps one or more pending fills\n"
+        "kind": "ncu_replay_instruction_mismatch",
+        "ncu": [
+          1574
+        ],
+        "replay": 1565
       },
       {
         "cell": "b84_load_system_line_stream_d16_l32",
-        "kind": "replay_blocked",
-        "stderr": "replay: L1 access failed: L1-wide invalidation overlaps one or more pending fills\n"
+        "kind": "ncu_replay_instruction_mismatch",
+        "ncu": [
+          132216
+        ],
+        "replay": 131460
       },
       {
         "cell": "b1_store_system_line_stream_d16_l32",
@@ -5075,10 +5071,14 @@
         "global_event_order_observed": false
       },
       "replay": {
-        "status": "replay_blocked",
-        "records": null,
-        "lower_bound_cycles": null,
-        "coverage": null
+        "status": "replayed",
+        "records": 1565,
+        "lower_bound_cycles": 17356,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        }
       },
       "ncu": {
         "values": [
@@ -5096,9 +5096,9 @@
         "cache_control": "all"
       },
       "comparison": {
-        "lower_bound_consistency": null,
-        "gap_cycles": null,
-        "gap_fraction": null,
+        "lower_bound_consistency": true,
+        "gap_cycles": 4006.0,
+        "gap_fraction": 0.18752925756015354,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
         "point_estimator": "not_claimed"
@@ -5126,10 +5126,14 @@
         "global_event_order_observed": false
       },
       "replay": {
-        "status": "replay_blocked",
-        "records": null,
-        "lower_bound_cycles": null,
-        "coverage": null
+        "status": "replayed",
+        "records": 1565,
+        "lower_bound_cycles": 17356,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        }
       },
       "ncu": {
         "values": [
@@ -5147,9 +5151,9 @@
         "cache_control": "all"
       },
       "comparison": {
-        "lower_bound_consistency": null,
-        "gap_cycles": null,
-        "gap_fraction": null,
+        "lower_bound_consistency": true,
+        "gap_cycles": 6085.0,
+        "gap_fraction": 0.2595879015400367,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
         "point_estimator": "not_claimed"
@@ -5177,10 +5181,14 @@
         "global_event_order_observed": false
       },
       "replay": {
-        "status": "replay_blocked",
-        "records": null,
-        "lower_bound_cycles": null,
-        "coverage": null
+        "status": "replayed",
+        "records": 131460,
+        "lower_bound_cycles": 17356,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 84,
+          "population_blocks": 84
+        }
       },
       "ncu": {
         "values": [
@@ -5198,9 +5206,9 @@
         "cache_control": "all"
       },
       "comparison": {
-        "lower_bound_consistency": null,
-        "gap_cycles": null,
-        "gap_fraction": null,
+        "lower_bound_consistency": true,
+        "gap_cycles": 5332.0,
+        "gap_fraction": 0.23501410437235543,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
         "point_estimator": "not_claimed"
@@ -5228,10 +5236,14 @@
         "global_event_order_observed": false
       },
       "replay": {
-        "status": "replay_blocked",
-        "records": null,
-        "lower_bound_cycles": null,
-        "coverage": null
+        "status": "replayed",
+        "records": 131460,
+        "lower_bound_cycles": 17356,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 84,
+          "population_blocks": 84
+        }
       },
       "ncu": {
         "values": [
@@ -5249,9 +5261,9 @@
         "cache_control": "all"
       },
       "comparison": {
-        "lower_bound_consistency": null,
-        "gap_cycles": null,
-        "gap_fraction": null,
+        "lower_bound_consistency": true,
+        "gap_cycles": 9400.0,
+        "gap_fraction": 0.35132306772312755,
         "native_macro_dispatches": 0,
         "hardware_completion": "not_observed",
         "point_estimator": "not_claimed"
@@ -5698,5 +5710,5 @@
       }
     }
   ],
-  "interpretation": "All 102 declared memory_retirement_service cells pass host correctness, fresh NVBit capture, and five NCU repetitions with per-cell instruction crosswalks where replay completes. The simulator replay completes most cells; system-fence load cells with pending L1 fills remain explicit blockers rather than being silently skipped. Lower-bound consistency is reported only for replay-complete cells; completion uppers and native dispatch remain open."
+  "interpretation": "All 102 declared memory_retirement_service cells pass host correctness, fresh NVBit capture, and five NCU repetitions. Replay now completes all 102 cells after the simulator parks CCTL.IVALL behind pending external L1-fill responses when a response horizon exists. Eight system-fence cells retain explicit NCU/replay instruction-count mismatches (NCU includes nine additional warp instructions per CTA); they are crosswalk failures, not silently scored rows. Lower-bound consistency is reported only where instruction identity matches; completion uppers and native dispatch remain open."
 }
