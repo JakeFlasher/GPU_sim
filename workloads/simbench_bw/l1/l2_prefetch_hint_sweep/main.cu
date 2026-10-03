@@ -1,107 +1,16 @@
-// Host driver for l2_prefetch_hint_sweep.
-//   in_fp32 = seeded((accesses * warps,), seed, [-1.0, 1.0))
-// Reference: identity round-trip from `in` to `out` over the
-// first `accesses * warps` floats; correctness shape's hash digest
-// verifies determinism (the prefetch hint does not affect output).
-
+// Host driver for l2_prefetch_hint_sweep with bounded shape and output checks.
 #include <cuda_runtime.h>
+#include <errno.h>
+#include <limits.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-extern "C" void l2_prefetch_hint_sweep_launch(
-    const float *d_in, float *d_out, float *d_sink,
-    int accesses, int prefetch_distance, int warps,
-    cudaStream_t stream);
-
-static inline uint32_t next_u32(uint32_t *s) {
-    *s = (*s) * 1103515245u + 12345u;
-    return *s;
-}
-
-static void seed_tensor(float *flat, size_t n, uint32_t seed,
-                        double lo, double hi) {
-    uint32_t st = seed * 2654435761u + 1u;
-    for (size_t i = 0; i < n; ++i) {
-        double r = (double)next_u32(&st) / 4294967296.0;
-        flat[i] = (float)(lo + (hi - lo) * r);
-    }
-}
-
-static void fail(const char *msg, int rc) {
-    fprintf(stderr, "l2_prefetch_hint_sweep_run: %s "
-            "(rc=%d: %s)\n", msg, rc,
-            cudaGetErrorString((cudaError_t)rc));
-    exit(1);
-}
-
-int main(int argc, char **argv) {
-    int accesses = 64;
-    int prefetch_distance = 4;
-    int warps = 4;
-    uint32_t seed = 42;
-    const char *shape_point = "correctness_00";
-    for (int i = 1; i < argc; ++i) {
-        if (strcmp(argv[i], "--accesses") == 0 && i + 1 < argc)
-            accesses = atoi(argv[++i]);
-        else if (strcmp(argv[i], "--prefetch-distance") == 0 && i + 1 < argc)
-            prefetch_distance = atoi(argv[++i]);
-        else if (strcmp(argv[i], "--warps") == 0 && i + 1 < argc)
-            warps = atoi(argv[++i]);
-        else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc)
-            seed = (uint32_t)atoi(argv[++i]);
-        else if (strcmp(argv[i], "--shape-point") == 0 && i + 1 < argc)
-            shape_point = argv[++i];
-        else {
-            fprintf(stderr, "l2_prefetch_hint_sweep_run: "
-                    "unknown arg %s\n", argv[i]);
-            return 2;
-        }
-    }
-    const size_t n = (size_t)accesses * warps;
-    float *h_in = (float *)malloc(n * sizeof(float));
-    float *h_out = (float *)malloc(n * sizeof(float));
-    seed_tensor(h_in, n, seed, -1.0, 1.0);
-
-    float *d_in = nullptr, *d_out = nullptr, *d_sink = nullptr;
-    cudaError_t rc;
-    rc = cudaMalloc(&d_in, n * sizeof(float));
-    if (rc) fail("mc in", rc);
-    rc = cudaMalloc(&d_out, n * sizeof(float));
-    if (rc) fail("mc out", rc);
-    rc = cudaMalloc(&d_sink, sizeof(float));
-    if (rc) fail("mc sink", rc);
-    rc = cudaMemcpy(d_in, h_in, n * sizeof(float),
-                    cudaMemcpyHostToDevice);
-    if (rc) fail("H2D", rc);
-
-    l2_prefetch_hint_sweep_launch(
-        d_in, d_out, d_sink,
-        accesses, prefetch_distance, warps, 0);
-    rc = cudaDeviceSynchronize();
-    if (rc) fail("sync", rc);
-    rc = cudaMemcpy(h_out, d_out, n * sizeof(float),
-                    cudaMemcpyDeviceToHost);
-    if (rc) fail("D2H", rc);
-
-    printf("{\n  \"schema_version\": 1,\n");
-    printf("  \"slug\": \"l2_prefetch_hint_sweep\",\n");
-    printf("  \"shape_set\": \"correctness_shapes\",\n");
-    printf("  \"shape_point\": \"%s\",\n", shape_point);
-    printf("  \"output\": [");
-    for (int a = 0; a < accesses; ++a) {
-        if (a > 0) printf(",");
-        printf("[");
-        for (int w = 0; w < warps; ++w) {
-            if (w > 0) printf(",");
-            printf("%.6g", h_out[a * warps + w]);
-        }
-        printf("]");
-    }
-    printf("]\n}\n");
-
-    cudaFree(d_in); cudaFree(d_out); cudaFree(d_sink);
-    free(h_in); free(h_out);
-    return 0;
-}
+extern "C" void l2_prefetch_hint_sweep_launch(const float *d_in,float *d_out,float *d_sink,int accesses,int prefetch_distance,int warps,cudaStream_t stream);
+static inline uint32_t next_u32(uint32_t *s){*s=(*s)*1103515245u+12345u;return *s;}
+static void seed_tensor(float *p,size_t n,uint32_t seed){uint32_t st=seed*2654435761u+1u;for(size_t i=0;i<n;++i){double r=(double)next_u32(&st)/4294967296.0;p[i]=(float)(-1.0+2.0*r);}}
+static void fail(const char *m,int rc){fprintf(stderr,"l2_prefetch_hint_sweep_run: %s (rc=%d: %s)\n",m,rc,cudaGetErrorString((cudaError_t)rc));exit(1);}
+static uint32_t parse_u32(const char *name,const char *text,uint32_t max){char *e=nullptr;errno=0;unsigned long long v=strtoull(text,&e,10);if(text[0]<'0'||text[0]>'9'||errno||!e||*e||v==0||v>max){fprintf(stderr,"l2_prefetch_hint_sweep_run: out_of_domain: invalid %s: %s\n",name,text);exit(2);}return(uint32_t)v;}
+int main(int argc,char **argv){int accesses=64,prefetch_distance=4,warps=4;uint32_t seed=42;const char *shape_point="correctness_00";bool summary_only=false;for(int i=1;i<argc;++i){if(!strcmp(argv[i],"--accesses")&&i+1<argc)accesses=(int)parse_u32("accesses",argv[++i],INT_MAX);else if(!strcmp(argv[i],"--prefetch-distance")&&i+1<argc)prefetch_distance=(int)parse_u32("prefetch-distance",argv[++i],INT_MAX);else if(!strcmp(argv[i],"--warps")&&i+1<argc)warps=(int)parse_u32("warps",argv[++i],INT_MAX);else if(!strcmp(argv[i],"--seed")&&i+1<argc)seed=parse_u32("seed",argv[++i],UINT32_MAX);else if(!strcmp(argv[i],"--shape-point")&&i+1<argc)shape_point=argv[++i];else if(!strcmp(argv[i],"--summary"))summary_only=true;else{fprintf(stderr,"l2_prefetch_hint_sweep_run: unknown arg %s\n",argv[i]);return 2;}}
+if(!*shape_point||strspn(shape_point,"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")!=strlen(shape_point)){fprintf(stderr,"l2_prefetch_hint_sweep_run: out_of_domain: invalid shape-point token\n");return 2;}uint64_t total64=(uint64_t)accesses*(uint64_t)warps;if(total64>(uint64_t)INT_MAX-32||total64>SIZE_MAX/(2*sizeof(float))){fprintf(stderr,"l2_prefetch_hint_sweep_run: out_of_domain: shape overflows index or allocation\n");return 2;}size_t n=(size_t)total64,bytes=n*sizeof(float),free_bytes=0,total_bytes=0;cudaError_t rc=cudaMemGetInfo(&free_bytes,&total_bytes);if(rc)fail("memory query",rc);if(bytes>free_bytes/3){fprintf(stderr,"l2_prefetch_hint_sweep_run: out of memory: requested shape exceeds free device memory\n");return 1;}float *h_in=(float*)malloc(bytes),*h_out=(float*)malloc(bytes);if(!h_in||!h_out){fprintf(stderr,"l2_prefetch_hint_sweep_run: out of memory: host allocation failed\n");free(h_in);free(h_out);return 1;}seed_tensor(h_in,n,seed);float *d_in=nullptr,*d_out=nullptr,*d_sink=nullptr,h_sink=0;rc=cudaMalloc(&d_in,bytes);if(rc)fail("mc in",rc);rc=cudaMalloc(&d_out,bytes);if(rc)fail("mc out",rc);rc=cudaMalloc(&d_sink,sizeof(float));if(rc)fail("mc sink",rc);rc=cudaMemset(d_out,0xff,bytes);if(rc)fail("memset out",rc);rc=cudaMemset(d_sink,0xff,sizeof(float));if(rc)fail("memset sink",rc);rc=cudaMemcpy(d_in,h_in,bytes,cudaMemcpyHostToDevice);if(rc)fail("H2D",rc);l2_prefetch_hint_sweep_launch(d_in,d_out,d_sink,accesses,prefetch_distance,warps,0);rc=cudaGetLastError();if(rc)fail("launch",rc);rc=cudaDeviceSynchronize();if(rc)fail("sync",rc);rc=cudaMemcpy(h_out,d_out,bytes,cudaMemcpyDeviceToHost);if(rc)fail("D2H",rc);rc=cudaMemcpy(&h_sink,d_sink,sizeof(float),cudaMemcpyDeviceToHost);if(rc)fail("sink D2H",rc);size_t mismatch=0;for(size_t i=0;i<n;++i)if(!isfinite(h_out[i])||h_out[i]!=h_in[i])++mismatch;bool correct=mismatch==0&&isfinite(h_sink);const char *shape_set=strncmp(shape_point,"trace_",6)==0?"trace_shapes":strncmp(shape_point,"timing_",7)==0?"timing_shapes":"correctness_shapes";printf("{\n  \"schema_version\":1,\n  \"slug\":\"l2_prefetch_hint_sweep\",\n  \"shape_set\":\"%s\",\n  \"shape_point\":\"%s\",\n  \"accesses\":%d,\n  \"prefetch_distance\":%d,\n  \"warps\":%d,\n  \"correct\":%s,\n  \"mismatch_count\":%zu,\n  \"sink\":%.9g",shape_set,shape_point,accesses,prefetch_distance,warps,correct?"true":"false",mismatch,h_sink);if(!summary_only){printf(",\n  \"output\":[");for(int a=0;a<accesses;++a){if(a)printf(",");printf("[");for(int w=0;w<warps;++w){if(w)printf(",");printf("%.6g",h_out[(size_t)a*warps+w]);}printf("]");}printf("]");}printf("\n}\n");cudaFree(d_in);cudaFree(d_out);cudaFree(d_sink);free(h_in);free(h_out);return correct?0:1;}
