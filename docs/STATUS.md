@@ -243,17 +243,18 @@ open dirty-writeback/coherence tails; no native macro dispatch was requested.
 The C7 population inventory is explicit in
 `docs/sm86_c7_workload_population_inventory_v1.json`: 15 active portable-LCD
 rows, 92 SimBench-BW rows (31 SM86-gated), 34 research-probe directories, and
-203 SOL baseline problem directories. Only the portable 15 have the completed
-full pipeline; the remaining populations need bounded shape/memory/OOM
-dispositions before a repository-wide campaign claim.
+203 SOL baseline problem directories. The portable 15 and two direct SimBench
+rows have completed bounded slices; the remaining populations need bounded
+shape/memory/OOM dispositions before a repository-wide campaign claim.
 
-The first SM86 SimBench slice (`fp32_fma_dep_chain`) passes its correctness
-shape. The active SimBench wrapper rejects repository-contained tracers and
-then requires an unavailable runtime sidecar, so that wrapper path remains
-blocked. A direct bounded timing-shape path nevertheless completed native
-execution, NVBit, replay, and five same-binary NCU runs; the analyzer refused
-all candidates and native dispatch was zero. See
-`docs/sm86_c7_simbench_fp32_direct_live_v1.json` and the wrapper-blocker
+Two SM86 SimBench direct slices (`fp32_fma_dep_chain` and
+`cp_async_shared_tile_copy`) pass their correctness shapes. Each completed a
+direct bounded native execution, NVBit trace, replay, and five same-binary NCU
+runs; both analyzers refused all candidates and native dispatch was zero. The
+active SimBench wrapper still rejects repository-contained tracers and then
+requires an unavailable runtime sidecar, so that wrapper path remains blocked.
+See `docs/sm86_c7_simbench_fp32_direct_live_v1.json`,
+`docs/sm86_c7_simbench_cp_async_direct_live_v1.json`, and the wrapper-blocker
 record `docs/sm86_c7_simbench_population_slice_v1.json`.
 
 The `async_visibility_phase` probe now independently recomputes and checks its

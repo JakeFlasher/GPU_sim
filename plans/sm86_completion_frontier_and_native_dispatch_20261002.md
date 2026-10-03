@@ -80,7 +80,7 @@ Three distinct questions must not be conflated:
 | C4 | Independently fit mechanism/observer models using new calibration-only probes, then materialize predictions on untouched cases. No ad-hoc padding or post-score model selection | partial: async group + destination-layout calibration |
 | C5 | Live held-out evaluation of point error, signed bias, finite statistical interval coverage/width, repeat dispersion and OOD; keep semantic tails separate | partial: two controlled async/layout holdouts |
 | C6 | Real scalar native region transition with full front-end/pipeline continuation differential and pre-mutation fallback; extend only after the first real positive case | pending |
-| C7 | Inventory all available workload families (portable, native probes, SOL/other rosters). Full live campaign over the declared supported population; failures remain in coverage denominator | partial: 15-row portable population complete; probe/SOL inventory pending |
+| C7 | Inventory all available workload families (portable, native probes, SOL/other rosters). Full live campaign over the declared supported population; failures remain in coverage denominator | partial: 15-row portable population plus 2 direct SimBench rows complete; remaining populations pending |
 | C8 | Rerun corrected workload failures, remove obsolete interfaces, synchronize supported claims, results and runbook; no unfinished mechanism called complete | pending |
 
 C0-R/C1-R repair the previous work; they do not finish C3/C5/C6. C7 is not
@@ -194,9 +194,10 @@ campaign did not request native macro dispatch.
 The population inventory is now explicit in
 `docs/sm86_c7_workload_population_inventory_v1.json`: 15 active portable-LCD
 rows, 92 SimBench-BW rows (31 with an SM86 arch gate), 34 research-probe
-directories, and 203 SOL baseline problem directories. Only the portable 15
-have the completed full pipeline; the other populations remain pending and
-must receive memory/shape/OOM dispositions before any repository-wide claim.
+directories, and 203 SOL baseline problem directories. The portable 15 and
+two direct SimBench rows have completed bounded slices; the other populations
+remain pending and must receive memory/shape/OOM dispositions before any
+repository-wide claim.
 
 The portable slice has now been executed live, not merely inventoried:
 `docs/sm86_c7_full_live_campaign_v1.json` records 15/15 successful rows,
@@ -206,12 +207,42 @@ correctness (this performance campaign uses timing shapes) or finite accuracy;
 all replay tails remain explicit. C7 remains partial until the other inventoried
 populations receive bounded campaign dispositions.
 
-The first SM86 SimBench slice (`fp32_fma_dep_chain`) passes correctness, but
-the active trace runner rejects the repository-contained NVBit tracer because
-it requires an external split-v2 tracer root. Trace, simulator, and NCU are
-therefore explicitly not started for this row; see
+### C7-S1 — direct SimBench async-copy slice — complete
+
+The second direct SM86 SimBench slice uses the rebuilt
+`cp_async_shared_tile_copy` binary and the exact same arguments for host
+correctness, NVBit, replay, and five fresh NCU application captures. Host
+validation passed with zero mismatches after explicit launch/synchronize error
+checks. The trace contains one complete block, 644 replay records, 32
+`LDGSTS` copy instructions, and four committed/waited async groups. NCU
+`gpc__cycles_elapsed.max` is `4247,4233,4232,4264,4229` (median `4233`);
+the simulator completion lower bound is `2190`, so lower-bound consistency is
+true but no point estimator or finite upper is claimed. Dirty-writeback and
+coherence tails remain open, and the independent extractor observes no
+hardware completion token, owner/read-from relation, or global instrumentation
+order. The fast analyzer refuses all four warps for nonfull predicate
+populations; native macro dispatch remains zero. The complete matched slice is
+recorded in `docs/sm86_c7_simbench_cp_async_direct_live_v1.json` with its
+schema. This closes only this slice; it does not close C3/C5/C6 or the C7
+population campaign.
+
+### C7-S2 — next active milestone
+
+Run one additional direct SM86 SimBench row from a different mechanism family
+(prefer `global_atomic_histogram` or `global_atomic_and_return_used`) using
+the same bounded pipeline and independent five-repeat NCU contract. Preserve
+the current refusal rules: correctness must be checked by the workload, NCU
+must use the exact traced binary/arguments, and open semantic tails or refused
+dispatch remain explicit. If a candidate is blocked by OOM, unsupported SASS,
+or a stale launcher, record a bounded disposition and move to the next row
+without substituting a different shape silently.
+
+The active SimBench wrapper still rejects the repository-contained NVBit
+tracer because it requires an external split-v2 tracer root; see
 `docs/sm86_c7_simbench_population_slice_v1.json`. The blocker is recorded,
-not bypassed with a hidden tracer or substituted shape.
+not bypassed with a hidden tracer or substituted shape. It does not invalidate
+the two direct bounded slices, which use the repository tracer explicitly and
+retain their own exact binary/trace/control identities.
 
 The wrapper blocker did not prevent a direct bounded timing-shape check: the
 same `fp32_fma_dep_chain` binary/arguments completed native execution, NVBit,

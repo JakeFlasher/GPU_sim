@@ -5,6 +5,7 @@
 // fallback (seeded tensor of shape (rows, cols)).
 
 #include <cuda_runtime.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -37,7 +38,15 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i], "--shape-point") == 0 && i + 1 < argc) shape_point = argv[++i];
         else { fprintf(stderr, "cp_async_shared_tile_copy_run: unknown arg %s\n", argv[i]); return 2; }
     }
-    const size_t n = (size_t)rows * cols;
+    if (rows <= 0 || cols <= 0) {
+        fprintf(stderr, "cp_async_shared_tile_copy_run: rows and cols must be positive\n");
+        return 2;
+    }
+    if ((size_t)rows > SIZE_MAX / (size_t)cols) {
+        fprintf(stderr, "cp_async_shared_tile_copy_run: shape overflows element count\n");
+        return 2;
+    }
+    const size_t n = (size_t)rows * (size_t)cols;
     float *h_in = (float *)malloc(n * sizeof(float));
     float *h_out = (float *)malloc(n * sizeof(float));
     seed_tensor(h_in, n, seed, -1.0, 1.0);
@@ -49,11 +58,22 @@ int main(int argc, char **argv) {
     rc = cudaMemcpy(d_in, h_in, n * sizeof(float), cudaMemcpyHostToDevice); if (rc) fail("H2D", rc);
 
     cp_async_shared_tile_copy_launch(d_in, d_out, rows, cols, 0);
+    rc = cudaGetLastError(); if (rc) fail("launch", rc);
     rc = cudaDeviceSynchronize(); if (rc) fail("sync", rc);
     rc = cudaMemcpy(h_out, d_out, n * sizeof(float), cudaMemcpyDeviceToHost); if (rc) fail("D2H", rc);
 
+    double max_abs_error = 0.0;
+    size_t mismatch_count = 0;
+    for (size_t i = 0; i < n; ++i) {
+        const double error = fabs((double)h_out[i] - (double)h_in[i]);
+        if (!isfinite((double)h_out[i]) || error > 1.0e-6) ++mismatch_count;
+        if (error > max_abs_error) max_abs_error = error;
+    }
+    const int correct = mismatch_count == 0;
+
     printf("{\n  \"schema_version\": 1,\n  \"slug\": \"cp_async_shared_tile_copy\",\n");
     printf("  \"shape_set\": \"correctness_shapes\",\n  \"shape_point\": \"%s\",\n", shape_point);
+    printf("  \"correct\": %s,\n  \"mismatch_count\": %zu,\n  \"max_abs_error\": %.9g,\n", correct ? "true" : "false", mismatch_count, max_abs_error);
     printf("  \"output\": [");
     for (int r = 0; r < rows; ++r) {
         if (r > 0) printf(",");
@@ -68,5 +88,5 @@ int main(int argc, char **argv) {
 
     cudaFree(d_in); cudaFree(d_out);
     free(h_in); free(h_out);
-    return 0;
+    return correct ? 0 : 1;
 }

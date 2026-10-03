@@ -1,6 +1,6 @@
 {
   "host_architecture": "sm86",
-  "interpretation": "The portable 15-row population has a completed bounded live pipeline. One SimBench SM86 row now has a direct timing-shape native/NVBit/replay/five-NCU slice, while the active wrapper remains blocked by external tracer/runtime-sidecar requirements. This inventory prevents calling the slice a full repository campaign; remaining SimBench rows, research probes, and SOL populations remain explicit.",
+  "interpretation": "The portable 15-row population has a completed bounded live pipeline. Two SimBench SM86 rows now have direct timing-shape native/NVBit/replay/five-NCU slices: fp32_fma_dep_chain and cp_async_shared_tile_copy. The active wrapper remains blocked by external tracer/runtime-sidecar requirements. This inventory prevents calling the slices a full repository campaign; remaining SimBench rows, research probes, and SOL populations remain explicit.",
   "populations": {
     "portable_lcd": {
       "active_count": 15,
@@ -65,7 +65,7 @@
     },
     "simbench_bw": {
       "direct_slice_artifact": "docs/sm86_c7_simbench_fp32_direct_live_v1.json",
-      "live_pipeline_status": "one_direct_fp32_trace_shape_complete; wrapper_trace_path_blocked_external_runtime_sidecar; remaining_sm86_rows_pending",
+      "live_pipeline_status": "two direct SM86 rows complete (fp32 scalar and cp.async); wrapper_trace_path_blocked_external_runtime_sidecar; remaining_sm86_rows_pending",
       "roster_rows": 92,
       "sm86_arch_rows": 31,
       "sm86_arch_rows_list": [
@@ -101,7 +101,15 @@
         "warm_cold_pair_relaunch",
         "working_set_capacity_sweep"
       ],
-      "wrapper_blocker_artifact": "docs/sm86_c7_simbench_population_slice_v1.json"
+      "wrapper_blocker_artifact": "docs/sm86_c7_simbench_population_slice_v1.json",
+      "direct_slice_artifacts": [
+        "docs/sm86_c7_simbench_fp32_direct_live_v1.json",
+        "docs/sm86_c7_simbench_cp_async_direct_live_v1.json"
+      ],
+      "direct_sm86_rows_completed": [
+        "fp32_fma_dep_chain",
+        "cp_async_shared_tile_copy"
+      ]
     },
     "sol_execbench_baselines": {
       "families": [
