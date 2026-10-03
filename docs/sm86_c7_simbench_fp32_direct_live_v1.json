@@ -1,0 +1,308 @@
+{
+  "comparison": {
+    "hardware_completion": "not_observed",
+    "native_macro_dispatches": 0,
+    "point_absolute_percentage_error": 0.03958529688972667,
+    "point_error_cycles": -336.0
+  },
+  "correctness": {
+    "driver_returncode": 0,
+    "shape_point": "trace_00",
+    "status": "not_run_timing_shape"
+  },
+  "fast_frontier": {
+    "device_id": 0,
+    "function_unique_id": 1,
+    "kernel_id": 1,
+    "kernel_name": "fp32_fma_dep_chain_kernel___0",
+    "stream_id": 7,
+    "summary": {
+      "architecture": "sm_86",
+      "blocks_seen": 16,
+      "candidate_instructions": 0,
+      "candidate_regions": 0,
+      "certified_regions": 0,
+      "collapsed_instructions": 0,
+      "contract": "sm86_fast_exact_scalar_regions_v1",
+      "coverage": {
+        "candidate_records": 0,
+        "reified_records": 0,
+        "summarized_records": 0,
+        "trace_records": 5424,
+        "uncovered_records": 5424
+      },
+      "eligible_warps": 0,
+      "exact_execution_steps": 0,
+      "macro_dispatches": 0,
+      "maximum_exact_final_cycle": 0,
+      "maximum_summarized_final_cycle": 0,
+      "refusal_reasons": {
+        "nonfull_predicate_population": 16
+      },
+      "reified_regions": 0,
+      "summarized_execution_steps": 0,
+      "terminal_state_matches": true,
+      "warps_seen": 16
+    }
+  },
+  "host_observation": "0, NVIDIA GeForce RTX 3090 Ti, GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c, 8.6, 615.71.09",
+  "identity": {
+    "args": [
+      "--m",
+      "32",
+      "--n",
+      "16",
+      "--k",
+      "64",
+      "--seed",
+      "42",
+      "--shape-point",
+      "trace_00"
+    ],
+    "binary": "results/alpha/c7_simbench_fp32_direct_20261003/fp32_fma_dep_chain_run",
+    "binary_sha256": "dd682b94c0d0e77f5fe7ad3bd7d3e3750fdb096ad7d77d4998e7de0ad5e1c7b7",
+    "control": "results/alpha/c7_simbench_fp32_direct_20261003/control.json",
+    "source": "workloads/simbench_bw/l1/fp32_fma_dep_chain",
+    "trace": "results/alpha/c7_simbench_fp32_direct_20261003/trace"
+  },
+  "interpretation": "A direct bounded SM86 SimBench timing-shape path exits successfully, produces a fresh NVBit trace, simulator replay, and five NCU runs on the exact same binary/arguments. The timing driver does not run the correctness reference, so correctness is not claimed. The analyzer refuses all candidates because predicate populations are nonfull; native macro dispatch is zero. Simulator endpoint 8152 versus NCU median 8488 is a 3.96 percent low point mismatch. This is one probe row and not a repository-wide accuracy or speedup claim.",
+  "ncu": {
+    "cache": "all",
+    "clock": "none",
+    "median": 8488.0,
+    "metric": "gpc__cycles_elapsed.max",
+    "replay": "application",
+    "rows": [
+      {
+        "Block Size": "(32, 1, 1)",
+        "CC": "8.6",
+        "Device": "0",
+        "Grid Size": "(1, 16, 1)",
+        "Kernel Name": "fp32_fma_dep_chain_kernel",
+        "dram__sectors_read.sum": "564",
+        "dram__sectors_write.sum": "0",
+        "gpc__cycles_elapsed.max": "8488",
+        "sm__cycles_active.sum": "105378",
+        "smsp__inst_executed.sum": "5424"
+      },
+      {
+        "Block Size": "(32, 1, 1)",
+        "CC": "8.6",
+        "Device": "0",
+        "Grid Size": "(1, 16, 1)",
+        "Kernel Name": "fp32_fma_dep_chain_kernel",
+        "dram__sectors_read.sum": "652",
+        "dram__sectors_write.sum": "140",
+        "gpc__cycles_elapsed.max": "8568",
+        "sm__cycles_active.sum": "106768",
+        "smsp__inst_executed.sum": "5424"
+      },
+      {
+        "Block Size": "(32, 1, 1)",
+        "CC": "8.6",
+        "Device": "0",
+        "Grid Size": "(1, 16, 1)",
+        "Kernel Name": "fp32_fma_dep_chain_kernel",
+        "dram__sectors_read.sum": "564",
+        "dram__sectors_write.sum": "0",
+        "gpc__cycles_elapsed.max": "8765",
+        "sm__cycles_active.sum": "109916",
+        "smsp__inst_executed.sum": "5424"
+      },
+      {
+        "Block Size": "(32, 1, 1)",
+        "CC": "8.6",
+        "Device": "0",
+        "Grid Size": "(1, 16, 1)",
+        "Kernel Name": "fp32_fma_dep_chain_kernel",
+        "dram__sectors_read.sum": "564",
+        "dram__sectors_write.sum": "0",
+        "gpc__cycles_elapsed.max": "8481",
+        "sm__cycles_active.sum": "106125",
+        "smsp__inst_executed.sum": "5424"
+      },
+      {
+        "Block Size": "(32, 1, 1)",
+        "CC": "8.6",
+        "Device": "0",
+        "Grid Size": "(1, 16, 1)",
+        "Kernel Name": "fp32_fma_dep_chain_kernel",
+        "dram__sectors_read.sum": "564",
+        "dram__sectors_write.sum": "0",
+        "gpc__cycles_elapsed.max": "8412",
+        "sm__cycles_active.sum": "105274",
+        "smsp__inst_executed.sum": "5424"
+      }
+    ],
+    "values": [
+      8488.0,
+      8568.0,
+      8765.0,
+      8481.0,
+      8412.0
+    ]
+  },
+  "schema": "sm86_c7_simbench_fp32_direct_live_v1",
+  "simulator": {
+    "instructions": 5424,
+    "records": 5424,
+    "timing": {
+      "completion_frontier": {
+        "lower_bound_cycles": 8152,
+        "status": "incomplete_unmodeled_retirement_tails",
+        "unmodeled_tails": {
+          "async_copy_shared_visibility": false,
+          "coherence": true,
+          "dirty_writeback": true,
+          "reduction_read_modify_write": false
+        }
+      },
+      "diagnostic_last_issue_cycles": 8141,
+      "gpc_observation_frontier": {
+        "cycles": 9960,
+        "envelope_cycles": 1808,
+        "grid_blocks": 16,
+        "grid_log2": 4,
+        "lower_bound_cycles": 8152,
+        "role": "architecture_scoped_gpc_observation_boundary_not_timing_crosswalk"
+      },
+      "last_processed_modeled_system_event_time": 8152,
+      "readiness": {
+        "async_groups": {
+          "completion_hidden_before_wait_cycles": 0,
+          "destination_groups_observed": 0,
+          "destination_local_cycles": 0,
+          "destination_local_limited_groups": 0,
+          "destination_sm_service_cycles": 0,
+          "destination_sm_service_limited_groups": 0,
+          "destination_wavefronts_observed": 0,
+          "groups_committed": 0,
+          "groups_waited": 0,
+          "source_cycles": 0,
+          "source_limited_groups": 0
+        },
+        "constraint_exposure_cycles": {
+          "async_destination_local": 0,
+          "async_destination_sm_service": 0,
+          "async_source": 0,
+          "control_stall": 17424,
+          "cta_barrier_rendezvous": 0,
+          "dependence_counter_global_load_operand_read": 8256,
+          "dependence_counter_l1tex": 76992,
+          "dependence_counter_non_memory_write": 400,
+          "dependence_counter_read": 0,
+          "dependence_counter_shared_write": 0,
+          "dependence_counter_unknown_origin": 0,
+          "eligible_not_selected": 19136,
+          "instruction_front_end": 10144,
+          "pipeline_branch": 1312,
+          "pipeline_tensor": 0
+        },
+        "control_pipeline": {
+          "branch_instructions_issued": 176,
+          "branch_resolution_cycles": 1312
+        },
+        "cta_barriers": {
+          "generations": 0,
+          "max_arrival_spread_cycles": 0,
+          "releases_after_participant_retirement": 0,
+          "total_arrival_spread_cycles": 0,
+          "total_rendezvous_warp_cycles": 0
+        },
+        "delayed_ready_issues": 320,
+        "global_memory_issue": {
+          "atomic_ideal_wavefronts": 0,
+          "atomic_instructions": 0,
+          "atomic_l2_requests": 0,
+          "atomic_sectors": 0,
+          "atomic_unique_lines": 0,
+          "first_issue_timestamp_sum": 23568,
+          "last_issue_timestamp_sum": 130208,
+          "load_ideal_wavefronts": 9216,
+          "load_instructions": 2048,
+          "load_operand_read_barrier_instructions": 896,
+          "load_sectors": 33792,
+          "load_unique_lines": 33792,
+          "max_issue_span_cycles": 6665,
+          "reduction_ideal_wavefronts": 0,
+          "reduction_instructions": 0,
+          "reduction_l2_requests": 0,
+          "reduction_sectors": 0,
+          "reduction_unique_lines": 0,
+          "store_ideal_wavefronts": 128,
+          "store_instructions": 16,
+          "store_sectors": 512,
+          "store_unique_lines": 256,
+          "total_issue_span_cycles": 106640
+        },
+        "immediate_constant_cache": {
+          "lines_filled": 64,
+          "lookup_hits": 256,
+          "lookup_misses": 64,
+          "maximum_pending_lines": 1,
+          "miss_wait_cycles": 64,
+          "miss_wait_events": 64,
+          "pending_merges": 0,
+          "pending_tag_hits": 0,
+          "references": 320,
+          "tag_misses": 64
+        },
+        "instruction_front_end": {
+          "demand_l0_hits": 5152,
+          "demand_l0_misses": 64,
+          "demand_l1_hits": 48,
+          "demand_l1_misses": 16,
+          "demand_stream_buffer_hits": 208,
+          "instructions_fetched": 5424,
+          "maximum_fetch_latency_cycles": 324,
+          "prefetch_l1_hits": 208,
+          "prefetch_l1_misses": 512,
+          "prefetch_requests": 720,
+          "stream_restarts": 64
+        },
+        "limiting_cycles": {
+          "async_destination_local": 0,
+          "async_destination_sm_service": 0,
+          "async_source": 0,
+          "control_stall": 14752,
+          "cta_barrier_rendezvous": 0,
+          "dependence_counter_global_load_operand_read": 8128,
+          "dependence_counter_l1tex": 76992,
+          "dependence_counter_non_memory_write": 400,
+          "dependence_counter_read": 0,
+          "dependence_counter_shared_write": 0,
+          "dependence_counter_unknown_origin": 0,
+          "eligible_not_selected": 19136,
+          "instruction_front_end": 10032,
+          "pipeline_branch": 800,
+          "pipeline_tensor": 0
+        },
+        "memory_issue_pipeline": {
+          "instructions_admitted": 2064,
+          "maximum_operand_pipeline_delay_cycles": 0,
+          "maximum_queue_occupancy": 5,
+          "maximum_shared_queue_delay_cycles": 0,
+          "operand_pipeline_delay_cycles": 0,
+          "shared_queue_delay_cycles": 0,
+          "terminal_shared_accept_cycle": 8152
+        },
+        "schema_version": 25,
+        "tied_limiting_causes": 0
+      },
+      "sm_active_observation_frontier": {
+        "envelope_cycles": 0,
+        "issue_cycles": 8141,
+        "issue_lower_bound_cycles": 8141,
+        "role": "architecture_scoped_sm_active_observation_boundary_not_raw_lower_bound",
+        "terminal_cycles": 8152,
+        "terminal_lower_bound_cycles": 8152
+      },
+      "sm_active_terminal_frontier": {
+        "cycles": 8152,
+        "role": "causal_sm_active_terminal_lower_bound_excludes_write_ack_and_service_only_events"
+      },
+      "terminal_modeled_event_time": 8152
+    }
+  },
+  "status": "timing_trace_replay_ncu_complete_native_dispatch_refused"
+}

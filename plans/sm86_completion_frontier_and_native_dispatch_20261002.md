@@ -213,6 +213,14 @@ therefore explicitly not started for this row; see
 `docs/sm86_c7_simbench_population_slice_v1.json`. The blocker is recorded,
 not bypassed with a hidden tracer or substituted shape.
 
+The wrapper blocker did not prevent a direct bounded timing-shape check: the
+same `fp32_fma_dep_chain` binary/arguments completed native execution, NVBit,
+replay, and five same-binary NCU captures. The analyzer refused all candidates
+for nonfull predicate populations, so native dispatch stayed zero; simulator
+8152 versus NCU median 8488 is a 3.96% mismatch. See
+`docs/sm86_c7_simbench_fp32_direct_live_v1.json`. This is one probe row, not a
+repository-wide claim.
+
 Historical C3 store/service artifacts were also normalized: their schemas now
 use explicit `withdrawn_historical_attempt`/`withdrawn_do_not_use` statuses
 instead of encoding finite completion as current state. Raw numerical files

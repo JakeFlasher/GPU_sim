@@ -247,11 +247,14 @@ rows, 92 SimBench-BW rows (31 SM86-gated), 34 research-probe directories, and
 full pipeline; the remaining populations need bounded shape/memory/OOM
 dispositions before a repository-wide campaign claim.
 
-The first SM86 SimBench slice (`fp32_fma_dep_chain`) passes correctness, but
-the active trace runner rejects the repository-contained NVBit tracer because
-it requires an external split-v2 tracer root. Trace/simulator/NCU are therefore
-not started for that row; see `docs/sm86_c7_simbench_population_slice_v1.json`.
-This is an explicit blocker, not a hidden tracer or shape substitution.
+The first SM86 SimBench slice (`fp32_fma_dep_chain`) passes its correctness
+shape. The active SimBench wrapper rejects repository-contained tracers and
+then requires an unavailable runtime sidecar, so that wrapper path remains
+blocked. A direct bounded timing-shape path nevertheless completed native
+execution, NVBit, replay, and five same-binary NCU runs; the analyzer refused
+all candidates and native dispatch was zero. See
+`docs/sm86_c7_simbench_fp32_direct_live_v1.json` and the wrapper-blocker
+record `docs/sm86_c7_simbench_population_slice_v1.json`.
 
 The `async_visibility_phase` probe now independently recomputes and checks its
 returned lane-0 token from the deterministic source initialization; it no

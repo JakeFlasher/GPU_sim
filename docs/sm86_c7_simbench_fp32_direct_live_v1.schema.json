@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpu-simulator.local/schemas/sm86_c7_simbench_fp32_direct_live_v1.schema.json",
+  "title": "SM86 SimBench FP32 direct live result",
+  "type": "object",
+  "required": [
+    "schema",
+    "status",
+    "identity",
+    "correctness",
+    "ncu",
+    "simulator",
+    "fast_frontier",
+    "comparison",
+    "interpretation"
+  ],
+  "properties": {
+    "schema": {
+      "const": "sm86_c7_simbench_fp32_direct_live_v1"
+    },
+    "status": {
+      "const": "timing_trace_replay_ncu_complete_native_dispatch_refused"
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "host_observation": {
+      "type": "string"
+    },
+    "correctness": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "ncu": {
+      "type": "object",
+      "required": [
+        "metric",
+        "values",
+        "median"
+      ],
+      "properties": {
+        "metric": {
+          "const": "gpc__cycles_elapsed.max"
+        },
+        "values": {
+          "type": "array",
+          "minItems": 5,
+          "items": {
+            "type": "number"
+          }
+        },
+        "median": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": true
+    },
+    "simulator": {
+      "type": "object"
+    },
+    "fast_frontier": {
+      "type": "object"
+    },
+    "comparison": {
+      "type": "object",
+      "required": [
+        "native_macro_dispatches",
+        "hardware_completion"
+      ],
+      "properties": {
+        "native_macro_dispatches": {
+          "const": 0
+        },
+        "hardware_completion": {
+          "const": "not_observed"
+        }
+      },
+      "additionalProperties": true
+    },
+    "interpretation": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": false
+}
