@@ -206,6 +206,13 @@ correctness (this performance campaign uses timing shapes) or finite accuracy;
 all replay tails remain explicit. C7 remains partial until the other inventoried
 populations receive bounded campaign dispositions.
 
+The first SM86 SimBench slice (`fp32_fma_dep_chain`) passes correctness, but
+the active trace runner rejects the repository-contained NVBit tracer because
+it requires an external split-v2 tracer root. Trace, simulator, and NCU are
+therefore explicitly not started for this row; see
+`docs/sm86_c7_simbench_population_slice_v1.json`. The blocker is recorded,
+not bypassed with a hidden tracer or substituted shape.
+
 Historical C3 store/service artifacts were also normalized: their schemas now
 use explicit `withdrawn_historical_attempt`/`withdrawn_do_not_use` statuses
 instead of encoding finite completion as current state. Raw numerical files

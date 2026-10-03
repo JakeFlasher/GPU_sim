@@ -358,6 +358,12 @@ rows, 92 SimBench-BW rows (31 SM86-gated), 34 research-probe directories, and
 full pipeline; the remaining populations need bounded shape/memory/OOM
 dispositions before a repository-wide campaign claim.
 
+The first SM86 SimBench slice (`fp32_fma_dep_chain`) passes correctness, but
+the active trace runner rejects the repository-contained NVBit tracer because
+it requires an external split-v2 tracer root. Trace/simulator/NCU are not
+started for that row; the explicit blocker is
+`docs/sm86_c7_simbench_population_slice_v1.json`.
+
 ## Retained evidence
 
 The 2026-09-30 cold/warm campaigns completed 15/15 workloads on RTX 3090 Ti / SM86,

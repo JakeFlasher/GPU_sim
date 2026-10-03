@@ -1,0 +1,9 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://gpu-simulator.local/schemas/sm86_c7_simbench_population_slice_v1.schema.json",
+  "title":"SM86 SimBench population slice",
+  "type":"object",
+  "required":["schema","status","workload","correctness","trace","simulator","ncu","interpretation"],
+  "properties":{"schema":{"const":"sm86_c7_simbench_population_slice_v1"},"status":{"const":"correctness_pass_trace_blocked_external_tracer"},"workload":{"const":"fp32_fma_dep_chain"},"architecture":{"const":"sm_86"},"correctness":{"type":"object","properties":{"status":{"const":"passed"}},"required":["status"],"additionalProperties":true},"trace":{"type":"object","properties":{"status":{"const":"blocked"}},"required":["status"],"additionalProperties":true},"simulator":{"type":"object"},"ncu":{"type":"object"},"interpretation":{"type":"string","minLength":1}},
+  "additionalProperties":false
+}
