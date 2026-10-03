@@ -22,13 +22,12 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    `docs/sm86_c7_simbench_dram_streaming_dot_product_direct_live_v1.json`;
    the former tiny `trace_00` run is only a smoke check.
    [Ampere shared memory](https://docs.nvidia.com/cuda/ampere-tuning-guide/#unified-shared-memory-l1-texture-cache)
-3. **C7-S32 complete; C7-S33 next.** The BF16 cuBLAS control row now has a
-   correctness/memcheck result and five independent NCU observations, while
-   both static control extraction and NVBit fail closed on the dynamic
-   tensor-core kernel. All 31 SM86 SimBench rows have a direct artifact or a
-   typed blocker. The next phase inventories and samples the separate native
-   research-probe and SOL populations; no timing/card parameter is selected
-   from scored NCU targets.
+3. **C7-S33J complete; C7-S33K active.** All four probe families sampled so
+   far have live evidence: 68 issue-port cells, 36 async-barrier cells, 30
+   store-ack arms, and 102 memory-retirement cells. The remaining blockers are
+   four L1 pending-fill invalidation replays and six system-fence instruction
+   crosswalk mismatches. Repair those blockers before expanding to another
+   family; no timing/card parameter is selected from scored NCU targets.
 
 ## Outcome
 
