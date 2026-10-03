@@ -1,0 +1,177 @@
+{
+  "schema": "sm86_c7_simbench_vendor_sgemm_strided_batched_cublas_blocked_live_v1",
+  "status": "correctness_trace_ncu_complete_replay_blocked_static_module",
+  "host_observation": "0, NVIDIA GeForce RTX 3090 Ti, GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c, 8.6, 615.71.09",
+  "host_identity": {
+    "device_index": 0,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "compute_capability": "8.6",
+    "driver": "615.71.09",
+    "pstate": "P0",
+    "graphics_clock_mhz": 1350,
+    "memory_clock_mhz": 10501
+  },
+  "identity": {
+    "source": "workloads/simbench_bw/l1/vendor_sgemm_strided_batched_cublas",
+    "binary": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s21_vendor_batch_20261003/vendor_sgemm_strided_batched_cublas_run",
+    "binary_sha256": "34438d2e6b1d6076cd98a93f7b5aff2b0ce6504db7b0b36576e8e858487102e0",
+    "control": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s21_vendor_batch_20261003/control.json",
+    "control_sha256": "f4d949d4ce18af3b33e0f9cc784f1fb9aed8a67e77174969d36ca7e2e205255e",
+    "trace": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s21_vendor_batch_20261003/trace",
+    "trace_stats": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s21_vendor_batch_20261003/trace/stats.csv",
+    "args": [
+      "--m",
+      "32",
+      "--n",
+      "32",
+      "--k",
+      "32",
+      "--batch-count",
+      "4",
+      "--seed",
+      "42",
+      "--shape-point",
+      "trace_00",
+      "--summary"
+    ],
+    "kernel": "ampere_sgemm_128x128_nn",
+    "metric": "gpc__cycles_elapsed.max",
+    "ncu_repeats": 5,
+    "ncu_cache": "all",
+    "ncu_clock": "none"
+  },
+  "correctness": {
+    "status": "passed",
+    "correct": true,
+    "shape_point": "trace_00",
+    "batch_count": 4,
+    "mismatch_count": 0,
+    "max_abs_error": 2.38418579e-07,
+    "validation": "host FP32 CPU reference batch-0 GEMM compared after cudaGetLastError and cudaDeviceSynchronize"
+  },
+  "trace": {
+    "stats": {
+      "device_id": 0,
+      "stream_id": 7,
+      "kernel id": "kernel-1.trace",
+      "kernel mangled name": "ampere_sgemm_128x128_nn",
+      "grid_dimX": 1,
+      "grid_dimY": 1,
+      "grid_dimZ": 4,
+      "#blocks": 4,
+      "block_dimX": 256,
+      "block_dimY": 1,
+      "block_dimZ": 1,
+      "#threads": 256,
+      "total_insts": 367168,
+      "total_reported_insts": 367168
+    },
+    "records_traced": 367168,
+    "kernel_name": "ampere_sgemm_128x128_nn",
+    "static_module_status": {
+      "status": "no_stable_static_module",
+      "reason": "alpha_path_only",
+      "path_at_capture": "/opt/cuda/targets/x86_64-linux/lib/libcublasLt.so.13.8.0.4",
+      "basename": "libcublasLt.so.13.8.0.4"
+    }
+  },
+  "replay": {
+    "status": "blocked",
+    "classification": "vendor_library_no_stable_static_module",
+    "reason": "the strided-batched cuBLAS kernel comes from libcublasLt.so and no stable static control sidecar is available; repository binary control extractor has zero functions",
+    "no_substitute_used": true
+  },
+  "fast_frontier": {
+    "status": "not_run_replay_blocked",
+    "native_macro_dispatches": "not_run"
+  },
+  "ncu": {
+    "metric": "gpc__cycles_elapsed.max",
+    "values": [
+      15524.0,
+      15492.0,
+      15550.0,
+      15511.0,
+      15503.0
+    ],
+    "median": 15511.0,
+    "min": 15492.0,
+    "max": 15550.0,
+    "stdev": 22.304708023195463,
+    "rows": [
+      {
+        "ID": "0",
+        "Kernel Name": "ampere_sgemm_128x128_nn",
+        "Grid Size": "(1, 1, 4)",
+        "Block Size": "(256, 1, 1)",
+        "Device": "0",
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 15524.0,
+        "gpu__time_duration.sum": 11.552,
+        "smsp__inst_executed.sum": 102176.0,
+        "dram__sectors_read.sum": 1712.0,
+        "dram__sectors_write.sum": 8.0
+      },
+      {
+        "ID": "0",
+        "Kernel Name": "ampere_sgemm_128x128_nn",
+        "Grid Size": "(1, 1, 4)",
+        "Block Size": "(256, 1, 1)",
+        "Device": "0",
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 15492.0,
+        "gpu__time_duration.sum": 11.52,
+        "smsp__inst_executed.sum": 102176.0,
+        "dram__sectors_read.sum": 1712.0,
+        "dram__sectors_write.sum": 4.0
+      },
+      {
+        "ID": "0",
+        "Kernel Name": "ampere_sgemm_128x128_nn",
+        "Grid Size": "(1, 1, 4)",
+        "Block Size": "(256, 1, 1)",
+        "Device": "0",
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 15550.0,
+        "gpu__time_duration.sum": 11.584,
+        "smsp__inst_executed.sum": 102176.0,
+        "dram__sectors_read.sum": 1712.0,
+        "dram__sectors_write.sum": 0.0
+      },
+      {
+        "ID": "0",
+        "Kernel Name": "ampere_sgemm_128x128_nn",
+        "Grid Size": "(1, 1, 4)",
+        "Block Size": "(256, 1, 1)",
+        "Device": "0",
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 15511.0,
+        "gpu__time_duration.sum": 11.52,
+        "smsp__inst_executed.sum": 102176.0,
+        "dram__sectors_read.sum": 1712.0,
+        "dram__sectors_write.sum": 20.0
+      },
+      {
+        "ID": "0",
+        "Kernel Name": "ampere_sgemm_128x128_nn",
+        "Grid Size": "(1, 1, 4)",
+        "Block Size": "(256, 1, 1)",
+        "Device": "0",
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 15503.0,
+        "gpu__time_duration.sum": 11.52,
+        "smsp__inst_executed.sum": 102176.0,
+        "dram__sectors_read.sum": 2256.0,
+        "dram__sectors_write.sum": 4.0
+      }
+    ]
+  },
+  "comparison": {
+    "hardware_completion": "not_observed",
+    "native_macro_dispatches": "not_run",
+    "point_estimator": "not_claimed",
+    "absolute_percentage_error": "not_applicable_replay_blocked"
+  },
+  "interpretation": "The exact rebuilt strided-batched cuBLAS FP32 binary passes host batch-0 correctness and produces a fresh NVBit trace of ampere_sgemm_128x128_nn. Five same-binary NCU captures report 102176 warp instructions and cycles 15524,15492,15550,15511,15503 (median 15511). Replay is explicitly blocked because the kernel is loaded from libcublasLt.so with no stable static module/control sidecar; the traced dynamic record count (367168) cannot be silently crosswalked to NCU. No simulator endpoint, native dispatch, or accuracy comparison is claimed."
+}

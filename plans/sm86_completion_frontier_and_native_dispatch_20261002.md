@@ -20,7 +20,7 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    opt-in and a corrected original-shape recapture. Keep the superseded
    pre-opt-in artifact historical, not active evidence.
    [Ampere shared memory](https://docs.nvidia.com/cuda/ampere-tuning-guide/#unified-shared-memory-l1-texture-cache)
-3. **C7-S20 complete; C7-S21 next.** Tensor refusals and
+3. **C7-S21 complete; C7-S22 next.** Tensor/vendor refusals and
    measured timing mismatches stay open deliverables, not completed mechanisms.
    No timing/card parameter is selected from these scored NCU targets.
 
@@ -857,10 +857,22 @@ count (29,752) cannot be silently crosswalked to NCU's 8,784. No simulator
 endpoint, native dispatch, or accuracy comparison is claimed. Evidence:
 `docs/sm86_c7_simbench_vendor_sgemm_cublas_blocked_live_v1.json`.
 
-### C7-S21 — next active milestone
+### C7-S21 — vendor strided SGEMM blocked disposition — complete
 
-Run one additional unrun SM86 SimBench row from the remaining vendor/control
-population (prefer `vendor_sgemm_strided_batched_cublas` or a non-vendor row).
+The exact rebuilt strided-batched cuBLAS FP32 binary passes host batch-0
+correctness and produces a fresh NVBit trace of ampere_sgemm_128x128_nn. Five
+same-binary NCU captures report 102,176 warp instructions and cycles
+15524,15492,15550,15511,15503 (median 15511). Replay is explicitly blocked:
+the kernel is loaded from libcublasLt.so with no stable static module/control
+sidecar, and the traced dynamic record count (367,168) cannot be silently
+crosswalked to NCU. No simulator endpoint, native dispatch, or accuracy
+comparison is claimed. Evidence:
+`docs/sm86_c7_simbench_vendor_sgemm_strided_batched_cublas_blocked_live_v1.json`.
+
+### C7-S22 — next active milestone
+
+Run one additional unrun SM86 SimBench row from the remaining non-vendor
+population (prefer l2_thrash_pointer_chase variants or working_set_capacity_sweep).
 Preserve checked correctness, exact binary/arguments, fresh NVBit, replay, and
 five-repetition NCU; retain every unsupported-SASS, OOM/OOD, or falsifying
 outcome without tuning scored parameters.

@@ -284,10 +284,12 @@ Superseded artifacts remain historical and are not current evidence.
 C7-S18 atomic-and-return is complete after repairing its shared-bin sink
 race: disjoint return sinks and a deterministic final bitwise-AND histogram pass;
 46,882 replay/NCU instructions match. C7-S19 carveout sensitivity is complete
-and falsifies the lower-bound consistency (211,002 simulator lower vs 178,521
-NCU median). C7-S20 vendor SGEMM is an explicit replay blocker: cuBLAS emits
-ampere_sgemm_128x32_nn from libcublasLt.so without a stable static control
-sidecar; 29,752 traced records cannot be crosswalked to 8,784 NCU instructions.
+and falsifies lower-bound consistency (211,002 simulator lower vs 178,521 NCU
+median). C7-S20/S21 vendor SGEMM variants are explicit replay blockers: cuBLAS
+kernels from libcublasLt.so have no stable static control sidecar, and traced
+records cannot be silently crosswalked to NCU instruction counts. See
+`docs/sm86_c7_simbench_vendor_sgemm_cublas_blocked_live_v1.json` and
+`docs/sm86_c7_simbench_vendor_sgemm_strided_batched_cublas_blocked_live_v1.json`.
 
 The `async_visibility_phase` probe now independently recomputes and checks its
 returned lane-0 token from the deterministic source initialization; it no

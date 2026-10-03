@@ -1,6 +1,6 @@
 {
   "host_architecture": "sm86",
-  "interpretation": "The portable 15-row population has a completed bounded live pipeline. Sixteen SimBench SM86 rows have direct timing-shape native/NVBit/replay/five-NCU slices, including repaired carveout and atomic-AND workloads. Three rows are explicit replay blockers: INT8 IMMA and TF32 HMMA lack SM86 pipeline models, while vendor_sgemm_cublas comes from libcublasLt.so with no stable static control sidecar and mismatched trace/NCU instruction counts. Four control/L2 rows are real lower-bound falsifiers. The active wrapper remains blocked by external tracer/runtime-sidecar requirements. This inventory prevents calling the slices a full repository campaign; remaining SimBench rows, research probes, and SOL populations remain explicit.",
+  "interpretation": "The portable 15-row population has a completed bounded live pipeline. Sixteen SimBench SM86 rows have direct timing-shape native/NVBit/replay/five-NCU slices, including repaired carveout and atomic-AND workloads. Four rows are explicit replay blockers: INT8 IMMA and TF32 HMMA lack SM86 pipeline models, while both cuBLAS vendor SGEMM variants lack stable static control sidecars and have trace/NCU instruction-count mismatches. Four control/L2 rows are real lower-bound falsifiers. The active wrapper remains blocked by external tracer/runtime-sidecar requirements. This inventory prevents calling the slices a full repository campaign; remaining SimBench rows, research probes, and SOL populations remain explicit.",
   "populations": {
     "portable_lcd": {
       "active_count": 15,
@@ -65,7 +65,7 @@
     },
     "simbench_bw": {
       "direct_slice_artifact": "docs/sm86_c7_simbench_fp32_direct_live_v1.json",
-      "live_pipeline_status": "sixteen direct SM86 rows complete; three replay blockers (INT8 IMMA, TF32 HMMA, vendor cuBLAS static module); four lower-bound falsifiers; corrected shared/persisting/prefetch evidence active; warm/cold complete; remaining rows pending",
+      "live_pipeline_status": "sixteen direct SM86 rows complete; four vendor/tensor replay blockers (INT8 IMMA, TF32 HMMA, vendor SGEMM, vendor strided SGEMM); four lower-bound falsifiers; corrected shared/persisting/prefetch artifacts active; warm/cold complete; remaining rows pending",
       "roster_rows": 92,
       "sm86_arch_rows": 31,
       "sm86_arch_rows_list": [
@@ -141,7 +141,8 @@
       "blocked_slice_artifacts": [
         "docs/sm86_c7_simbench_int8_imma_gemm_blocked_live_v1.json",
         "docs/sm86_c7_simbench_tf32_hmma_gemm_blocked_live_v1.json",
-        "docs/sm86_c7_simbench_vendor_sgemm_cublas_blocked_live_v1.json"
+        "docs/sm86_c7_simbench_vendor_sgemm_cublas_blocked_live_v1.json",
+        "docs/sm86_c7_simbench_vendor_sgemm_strided_batched_cublas_blocked_live_v1.json"
       ],
       "blocked_sm86_rows": [
         {
@@ -158,6 +159,11 @@
           "row": "vendor_sgemm_cublas",
           "reason": "vendor_library_no_stable_static_module",
           "ncu_median_cycles": 8904
+        },
+        {
+          "row": "vendor_sgemm_strided_batched_cublas",
+          "reason": "vendor_library_no_stable_static_module",
+          "ncu_median_cycles": 15511
         }
       ],
       "superseded_artifacts": [
