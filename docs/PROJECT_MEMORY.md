@@ -323,7 +323,11 @@ separated into prediction and observation documents: compact/conflict NCU
 calibration predicted severe at 24,476.2..24,902.2 cycles before profiling;
 five severe NCU repeats have median 24,855, interval coverage true, and point
 APE 0.667%. This remains a controlled observer result, not a semantic upper or
-global accuracy claim. The async visibility phase probe was also repaired to
+global accuracy claim. A real same-shape fixed-latency scalar slice now has
+correctness plus five NCU captures, but nonfull active/predicate populations
+force zero native dispatch; simulator 3,578 versus NCU median 6,812 is 47.5%
+low. The old 8,192-generation NCU rows are excluded. The async visibility
+phase probe was also repaired to
 recompute its deterministic lane-0 token on the host before reporting
 `correct`; compact/conflict/streaming-severe direct runs pass the check. Older
 phase captures are historical because the binary changed.

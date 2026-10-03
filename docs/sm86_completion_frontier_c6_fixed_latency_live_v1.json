@@ -1,0 +1,287 @@
+{
+  "comparison": {
+    "hardware_completion": "not_observed",
+    "native_macro_dispatches": 0,
+    "point_absolute_percentage_error": 0.47475044039929537,
+    "point_error_cycles": -3234.0,
+    "same_shape_target": true
+  },
+  "correctness": {
+    "checksum": 5938281556308338,
+    "correct": true,
+    "distance": 4,
+    "generations": 64,
+    "hot_instructions_per_generation": 16,
+    "samples_cycles": [
+      [
+        3229,
+        3147,
+        3273,
+        3279
+      ],
+      [
+        3171,
+        3057,
+        3175,
+        3133
+      ],
+      [
+        3170,
+        3056,
+        3134,
+        3172
+      ],
+      [
+        3170,
+        3016,
+        3118,
+        3172
+      ],
+      [
+        3123,
+        3057,
+        3167,
+        3173
+      ]
+    ],
+    "variant": "split",
+    "warps": 4,
+    "warps_per_modeled_smsp": 1
+  },
+  "fast_frontier": {
+    "device_id": 0,
+    "function_unique_id": 1,
+    "kernel_id": 1,
+    "kernel_name": "completion_d4___0",
+    "stream_id": 7,
+    "summary": {
+      "architecture": "sm_86",
+      "blocks_seen": 1,
+      "candidate_instructions": 0,
+      "candidate_regions": 0,
+      "certified_regions": 0,
+      "collapsed_instructions": 0,
+      "contract": "sm86_fast_exact_scalar_regions_v1",
+      "coverage": {
+        "candidate_records": 0,
+        "reified_records": 0,
+        "summarized_records": 0,
+        "trace_records": 5104,
+        "uncovered_records": 5104
+      },
+      "eligible_warps": 0,
+      "exact_execution_steps": 0,
+      "macro_dispatches": 0,
+      "maximum_exact_final_cycle": 0,
+      "maximum_summarized_final_cycle": 0,
+      "refusal_reasons": {
+        "nonfull_active_population": 4,
+        "nonfull_predicate_population": 4
+      },
+      "reified_regions": 0,
+      "summarized_execution_steps": 0,
+      "terminal_state_matches": true,
+      "warps_seen": 4
+    }
+  },
+  "identity": {
+    "args": [
+      "4",
+      "split",
+      "4",
+      "64",
+      "1"
+    ],
+    "binary_path": "workloads/research_probes/fixed_latency_completion/fixed_latency_completion_trace_split.cubin",
+    "binary_sha256": "cfe425f5ce843fa968a188d415d5e8dd02efb55ddf7c96844ea7244a02276060",
+    "control": "results/alpha/c6_fixed_latency_20261003/sass/fixed_latency_completion_trace_split.control_bits.json",
+    "driver": "workloads/research_probes/fixed_latency_completion/fixed_latency_completion_driver",
+    "same_binary_for_trace_and_ncu": true,
+    "source": "workloads/research_probes/fixed_latency_completion/fixed_latency_completion.cu",
+    "trace": "results/alpha/c6_fixed_latency_20261003/nvbit/w4_d4_split"
+  },
+  "interpretation": "A real memory-free scalar SASS trace uses the exact 64-generation trace cubin for native/NVBit/replay/NCU. Correctness passes; the conservative fast-frontier analyzer finds no candidate because active/predicate populations are nonfull, so native macro dispatch is zero. The simulator terminal model endpoint is 3,578 cycles versus NCU median 6,812 (47.5 percent low). The previously collected 8,192-generation NCU rows are not joined here.",
+  "ncu": {
+    "cache": "none",
+    "clock": "base",
+    "median": 6812.0,
+    "metric": "gpc__cycles_elapsed.max",
+    "replay": "application",
+    "rows": [
+      {
+        "Block Size": "(128, 1, 1)",
+        "CC": "8.6",
+        "Device": "0",
+        "Grid Size": "(1, 1, 1)",
+        "Kernel Name": "completion_d4",
+        "gpc__cycles_elapsed.max": "7217",
+        "sm__cycles_active.max": "5091",
+        "smsp__inst_executed.sum": "5104",
+        "smsp__inst_issued.sum": "5128"
+      },
+      {
+        "Block Size": "(128, 1, 1)",
+        "CC": "8.6",
+        "Device": "0",
+        "Grid Size": "(1, 1, 1)",
+        "Kernel Name": "completion_d4",
+        "gpc__cycles_elapsed.max": "7258",
+        "sm__cycles_active.max": "5138",
+        "smsp__inst_executed.sum": "5104",
+        "smsp__inst_issued.sum": "5128"
+      },
+      {
+        "Block Size": "(128, 1, 1)",
+        "CC": "8.6",
+        "Device": "0",
+        "Grid Size": "(1, 1, 1)",
+        "Kernel Name": "completion_d4",
+        "gpc__cycles_elapsed.max": "6812",
+        "sm__cycles_active.max": "4685",
+        "smsp__inst_executed.sum": "5104",
+        "smsp__inst_issued.sum": "5128"
+      },
+      {
+        "Block Size": "(128, 1, 1)",
+        "CC": "8.6",
+        "Device": "0",
+        "Grid Size": "(1, 1, 1)",
+        "Kernel Name": "completion_d4",
+        "gpc__cycles_elapsed.max": "6796",
+        "sm__cycles_active.max": "4682",
+        "smsp__inst_executed.sum": "5104",
+        "smsp__inst_issued.sum": "5128"
+      },
+      {
+        "Block Size": "(128, 1, 1)",
+        "CC": "8.6",
+        "Device": "0",
+        "Grid Size": "(1, 1, 1)",
+        "Kernel Name": "completion_d4",
+        "gpc__cycles_elapsed.max": "6788",
+        "sm__cycles_active.max": "4666",
+        "smsp__inst_executed.sum": "5104",
+        "smsp__inst_issued.sum": "5128"
+      }
+    ],
+    "values": [
+      7217.0,
+      7258.0,
+      6812.0,
+      6796.0,
+      6788.0
+    ]
+  },
+  "schema": "sm86_completion_frontier_c6_fixed_latency_live_v1",
+  "simulator": {
+    "instructions": 5104,
+    "records": 5104,
+    "timing": {
+      "completion_frontier": {
+        "lower_bound_cycles": 3578,
+        "status": "incomplete_unmodeled_retirement_tails",
+        "unmodeled_tails": {
+          "async_copy_shared_visibility": false,
+          "coherence": true,
+          "dirty_writeback": true,
+          "reduction_read_modify_write": false
+        }
+      },
+      "diagnostic_last_issue_cycles": 3561,
+      "last_processed_modeled_system_event_time": null,
+      "readiness": {
+        "async_groups": {
+          "completion_hidden_before_wait_cycles": 0,
+          "destination_groups_observed": 0,
+          "destination_local_cycles": 0,
+          "destination_local_limited_groups": 0,
+          "destination_sm_service_cycles": 0,
+          "destination_sm_service_limited_groups": 0,
+          "destination_wavefronts_observed": 0,
+          "groups_committed": 0,
+          "groups_waited": 0,
+          "source_cycles": 0,
+          "source_limited_groups": 0
+        },
+        "clock_issue": {
+          "maximum_first_to_last_issue_cycles": 3055,
+          "reads_issued": 8,
+          "warps_with_interval": 4
+        },
+        "constraint_exposure_cycles": {
+          "async_destination_local": 0,
+          "async_destination_sm_service": 0,
+          "async_source": 0,
+          "control_stall": 11164,
+          "cta_barrier_rendezvous": 0,
+          "dependence_counter_l1tex": 1691,
+          "dependence_counter_non_memory_write": 84,
+          "dependence_counter_read": 0,
+          "dependence_counter_shared_write": 0,
+          "dependence_counter_unknown_origin": 0,
+          "eligible_not_selected": 3,
+          "instruction_front_end": 1306,
+          "pipeline_branch": 768,
+          "pipeline_tensor": 0
+        },
+        "control_pipeline": {
+          "branch_instructions_issued": 256,
+          "branch_resolution_cycles": 768
+        },
+        "cta_barriers": {
+          "generations": 0,
+          "max_arrival_spread_cycles": 0,
+          "releases_after_participant_retirement": 0,
+          "total_arrival_spread_cycles": 0,
+          "total_rendezvous_warp_cycles": 0
+        },
+        "delayed_ready_issues": 2,
+        "instruction_front_end": {
+          "demand_l0_hits": 5064,
+          "demand_l0_misses": 4,
+          "demand_l1_hits": 3,
+          "demand_l1_misses": 1,
+          "demand_stream_buffer_hits": 36,
+          "instructions_fetched": 5104,
+          "maximum_fetch_latency_cycles": 327,
+          "prefetch_l1_hits": 51,
+          "prefetch_l1_misses": 17,
+          "prefetch_requests": 68,
+          "stream_restarts": 4
+        },
+        "limiting_cycles": {
+          "async_destination_local": 0,
+          "async_destination_sm_service": 0,
+          "async_source": 0,
+          "control_stall": 11148,
+          "cta_barrier_rendezvous": 0,
+          "dependence_counter_l1tex": 1691,
+          "dependence_counter_non_memory_write": 84,
+          "dependence_counter_read": 0,
+          "dependence_counter_shared_write": 0,
+          "dependence_counter_unknown_origin": 0,
+          "eligible_not_selected": 3,
+          "instruction_front_end": 1302,
+          "pipeline_tensor": 0
+        },
+        "memory_issue_pipeline": {
+          "instructions_admitted": 40,
+          "maximum_operand_pipeline_delay_cycles": 2,
+          "maximum_queue_occupancy": 5,
+          "maximum_shared_queue_delay_cycles": 29,
+          "operand_pipeline_delay_cycles": 8,
+          "shared_queue_delay_cycles": 509,
+          "terminal_shared_accept_cycle": 3578
+        },
+        "schema_version": 24,
+        "tied_limiting_causes": 0
+      },
+      "sm_active_terminal_frontier": {
+        "cycles": 3578,
+        "role": "causal_sm_active_terminal_lower_bound_excludes_write_ack_and_service_only_events"
+      },
+      "terminal_modeled_event_time": 3578
+    }
+  },
+  "status": "real_scalar_candidate_refused_live_negative"
+}

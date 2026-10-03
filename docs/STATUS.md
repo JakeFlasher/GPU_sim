@@ -223,6 +223,13 @@ and `docs/sm86_completion_frontier_c4_destination_layout_holdout_v1.json`.
 This is one controlled layout family, not a semantic upper or global accuracy
 claim.
 
+C6 has a real same-shape scalar negative slice in
+`docs/sm86_completion_frontier_c6_fixed_latency_live_v1.json`: the exact
+64-generation trace cubin passes correctness and five NCU captures, but the
+fast analyzer refuses all candidates for nonfull active/predicate populations
+(zero native dispatches). Simulator endpoint 3,578 versus NCU median 6,812 is
+47.5% low; prior 8,192-generation NCU rows are excluded.
+
 The `async_visibility_phase` probe now independently recomputes and checks its
 returned lane-0 token from the deterministic source initialization; it no
 longer prints an unconditional correctness boolean. Fresh direct runs for

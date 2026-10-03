@@ -180,6 +180,15 @@ and `docs/sm86_completion_frontier_c4_destination_layout_holdout_v1.json`.
 This remains one controlled layout family; it is not a semantic completion
 upper or a general hardware-accuracy result.
 
+C6 now has a real same-shape scalar negative slice. The fixed-latency
+`w4_d4_split` trace uses the exact 64-generation trace cubin for correctness,
+NVBit, replay, and five NCU captures. Correctness passes; the analyzer refuses
+all candidates because active/predicate populations are nonfull, so native
+macro dispatch remains zero. The simulator endpoint is 3,578 cycles versus
+NCU median 6,812 (47.5% low). The old 8,192-generation NCU rows are excluded
+from this comparison. Artifact:
+`docs/sm86_completion_frontier_c6_fixed_latency_live_v1.json`.
+
 The phase-assay probe itself was corrected before another capture: its
 `correct` field now compares the returned lane-0 token against a host
 recomputation from the deterministic source initialization, in addition to
