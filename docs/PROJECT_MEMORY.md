@@ -399,18 +399,18 @@ and matches 118,976 replay/NCU instructions, but simulator lower 59,545 is
 error claim is made. See
 `docs/sm86_c7_simbench_l2_thrash_pointer_chase_direct_live_v1.json`.
 
-C7-S13 persisting-window sweep is a second real lower-bound falsifier: the
-checked 1MiB allocation/524,288-byte effective window matches 159,200
-replay/NCU instructions, but simulator lower 31,173 is 1,416 cycles (4.76%)
-above NCU median 29,757. No post-score tuning or point-error claim is made.
-See `docs/sm86_c7_simbench_l2_persisting_window_sweep_direct_live_v1.json`.
+C7-S13 persisting-window historical artifact is superseded: its host sink
+reference omitted four Stage-1 anchor revisits. C7-S16a rebuilt the exact
+trace_00 path with the complete sink reference, and fresh instruction-matched
+NCU shows simulator lower 31,173 versus NCU median 29,846 (1,327 cycles,
+4.44%); the falsifier remains, but the correctness check is now meaningful.
+See `docs/sm86_c7_simbench_l2_persisting_window_sweep_corrected_live_v1.json`.
 
-C7-S14 prefetch-hint sweep is a third real lower-bound falsifier: the
-checked 256-access/32-warp path matches 267,712 replay/NCU instructions, but
-simulator lower 46,874 is 6,276 cycles (15.46%) above NCU median 40,598.
-Static SASS has no explicit prefetch mnemonic, so the hint is recorded as
-advisory/unobserved. See
-`docs/sm86_c7_simbench_l2_prefetch_hint_sweep_direct_live_v1.json`.
+C7-S14 prefetch-hint historical artifact is superseded: its static SASS was
+not interpreted correctly. Five CCTL.E.PF2 instructions are observed in the
+exact binary; their cache effect and completion remain unobservable. The live
+lower-bound falsifier remains 46,874 versus NCU median 40,598 (6,276 cycles,
+15.46%). See `docs/sm86_c7_simbench_l2_prefetch_hint_sweep_corrected_live_v1.json`.
 
 C7-S15 warm/cold multi-launch is complete with separate first/repeat outputs
 and sinks. Compute Sanitizer reports zero errors; detailed replay completes all

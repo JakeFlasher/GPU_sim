@@ -13,13 +13,12 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    replay, with every endpoint and simulator runtime recorded before NCU.
    The fast analyzer's single-launch limitation is not a detailed replay failure.
    [NCU cache control](https://docs.nvidia.com/nsight-compute/ProfilingGuide/index.html#cache-control)
-2. **C7-S16 active — correct recent evidence defects before expanding coverage.**
-   C7-S13's host sink reference omitted four anchor revisits; its failed check
-   must not be dropped as a diagnostic or attributed to reassociation. Restore
-   full checking and recapture. C7-S14 emits CCTL.E.PF2 in SASS; correct its
-   false “unobserved prefetch” statement. C7-S10's 64 KiB request exceeds the
-   default 48 KiB limit, not SM86's 99 KiB opt-in limit; repair and recapture
-   the original shape instead of declaring it hardware OOD.
+2. **C7-S16b active — finish recent evidence-defect cleanup before expanding coverage.**
+   C7-S16a corrected and recaptured C7-S13's sink reference. C7-S14 emits
+   CCTL.E.PF2 in SASS; correct its false “unobserved prefetch” statement.
+   C7-S10's 64 KiB request now has the documented SM86 dynamic-shared-memory
+   opt-in and a corrected original-shape recapture. Keep the superseded
+   pre-opt-in artifact historical, not active evidence.
    [Ampere shared memory](https://docs.nvidia.com/cuda/ampere-tuning-guide/#unified-shared-memory-l1-texture-cache)
 3. **Then resume remaining population/mechanism work.** Tensor refusals and
    measured timing mismatches stay open deliverables, not completed mechanisms.
@@ -489,26 +488,25 @@ binary/arguments, fresh NVBit, replay, and five-repetition NCU contract;
 retain any unsupported-SASS or OOM/OOD disposition without silent shape
 substitution.
 
-### C7-S10 — direct SimBench shared-bank slice — complete
+### C7-S10 — direct SimBench shared-bank slice — superseded
 
-The shared_bank_conflict_stride row was hardened with checked shape arithmetic,
-shared-memory/device-memory preflight, launch-error checks, identity-output
-validation, and a strided-read sink check. Its declared trace_00 shape
-(64x64x4) is explicitly OOD on SM86 because 65,536 bytes exceeds the
-per-block shared-memory limit; it was refused before allocation, not silently
-shrunk. The separately declared trace_l2_accuracy_xl shape (32x16x4) passes
-and uses the same binary/arguments for NVBit, replay, and five NCU captures.
-Replay has full one-block coverage and 2,022 records, and NCU reports the same
-2,022 warp instructions. NCU gpc cycles were
-16198,16003,15927,16324,15959 (median 16003); simulator lower bound is 15081,
-so lower-bound consistency is true but no point estimator or finite upper is
-claimed. The independent extractor observes shared LDS/STS traffic, 128
-shared loads, 64 global loads, 65 stores, and one barrier, but no hardware
-completion token or global instrumentation order. Dirty-writeback and
-coherence tails remain open. Native macro dispatch remains zero. Evidence:
-docs/sm86_c7_simbench_shared_bank_conflict_stride_direct_live_v1.json and its
-schema. This closes only this slice; C3/C5/C6 and the wider C7 campaign
-remain open.
+The original artifact `docs/sm86_c7_simbench_shared_bank_conflict_stride_direct_live_v1.json`
+is superseded. Its default-limit refusal was not a valid silicon OOD result:
+SM86 permits dynamic shared memory above 48 KiB with an explicit opt-in.
+Retain it only as historical execution evidence.
+
+### C7-S10r — corrected direct SimBench shared-bank slice — complete
+
+The same `trace_00` shape (64x64x4, 65,536 dynamic shared bytes) now opts into
+the device's 101,376-byte SM86 limit. Host identity/sink checks and memcheck
+pass. Fresh NVBit/replay/five-NCU use the exact opted-in binary; replay has
+full one-block coverage and 15,350 records, and NCU reports the same 15,350
+warp instructions. NCU gpc cycles are 100467,100317,100939,99980,100758
+(median 100467); simulator lower is 103225, so lower-bound consistency is
+false by 2,758 cycles (2.75%). Shared LDS/STS traffic, open writeback/
+coherence tails, and zero native dispatch remain explicit. Evidence and schema:
+`docs/sm86_c7_simbench_shared_bank_conflict_stride_corrected_live_v1.json`.
+This is the active corrected slice; C3/C5/C6 remain open.
 
 ### C7-S11 — execution specification
 
@@ -797,12 +795,27 @@ or speedup claim. Evidence and schema:
 `docs/sm86_c7_simbench_warm_cold_pair_relaunch_direct_live_v1.json` and its
 schema.
 
-### C7-S16 — next active milestone
+### C7-S16a — persisting-window sink repair — complete
 
-Repair and recapture the recent evidence defects before adding another row:
-(1) recompute C7-S13's persisting-window sink expectation for every anchor
-revisit and restore a meaningful sink check; (2) keep C7-S14's emitted CCTL
-prefetch evidence rather than calling the hint unobserved; and (3) opt in to
-SM86 dynamic shared memory above 48 KiB, then recapture the original C7-S10
-`trace_00` shape instead of excluding it. Do not change simulator parameters
-from these scored observations.
+The corrected sink now includes all four C7-S13 Stage-1 anchor revisits; exact
+sink/output checks pass on a fresh rebuild. C7-S10 dynamic shared-memory
+opt-in and original-shape recapture are also complete. Do not change simulator
+parameters from these scored observations.
+The corrected live recapture is recorded in
+`docs/sm86_c7_simbench_l2_persisting_window_sweep_corrected_live_v1.json`.
+
+### C7-S16b — prefetch evidence correction — complete
+
+The exact C7-S14 binary's static SASS contains five `CCTL.E.PF2` instructions.
+The corrected artifact now reports that instruction as observed while keeping
+cache effect, request completion, and hardware timing unobservable. The same
+trace/replay/NCU measurements remain a lower-bound falsifier; no scored target
+was used to alter the model. See
+`docs/sm86_c7_simbench_l2_prefetch_hint_sweep_corrected_live_v1.json`.
+
+### C7-S17 — next active milestone
+
+Run the full corrected-shape regression for the repaired shared-bank and
+persisting-window rows, then select the next unrun SimBench row. Preserve exact
+binary/trace/control identity, independent NCU targets, and explicit falsifier
+status; do not re-use superseded artifacts as current evidence.

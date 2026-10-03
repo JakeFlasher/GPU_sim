@@ -1,0 +1,234 @@
+{
+  "schema": "sm86_c7_simbench_l2_persisting_window_sweep_corrected_live_v1",
+  "status": "correctness_trace_replay_ncu_complete_native_dispatch_refused",
+  "host_observation": "0, NVIDIA GeForce RTX 3090 Ti, GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c, 8.6, 615.71.09",
+  "host_identity": {
+    "device_index": 0,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "compute_capability": "8.6",
+    "driver": "615.71.09",
+    "pstate": "P0",
+    "graphics_clock_mhz": 1350,
+    "memory_clock_mhz": 10501
+  },
+  "identity": {
+    "source": "workloads/simbench_bw/l1/l2_persisting_window_sweep",
+    "binary": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s16a_persist_repair_20261003/l2_persisting_window_sweep_run",
+    "binary_sha256": "64ff279582467b50abfde04f4b14241f026e4ab911db5b1d507951276b5a2b01",
+    "control": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s16a_persist_repair_20261003/control.json",
+    "control_sha256": "a1e3309ef401f21643f2e5ede099b4d8b4270d2b0143bc14cde266dce354b48a",
+    "trace": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s16a_persist_repair_20261003/trace",
+    "trace_stats": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s16a_persist_repair_20261003/trace/stats.csv",
+    "args": [
+      "--allocation-bytes",
+      "1048576",
+      "--persisting-window-bytes",
+      "524288",
+      "--accesses",
+      "64",
+      "--warps",
+      "32",
+      "--seed",
+      "42",
+      "--shape-point",
+      "trace_00",
+      "--summary"
+    ],
+    "kernel": "l2_persisting_window_sweep_kernel",
+    "metric": "gpc__cycles_elapsed.max",
+    "ncu_repeats": 5,
+    "ncu_cache": "all",
+    "ncu_clock": "none",
+    "simulator": "sim/target/release/sim-run"
+  },
+  "correctness": {
+    "status": "passed",
+    "correct": true,
+    "shape_point": "trace_00",
+    "mismatch_count": 0,
+    "sink": -22.2296925,
+    "expected_sink": -22.2296925,
+    "sink_abs_error": 0,
+    "validation": "complete Stage-1 anchor-revisit sink plus identity output after rebuild"
+  },
+  "trace": {
+    "stats": {
+      "device_id": 0,
+      "stream_id": 13,
+      "kernel id": "kernel-1.trace",
+      "kernel mangled name": "l2_persisting_window_sweep_kernel",
+      "grid_dimX": 32,
+      "grid_dimY": 1,
+      "grid_dimZ": 1,
+      "#blocks": 32,
+      "block_dimX": 32,
+      "block_dimY": 1,
+      "block_dimZ": 1,
+      "#threads": 32,
+      "total_insts": 563232,
+      "total_reported_insts": 563232
+    },
+    "records_replayed": 159200,
+    "independent_tail_facts": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s16a_persist_repair_20261003/tail_facts.json"
+  },
+  "simulator": {
+    "records": 159200,
+    "instructions": 159200,
+    "completion_lower_bound_cycles": 31173,
+    "completion_status": "incomplete_unmodeled_retirement_tails",
+    "unmodeled_tails": {
+      "reduction_read_modify_write": false,
+      "dirty_writeback": true,
+      "coherence": true,
+      "async_copy_shared_visibility": false
+    },
+    "gpc_observation_frontier": {
+      "lower_bound_cycles": 31173,
+      "envelope_cycles": 1816,
+      "grid_blocks": 32,
+      "grid_log2": 5,
+      "cycles": 32989,
+      "role": "architecture_scoped_gpc_observation_boundary_not_timing_crosswalk"
+    }
+  },
+  "fast_frontier": {
+    "device_id": 0,
+    "stream_id": 13,
+    "kernel_id": 1,
+    "function_unique_id": 1,
+    "kernel_name": "l2_persisting_window_sweep_kernel___0",
+    "summary": {
+      "contract": "sm86_fast_exact_scalar_regions_v1",
+      "architecture": "sm_86",
+      "blocks_seen": 32,
+      "warps_seen": 32,
+      "eligible_warps": 0,
+      "candidate_regions": 0,
+      "certified_regions": 0,
+      "reified_regions": 0,
+      "candidate_instructions": 0,
+      "collapsed_instructions": 0,
+      "exact_execution_steps": 0,
+      "summarized_execution_steps": 0,
+      "macro_dispatches": 0,
+      "maximum_exact_final_cycle": 0,
+      "maximum_summarized_final_cycle": 0,
+      "terminal_state_matches": true,
+      "coverage": {
+        "trace_records": 159200,
+        "candidate_records": 0,
+        "summarized_records": 0,
+        "reified_records": 0,
+        "uncovered_records": 159200
+      },
+      "refusal_reasons": {
+        "nonfull_predicate_population": 32
+      }
+    }
+  },
+  "tail_facts": {
+    "records": 159200,
+    "memory_records": 8416,
+    "cross_sm_line_topology": 256,
+    "hardware_completion_token_observed": false,
+    "global_event_order_observed": false
+  },
+  "ncu": {
+    "metric": "gpc__cycles_elapsed.max",
+    "values": [
+      29874.0,
+      29776.0,
+      29566.0,
+      29852.0,
+      29846.0
+    ],
+    "median": 29846.0,
+    "min": 29566.0,
+    "max": 29874.0,
+    "stdev": 126.63806694671236,
+    "rows": [
+      {
+        "ID": "0",
+        "Kernel Name": "l2_persisting_window_sweep_kernel",
+        "Grid Size": "(32, 1, 1)",
+        "Block Size": "(32, 1, 1)",
+        "Device": "0",
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 29874.0,
+        "gpu__time_duration.sum": 22176.0,
+        "sm__cycles_active.max": 27922.0,
+        "smsp__inst_executed.sum": 159200.0,
+        "dram__sectors_read.sum": 2748.0,
+        "dram__sectors_write.sum": 0.0
+      },
+      {
+        "ID": "0",
+        "Kernel Name": "l2_persisting_window_sweep_kernel",
+        "Grid Size": "(32, 1, 1)",
+        "Block Size": "(32, 1, 1)",
+        "Device": "0",
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 29776.0,
+        "gpu__time_duration.sum": 22112.0,
+        "sm__cycles_active.max": 27839.0,
+        "smsp__inst_executed.sum": 159200.0,
+        "dram__sectors_read.sum": 2028.0,
+        "dram__sectors_write.sum": 0.0
+      },
+      {
+        "ID": "0",
+        "Kernel Name": "l2_persisting_window_sweep_kernel",
+        "Grid Size": "(32, 1, 1)",
+        "Block Size": "(32, 1, 1)",
+        "Device": "0",
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 29566.0,
+        "gpu__time_duration.sum": 21952.0,
+        "sm__cycles_active.max": 27644.0,
+        "smsp__inst_executed.sum": 159200.0,
+        "dram__sectors_read.sum": 2028.0,
+        "dram__sectors_write.sum": 0.0
+      },
+      {
+        "ID": "0",
+        "Kernel Name": "l2_persisting_window_sweep_kernel",
+        "Grid Size": "(32, 1, 1)",
+        "Block Size": "(32, 1, 1)",
+        "Device": "0",
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 29852.0,
+        "gpu__time_duration.sum": 22144.0,
+        "sm__cycles_active.max": 27920.0,
+        "smsp__inst_executed.sum": 159200.0,
+        "dram__sectors_read.sum": 2408.0,
+        "dram__sectors_write.sum": 344.0
+      },
+      {
+        "ID": "0",
+        "Kernel Name": "l2_persisting_window_sweep_kernel",
+        "Grid Size": "(32, 1, 1)",
+        "Block Size": "(32, 1, 1)",
+        "Device": "0",
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 29846.0,
+        "gpu__time_duration.sum": 22144.0,
+        "sm__cycles_active.max": 27890.0,
+        "smsp__inst_executed.sum": 159200.0,
+        "dram__sectors_read.sum": 2028.0,
+        "dram__sectors_write.sum": 0.0
+      }
+    ]
+  },
+  "comparison": {
+    "hardware_completion": "not_observed",
+    "native_macro_dispatches": 0,
+    "lower_bound_cycles": 31173,
+    "ncu_median_cycles": 29846.0,
+    "lower_bound_consistency": false,
+    "gap_cycles": 1327.0,
+    "gap_fraction": 0.04446156938953293,
+    "point_estimator": "not_claimed"
+  },
+  "interpretation": "This corrected rebuild includes all four Stage-1 anchor revisits in the host sink reference. Exact output/sink checks pass. The original trace_00 shape uses a documented persistence-window path and completes fresh NVBit/replay/five-NCU captures. Replay has full one-block coverage and 159200 records; NCU gpc cycles are 29874,29776,29566,29852,29846 (median 29846), while simulator lower bound is 31173, so lower-bound consistency remains false by 1327 cycles (4.44%). This is corrected evidence, not a point-error claim or tuning target; dirty-writeback/coherence tails and zero native dispatch remain open."
+}

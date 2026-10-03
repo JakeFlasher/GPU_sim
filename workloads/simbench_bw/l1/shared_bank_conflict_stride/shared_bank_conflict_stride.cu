@@ -4,7 +4,7 @@
 //
 // Stages a (rows * cols * stride) float tile through shared memory.
 // The kernel performs two read passes: a strided read (bank-conflict
-// stress) followed by an identity read; the strided value is XOR'd
+// stress) followed by an identity read; the strided value is summed
 // into a sink to prevent DCE while the identity read produces the
 // output. Cubin contains LDS/STS instructions per per-row contract.
 
@@ -36,7 +36,7 @@ extern "C" __global__ void shared_bank_conflict_stride_kernel(
     }
 }
 
-extern "C" void shared_bank_conflict_stride_launch(
+extern "C" cudaError_t shared_bank_conflict_stride_launch(
     const float *d_in, float *d_out, float *d_sink,
     int rows, int cols, int stride, cudaStream_t stream)
 {
@@ -44,5 +44,16 @@ extern "C" void shared_bank_conflict_stride_launch(
     dim3 grid(1, 1, 1);
     dim3 block(threads, 1, 1);
     size_t shmem = (size_t)rows * cols * stride * sizeof(float);
+    int device = 0, default_shared = 0;
+    cudaError_t rc = cudaGetDevice(&device);
+    if (rc != cudaSuccess) return rc;
+    rc = cudaDeviceGetAttribute(&default_shared, cudaDevAttrMaxSharedMemoryPerBlock, device);
+    if (rc != cudaSuccess) return rc;
+    if (shmem > (size_t)default_shared) {
+        rc = cudaFuncSetAttribute(shared_bank_conflict_stride_kernel,
+                                  cudaFuncAttributeMaxDynamicSharedMemorySize, (int)shmem);
+        if (rc != cudaSuccess) return rc;
+    }
     shared_bank_conflict_stride_kernel<<<grid, block, shmem, stream>>>(d_in, d_out, d_sink, rows, cols, stride);
+    return cudaGetLastError();
 }

@@ -1,0 +1,264 @@
+{
+  "schema": "sm86_c7_simbench_shared_bank_conflict_stride_corrected_live_v1",
+  "status": "correctness_trace_replay_ncu_complete_native_dispatch_refused",
+  "host_observation": "0, NVIDIA GeForce RTX 3090 Ti, GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c, 8.6, 615.71.09",
+  "host_identity": {
+    "device_index": 0,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "compute_capability": "8.6",
+    "driver": "615.71.09",
+    "pstate": "P0",
+    "graphics_clock_mhz": 1350,
+    "memory_clock_mhz": 10501
+  },
+  "identity": {
+    "source": "workloads/simbench_bw/l1/shared_bank_conflict_stride",
+    "binary": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s16c_shared_optin_20261003/shared_bank_conflict_stride_run",
+    "binary_sha256": "a334da2f9aee7047577869f6d9d20110d3d0b9938723bdf62da01535efe28b32",
+    "control": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s16c_shared_optin_20261003/control.json",
+    "control_sha256": "ecc005581f33fc56c7eeb11b9fb8a82e69e7e5ae1f3ebe6e9c76c2cfd2731250",
+    "trace": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s16c_shared_optin_20261003/trace",
+    "trace_stats": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s16c_shared_optin_20261003/trace/stats.csv",
+    "args": [
+      "--rows",
+      "64",
+      "--cols",
+      "64",
+      "--stride",
+      "4",
+      "--seed",
+      "42",
+      "--shape-point",
+      "trace_00",
+      "--summary"
+    ],
+    "kernel": "shared_bank_conflict_stride_kernel",
+    "metric": "gpc__cycles_elapsed.max",
+    "ncu_repeats": 5,
+    "ncu_cache": "all",
+    "ncu_clock": "none",
+    "simulator": "sim/target/release/sim-run"
+  },
+  "shape_dispositions": {
+    "trace_00": {
+      "rows": 64,
+      "cols": 64,
+      "stride": 4,
+      "shared_bytes": 65536,
+      "default_limit_bytes": 49152,
+      "optin_limit_bytes": 101376,
+      "status": "completed_after_dynamic_shared_memory_opt_in"
+    },
+    "trace_l2_accuracy_xl": {
+      "rows": 32,
+      "cols": 16,
+      "stride": 4,
+      "status": "not_scored_corrected_shape_supersedes_prior_slice"
+    }
+  },
+  "correctness": {
+    "status": "passed",
+    "shape_point": "trace_00",
+    "correct": true,
+    "mismatch_count": 0,
+    "sink_abs_error": 0,
+    "shared_bytes": 65536,
+    "default_shared_limit": 49152,
+    "optin_shared_limit": 101376,
+    "validation": "host-seeded identity output and strided-read sink checked after explicit dynamic shared-memory opt-in, cudaGetLastError, and cudaDeviceSynchronize",
+    "compute_sanitizer": {
+      "status": "passed",
+      "tool": "memcheck",
+      "error_summary": "0 errors"
+    }
+  },
+  "trace": {
+    "stats": {
+      "device_id": 0,
+      "stream_id": 7,
+      "kernel id": "kernel-1.trace",
+      "kernel mangled name": "shared_bank_conflict_stride_kernel",
+      "grid_dimX": 1,
+      "grid_dimY": 1,
+      "grid_dimZ": 1,
+      "#blocks": 1,
+      "block_dimX": 32,
+      "block_dimY": 1,
+      "block_dimZ": 1,
+      "#threads": 32,
+      "total_insts": 48599,
+      "total_reported_insts": 48599
+    },
+    "records_replayed": 15350,
+    "independent_tail_facts": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s16c_shared_optin_20261003/tail_facts.json"
+  },
+  "simulator": {
+    "records": 15350,
+    "instructions": 15350,
+    "completion_lower_bound_cycles": 103225,
+    "completion_status": "incomplete_unmodeled_retirement_tails",
+    "unmodeled_tails": {
+      "reduction_read_modify_write": false,
+      "dirty_writeback": true,
+      "coherence": true,
+      "async_copy_shared_visibility": false
+    },
+    "gpc_observation_frontier": {
+      "lower_bound_cycles": 103225,
+      "envelope_cycles": 1776,
+      "grid_blocks": 1,
+      "grid_log2": 0,
+      "cycles": 105001,
+      "role": "architecture_scoped_gpc_observation_boundary_not_timing_crosswalk"
+    }
+  },
+  "fast_frontier": {
+    "device_id": 0,
+    "stream_id": 7,
+    "kernel_id": 1,
+    "function_unique_id": 1,
+    "kernel_name": "shared_bank_conflict_stride_kernel___0",
+    "summary": {
+      "contract": "sm86_fast_exact_scalar_regions_v1",
+      "architecture": "sm_86",
+      "blocks_seen": 1,
+      "warps_seen": 1,
+      "eligible_warps": 0,
+      "candidate_regions": 0,
+      "certified_regions": 0,
+      "reified_regions": 0,
+      "candidate_instructions": 0,
+      "collapsed_instructions": 0,
+      "exact_execution_steps": 0,
+      "summarized_execution_steps": 0,
+      "macro_dispatches": 0,
+      "maximum_exact_final_cycle": 0,
+      "maximum_summarized_final_cycle": 0,
+      "terminal_state_matches": true,
+      "coverage": {
+        "trace_records": 15350,
+        "candidate_records": 0,
+        "summarized_records": 0,
+        "reified_records": 0,
+        "uncovered_records": 15350
+      },
+      "refusal_reasons": {
+        "nonfull_predicate_population": 1
+      }
+    }
+  },
+  "tail_facts": {
+    "records": 15350,
+    "memory_records": 2561,
+    "stores": 1025,
+    "cross_sm_line_topology": 0,
+    "protocol_record_counts": {
+      "async_commit_records": 0,
+      "async_issue_records": 0,
+      "async_wait_records": 0,
+      "block_barrier_records": 1,
+      "membar_records": 0,
+      "synchronization_records": 1
+    },
+    "hardware_completion_token_observed": false,
+    "global_event_order_observed": false
+  },
+  "ncu": {
+    "metric": "gpc__cycles_elapsed.max",
+    "values": [
+      100467.0,
+      100317.0,
+      100939.0,
+      99980.0,
+      100758.0
+    ],
+    "median": 100467.0,
+    "min": 99980.0,
+    "max": 100939.0,
+    "stdev": 375.4859518011293,
+    "rows": [
+      {
+        "ID": "0",
+        "Kernel Name": "shared_bank_conflict_stride_kernel",
+        "Grid Size": "(1, 1, 1)",
+        "Block Size": "(32, 1, 1)",
+        "Device": "0",
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 100467.0,
+        "gpu__time_duration.sum": 74464.0,
+        "sm__active_cycles.max": null,
+        "smsp__inst_executed.sum": 15350.0,
+        "dram__sectors_read.sum": 2284.0,
+        "dram__sectors_write.sum": 0.0
+      },
+      {
+        "ID": "0",
+        "Kernel Name": "shared_bank_conflict_stride_kernel",
+        "Grid Size": "(1, 1, 1)",
+        "Block Size": "(32, 1, 1)",
+        "Device": "0",
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 100317.0,
+        "gpu__time_duration.sum": 74336.0,
+        "sm__active_cycles.max": null,
+        "smsp__inst_executed.sum": 15350.0,
+        "dram__sectors_read.sum": 2284.0,
+        "dram__sectors_write.sum": 36.0
+      },
+      {
+        "ID": "0",
+        "Kernel Name": "shared_bank_conflict_stride_kernel",
+        "Grid Size": "(1, 1, 1)",
+        "Block Size": "(32, 1, 1)",
+        "Device": "0",
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 100939.0,
+        "gpu__time_duration.sum": 74816.0,
+        "sm__active_cycles.max": null,
+        "smsp__inst_executed.sum": 15350.0,
+        "dram__sectors_read.sum": 2284.0,
+        "dram__sectors_write.sum": 32.0
+      },
+      {
+        "ID": "0",
+        "Kernel Name": "shared_bank_conflict_stride_kernel",
+        "Grid Size": "(1, 1, 1)",
+        "Block Size": "(32, 1, 1)",
+        "Device": "0",
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 99980.0,
+        "gpu__time_duration.sum": 74080.0,
+        "sm__active_cycles.max": null,
+        "smsp__inst_executed.sum": 15350.0,
+        "dram__sectors_read.sum": 2284.0,
+        "dram__sectors_write.sum": 0.0
+      },
+      {
+        "ID": "0",
+        "Kernel Name": "shared_bank_conflict_stride_kernel",
+        "Grid Size": "(1, 1, 1)",
+        "Block Size": "(32, 1, 1)",
+        "Device": "0",
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 100758.0,
+        "gpu__time_duration.sum": 74688.0,
+        "sm__active_cycles.max": null,
+        "smsp__inst_executed.sum": 15350.0,
+        "dram__sectors_read.sum": 2284.0,
+        "dram__sectors_write.sum": 16.0
+      }
+    ]
+  },
+  "comparison": {
+    "hardware_completion": "not_observed",
+    "native_macro_dispatches": 0,
+    "lower_bound_cycles": 103225,
+    "ncu_median_cycles": 100467.0,
+    "lower_bound_consistency": false,
+    "gap_cycles": 2758.0,
+    "gap_fraction": 0.027451800093563062,
+    "point_estimator": "not_claimed"
+  },
+  "interpretation": "The original trace_00 shared-bank shape (64x64x4, 65536 dynamic shared bytes) is now run correctly by opting into the documented SM86 dynamic shared-memory limit (default 49152, opt-in 101376). Host identity/sink checks and compute-sanitizer pass. Fresh NVBit/replay/five NCU use the exact opted-in binary; replay has full one-block coverage and 15350 records, NCU reports the same 15350 warp instructions. NCU gpc cycles are 100467,100317,100939,99980,100758 (median 100467); simulator lower bound is 103225, so lower-bound consistency is false by 2758 cycles (2.75% above the hardware median). The prior OOD disposition is superseded by this corrected live run; no parameter tuning or point accuracy claim is made. Shared-memory LDS/STS traffic, dirty-writeback/coherence tails, and zero native dispatch remain explicit."
+}
