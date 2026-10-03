@@ -20,7 +20,7 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    opt-in and a corrected original-shape recapture. Keep the superseded
    pre-opt-in artifact historical, not active evidence.
    [Ampere shared memory](https://docs.nvidia.com/cuda/ampere-tuning-guide/#unified-shared-memory-l1-texture-cache)
-3. **Then resume remaining population/mechanism work.** Tensor refusals and
+3. **C7-S17 complete; C7-S18 next.** Tensor refusals and
    measured timing mismatches stay open deliverables, not completed mechanisms.
    No timing/card parameter is selected from these scored NCU targets.
 
@@ -813,9 +813,19 @@ trace/replay/NCU measurements remain a lower-bound falsifier; no scored target
 was used to alter the model. See
 `docs/sm86_c7_simbench_l2_prefetch_hint_sweep_corrected_live_v1.json`.
 
-### C7-S17 — next active milestone
+### C7-S17 — corrected-artifact regression — complete
 
-Run the full corrected-shape regression for the repaired shared-bank and
-persisting-window rows, then select the next unrun SimBench row. Preserve exact
-binary/trace/control identity, independent NCU targets, and explicit falsifier
-status; do not re-use superseded artifacts as current evidence.
+All 19 current live/blocked C7 artifacts validate against their sibling JSON
+schemas; the inventory has 14 complete direct rows and two explicit replay
+blockers. The Cargo workspace regression passes (38 test groups; no reported
+failures). The corrected shared-bank and persisting-window artifacts are the
+active records; their pre-opt-in/pre-sink artifacts remain superseded history.
+No scored NCU target was used to change simulator parameters.
+
+### C7-S18 — next active milestone
+
+Run one additional unrun SM86 SimBench row from the remaining control/vendor
+population (prefer `vendor_sgemm_cublas` or `global_atomic_and_return_used`).
+Preserve checked correctness, exact binary/arguments, fresh NVBit, replay, and
+five-repetition NCU; retain every unsupported-SASS, OOM/OOD, or falsifying
+disposition without tuning scored parameters.
