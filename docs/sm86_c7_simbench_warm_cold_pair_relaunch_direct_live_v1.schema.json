@@ -15,7 +15,8 @@
     "simulator": {"type": "object", "additionalProperties": true},
     "ncu": {"type": "object", "required": ["metric", "repeats", "launches"], "properties": {"metric": {"const": "gpc__cycles_elapsed.max"}, "repeats": {"const": 5}, "launches": {"type": "object"}}, "additionalProperties": true},
     "comparison": {"type": "object", "required": ["native_macro_dispatches", "hardware_completion", "point_estimator"], "properties": {"native_macro_dispatches": {"const": 0}, "hardware_completion": {"const": "not_observed"}, "point_estimator": {"const": "not_claimed"}}, "additionalProperties": true},
-    "interpretation": {"type": "string", "minLength": 1}
+    "interpretation": {"type": "string", "minLength": 1},
+    "raw_artifacts": {"type": "object", "additionalProperties": true}
   },
   "additionalProperties": false
 }
