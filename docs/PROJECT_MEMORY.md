@@ -353,13 +353,13 @@ not requested.
 
 The C7 inventory lists 15 portable rows, 31 SM86-capable rows among 92
 SimBench rows, 34 research-probe directories, and 203 SOL baseline problems.
-Portable timing paths and eight direct SimBench slices have completed:
+Portable timing paths and nine direct SimBench slices have completed:
 `fp32_fma_dep_chain`, `cp_async_shared_tile_copy`, `global_atomic_histogram`,
 `global_vectorized_128b_copy`, `bf16_hmma_gemm_traceable`,
-`global_scalar_32b_copy`, `global_atomic_return_used`, and
-`fp16_hmma_gemm_traceable`. These check outputs at the captured shape;
+`global_scalar_32b_copy`, `global_atomic_return_used`,
+`fp16_hmma_gemm_traceable`, and `global_vectorized_64b_copy`. These check outputs at the captured shape;
 the FP32 direct slice is timing-only (its separate correctness-shape run does
-not validate that captured shape). All eight retain open tails and zero native
+not validate that captured shape). All nine retain open tails and zero native
 macro dispatch. Instruction counts match NCU in the scalar/vector/atomic/tensor
 slices; that does not identify the cause of their timing gaps. Results and
 remaining populations: `docs/sm86_c7_workload_population_inventory_v1.json`.
@@ -388,6 +388,12 @@ trace, replay, and five NCU captures match at 404 warp instructions. NCU
 median is 4,934 cycles versus the simulator lower bound 3,337; dirty-writeback
 and coherence tails remain open and native dispatch remains zero. See
 `docs/sm86_c7_simbench_fp16_hmma_gemm_direct_live_v1.json`.
+
+C7-S9 64-bit vector copy is complete: its host identity check, fresh NVBit
+trace, replay, and five NCU captures match at 5,921 warp instructions. NCU
+median is 129,721 cycles versus the simulator lower bound 123,918; writeback
+and coherence tails remain open and native dispatch remains zero. See
+`docs/sm86_c7_simbench_global_vectorized_64b_copy_direct_live_v1.json`.
 
 ## Retained evidence
 

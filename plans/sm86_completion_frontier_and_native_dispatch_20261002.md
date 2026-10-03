@@ -80,7 +80,7 @@ Three distinct questions must not be conflated:
 | C4 | Independently fit mechanism/observer models using new calibration-only probes, then materialize predictions on untouched cases. No ad-hoc padding or post-score model selection | partial: async group + destination-layout calibration |
 | C5 | Live held-out evaluation of point error, signed bias, finite statistical interval coverage/width, repeat dispersion and OOD; keep semantic tails separate | partial: two controlled async/layout holdouts |
 | C6 | Real scalar native region transition with full front-end/pipeline continuation differential and pre-mutation fallback; extend only after the first real positive case | pending |
-| C7 | Inventory all available workload families (portable, native probes, SOL/other rosters). Full live campaign over the declared supported population; failures remain in coverage denominator | partial: 15-row portable population plus 8 direct SimBench rows complete; one IMMA blocker and remaining populations pending |
+| C7 | Inventory all available workload families (portable, native probes, SOL/other rosters). Full live campaign over the declared supported population; failures remain in coverage denominator | partial: 15-row portable population plus 9 direct SimBench rows complete; one IMMA blocker and remaining populations pending |
 | C8 | Rerun corrected workload failures, remove obsolete interfaces, synchronize supported claims, results and runbook; no unfinished mechanism called complete | pending |
 
 C0-R/C1-R repair the previous work; they do not finish C3/C5/C6. C7 is not
@@ -438,6 +438,34 @@ shared_bank_conflict_stride, or tf32_hmma_gemm_traceable). Preserve the same
 checked correctness, exact binary/arguments, fresh NVBit, replay, and
 five-repetition NCU contract; retain any unsupported-SASS or OOM/OOD
 disposition without silent shape substitution.
+
+### C7-S9 — direct SimBench 64-bit vector slice — complete
+
+The global_vectorized_64b_copy row now has a direct SM86 timing-shape slice
+using one rebuilt binary and identical samples=1024,bins=64,seed=42 arguments
+for host correctness, NVBit, replay, and five fresh NCU application captures.
+The host identity-output check passed with zero mismatches; SASS contains
+LDG.E.64/STG.E.64. Replay has one-block coverage and 5,921 records, and NCU
+reports the same 5,921 warp instructions. NCU gpc cycles were
+130097,129581,130029,129449,129721 (median 129721); simulator completion
+lower bound is 123918, so lower-bound consistency is true but no point
+estimator or finite upper is claimed. The independent extractor observes
+1,024 vector loads and 1,024 vector stores, but no hardware completion token,
+owner/read-from relation, or global instrumentation order. Dirty-writeback and
+coherence tails remain open. The fast analyzer refuses the one warp for a
+nonfull predicate population; native macro dispatch remains zero. Evidence:
+docs/sm86_c7_simbench_global_vectorized_64b_copy_direct_live_v1.json and its
+schema. This closes only this slice; C3/C5/C6 and the wider C7 campaign
+remain open.
+
+### C7-S10 — next active milestone
+
+Run one additional direct SM86 SimBench row from the remaining memory, control,
+or tensor populations (prefer shared_bank_conflict_stride or
+tf32_hmma_gemm_traceable). Preserve the same checked correctness, exact
+binary/arguments, fresh NVBit, replay, and five-repetition NCU contract;
+retain any unsupported-SASS or OOM/OOD disposition without silent shape
+substitution.
 
 The active SimBench wrapper still rejects the repository-contained NVBit
 tracer because it requires an external split-v2 tracer root; see
