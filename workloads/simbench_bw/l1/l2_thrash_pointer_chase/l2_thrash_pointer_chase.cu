@@ -33,7 +33,11 @@ extern "C" __global__ void l2_thrash_pointer_chase_kernel(
         acc += v;
         // Next index is derived from the bit pattern of the loaded value
         // — dependent load on the previous result.
-        idx = ((__float_as_int(v) >> 3) ^ idx) % total;
+        // Treat the loaded bit pattern as unsigned before hashing.  A signed
+        // right shift of negative floats could produce a negative modulo and
+        // an out-of-bounds next index.
+        const uint32_t bits = (uint32_t)__float_as_int(v);
+        idx = (int)(((bits >> 3) ^ (uint32_t)idx) % (uint32_t)total);
     }
     if (tid == 0) sink[0] = acc;
     __syncthreads();

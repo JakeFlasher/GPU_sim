@@ -390,6 +390,13 @@ sim-run refuses HMMA.1688.F32.TF32 because the SM86 execution-pipeline
 model is missing. No simulator endpoint or accuracy comparison is claimed.
 See `docs/sm86_c7_simbench_tf32_hmma_gemm_blocked_live_v1.json`.
 
+C7-S12 pointer chase is a real lower-bound falsifier: after repairing its
+unsigned bit-hash index arithmetic, the trace shape passes identity/sink checks
+and matches 118,976 replay/NCU instructions, but simulator lower 59,545 is
+9,965 cycles (20.1%) above NCU median 49,580. No post-score tuning or point
+error claim is made. See
+`docs/sm86_c7_simbench_l2_thrash_pointer_chase_direct_live_v1.json`.
+
 C7-S8 FP16 HMMA is complete: the checked FP16-cast reference, fresh NVBit
 trace, replay, and five NCU captures match at 404 warp instructions. NCU
 median is 4,934 cycles versus the simulator lower bound 3,337; dirty-writeback

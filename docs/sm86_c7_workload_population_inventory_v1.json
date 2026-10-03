@@ -1,6 +1,6 @@
 {
   "host_architecture": "sm86",
-  "interpretation": "The portable 15-row population has a completed bounded live pipeline. Ten SimBench SM86 rows have direct timing-shape native/NVBit/replay/five-NCU slices, including shared_bank_conflict_stride on its declared trace_l2_accuracy_xl shape after trace_00 was explicitly refused for exceeding SM86 shared memory. The int8_imma_gemm_traceable and tf32_hmma_gemm_traceable rows pass correctness, tracing, and NCU but are explicitly blocked at simulator replay because the SM86 model lacks their IMMA/TF32 pipeline models. The active wrapper remains blocked by external tracer/runtime-sidecar requirements. This inventory prevents calling the slices a full repository campaign; remaining SimBench rows, research probes, and SOL populations remain explicit.",
+  "interpretation": "The portable 15-row population has a completed bounded live pipeline. Eleven SimBench SM86 rows now have direct timing-shape native/NVBit/replay/five-NCU slices, including repaired shared-bank and pointer-chase workloads. The pointer-chase row is a real falsifier: simulator lower 59,545 exceeds NCU median 49,580 by 9,965 cycles. The int8_imma_gemm_traceable and tf32_hmma_gemm_traceable rows pass correctness, tracing, and NCU but are explicitly blocked at simulator replay because the SM86 model lacks their pipeline models. The active wrapper remains blocked by external tracer/runtime-sidecar requirements. This inventory prevents calling the slices a full repository campaign; remaining SimBench rows, research probes, and SOL populations remain explicit.",
   "populations": {
     "portable_lcd": {
       "active_count": 15,
@@ -65,7 +65,7 @@
     },
     "simbench_bw": {
       "direct_slice_artifact": "docs/sm86_c7_simbench_fp32_direct_live_v1.json",
-      "live_pipeline_status": "ten direct SM86 rows complete; two tensor rows (INT8 IMMA and TF32 HMMA) correctness/trace/NCU complete but replay-blocked by missing SM86 pipeline models; one declared shared trace shape OOD; wrapper_trace_path_blocked_external_runtime_sidecar; remaining_sm86_rows_pending",
+      "live_pipeline_status": "eleven direct SM86 rows complete; two tensor rows (INT8 IMMA and TF32 HMMA) replay-blocked by missing SM86 pipeline models; one pointer-chase row is a real lower-bound falsifier; one declared shared trace shape OOD; wrapper_trace_path_blocked_external_runtime_sidecar; remaining_sm86_rows_pending",
       "roster_rows": 92,
       "sm86_arch_rows": 31,
       "sm86_arch_rows_list": [
@@ -112,7 +112,8 @@
         "docs/sm86_c7_simbench_global_atomic_return_used_direct_live_v1.json",
         "docs/sm86_c7_simbench_fp16_hmma_gemm_direct_live_v1.json",
         "docs/sm86_c7_simbench_global_vectorized_64b_copy_direct_live_v1.json",
-        "docs/sm86_c7_simbench_shared_bank_conflict_stride_direct_live_v1.json"
+        "docs/sm86_c7_simbench_shared_bank_conflict_stride_direct_live_v1.json",
+        "docs/sm86_c7_simbench_l2_thrash_pointer_chase_direct_live_v1.json"
       ],
       "direct_sm86_rows_completed": [
         "fp32_fma_dep_chain",
@@ -124,7 +125,8 @@
         "global_atomic_return_used",
         "fp16_hmma_gemm_traceable",
         "global_vectorized_64b_copy",
-        "shared_bank_conflict_stride"
+        "shared_bank_conflict_stride",
+        "l2_thrash_pointer_chase"
       ],
       "blocked_slice_artifacts": [
         "docs/sm86_c7_simbench_int8_imma_gemm_blocked_live_v1.json",

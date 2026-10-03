@@ -80,7 +80,7 @@ Three distinct questions must not be conflated:
 | C4 | Independently fit mechanism/observer models using new calibration-only probes, then materialize predictions on untouched cases. No ad-hoc padding or post-score model selection | partial: async group + destination-layout calibration |
 | C5 | Live held-out evaluation of point error, signed bias, finite statistical interval coverage/width, repeat dispersion and OOD; keep semantic tails separate | partial: two controlled async/layout holdouts |
 | C6 | Real scalar native region transition with full front-end/pipeline continuation differential and pre-mutation fallback; extend only after the first real positive case | pending |
-| C7 | Inventory all available workload families (portable, native probes, SOL/other rosters). Full live campaign over the declared supported population; failures remain in coverage denominator | partial: 15-row portable population plus 10 direct SimBench rows complete; INT8/TF32 replay blockers and one shared-shape OOD disposition remain |
+| C7 | Inventory all available workload families (portable, native probes, SOL/other rosters). Full live campaign over the declared supported population; failures remain in coverage denominator | partial: 15-row portable population plus 11 direct SimBench rows complete; INT8/TF32 replay blockers, one shared-shape OOD disposition, and one lower-bound falsifier remain |
 | C8 | Rerun corrected workload failures, remove obsolete interfaces, synchronize supported claims, results and runbook; no unfinished mechanism called complete | pending |
 
 C0-R/C1-R repair the previous work; they do not finish C3/C5/C6. C7 is not
@@ -517,6 +517,33 @@ memory populations (prefer l2_thrash_pointer_chase or
 global_atomic_and_return_used). Preserve checked correctness, exact
 binary/arguments, fresh NVBit, replay, and five-repetition NCU; retain every
 unsupported-SASS or OOM/OOD disposition.
+
+### C7-S12 — direct SimBench pointer-chase slice — complete
+
+The repaired l2_thrash_pointer_chase row passes host identity-output and
+dependent-sink checks on its declared trace_00 shape
+(chain_length=256,warps=32); unsigned bit hashing prevents the prior possible
+negative-index OOB. The exact binary produces a fresh NVBit trace, full 32-block
+replay coverage, and five NCU captures. Replay has 118,976 records and NCU
+reports the same 118,976 warp instructions. NCU gpc cycles were
+49573,49580,49739,49630,49523 (median 49580), while simulator completion lower
+bound is 59545: lower-bound consistency is false by 9,965 cycles (20.1% above
+the hardware median). This is a real falsifying mismatch, not a point-error
+score or a reason to tune the model post hoc. The extractor reports 256
+cross-SM line-topology events and 31 unknown address operands, with no hardware
+completion token or global instrumentation order. Dirty-writeback and
+coherence tails remain open; native dispatch remains zero. Evidence:
+docs/sm86_c7_simbench_l2_thrash_pointer_chase_direct_live_v1.json and its
+schema. This closes only this slice; C3/C5/C6 and the wider C7 campaign remain
+open.
+
+### C7-S13 — next active milestone
+
+Run one additional direct SM86 SimBench row from the remaining memory/control
+population (prefer l2_persisting_window_sweep or warm_cold_pair_relaunch).
+Preserve checked correctness, exact binary/arguments, fresh NVBit, replay, and
+five-repetition NCU; retain every unsupported-SASS, OOM/OOD, or falsifying
+disposition without parameter tuning.
 
 The active SimBench wrapper still rejects the repository-contained NVBit
 tracer because it requires an external split-v2 tracer root; see
