@@ -467,6 +467,34 @@ binary/arguments, fresh NVBit, replay, and five-repetition NCU contract;
 retain any unsupported-SASS or OOM/OOD disposition without silent shape
 substitution.
 
+### C7-S10 — direct SimBench shared-bank slice — complete
+
+The shared_bank_conflict_stride row was hardened with checked shape arithmetic,
+shared-memory/device-memory preflight, launch-error checks, identity-output
+validation, and a strided-read sink check. Its declared trace_00 shape
+(64x64x4) is explicitly OOD on SM86 because 65,536 bytes exceeds the
+per-block shared-memory limit; it was refused before allocation, not silently
+shrunk. The separately declared trace_l2_accuracy_xl shape (32x16x4) passes
+and uses the same binary/arguments for NVBit, replay, and five NCU captures.
+Replay has full one-block coverage and 2,022 records, and NCU reports the same
+2,022 warp instructions. NCU gpc cycles were
+16198,16003,15927,16324,15959 (median 16003); simulator lower bound is 15081,
+so lower-bound consistency is true but no point estimator or finite upper is
+claimed. The independent extractor observes shared LDS/STS traffic, 128
+shared loads, 64 global loads, 65 stores, and one barrier, but no hardware
+completion token or global instrumentation order. Dirty-writeback and
+coherence tails remain open. Native macro dispatch remains zero. Evidence:
+docs/sm86_c7_simbench_shared_bank_conflict_stride_direct_live_v1.json and its
+schema. This closes only this slice; C3/C5/C6 and the wider C7 campaign
+remain open.
+
+### C7-S11 — next active milestone
+
+Run one additional direct SM86 SimBench row from the remaining tensor/control
+populations (prefer tf32_hmma_gemm_traceable or l2_thrash_pointer_chase).
+Preserve checked correctness, exact binary/arguments, fresh NVBit, replay, and
+five-repetition NCU; retain every unsupported-SASS or OOM/OOD disposition.
+
 The active SimBench wrapper still rejects the repository-contained NVBit
 tracer because it requires an external split-v2 tracer root; see
 `docs/sm86_c7_simbench_population_slice_v1.json`. The blocker is recorded,
