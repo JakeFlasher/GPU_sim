@@ -1,0 +1,229 @@
+{
+  "schema": "sm86_c7_research_probe_build_matrix_v1",
+  "status": "complete",
+  "toolchain": "CUDA 13.2 / GCC 14 / sm_86",
+  "results": [
+    {
+      "name": "async_barrier_overlap",
+      "status": "passed",
+      "return_code": 0,
+      "stdout": "results/alpha/c7_s33_probe_build_20261003/async_barrier_overlap.stdout",
+      "stderr": "results/alpha/c7_s33_probe_build_20261003/async_barrier_overlap.stderr"
+    },
+    {
+      "name": "async_source_only",
+      "status": "passed",
+      "return_code": 0,
+      "stdout": "results/alpha/c7_s33_probe_build_20261003/async_source_only.stdout",
+      "stderr": "results/alpha/c7_s33_probe_build_20261003/async_source_only.stderr"
+    },
+    {
+      "name": "atomic_alias_adversarial",
+      "status": "passed",
+      "return_code": 0,
+      "stdout": "results/alpha/c7_s33_probe_build_20261003/atomic_alias_adversarial.stdout",
+      "stderr": "results/alpha/c7_s33_probe_build_20261003/atomic_alias_adversarial.stderr"
+    },
+    {
+      "name": "atomic_completion_serialization",
+      "status": "passed",
+      "return_code": 0,
+      "stdout": "results/alpha/c7_s33_probe_build_20261003/atomic_completion_serialization.stdout",
+      "stderr": "results/alpha/c7_s33_probe_build_20261003/atomic_completion_serialization.stderr"
+    },
+    {
+      "name": "atomic_lts_mapping",
+      "status": "passed",
+      "return_code": 0,
+      "stdout": "results/alpha/c7_s33_probe_build_20261003/atomic_lts_mapping.stdout",
+      "stderr": "results/alpha/c7_s33_probe_build_20261003/atomic_lts_mapping.stderr"
+    },
+    {
+      "name": "atomic_multism_service",
+      "status": "passed",
+      "return_code": 0,
+      "stdout": "results/alpha/c7_s33_probe_build_20261003/atomic_multism_service.stdout",
+      "stderr": "results/alpha/c7_s33_probe_build_20261003/atomic_multism_service.stderr"
+    },
+    {
+      "name": "atomic_vmm_alias",
+      "status": "passed",
+      "return_code": 0,
+      "stdout": "results/alpha/c7_s33_probe_build_20261003/atomic_vmm_alias.stdout",
+      "stderr": "results/alpha/c7_s33_probe_build_20261003/atomic_vmm_alias.stderr"
+    },
+    {
+      "name": "barrier_pipeline",
+      "status": "passed",
+      "return_code": 0,
+      "stdout": "results/alpha/c7_s33_probe_build_20261003/barrier_pipeline.stdout",
+      "stderr": "results/alpha/c7_s33_probe_build_20261003/barrier_pipeline.stderr"
+    },
+    {
+      "name": "fixed_latency_allocate",
+      "status": "passed",
+      "return_code": 0,
+      "stdout": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_allocate.stdout",
+      "stderr": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_allocate.stderr"
+    },
+    {
+      "name": "fixed_latency_completion",
+      "status": "passed",
+      "return_code": 0,
+      "stdout": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_completion.stdout",
+      "stderr": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_completion.stderr"
+    },
+    {
+      "name": "fixed_latency_front_end_footprint",
+      "status": "passed",
+      "return_code": 0,
+      "stdout": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_front_end_footprint.stdout",
+      "stderr": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_front_end_footprint.stderr"
+    },
+    {
+      "name": "fixed_latency_result_bypass",
+      "status": "passed",
+      "return_code": 0,
+      "stdout": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_result_bypass.stdout",
+      "stderr": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_result_bypass.stderr"
+    },
+    {
+      "name": "fixed_latency_result_capacity",
+      "status": "passed",
+      "return_code": 0,
+      "stdout": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_result_capacity.stdout",
+      "stderr": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_result_capacity.stderr"
+    },
+    {
+      "name": "fixed_latency_result_load_priority",
+      "status": "passed",
+      "return_code": 0,
+      "stdout": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_result_load_priority.stdout",
+      "stderr": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_result_load_priority.stderr"
+    },
+    {
+      "name": "fixed_latency_result_order",
+      "status": "passed",
+      "return_code": 0,
+      "stdout": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_result_order.stdout",
+      "stderr": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_result_order.stderr"
+    },
+    {
+      "name": "fixed_latency_result_queue",
+      "status": "passed",
+      "return_code": 0,
+      "stdout": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_result_queue.stdout",
+      "stderr": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_result_queue.stderr"
+    },
+    {
+      "name": "fixed_latency_result_same_bank",
+      "status": "passed",
+      "return_code": 0,
+      "stdout": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_result_same_bank.stdout",
+      "stderr": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_result_same_bank.stderr"
+    },
+    {
+      "name": "fixed_latency_reuse",
+      "status": "passed",
+      "return_code": 0,
+      "stdout": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_reuse.stdout",
+      "stderr": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_reuse.stderr"
+    },
+    {
+      "name": "front_end_ibuffer_depth",
+      "status": "passed",
+      "return_code": 0,
+      "stdout": "results/alpha/c7_s33_probe_build_20261003/front_end_ibuffer_depth.stdout",
+      "stderr": "results/alpha/c7_s33_probe_build_20261003/front_end_ibuffer_depth.stderr"
+    },
+    {
+      "name": "immediate_constant_frontier",
+      "status": "passed",
+      "return_code": 0,
+      "stdout": "results/alpha/c7_s33_probe_build_20261003/immediate_constant_frontier.stdout",
+      "stderr": "results/alpha/c7_s33_probe_build_20261003/immediate_constant_frontier.stderr"
+    },
+    {
+      "name": "issue_port_control",
+      "status": "passed",
+      "return_code": 0,
+      "stdout": "results/alpha/c7_s33_probe_build_20261003/issue_port_control.stdout",
+      "stderr": "results/alpha/c7_s33_probe_build_20261003/issue_port_control.stderr"
+    },
+    {
+      "name": "l1tex_admission_backpressure",
+      "status": "passed",
+      "return_code": 0,
+      "stdout": "results/alpha/c7_s33_probe_build_20261003/l1tex_admission_backpressure.stdout",
+      "stderr": "results/alpha/c7_s33_probe_build_20261003/l1tex_admission_backpressure.stderr"
+    },
+    {
+      "name": "l1tex_arrival_replay_service",
+      "status": "passed",
+      "return_code": 0,
+      "stdout": "results/alpha/c7_s33_probe_build_20261003/l1tex_arrival_replay_service.stdout",
+      "stderr": "results/alpha/c7_s33_probe_build_20261003/l1tex_arrival_replay_service.stderr"
+    },
+    {
+      "name": "l2_queue_frontier",
+      "status": "passed",
+      "return_code": 0,
+      "stdout": "results/alpha/c7_s33_probe_build_20261003/l2_queue_frontier.stdout",
+      "stderr": "results/alpha/c7_s33_probe_build_20261003/l2_queue_frontier.stderr"
+    },
+    {
+      "name": "launch_cycle_semantics",
+      "status": "passed",
+      "return_code": 0,
+      "stdout": "results/alpha/c7_s33_probe_build_20261003/launch_cycle_semantics.stdout",
+      "stderr": "results/alpha/c7_s33_probe_build_20261003/launch_cycle_semantics.stderr"
+    },
+    {
+      "name": "ldgsts_burst_release",
+      "status": "passed",
+      "return_code": 0,
+      "stdout": "results/alpha/c7_s33_probe_build_20261003/ldgsts_burst_release.stdout",
+      "stderr": "results/alpha/c7_s33_probe_build_20261003/ldgsts_burst_release.stderr"
+    },
+    {
+      "name": "memory_retirement_service",
+      "status": "passed",
+      "return_code": 0,
+      "stdout": "results/alpha/c7_s33_probe_build_20261003/memory_retirement_service.stdout",
+      "stderr": "results/alpha/c7_s33_probe_build_20261003/memory_retirement_service.stderr"
+    },
+    {
+      "name": "sfu_frontier",
+      "status": "passed",
+      "return_code": 0,
+      "stdout": "results/alpha/c7_s33_probe_build_20261003/sfu_frontier.stdout",
+      "stderr": "results/alpha/c7_s33_probe_build_20261003/sfu_frontier.stderr"
+    },
+    {
+      "name": "smsp_scheduler_contention",
+      "status": "passed",
+      "return_code": 0,
+      "stdout": "results/alpha/c7_s33_probe_build_20261003/smsp_scheduler_contention.stdout",
+      "stderr": "results/alpha/c7_s33_probe_build_20261003/smsp_scheduler_contention.stderr"
+    },
+    {
+      "name": "store_ack_frontier",
+      "status": "passed",
+      "return_code": 0,
+      "stdout": "results/alpha/c7_s33_probe_build_20261003/store_ack_frontier.stdout",
+      "stderr": "results/alpha/c7_s33_probe_build_20261003/store_ack_frontier.stderr"
+    },
+    {
+      "name": "task_done_boundary",
+      "status": "passed",
+      "return_code": 0,
+      "stdout": "results/alpha/c7_s33_probe_build_20261003/task_done_boundary.stdout",
+      "stderr": "results/alpha/c7_s33_probe_build_20261003/task_done_boundary.stderr"
+    }
+  ],
+  "summary": {
+    "attempted": 31,
+    "passed": 31,
+    "failed": 0
+  }
+}

@@ -1,0 +1,981 @@
+{
+  "schema": "sm86_c7_research_probe_inventory_v1",
+  "architecture": "sm_86",
+  "status": "inventory_and_makefile_build_matrix_complete",
+  "root": "workloads/research_probes",
+  "population": {
+    "directory_count": 42,
+    "makefile_probe_count": 31,
+    "cuda_source_or_preserved_binary_count": 6,
+    "analysis_only_count": 5,
+    "entries": [
+      {
+        "name": "async_barrier_overlap",
+        "category": "cuda_makefile_probe",
+        "makefile": true,
+        "cuda_sources": [
+          "async_barrier_overlap.cu"
+        ],
+        "host_sources": [],
+        "executable_candidates": [
+          "async_barrier_overlap",
+          "async_barrier_overlap_trace"
+        ],
+        "campaign_scripts": [
+          "campaign.py"
+        ],
+        "has_readme": true,
+        "initial_disposition": "build_passed",
+        "build_status": "passed",
+        "build_return_code": 0,
+        "build_logs": {
+          "stdout": "results/alpha/c7_s33_probe_build_20261003/async_barrier_overlap.stdout",
+          "stderr": "results/alpha/c7_s33_probe_build_20261003/async_barrier_overlap.stderr"
+        }
+      },
+      {
+        "name": "async_source_only",
+        "category": "cuda_makefile_probe",
+        "makefile": true,
+        "cuda_sources": [
+          "async_cohort_pairing.cu",
+          "async_cross_warp_queue_overlap.cu",
+          "async_issue_spacing.cu",
+          "async_multiline_response.cu",
+          "async_source_line_ownership.cu",
+          "async_source_only.cu",
+          "async_visibility_phase.cu",
+          "async_wait_prefix_order.cu"
+        ],
+        "host_sources": [],
+        "executable_candidates": [
+          "async_cohort_pairing",
+          "async_cross_warp_queue_overlap",
+          "async_issue_spacing",
+          "async_multiline_response",
+          "async_source_line_ownership",
+          "async_source_line_ownership_coordinates",
+          "async_source_only",
+          "async_visibility_phase",
+          "async_wait_prefix_order"
+        ],
+        "campaign_scripts": [
+          "line_ownership_campaign_contract.py"
+        ],
+        "has_readme": true,
+        "initial_disposition": "build_passed",
+        "build_status": "passed",
+        "build_return_code": 0,
+        "build_logs": {
+          "stdout": "results/alpha/c7_s33_probe_build_20261003/async_source_only.stdout",
+          "stderr": "results/alpha/c7_s33_probe_build_20261003/async_source_only.stderr"
+        }
+      },
+      {
+        "name": "atomic_alias_adversarial",
+        "category": "cuda_makefile_probe",
+        "makefile": true,
+        "cuda_sources": [
+          "atomic_alias_adversarial.cu"
+        ],
+        "host_sources": [
+          "atomic_alias_adversarial_driver.cpp"
+        ],
+        "executable_candidates": [
+          "atomic_alias_adversarial_driver"
+        ],
+        "campaign_scripts": [
+          "campaign.py"
+        ],
+        "has_readme": true,
+        "initial_disposition": "build_passed",
+        "build_status": "passed",
+        "build_return_code": 0,
+        "build_logs": {
+          "stdout": "results/alpha/c7_s33_probe_build_20261003/atomic_alias_adversarial.stdout",
+          "stderr": "results/alpha/c7_s33_probe_build_20261003/atomic_alias_adversarial.stderr"
+        }
+      },
+      {
+        "name": "atomic_completion_serialization",
+        "category": "cuda_makefile_probe",
+        "makefile": true,
+        "cuda_sources": [
+          "atomic_completion_serialization.cu"
+        ],
+        "host_sources": [
+          "atomic_completion_serialization_driver.cpp"
+        ],
+        "executable_candidates": [
+          "atomic_completion_serialization_driver"
+        ],
+        "campaign_scripts": [
+          "campaign.py"
+        ],
+        "has_readme": true,
+        "initial_disposition": "build_passed",
+        "build_status": "passed",
+        "build_return_code": 0,
+        "build_logs": {
+          "stdout": "results/alpha/c7_s33_probe_build_20261003/atomic_completion_serialization.stdout",
+          "stderr": "results/alpha/c7_s33_probe_build_20261003/atomic_completion_serialization.stderr"
+        }
+      },
+      {
+        "name": "atomic_lts_mapping",
+        "category": "cuda_makefile_probe",
+        "makefile": true,
+        "cuda_sources": [
+          "atomic_lts_mapping.cu"
+        ],
+        "host_sources": [
+          "atomic_lts_mapping_driver.cpp"
+        ],
+        "executable_candidates": [
+          "atomic_lts_mapping_driver"
+        ],
+        "campaign_scripts": [
+          "campaign.py"
+        ],
+        "has_readme": true,
+        "initial_disposition": "build_passed",
+        "build_status": "passed",
+        "build_return_code": 0,
+        "build_logs": {
+          "stdout": "results/alpha/c7_s33_probe_build_20261003/atomic_lts_mapping.stdout",
+          "stderr": "results/alpha/c7_s33_probe_build_20261003/atomic_lts_mapping.stderr"
+        }
+      },
+      {
+        "name": "atomic_many_region",
+        "category": "analysis_only_no_native_binary",
+        "makefile": false,
+        "cuda_sources": [],
+        "host_sources": [],
+        "executable_candidates": [],
+        "campaign_scripts": [
+          "campaign.py"
+        ],
+        "has_readme": true,
+        "initial_disposition": "not_attempted"
+      },
+      {
+        "name": "atomic_multism_service",
+        "category": "cuda_makefile_probe",
+        "makefile": true,
+        "cuda_sources": [
+          "atomic_multism_service.cu"
+        ],
+        "host_sources": [
+          "atomic_multism_service_driver.cpp"
+        ],
+        "executable_candidates": [
+          "atomic_multism_service_driver"
+        ],
+        "campaign_scripts": [
+          "campaign.py"
+        ],
+        "has_readme": true,
+        "initial_disposition": "build_passed",
+        "build_status": "passed",
+        "build_return_code": 0,
+        "build_logs": {
+          "stdout": "results/alpha/c7_s33_probe_build_20261003/atomic_multism_service.stdout",
+          "stderr": "results/alpha/c7_s33_probe_build_20261003/atomic_multism_service.stderr"
+        }
+      },
+      {
+        "name": "atomic_vmm_alias",
+        "category": "cuda_makefile_probe",
+        "makefile": true,
+        "cuda_sources": [
+          "vmm_alias_atomic.cu",
+          "vmm_alias_read.cu"
+        ],
+        "host_sources": [
+          "vmm_alias_atomic_driver.cpp",
+          "vmm_alias_driver.cpp",
+          "vmm_cross_allocation_driver.cpp"
+        ],
+        "executable_candidates": [
+          "vmm_alias_atomic_driver",
+          "vmm_alias_driver",
+          "vmm_cross_allocation_driver"
+        ],
+        "campaign_scripts": [
+          "campaign.py"
+        ],
+        "has_readme": true,
+        "initial_disposition": "build_passed",
+        "build_status": "passed",
+        "build_return_code": 0,
+        "build_logs": {
+          "stdout": "results/alpha/c7_s33_probe_build_20261003/atomic_vmm_alias.stdout",
+          "stderr": "results/alpha/c7_s33_probe_build_20261003/atomic_vmm_alias.stderr"
+        }
+      },
+      {
+        "name": "barrier_pipeline",
+        "category": "cuda_makefile_probe",
+        "makefile": true,
+        "cuda_sources": [
+          "barrier_pipeline.cu",
+          "multi_cta_barrier.cu"
+        ],
+        "host_sources": [],
+        "executable_candidates": [
+          "barrier_pipeline",
+          "barrier_pipeline_trace",
+          "multi_cta_barrier",
+          "multi_cta_barrier_trace"
+        ],
+        "campaign_scripts": [
+          "campaign.py",
+          "coupled_campaign.py",
+          "multi_cta_campaign.py"
+        ],
+        "has_readme": true,
+        "initial_disposition": "build_passed",
+        "build_status": "passed",
+        "build_return_code": 0,
+        "build_logs": {
+          "stdout": "results/alpha/c7_s33_probe_build_20261003/barrier_pipeline.stdout",
+          "stderr": "results/alpha/c7_s33_probe_build_20261003/barrier_pipeline.stderr"
+        }
+      },
+      {
+        "name": "constant_load_path",
+        "category": "cuda_source_or_preserved_binary",
+        "makefile": false,
+        "cuda_sources": [
+          "constant_load_path.cu"
+        ],
+        "host_sources": [],
+        "executable_candidates": [
+          "constant_load_path"
+        ],
+        "campaign_scripts": [],
+        "has_readme": true,
+        "initial_disposition": "not_attempted"
+      },
+      {
+        "name": "fixed_latency_allocate",
+        "category": "cuda_makefile_probe",
+        "makefile": true,
+        "cuda_sources": [
+          "fixed_latency_allocate.cu"
+        ],
+        "host_sources": [
+          "fixed_latency_allocate_driver.cpp"
+        ],
+        "executable_candidates": [
+          "fixed_latency_allocate",
+          "fixed_latency_allocate_driver",
+          "fixed_latency_allocate_trace"
+        ],
+        "campaign_scripts": [
+          "campaign.py"
+        ],
+        "has_readme": true,
+        "initial_disposition": "build_passed",
+        "build_status": "passed",
+        "build_return_code": 0,
+        "build_logs": {
+          "stdout": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_allocate.stdout",
+          "stderr": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_allocate.stderr"
+        }
+      },
+      {
+        "name": "fixed_latency_completion",
+        "category": "cuda_makefile_probe",
+        "makefile": true,
+        "cuda_sources": [
+          "fixed_latency_completion.cu"
+        ],
+        "host_sources": [
+          "fixed_latency_completion_driver.cpp"
+        ],
+        "executable_candidates": [
+          "fixed_latency_completion_driver"
+        ],
+        "campaign_scripts": [
+          "campaign.py"
+        ],
+        "has_readme": true,
+        "initial_disposition": "build_passed",
+        "build_status": "passed",
+        "build_return_code": 0,
+        "build_logs": {
+          "stdout": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_completion.stdout",
+          "stderr": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_completion.stderr"
+        }
+      },
+      {
+        "name": "fixed_latency_front_end_footprint",
+        "category": "cuda_makefile_probe",
+        "makefile": true,
+        "cuda_sources": [
+          "fixed_latency_front_end_footprint.cu"
+        ],
+        "host_sources": [
+          "fixed_latency_front_end_footprint_driver.cpp"
+        ],
+        "executable_candidates": [
+          "fixed_latency_front_end_footprint_driver"
+        ],
+        "campaign_scripts": [
+          "campaign.py"
+        ],
+        "has_readme": true,
+        "initial_disposition": "build_passed",
+        "build_status": "passed",
+        "build_return_code": 0,
+        "build_logs": {
+          "stdout": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_front_end_footprint.stdout",
+          "stderr": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_front_end_footprint.stderr"
+        }
+      },
+      {
+        "name": "fixed_latency_producer_shift",
+        "category": "analysis_only_no_native_binary",
+        "makefile": false,
+        "cuda_sources": [],
+        "host_sources": [],
+        "executable_candidates": [],
+        "campaign_scripts": [
+          "campaign.py"
+        ],
+        "has_readme": true,
+        "initial_disposition": "not_attempted"
+      },
+      {
+        "name": "fixed_latency_result_bypass",
+        "category": "cuda_makefile_probe",
+        "makefile": true,
+        "cuda_sources": [
+          "fixed_latency_result_bypass.cu"
+        ],
+        "host_sources": [
+          "fixed_latency_result_bypass_canary_driver.cpp",
+          "fixed_latency_result_bypass_driver.cpp"
+        ],
+        "executable_candidates": [
+          "fixed_latency_result_bypass_canary_driver",
+          "fixed_latency_result_bypass_driver"
+        ],
+        "campaign_scripts": [
+          "campaign.py"
+        ],
+        "has_readme": true,
+        "initial_disposition": "build_passed",
+        "build_status": "passed",
+        "build_return_code": 0,
+        "build_logs": {
+          "stdout": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_result_bypass.stdout",
+          "stderr": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_result_bypass.stderr"
+        }
+      },
+      {
+        "name": "fixed_latency_result_capacity",
+        "category": "cuda_makefile_probe",
+        "makefile": true,
+        "cuda_sources": [
+          "fixed_latency_result_capacity.cu"
+        ],
+        "host_sources": [
+          "fixed_latency_result_capacity_driver.cpp"
+        ],
+        "executable_candidates": [
+          "analyze.py",
+          "campaign.py",
+          "fixed_latency_result_capacity_driver",
+          "patch_sm86_result_capacity.py"
+        ],
+        "campaign_scripts": [
+          "campaign.py"
+        ],
+        "has_readme": true,
+        "initial_disposition": "build_passed",
+        "build_status": "passed",
+        "build_return_code": 0,
+        "build_logs": {
+          "stdout": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_result_capacity.stdout",
+          "stderr": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_result_capacity.stderr"
+        }
+      },
+      {
+        "name": "fixed_latency_result_load_priority",
+        "category": "cuda_makefile_probe",
+        "makefile": true,
+        "cuda_sources": [
+          "fixed_latency_result_load_priority.cu"
+        ],
+        "host_sources": [
+          "fixed_latency_result_load_priority_driver.cpp"
+        ],
+        "executable_candidates": [
+          "fixed_latency_result_load_priority_driver"
+        ],
+        "campaign_scripts": [
+          "campaign.py"
+        ],
+        "has_readme": true,
+        "initial_disposition": "build_passed",
+        "build_status": "passed",
+        "build_return_code": 0,
+        "build_logs": {
+          "stdout": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_result_load_priority.stdout",
+          "stderr": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_result_load_priority.stderr"
+        }
+      },
+      {
+        "name": "fixed_latency_result_order",
+        "category": "cuda_makefile_probe",
+        "makefile": true,
+        "cuda_sources": [
+          "fixed_latency_result_order.cu"
+        ],
+        "host_sources": [
+          "fixed_latency_result_order_driver.cpp"
+        ],
+        "executable_candidates": [
+          "analyze.py",
+          "campaign.py",
+          "fixed_latency_result_order_driver",
+          "patch_sm86_result_order.py"
+        ],
+        "campaign_scripts": [
+          "campaign.py"
+        ],
+        "has_readme": true,
+        "initial_disposition": "build_passed",
+        "build_status": "passed",
+        "build_return_code": 0,
+        "build_logs": {
+          "stdout": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_result_order.stdout",
+          "stderr": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_result_order.stderr"
+        }
+      },
+      {
+        "name": "fixed_latency_result_queue",
+        "category": "cuda_makefile_probe",
+        "makefile": true,
+        "cuda_sources": [
+          "fixed_latency_result_queue.cu"
+        ],
+        "host_sources": [
+          "fixed_latency_result_queue_driver.cpp"
+        ],
+        "executable_candidates": [
+          "analyze.py",
+          "campaign.py",
+          "fixed_latency_result_queue",
+          "fixed_latency_result_queue_driver",
+          "fixed_latency_result_queue_trace"
+        ],
+        "campaign_scripts": [
+          "campaign.py"
+        ],
+        "has_readme": true,
+        "initial_disposition": "build_passed",
+        "build_status": "passed",
+        "build_return_code": 0,
+        "build_logs": {
+          "stdout": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_result_queue.stdout",
+          "stderr": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_result_queue.stderr"
+        }
+      },
+      {
+        "name": "fixed_latency_result_same_bank",
+        "category": "cuda_makefile_probe",
+        "makefile": true,
+        "cuda_sources": [
+          "fixed_latency_result_same_bank.cu"
+        ],
+        "host_sources": [
+          "fixed_latency_result_same_bank_driver.cpp"
+        ],
+        "executable_candidates": [
+          "analyze.py",
+          "campaign.py",
+          "fixed_latency_result_same_bank_driver",
+          "patch_sm86_same_bank_order.py"
+        ],
+        "campaign_scripts": [
+          "campaign.py"
+        ],
+        "has_readme": true,
+        "initial_disposition": "build_passed",
+        "build_status": "passed",
+        "build_return_code": 0,
+        "build_logs": {
+          "stdout": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_result_same_bank.stdout",
+          "stderr": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_result_same_bank.stderr"
+        }
+      },
+      {
+        "name": "fixed_latency_reuse",
+        "category": "cuda_makefile_probe",
+        "makefile": true,
+        "cuda_sources": [
+          "fixed_latency_reuse.cu"
+        ],
+        "host_sources": [
+          "fixed_latency_reuse_driver.cpp"
+        ],
+        "executable_candidates": [
+          "fixed_latency_reuse_driver"
+        ],
+        "campaign_scripts": [
+          "campaign.py"
+        ],
+        "has_readme": true,
+        "initial_disposition": "build_passed",
+        "build_status": "passed",
+        "build_return_code": 0,
+        "build_logs": {
+          "stdout": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_reuse.stdout",
+          "stderr": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_reuse.stderr"
+        }
+      },
+      {
+        "name": "front_end_ibuffer_depth",
+        "category": "cuda_makefile_probe",
+        "makefile": true,
+        "cuda_sources": [
+          "front_end_ibuffer_depth.cu"
+        ],
+        "host_sources": [
+          "front_end_ibuffer_depth_driver.cpp"
+        ],
+        "executable_candidates": [
+          "front_end_ibuffer_depth_driver"
+        ],
+        "campaign_scripts": [
+          "campaign.py"
+        ],
+        "has_readme": true,
+        "initial_disposition": "build_passed",
+        "build_status": "passed",
+        "build_return_code": 0,
+        "build_logs": {
+          "stdout": "results/alpha/c7_s33_probe_build_20261003/front_end_ibuffer_depth.stdout",
+          "stderr": "results/alpha/c7_s33_probe_build_20261003/front_end_ibuffer_depth.stderr"
+        }
+      },
+      {
+        "name": "immediate_constant_frontier",
+        "category": "cuda_makefile_probe",
+        "makefile": true,
+        "cuda_sources": [
+          "immediate_constant_frontier.cu"
+        ],
+        "host_sources": [
+          "imc_valid_driver.cpp"
+        ],
+        "executable_candidates": [
+          "imc_valid_driver",
+          "immediate_constant_frontier"
+        ],
+        "campaign_scripts": [],
+        "has_readme": true,
+        "initial_disposition": "build_passed",
+        "build_status": "passed",
+        "build_return_code": 0,
+        "build_logs": {
+          "stdout": "results/alpha/c7_s33_probe_build_20261003/immediate_constant_frontier.stdout",
+          "stderr": "results/alpha/c7_s33_probe_build_20261003/immediate_constant_frontier.stderr"
+        }
+      },
+      {
+        "name": "issue_port_control",
+        "category": "cuda_makefile_probe",
+        "makefile": true,
+        "cuda_sources": [
+          "issue_port_control.cu"
+        ],
+        "host_sources": [],
+        "executable_candidates": [
+          "issue_port_control",
+          "issue_port_control_trace"
+        ],
+        "campaign_scripts": [
+          "campaign.py"
+        ],
+        "has_readme": true,
+        "initial_disposition": "build_passed",
+        "build_status": "passed",
+        "build_return_code": 0,
+        "build_logs": {
+          "stdout": "results/alpha/c7_s33_probe_build_20261003/issue_port_control.stdout",
+          "stderr": "results/alpha/c7_s33_probe_build_20261003/issue_port_control.stderr"
+        }
+      },
+      {
+        "name": "l1tex_admission_backpressure",
+        "category": "cuda_makefile_probe",
+        "makefile": true,
+        "cuda_sources": [
+          "l1tex_admission_backpressure.cu"
+        ],
+        "host_sources": [],
+        "executable_candidates": [
+          "l1tex_admission_backpressure",
+          "l1tex_admission_backpressure_trace"
+        ],
+        "campaign_scripts": [
+          "campaign.py"
+        ],
+        "has_readme": true,
+        "initial_disposition": "build_passed",
+        "build_status": "passed",
+        "build_return_code": 0,
+        "build_logs": {
+          "stdout": "results/alpha/c7_s33_probe_build_20261003/l1tex_admission_backpressure.stdout",
+          "stderr": "results/alpha/c7_s33_probe_build_20261003/l1tex_admission_backpressure.stderr"
+        }
+      },
+      {
+        "name": "l1tex_arrival_replay_service",
+        "category": "cuda_makefile_probe",
+        "makefile": true,
+        "cuda_sources": [
+          "l1tex_arrival_replay_service.cu"
+        ],
+        "host_sources": [],
+        "executable_candidates": [
+          "l1tex_arrival_replay_service",
+          "l1tex_arrival_replay_service_trace"
+        ],
+        "campaign_scripts": [
+          "campaign.py"
+        ],
+        "has_readme": true,
+        "initial_disposition": "build_passed",
+        "build_status": "passed",
+        "build_return_code": 0,
+        "build_logs": {
+          "stdout": "results/alpha/c7_s33_probe_build_20261003/l1tex_arrival_replay_service.stdout",
+          "stderr": "results/alpha/c7_s33_probe_build_20261003/l1tex_arrival_replay_service.stderr"
+        }
+      },
+      {
+        "name": "l2_queue_frontier",
+        "category": "cuda_makefile_probe",
+        "makefile": true,
+        "cuda_sources": [
+          "l2_queue_frontier.cu"
+        ],
+        "host_sources": [],
+        "executable_candidates": [
+          "l2_queue_frontier",
+          "l2_queue_frontier_trace"
+        ],
+        "campaign_scripts": [],
+        "has_readme": true,
+        "initial_disposition": "build_passed",
+        "build_status": "passed",
+        "build_return_code": 0,
+        "build_logs": {
+          "stdout": "results/alpha/c7_s33_probe_build_20261003/l2_queue_frontier.stdout",
+          "stderr": "results/alpha/c7_s33_probe_build_20261003/l2_queue_frontier.stderr"
+        }
+      },
+      {
+        "name": "launch_cycle_semantics",
+        "category": "cuda_makefile_probe",
+        "makefile": true,
+        "cuda_sources": [
+          "imma_issue_probe.cu",
+          "launch_cycle_semantics.cu",
+          "ncu_launch_envelope.cu"
+        ],
+        "host_sources": [],
+        "executable_candidates": [
+          "imma_issue_probe",
+          "launch_cycle_semantics",
+          "launch_cycle_semantics_trace",
+          "ncu_launch_envelope"
+        ],
+        "campaign_scripts": [
+          "campaign.py"
+        ],
+        "has_readme": true,
+        "initial_disposition": "build_passed",
+        "build_status": "passed",
+        "build_return_code": 0,
+        "build_logs": {
+          "stdout": "results/alpha/c7_s33_probe_build_20261003/launch_cycle_semantics.stdout",
+          "stderr": "results/alpha/c7_s33_probe_build_20261003/launch_cycle_semantics.stderr"
+        }
+      },
+      {
+        "name": "ldgsts_burst_release",
+        "category": "cuda_makefile_probe",
+        "makefile": true,
+        "cuda_sources": [
+          "ldgsts_burst_release.cu"
+        ],
+        "host_sources": [],
+        "executable_candidates": [
+          "ldgsts_burst_release"
+        ],
+        "campaign_scripts": [],
+        "has_readme": true,
+        "initial_disposition": "build_passed",
+        "build_status": "passed",
+        "build_return_code": 0,
+        "build_logs": {
+          "stdout": "results/alpha/c7_s33_probe_build_20261003/ldgsts_burst_release.stdout",
+          "stderr": "results/alpha/c7_s33_probe_build_20261003/ldgsts_burst_release.stderr"
+        }
+      },
+      {
+        "name": "memory_retirement_service",
+        "category": "cuda_makefile_probe",
+        "makefile": true,
+        "cuda_sources": [
+          "memory_retirement_service.cu"
+        ],
+        "host_sources": [],
+        "executable_candidates": [
+          "memory_retirement_service",
+          "memory_retirement_service_trace"
+        ],
+        "campaign_scripts": [
+          "campaign.py"
+        ],
+        "has_readme": true,
+        "initial_disposition": "build_passed",
+        "build_status": "passed",
+        "build_return_code": 0,
+        "build_logs": {
+          "stdout": "results/alpha/c7_s33_probe_build_20261003/memory_retirement_service.stdout",
+          "stderr": "results/alpha/c7_s33_probe_build_20261003/memory_retirement_service.stderr"
+        }
+      },
+      {
+        "name": "phasefuse_scaling",
+        "category": "analysis_only_no_native_binary",
+        "makefile": false,
+        "cuda_sources": [],
+        "host_sources": [],
+        "executable_candidates": [],
+        "campaign_scripts": [],
+        "has_readme": true,
+        "initial_disposition": "not_attempted"
+      },
+      {
+        "name": "sfu_frontier",
+        "category": "cuda_makefile_probe",
+        "makefile": true,
+        "cuda_sources": [
+          "sfu_frontier.cu"
+        ],
+        "host_sources": [],
+        "executable_candidates": [
+          "sfu_frontier"
+        ],
+        "campaign_scripts": [],
+        "has_readme": true,
+        "initial_disposition": "build_passed",
+        "build_status": "passed",
+        "build_return_code": 0,
+        "build_logs": {
+          "stdout": "results/alpha/c7_s33_probe_build_20261003/sfu_frontier.stdout",
+          "stderr": "results/alpha/c7_s33_probe_build_20261003/sfu_frontier.stderr"
+        }
+      },
+      {
+        "name": "simulator_event_throughput",
+        "category": "analysis_only_no_native_binary",
+        "makefile": false,
+        "cuda_sources": [],
+        "host_sources": [],
+        "executable_candidates": [],
+        "campaign_scripts": [],
+        "has_readme": true,
+        "initial_disposition": "not_attempted"
+      },
+      {
+        "name": "sm86_branch_domains",
+        "category": "cuda_source_or_preserved_binary",
+        "makefile": false,
+        "cuda_sources": [
+          "main.cu"
+        ],
+        "host_sources": [],
+        "executable_candidates": [],
+        "campaign_scripts": [],
+        "has_readme": false,
+        "initial_disposition": "not_attempted"
+      },
+      {
+        "name": "sm86_coherence_litmus",
+        "category": "cuda_source_or_preserved_binary",
+        "makefile": false,
+        "cuda_sources": [
+          "l1_invalidation.cu",
+          "message_passing.cu",
+          "message_passing_device.cu"
+        ],
+        "host_sources": [],
+        "executable_candidates": [],
+        "campaign_scripts": [],
+        "has_readme": true,
+        "initial_disposition": "not_attempted"
+      },
+      {
+        "name": "sm86_metric_domains",
+        "category": "cuda_source_or_preserved_binary",
+        "makefile": false,
+        "cuda_sources": [
+          "main.cu",
+          "main_writeback.cu"
+        ],
+        "host_sources": [],
+        "executable_candidates": [
+          "run.py"
+        ],
+        "campaign_scripts": [],
+        "has_readme": false,
+        "initial_disposition": "not_attempted"
+      },
+      {
+        "name": "sm86_ncu_demo_benchmark",
+        "category": "analysis_only_no_native_binary",
+        "makefile": false,
+        "cuda_sources": [],
+        "host_sources": [],
+        "executable_candidates": [],
+        "campaign_scripts": [
+          "alpha_campaign.py",
+          "campaign.py",
+          "test_campaign.py"
+        ],
+        "has_readme": false,
+        "initial_disposition": "not_attempted"
+      },
+      {
+        "name": "sm86_pipeline_categories",
+        "category": "cuda_source_or_preserved_binary",
+        "makefile": false,
+        "cuda_sources": [
+          "main.cu"
+        ],
+        "host_sources": [],
+        "executable_candidates": [],
+        "campaign_scripts": [],
+        "has_readme": false,
+        "initial_disposition": "not_attempted"
+      },
+      {
+        "name": "sm86_value_differential",
+        "category": "cuda_source_or_preserved_binary",
+        "makefile": false,
+        "cuda_sources": [
+          "capture.cu",
+          "inject.cu"
+        ],
+        "host_sources": [
+          "runner.cpp"
+        ],
+        "executable_candidates": [],
+        "campaign_scripts": [],
+        "has_readme": true,
+        "initial_disposition": "not_attempted"
+      },
+      {
+        "name": "smsp_scheduler_contention",
+        "category": "cuda_makefile_probe",
+        "makefile": true,
+        "cuda_sources": [
+          "smsp_scheduler_contention.cu"
+        ],
+        "host_sources": [],
+        "executable_candidates": [
+          "smsp_scheduler_contention",
+          "smsp_scheduler_contention_trace"
+        ],
+        "campaign_scripts": [
+          "campaign.py"
+        ],
+        "has_readme": true,
+        "initial_disposition": "build_passed",
+        "build_status": "passed",
+        "build_return_code": 0,
+        "build_logs": {
+          "stdout": "results/alpha/c7_s33_probe_build_20261003/smsp_scheduler_contention.stdout",
+          "stderr": "results/alpha/c7_s33_probe_build_20261003/smsp_scheduler_contention.stderr"
+        }
+      },
+      {
+        "name": "store_ack_frontier",
+        "category": "cuda_makefile_probe",
+        "makefile": true,
+        "cuda_sources": [
+          "store_ack_frontier.cu"
+        ],
+        "host_sources": [],
+        "executable_candidates": [
+          "store_ack_frontier",
+          "store_ack_frontier_trace"
+        ],
+        "campaign_scripts": [
+          "campaign.py"
+        ],
+        "has_readme": false,
+        "initial_disposition": "build_passed",
+        "build_status": "passed",
+        "build_return_code": 0,
+        "build_logs": {
+          "stdout": "results/alpha/c7_s33_probe_build_20261003/store_ack_frontier.stdout",
+          "stderr": "results/alpha/c7_s33_probe_build_20261003/store_ack_frontier.stderr"
+        }
+      },
+      {
+        "name": "task_done_boundary",
+        "category": "cuda_makefile_probe",
+        "makefile": true,
+        "cuda_sources": [
+          "task_done_boundary.cu"
+        ],
+        "host_sources": [],
+        "executable_candidates": [
+          "task_done_boundary",
+          "task_done_boundary_trace"
+        ],
+        "campaign_scripts": [
+          "campaign.py",
+          "ncu_campaign.py"
+        ],
+        "has_readme": true,
+        "initial_disposition": "build_passed",
+        "build_status": "passed",
+        "build_return_code": 0,
+        "build_logs": {
+          "stdout": "results/alpha/c7_s33_probe_build_20261003/task_done_boundary.stdout",
+          "stderr": "results/alpha/c7_s33_probe_build_20261003/task_done_boundary.stderr"
+        }
+      }
+    ]
+  },
+  "selection_rules": {
+    "include": "every current non-cache directory under workloads/research_probes",
+    "build_probe": "run each Makefile with the pinned CUDA 13.2 SM86 toolchain; do not infer support from a stale executable",
+    "live_capture": "only launch a binary after bounded correctness/safety review; record tracer/NCU/replay failures explicitly",
+    "analysis_only": "do not label Python-only analysis directories as native workloads"
+  },
+  "notes": [
+    "The prior C7 inventory declared 34 directories; the current tree contains 42 after eight additional source/analysis directories were added.",
+    "Existing executables are candidates only; they are not treated as current builds until rebuilt or explicitly marked source-only.",
+    "This inventory is ordinary research bookkeeping and is not an execution or approval gate."
+  ],
+  "build_matrix": {
+    "artifact": "docs/sm86_c7_research_probe_build_matrix_v1.json",
+    "toolchain": "CUDA 13.2 / GCC 14 / sm_86",
+    "attempted_makefiles": 31,
+    "passed": 31,
+    "failed": 0
+  }
+}

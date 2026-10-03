@@ -241,7 +241,7 @@ correctness-mode joins remain to be inventoried. Portable replay rows retain
 open dirty-writeback/coherence tails; no native macro dispatch was requested.
 
 The C7 inventory lists 15 portable rows, 31 SM86-capable rows among 92
-SimBench rows, 34 research-probe directories, and 203 SOL baseline problems.
+SimBench rows, 42 research-probe directories, and 203 SOL baseline problems.
 Portable timing paths and twenty-six direct SimBench slices have completed:
 `fp32_fma_dep_chain`, `cp_async_shared_tile_copy`, `global_atomic_histogram`,
 `global_vectorized_128b_copy`, `bf16_hmma_gemm_traceable`,
@@ -294,6 +294,8 @@ five static `CCTL.E.PF2` instructions; cache effect and completion remain
 unobservable. The corrected shared-bank shape uses SM86 dynamic shared-memory
 opt-in (65,536 bytes against default 49,152 and opt-in 101,376), superseding
 its old false OOD disposition.
+
+The research-probe population was re-enumerated from the current tree: 42 directories are present (31 Makefile CUDA probes, 6 source/preserved-binary rows, and 5 analysis-only rows). The bounded inventory is `docs/sm86_c7_research_probe_inventory_v1.json`; all 31 Makefile probes build successfully with the pinned CUDA 13.2/GCC 14/sm_86 matrix recorded in `docs/sm86_c7_research_probe_build_matrix_v1.json`; no live captures are claimed yet.
 
 The remaining BF16 cuBLAS control row is now also dispositioned in
 `docs/sm86_c7_simbench_vendor_gemm_cublas_blocked_live_v1.json`: host BF16

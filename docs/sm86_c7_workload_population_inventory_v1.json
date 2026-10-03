@@ -1,6 +1,6 @@
 {
   "host_architecture": "sm86",
-  "interpretation": "The portable 15-row population has a completed bounded live pipeline. Twenty-six SimBench SM86 rows now have direct timing-shape native/NVBit/replay/five-NCU slices, including repaired DRAM dot-product and atomic max/return, local volatile/spill, DRAM stream, working-set, carveout, atomic-AND, shared-bank opt-in, persisting-window, prefetch-hint, pointer-chase, and warm/cold workloads. Ten memory/control rows are real lower-bound falsifiers. Four rows are replay blockers: INT8 IMMA, TF32 HMMA, and two cuBLAS vendor kernels lack usable SM86 static/pipeline control. The active wrapper remains blocked by external tracer/runtime-sidecar requirements. This inventory prevents calling the slices a full repository campaign; all 31 SM86 SimBench rows now have a direct or blocked disposition, research probes, and SOL populations remain explicit.",
+  "interpretation": "The portable 15-row population has a completed bounded live pipeline. Twenty-six SimBench SM86 rows now have direct timing-shape native/NVBit/replay/five-NCU slices, including repaired DRAM dot-product and atomic max/return, local volatile/spill, DRAM stream, working-set, carveout, atomic-AND, shared-bank opt-in, persisting-window, prefetch-hint, pointer-chase, and warm/cold workloads. Ten memory/control rows are real lower-bound falsifiers. Four rows are replay blockers: INT8 IMMA, TF32 HMMA, and two cuBLAS vendor kernels lack usable SM86 static/pipeline control. The active wrapper remains blocked by external tracer/runtime-sidecar requirements. This inventory prevents calling the slices a full repository campaign; all 31 SM86 SimBench rows now have a direct or blocked disposition, the 42-directory research-probe inventory and SOL populations remain explicit.",
   "populations": {
     "portable_lcd": {
       "active_count": 15,
@@ -24,7 +24,7 @@
       ]
     },
     "research_probes": {
-      "campaign_or_makefile_directories": 34,
+      "campaign_or_makefile_directories": 42,
       "directories": [
         "async_barrier_overlap",
         "async_source_only",
@@ -35,6 +35,7 @@
         "atomic_multism_service",
         "atomic_vmm_alias",
         "barrier_pipeline",
+        "constant_load_path",
         "fixed_latency_allocate",
         "fixed_latency_completion",
         "fixed_latency_front_end_footprint",
@@ -55,13 +56,21 @@
         "launch_cycle_semantics",
         "ldgsts_burst_release",
         "memory_retirement_service",
+        "phasefuse_scaling",
         "sfu_frontier",
+        "simulator_event_throughput",
+        "sm86_branch_domains",
+        "sm86_coherence_litmus",
+        "sm86_metric_domains",
         "sm86_ncu_demo_benchmark",
+        "sm86_pipeline_categories",
+        "sm86_value_differential",
         "smsp_scheduler_contention",
         "store_ack_frontier",
         "task_done_boundary"
       ],
-      "live_pipeline_status": "targeted_slices_only"
+      "live_pipeline_status": "inventory complete for 42 current directories; 31 Makefile probes awaiting bounded build matrix; 6 source/preserved-binary rows and 5 analysis-only rows require explicit dispositions",
+      "inventory_artifact": "docs/sm86_c7_research_probe_inventory_v1.json"
     },
     "simbench_bw": {
       "direct_slice_artifact": "docs/sm86_c7_simbench_fp32_direct_live_v1.json",

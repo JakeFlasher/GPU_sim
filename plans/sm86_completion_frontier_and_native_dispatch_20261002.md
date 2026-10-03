@@ -1013,12 +1013,29 @@ timing, native dispatch, and accuracy comparison remain blocked. Evidence:
 `docs/sm86_c7_simbench_vendor_gemm_cublas_blocked_live_v1.json` and its
 schema. This is not a point-accuracy or speedup claim.
 
-### C7-S33 — next active milestone
+### C7-S33A — research-probe inventory correction — complete
 
-Inventory the 34 native research-probe directories and 203 SOL-ExecBench
-problem directories as separate populations. For each candidate, record a
-bounded SM86 build/shape/memory disposition first; run live native/NVBit/NCU
-and replay only for rows whose binary and trace path are actually supported.
-Keep unsupported architecture, OOM/OOD, timeout, tracer, and vendor failures
-in the denominator, and do not call C7 complete until those populations have
-an explicit disposition.
+The current tree contains 42 research-probe directories, not the stale 34-row
+count: 31 have Makefiles for SM86 CUDA builds, six contain CUDA source or
+preserved binaries without a Makefile, and five are analysis-only directories
+with no native binary. The corrected inventory is
+`docs/sm86_c7_research_probe_inventory_v1.json`; no build or live-capture
+success is inferred from an existing executable.
+
+### C7-S33B — research-probe build matrix — complete
+
+All 31 current Makefile probes build successfully with the pinned CUDA 13.2,
+GCC 14, and `sm_86` toolchain. The machine-readable result is
+`docs/sm86_c7_research_probe_build_matrix_v1.json`; generated binaries are
+not treated as live evidence. The six source/preserved-binary rows and five
+analysis-only rows remain separate until they have a reproducible bounded
+launch contract.
+
+### C7-S33C — next active milestone
+
+Run the first correctness-first native/NVBit/replay/NCU slice from the
+buildable probe population, beginning with one `issue_port_control` cell. Use
+the probe's own host output check and exact binary/arguments, capture its
+static SASS/control surface, and retain any tracer or unsupported-pipeline
+failure without substituting a custom or stale binary. Expand to the remaining
+cells only after this vertical slice has a stable completion disposition.
