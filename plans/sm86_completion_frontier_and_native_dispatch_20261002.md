@@ -22,14 +22,14 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    `docs/sm86_c7_simbench_dram_streaming_dot_product_direct_live_v1.json`;
    the former tiny `trace_00` run is only a smoke check.
    [Ampere shared memory](https://docs.nvidia.com/cuda/ampere-tuning-guide/#unified-shared-memory-l1-texture-cache)
-3. **C7-S33L diagnostic complete; C7-S33M active.** All four probe families sampled so
+3. **C7-S33M diagnostic complete; C7-S33N active.** All four probe families sampled so
    far have live evidence: 68 issue-port cells, 36 async-barrier cells, 30
    store-ack arms, and 102 memory-retirement cells. CCTL pending-fill replay
    blockers are repaired; eight system-fence instruction crosswalk mismatches
-   remain and are now characterized as an NCU-versus-trace counter mismatch.
-   Preserve those exclusions while testing one independent instruction-count
-   crosswalk hypothesis; no timing/card parameter is selected from scored NCU
-   targets.
+   remain and are now characterized as an NCU-versus-trace counter mismatch;
+   source-level NCU counters do not resolve it. Preserve those exclusions while
+   moving to the next probe family; no timing/card parameter is selected from
+   scored NCU targets.
 
 ## Outcome
 
@@ -1159,11 +1159,20 @@ rejected. Diagnostic evidence:
 its schema. The eight rows remain crosswalk exclusions until an independent
 instruction-identity explanation is found.
 
-### C7-S33M — next active milestone
+### C7-S33M — source-counter crosswalk check — complete
 
-Run one independent crosswalk check using a profiler metric that can be
-reconciled to the traced SASS population (for example a per-op SASS surface or
-source mapping), without using the NCU total as a simulator input. If the
-counter still includes fence micro-operations absent from NVBit records,
-retain the typed exclusion and proceed to the next probe family rather than
-inventing hidden trace instructions.
+An independent NCU SourceCounters export was compared for matched no-fence and
+system-fence binaries. NCU lists the visible `MEMBAR.SC.SYS`, `ERRBAR`, and
+`CCTL.IVALL` PCs but reports zero direct source execution for them, while
+`smsp__inst_executed.sum` still rises by twelve warp instructions and pipe/op
+counters change across multiple categories. The metric crosswalk remains
+unresolved; no simulator padding or hidden-instruction synthesis is applied.
+Diagnostic evidence is
+`docs/sm86_c7_memory_retirement_system_fence_crosswalk_diagnostic_v1.json`.
+
+### C7-S33N — next active milestone
+
+Select the next bounded probe family, prioritizing `barrier_pipeline`, and run
+one matched correctness/NVBit/replay/five-NCU vertical cell before expanding
+its matrix. Preserve all open-tail, unsupported, and instruction-crosswalk
+outcomes explicitly.
