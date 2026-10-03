@@ -1,0 +1,226 @@
+{
+  "schema": "sm86_c7_simbench_local_volatile_array_direct_live_v1",
+  "status": "correctness_trace_replay_ncu_complete_native_dispatch_refused",
+  "host_observation": "0, NVIDIA GeForce RTX 3090 Ti, GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c, 8.6, 615.71.09",
+  "host_identity": {
+    "device_index": 0,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "compute_capability": "8.6",
+    "driver": "615.71.09",
+    "pstate": "P0",
+    "graphics_clock_mhz": 1350,
+    "memory_clock_mhz": 10501
+  },
+  "identity": {
+    "source": "workloads/simbench_bw/l1/local_volatile_array",
+    "binary": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s25_volatile_20261003/local_volatile_array_run",
+    "binary_sha256": "9b0167d72bda43d3495c1bf3cd06b66d7ff063bf32b1fbd85459d0a041307041",
+    "control": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s25_volatile_20261003/control.json",
+    "control_sha256": "eeea4e1719926e0cdeeacec8a6d077dbcc29202f65ff091db994d0de09d899ea",
+    "trace": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s25_volatile_20261003/trace",
+    "trace_stats": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s25_volatile_20261003/trace/stats.csv",
+    "args": [
+      "--samples",
+      "1024",
+      "--bins",
+      "64",
+      "--seed",
+      "42",
+      "--shape-point",
+      "trace_00",
+      "--summary"
+    ],
+    "kernel": "local_volatile_array_kernel",
+    "metric": "gpc__cycles_elapsed.max",
+    "ncu_repeats": 5,
+    "ncu_cache": "all",
+    "ncu_clock": "none"
+  },
+  "correctness": {
+    "status": "passed",
+    "correct": true,
+    "shape_point": "trace_00",
+    "mismatch_count": 0,
+    "validation": "host identity output checked after launch/error handling"
+  },
+  "trace": {
+    "stats": {
+      "device_id": 0,
+      "stream_id": 7,
+      "kernel id": "kernel-1.trace",
+      "kernel mangled name": "local_volatile_array_kernel",
+      "grid_dimX": 1,
+      "grid_dimY": 1,
+      "grid_dimZ": 1,
+      "#blocks": 1,
+      "block_dimX": 32,
+      "block_dimY": 1,
+      "block_dimZ": 1,
+      "#threads": 32,
+      "total_insts": 69874,
+      "total_reported_insts": 69874
+    },
+    "records_replayed": 29017,
+    "independent_tail_facts": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s25_volatile_20261003/tail_facts.json"
+  },
+  "simulator": {
+    "records": 29017,
+    "instructions": 29017,
+    "completion_lower_bound_cycles": 524608,
+    "completion_status": "incomplete_unmodeled_retirement_tails",
+    "unmodeled_tails": {
+      "reduction_read_modify_write": false,
+      "dirty_writeback": true,
+      "coherence": true,
+      "async_copy_shared_visibility": false
+    },
+    "gpc_observation_frontier": {
+      "lower_bound_cycles": 524608,
+      "envelope_cycles": 1776,
+      "grid_blocks": 1,
+      "grid_log2": 0,
+      "cycles": 526384,
+      "role": "architecture_scoped_gpc_observation_boundary_not_timing_crosswalk"
+    }
+  },
+  "fast_frontier": {
+    "device_id": 0,
+    "stream_id": 7,
+    "kernel_id": 1,
+    "function_unique_id": 1,
+    "kernel_name": "local_volatile_array_kernel___0",
+    "summary": {
+      "contract": "sm86_fast_exact_scalar_regions_v1",
+      "architecture": "sm_86",
+      "blocks_seen": 1,
+      "warps_seen": 1,
+      "eligible_warps": 0,
+      "candidate_regions": 0,
+      "certified_regions": 0,
+      "reified_regions": 0,
+      "candidate_instructions": 0,
+      "collapsed_instructions": 0,
+      "exact_execution_steps": 0,
+      "summarized_execution_steps": 0,
+      "macro_dispatches": 0,
+      "maximum_exact_final_cycle": 0,
+      "maximum_summarized_final_cycle": 0,
+      "terminal_state_matches": true,
+      "coverage": {
+        "trace_records": 29017,
+        "candidate_records": 0,
+        "summarized_records": 0,
+        "reified_records": 0,
+        "uncovered_records": 29017
+      },
+      "refusal_reasons": {
+        "nonfull_predicate_population": 1
+      }
+    }
+  },
+  "tail_facts": {
+    "records": 29017,
+    "memory_records": 16577,
+    "cross_sm_line_topology": 0,
+    "hardware_completion_token_observed": false,
+    "global_event_order_observed": false
+  },
+  "ncu": {
+    "metric": "gpc__cycles_elapsed.max",
+    "values": [
+      421983.0,
+      422645.0,
+      423139.0,
+      422474.0,
+      422190.0
+    ],
+    "median": 422474.0,
+    "min": 421983.0,
+    "max": 423139.0,
+    "stdev": 445.1007751060427,
+    "rows": [
+      {
+        "ID": "0",
+        "Kernel Name": "local_volatile_array_kernel",
+        "Grid Size": "(1, 1, 1)",
+        "Block Size": "(32, 1, 1)",
+        "Device": "0",
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 421983.0,
+        "gpu__time_duration.sum": 312.608,
+        "sm__cycles_active.max": 420188.0,
+        "smsp__inst_executed.sum": 29017.0,
+        "dram__sectors_read.sum": 8988.0,
+        "dram__sectors_write.sum": 488.0
+      },
+      {
+        "ID": "0",
+        "Kernel Name": "local_volatile_array_kernel",
+        "Grid Size": "(1, 1, 1)",
+        "Block Size": "(32, 1, 1)",
+        "Device": "0",
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 422645.0,
+        "gpu__time_duration.sum": 313.12,
+        "sm__cycles_active.max": 420838.0,
+        "smsp__inst_executed.sum": 29017.0,
+        "dram__sectors_read.sum": 8988.0,
+        "dram__sectors_write.sum": 448.0
+      },
+      {
+        "ID": "0",
+        "Kernel Name": "local_volatile_array_kernel",
+        "Grid Size": "(1, 1, 1)",
+        "Block Size": "(32, 1, 1)",
+        "Device": "0",
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 423139.0,
+        "gpu__time_duration.sum": 313.472,
+        "sm__cycles_active.max": 421355.0,
+        "smsp__inst_executed.sum": 29017.0,
+        "dram__sectors_read.sum": 9132.0,
+        "dram__sectors_write.sum": 3396.0
+      },
+      {
+        "ID": "0",
+        "Kernel Name": "local_volatile_array_kernel",
+        "Grid Size": "(1, 1, 1)",
+        "Block Size": "(32, 1, 1)",
+        "Device": "0",
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 422474.0,
+        "gpu__time_duration.sum": 312.992,
+        "sm__cycles_active.max": 420679.0,
+        "smsp__inst_executed.sum": 29017.0,
+        "dram__sectors_read.sum": 8988.0,
+        "dram__sectors_write.sum": 300.0
+      },
+      {
+        "ID": "0",
+        "Kernel Name": "local_volatile_array_kernel",
+        "Grid Size": "(1, 1, 1)",
+        "Block Size": "(32, 1, 1)",
+        "Device": "0",
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 422190.0,
+        "gpu__time_duration.sum": 312.768,
+        "sm__cycles_active.max": 420382.0,
+        "smsp__inst_executed.sum": 29017.0,
+        "dram__sectors_read.sum": 11900.0,
+        "dram__sectors_write.sum": 468.0
+      }
+    ]
+  },
+  "comparison": {
+    "hardware_completion": "not_observed",
+    "native_macro_dispatches": 0,
+    "lower_bound_cycles": 524608,
+    "ncu_median_cycles": 422474.0,
+    "lower_bound_consistency": false,
+    "gap_cycles": 102134.0,
+    "gap_fraction": 0.24175215516221116,
+    "point_estimator": "not_claimed"
+  },
+  "interpretation": "The repaired local_volatile_array binary passes host identity-output checks at samples=1024,bins=64, exposes STL local traffic in SASS, and completes fresh NVBit/replay/five-NCU evidence. Replay has full one-block coverage and 29,017 records; NCU reports the same 29,017 warp instructions. NCU gpc cycles are 421983,422645,423139,422474,422190 (median 422474), while simulator lower is 524608: lower-bound consistency is false by 102134 cycles (24.18%). This is a real local-memory falsifier; dirty-writeback/coherence tails remain open and native dispatch is zero."
+}

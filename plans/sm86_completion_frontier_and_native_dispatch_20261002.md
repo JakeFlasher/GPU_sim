@@ -904,10 +904,20 @@ cycles (16.04%). This is a real local-memory falsifier; tails remain open and
 native dispatch is zero. Evidence:
 `docs/sm86_c7_simbench_local_dynamic_index_array_direct_live_v1.json`.
 
-### C7-S25 — next active milestone
+### C7-S25 — local volatile-array slice — complete
+
+The repaired local_volatile_array binary passes host identity-output checks and
+exposes STL local traffic in SASS. Replay has full one-block coverage and
+29,017 records; NCU reports the same 29,017 warp instructions. NCU gpc cycles
+are 421983,422645,423139,422474,422190 (median 422474), while simulator lower
+is 524608: lower-bound consistency is false by 102,134 cycles (24.18%). This
+is a real local-memory falsifier; tails remain open and native dispatch is zero.
+Evidence: `docs/sm86_c7_simbench_local_volatile_array_direct_live_v1.json`.
+
+### C7-S26 — next active milestone
 
 Run one additional unrun SM86 SimBench row from the remaining local/control
-population (prefer local_volatile_array or register_spill_local_mem). Preserve
-checked correctness, exact binary/arguments, fresh NVBit, replay, and
+population (prefer register_spill_local_mem or global_atomic_max_histogram).
+Preserve checked correctness, exact binary/arguments, fresh NVBit, replay, and
 five-repetition NCU; retain every unsupported-SASS, OOM/OOD, or falsifying
 outcome without tuning scored parameters.
