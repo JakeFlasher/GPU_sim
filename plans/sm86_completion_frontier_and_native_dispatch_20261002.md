@@ -1074,10 +1074,24 @@ stale literal v1 requirement to positive-version validation. Evidence:
 `docs/sm86_c7_research_probe_async_barrier_overlap_live_v1.json` and its
 schema. This is not a point-accuracy or speedup claim.
 
-### C7-S33F — next active milestone
+### C7-S33F — matched async-barrier 36-cell matrix — complete
 
-Expand the async-barrier family across its declared 36-cell matrix, using the
-same matched trace binary and five-NCU contract. Keep per-cell correctness,
-async-lane facts, replay coverage, lower-bound consistency, and open tails
-separate; do not infer a fixed barrier latency or extrapolate from this one
-falsifier.
+The repaired campaign uses the same 64-group trace binary for all stages and
+accepts the simulator's current positive readiness schema instead of requiring
+stale schema version 1. All 36 cells pass seven host correctness trials,
+produce full NVBit coverage, replay deterministically, and have five NCU
+repetitions with instruction-count crosswalks. Aggregate result: 36/36
+complete, 23 lower-bound-consistent cells, and 13 lower-bound falsifiers.
+Async-copy lane facts remain explicit per cell; hardware completion,
+writeback, and coherence uppers remain open, and native macro dispatch is zero.
+Evidence: `docs/sm86_c7_research_probe_async_barrier_overlap_matrix_live_v1.json`
+and its schema. No fixed barrier latency or point-accuracy claim is made.
+
+### C7-S33G — next active milestone
+
+Select the next probe family from the repaired build inventory, prioritizing a
+memory-retirement/store-ack or barrier-pipeline family with a bounded host
+correctness path. Apply the same matched-binary contract, live NVBit/replay,
+five NCU repetitions, instruction crosswalk, and open-tail accounting. Keep
+analysis-only and source/preserved-binary directories out of the supported
+denominator until their launch contracts are repaired.

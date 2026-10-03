@@ -1,7 +1,7 @@
 {
   "schema": "sm86_c7_research_probe_inventory_v1",
   "architecture": "sm_86",
-  "status": "inventory_build_matrix_and_two_probe_vertical_slices_complete",
+  "status": "inventory_build_matrix_issue_port_matrix_and_async_barrier_matrix_complete",
   "root": "workloads/research_probes",
   "population": {
     "directory_count": 42,
@@ -32,10 +32,11 @@
           "stdout": "results/alpha/c7_s33_probe_build_20261003/async_barrier_overlap.stdout",
           "stderr": "results/alpha/c7_s33_probe_build_20261003/async_barrier_overlap.stderr"
         },
-        "live_status": "one_vertical_slice_complete",
-        "live_artifact": "docs/sm86_c7_research_probe_async_barrier_overlap_live_v1.json",
+        "live_status": "36_cell_matrix_complete",
+        "live_artifact": "docs/sm86_c7_research_probe_async_barrier_overlap_matrix_live_v1.json",
         "live_cell": "w4_c11_l1_g0",
-        "disposition": "matched correctness/NVBit/replay/five-NCU complete; lower-bound falsifier; matrix expansion pending"
+        "disposition": "matched correctness/NVBit/replay/five-NCU complete; 23 lower-bound-consistent and 13 falsifiers; open tails",
+        "live_cells": 36
       },
       {
         "name": "async_source_only",
@@ -996,8 +997,8 @@
     },
     {
       "probe": "async_barrier_overlap",
-      "cell": "w4_c11_l1_g0",
-      "artifact": "docs/sm86_c7_research_probe_async_barrier_overlap_live_v1.json",
+      "cells": 36,
+      "artifact": "docs/sm86_c7_research_probe_async_barrier_overlap_matrix_live_v1.json",
       "status": "complete"
     }
   ]

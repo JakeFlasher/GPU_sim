@@ -1,0 +1,3028 @@
+{
+  "schema": "sm86_c7_research_probe_async_barrier_overlap_matrix_live_v1",
+  "status": "36_cell_correctness_nvbit_replay_ncu_complete_native_dispatch_refused",
+  "host_identity": {
+    "device_index": 0,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "compute_capability": "8.6",
+    "driver": "615.71.09",
+    "pstate": "P0",
+    "graphics_clock_mhz": 1350,
+    "memory_clock_mhz": 10501
+  },
+  "identity": {
+    "source": "workloads/research_probes/async_barrier_overlap",
+    "binary": "workloads/research_probes/async_barrier_overlap/async_barrier_overlap_trace",
+    "control": "results/alpha/c7_s33_async_matrix_20261003/sass/async_barrier_overlap_trace.control_bits.json",
+    "matrix": "results/alpha/c7_s33_async_matrix_20261003/metadata/matrix.json",
+    "ncu_metric": "gpc__cycles_elapsed.max",
+    "ncu_repeats": 5,
+    "ncu_replay_mode": "application",
+    "ncu_clock_control": "base",
+    "ncu_cache_control": "none",
+    "matched_groups": 64
+  },
+  "summary": {
+    "cells": 36,
+    "correctness_passed": 36,
+    "full_trace_cells": 36,
+    "ncu_complete_cells": 36,
+    "instruction_crosswalk_cells": 36,
+    "lower_bound_consistent_cells": 23,
+    "lower_bound_falsifier_cells": 13,
+    "native_macro_dispatches": 0,
+    "problems": []
+  },
+  "cells": [
+    {
+      "cell": {
+        "gap": 0,
+        "key": "w4_c00_na_g0",
+        "locality": "na",
+        "protocol": "c00",
+        "stage": "identification_controls",
+        "warps": 4
+      },
+      "correctness": {
+        "correct": true,
+        "checksum": 9945394037251280960,
+        "groups": 64,
+        "warps": 4,
+        "protocol": "c00_baseline",
+        "locality": "l1_reuse",
+        "gap_cycles": 0
+      },
+      "trace": {
+        "thread_instructions": 17720,
+        "warp_records": 4984,
+        "blocks": 1,
+        "threads": 128,
+        "kernel": "_Z21async_barrier_overlapILi0EEvPKcPcPyPjimm"
+      },
+      "simulator": {
+        "records": 4984,
+        "lower_bound_cycles": 6014,
+        "diagnostic_cycles": 4984,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "readiness_schema_version": 25
+      },
+      "tail_facts": {
+        "records": 4984,
+        "memory_records": 12,
+        "async_copies": 0,
+        "stores": 12,
+        "atomics": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false,
+        "async_protocol_lane_facts": {
+          "committed_lane_groups": 0,
+          "copy_lane_operations": 0,
+          "empty_lane_groups": 0,
+          "masked_protocol_records_unknown": 0,
+          "terminal_uncommitted_lane_copies": 0,
+          "terminal_unwaited_lane_copies": 0,
+          "terminal_unwaited_lane_groups": 0,
+          "waited_lane_copies": 0,
+          "waited_lane_groups": 0
+        }
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          7603.0,
+          7595.0,
+          7801.0,
+          7603.0,
+          7601.0
+        ],
+        "median": 7603.0,
+        "min": 7595.0,
+        "max": 7801.0,
+        "stdev": 89.72625033957453,
+        "instruction_count": 4984,
+        "kernel": "void async_barrier_overlap<0>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+        "clock_control": "base",
+        "cache_control": "none"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 1589.0,
+        "gap_fraction": 0.20899644877022228,
+        "native_macro_dispatches": 0,
+        "point_estimator": "not_claimed",
+        "hardware_completion": "not_observed"
+      }
+    },
+    {
+      "cell": {
+        "gap": 64,
+        "key": "w4_c00_na_g64",
+        "locality": "na",
+        "protocol": "c00",
+        "stage": "identification_controls",
+        "warps": 4
+      },
+      "correctness": {
+        "correct": true,
+        "checksum": 3806022253544110227,
+        "groups": 64,
+        "warps": 4,
+        "protocol": "c00_baseline",
+        "locality": "l1_reuse",
+        "gap_cycles": 64
+      },
+      "trace": {
+        "thread_instructions": 30264,
+        "warp_records": 8568,
+        "blocks": 1,
+        "threads": 128,
+        "kernel": "_Z21async_barrier_overlapILi0EEvPKcPcPyPjimm"
+      },
+      "simulator": {
+        "records": 8568,
+        "lower_bound_cycles": 10124,
+        "diagnostic_cycles": 8568,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "readiness_schema_version": 25
+      },
+      "tail_facts": {
+        "records": 8568,
+        "memory_records": 12,
+        "async_copies": 0,
+        "stores": 12,
+        "atomics": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false,
+        "async_protocol_lane_facts": {
+          "committed_lane_groups": 0,
+          "copy_lane_operations": 0,
+          "empty_lane_groups": 0,
+          "masked_protocol_records_unknown": 0,
+          "terminal_uncommitted_lane_copies": 0,
+          "terminal_unwaited_lane_copies": 0,
+          "terminal_unwaited_lane_groups": 0,
+          "waited_lane_copies": 0,
+          "waited_lane_groups": 0
+        }
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          11710.0,
+          11694.0,
+          11680.0,
+          11677.0,
+          11676.0
+        ],
+        "median": 11680.0,
+        "min": 11676.0,
+        "max": 11710.0,
+        "stdev": 14.553350129781116,
+        "instruction_count": 8568,
+        "kernel": "void async_barrier_overlap<0>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+        "clock_control": "base",
+        "cache_control": "none"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 1556.0,
+        "gap_fraction": 0.13321917808219177,
+        "native_macro_dispatches": 0,
+        "point_estimator": "not_claimed",
+        "hardware_completion": "not_observed"
+      }
+    },
+    {
+      "cell": {
+        "gap": 0,
+        "key": "w4_c01_na_g0",
+        "locality": "na",
+        "protocol": "c01",
+        "stage": "identification_controls",
+        "warps": 4
+      },
+      "correctness": {
+        "correct": true,
+        "checksum": 9945394037251280960,
+        "groups": 64,
+        "warps": 4,
+        "protocol": "c01_barrier_only",
+        "locality": "l1_reuse",
+        "gap_cycles": 0
+      },
+      "trace": {
+        "thread_instructions": 17976,
+        "warp_records": 5240,
+        "blocks": 1,
+        "threads": 128,
+        "kernel": "_Z21async_barrier_overlapILi1EEvPKcPcPyPjimm"
+      },
+      "simulator": {
+        "records": 5240,
+        "lower_bound_cycles": 6475,
+        "diagnostic_cycles": 5240,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "readiness_schema_version": 25
+      },
+      "tail_facts": {
+        "records": 5240,
+        "memory_records": 12,
+        "async_copies": 0,
+        "stores": 12,
+        "atomics": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false,
+        "async_protocol_lane_facts": {
+          "committed_lane_groups": 0,
+          "copy_lane_operations": 0,
+          "empty_lane_groups": 0,
+          "masked_protocol_records_unknown": 0,
+          "terminal_uncommitted_lane_copies": 0,
+          "terminal_unwaited_lane_copies": 0,
+          "terminal_unwaited_lane_groups": 0,
+          "waited_lane_copies": 0,
+          "waited_lane_groups": 0
+        }
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          8764.0,
+          8944.0,
+          8752.0,
+          8764.0,
+          8768.0
+        ],
+        "median": 8764.0,
+        "min": 8752.0,
+        "max": 8944.0,
+        "stdev": 81.61372433604534,
+        "instruction_count": 5240,
+        "kernel": "void async_barrier_overlap<1>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+        "clock_control": "base",
+        "cache_control": "none"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 2289.0,
+        "gap_fraction": 0.26118210862619806,
+        "native_macro_dispatches": 0,
+        "point_estimator": "not_claimed",
+        "hardware_completion": "not_observed"
+      }
+    },
+    {
+      "cell": {
+        "gap": 64,
+        "key": "w4_c01_na_g64",
+        "locality": "na",
+        "protocol": "c01",
+        "stage": "identification_controls",
+        "warps": 4
+      },
+      "correctness": {
+        "correct": true,
+        "checksum": 3806022253544110227,
+        "groups": 64,
+        "warps": 4,
+        "protocol": "c01_barrier_only",
+        "locality": "l1_reuse",
+        "gap_cycles": 64
+      },
+      "trace": {
+        "thread_instructions": 30520,
+        "warp_records": 8824,
+        "blocks": 1,
+        "threads": 128,
+        "kernel": "_Z21async_barrier_overlapILi1EEvPKcPcPyPjimm"
+      },
+      "simulator": {
+        "records": 8824,
+        "lower_bound_cycles": 10828,
+        "diagnostic_cycles": 8824,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "readiness_schema_version": 25
+      },
+      "tail_facts": {
+        "records": 8824,
+        "memory_records": 12,
+        "async_copies": 0,
+        "stores": 12,
+        "atomics": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false,
+        "async_protocol_lane_facts": {
+          "committed_lane_groups": 0,
+          "copy_lane_operations": 0,
+          "empty_lane_groups": 0,
+          "masked_protocol_records_unknown": 0,
+          "terminal_uncommitted_lane_copies": 0,
+          "terminal_unwaited_lane_copies": 0,
+          "terminal_unwaited_lane_groups": 0,
+          "waited_lane_copies": 0,
+          "waited_lane_groups": 0
+        }
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          12775.0,
+          12777.0,
+          12768.0,
+          12800.0,
+          12785.0
+        ],
+        "median": 12777.0,
+        "min": 12768.0,
+        "max": 12800.0,
+        "stdev": 12.227019260637483,
+        "instruction_count": 8824,
+        "kernel": "void async_barrier_overlap<1>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+        "clock_control": "base",
+        "cache_control": "none"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 1949.0,
+        "gap_fraction": 0.15253971980903186,
+        "native_macro_dispatches": 0,
+        "point_estimator": "not_claimed",
+        "hardware_completion": "not_observed"
+      }
+    },
+    {
+      "cell": {
+        "gap": 0,
+        "key": "w4_c10_l1_g0",
+        "locality": "l1",
+        "protocol": "c10",
+        "stage": "identification_async_factorial",
+        "warps": 4
+      },
+      "correctness": {
+        "correct": true,
+        "checksum": 5025747196710545408,
+        "groups": 64,
+        "warps": 4,
+        "protocol": "c10_wait_only",
+        "locality": "l1_reuse",
+        "gap_cycles": 0
+      },
+      "trace": {
+        "thread_instructions": 26504,
+        "warp_records": 8848,
+        "blocks": 1,
+        "threads": 128,
+        "kernel": "_Z21async_barrier_overlapILi2EEvPKcPcPyPjimm"
+      },
+      "simulator": {
+        "records": 8848,
+        "lower_bound_cycles": 17391,
+        "diagnostic_cycles": 8848,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "readiness_schema_version": 25
+      },
+      "tail_facts": {
+        "records": 8848,
+        "memory_records": 2832,
+        "async_copies": 2048,
+        "stores": 12,
+        "atomics": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false,
+        "async_protocol_lane_facts": {
+          "committed_lane_groups": 8192,
+          "copy_lane_operations": 65536,
+          "empty_lane_groups": 0,
+          "masked_protocol_records_unknown": 0,
+          "terminal_uncommitted_lane_copies": 0,
+          "terminal_unwaited_lane_copies": 0,
+          "terminal_unwaited_lane_groups": 0,
+          "waited_lane_copies": 65536,
+          "waited_lane_groups": 8192
+        }
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          21002.0,
+          21409.0,
+          21000.0,
+          21000.0,
+          21008.0
+        ],
+        "median": 21002.0,
+        "min": 21000.0,
+        "max": 21409.0,
+        "stdev": 181.82189087125894,
+        "instruction_count": 8848,
+        "kernel": "void async_barrier_overlap<2>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+        "clock_control": "base",
+        "cache_control": "none"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 3611.0,
+        "gap_fraction": 0.17193600609465765,
+        "native_macro_dispatches": 0,
+        "point_estimator": "not_claimed",
+        "hardware_completion": "not_observed"
+      }
+    },
+    {
+      "cell": {
+        "gap": 64,
+        "key": "w4_c10_l1_g64",
+        "locality": "l1",
+        "protocol": "c10",
+        "stage": "identification_async_factorial",
+        "warps": 4
+      },
+      "correctness": {
+        "correct": true,
+        "checksum": 5025747196710545408,
+        "groups": 64,
+        "warps": 4,
+        "protocol": "c10_wait_only",
+        "locality": "l1_reuse",
+        "gap_cycles": 64
+      },
+      "trace": {
+        "thread_instructions": 39048,
+        "warp_records": 12432,
+        "blocks": 1,
+        "threads": 128,
+        "kernel": "_Z21async_barrier_overlapILi2EEvPKcPcPyPjimm"
+      },
+      "simulator": {
+        "records": 12432,
+        "lower_bound_cycles": 17391,
+        "diagnostic_cycles": 12432,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "readiness_schema_version": 25
+      },
+      "tail_facts": {
+        "records": 12432,
+        "memory_records": 2832,
+        "async_copies": 2048,
+        "stores": 12,
+        "atomics": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false,
+        "async_protocol_lane_facts": {
+          "committed_lane_groups": 8192,
+          "copy_lane_operations": 65536,
+          "empty_lane_groups": 0,
+          "masked_protocol_records_unknown": 0,
+          "terminal_uncommitted_lane_copies": 0,
+          "terminal_unwaited_lane_copies": 0,
+          "terminal_unwaited_lane_groups": 0,
+          "waited_lane_copies": 65536,
+          "waited_lane_groups": 8192
+        }
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          21000.0,
+          21013.0,
+          21012.0,
+          21008.0,
+          21425.0
+        ],
+        "median": 21012.0,
+        "min": 21000.0,
+        "max": 21425.0,
+        "stdev": 186.44650707374487,
+        "instruction_count": 12432,
+        "kernel": "void async_barrier_overlap<2>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+        "clock_control": "base",
+        "cache_control": "none"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 3621.0,
+        "gap_fraction": 0.17233009708737865,
+        "native_macro_dispatches": 0,
+        "point_estimator": "not_claimed",
+        "hardware_completion": "not_observed"
+      }
+    },
+    {
+      "cell": {
+        "gap": 0,
+        "key": "w4_c10_l2_g0",
+        "locality": "l2",
+        "protocol": "c10",
+        "stage": "identification_async_factorial",
+        "warps": 4
+      },
+      "correctness": {
+        "correct": true,
+        "checksum": 16089096904608057344,
+        "groups": 64,
+        "warps": 4,
+        "protocol": "c10_wait_only",
+        "locality": "l2_rotation",
+        "gap_cycles": 0
+      },
+      "trace": {
+        "thread_instructions": 26504,
+        "warp_records": 8848,
+        "blocks": 1,
+        "threads": 128,
+        "kernel": "_Z21async_barrier_overlapILi2EEvPKcPcPyPjimm"
+      },
+      "simulator": {
+        "records": 8848,
+        "lower_bound_cycles": 38368,
+        "diagnostic_cycles": 8848,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "readiness_schema_version": 25
+      },
+      "tail_facts": {
+        "records": 8848,
+        "memory_records": 2832,
+        "async_copies": 2048,
+        "stores": 12,
+        "atomics": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false,
+        "async_protocol_lane_facts": {
+          "committed_lane_groups": 8192,
+          "copy_lane_operations": 65536,
+          "empty_lane_groups": 0,
+          "masked_protocol_records_unknown": 0,
+          "terminal_uncommitted_lane_copies": 0,
+          "terminal_unwaited_lane_copies": 0,
+          "terminal_unwaited_lane_groups": 0,
+          "waited_lane_copies": 65536,
+          "waited_lane_groups": 8192
+        }
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          30271.0,
+          32014.0,
+          31018.0,
+          43889.0,
+          32726.0
+        ],
+        "median": 32014.0,
+        "min": 30271.0,
+        "max": 43889.0,
+        "stdev": 5615.959695368192,
+        "instruction_count": 8848,
+        "kernel": "void async_barrier_overlap<2>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+        "clock_control": "base",
+        "cache_control": "none"
+      },
+      "comparison": {
+        "lower_bound_consistency": false,
+        "gap_cycles": -6354.0,
+        "gap_fraction": -0.19847566689573312,
+        "native_macro_dispatches": 0,
+        "point_estimator": "not_claimed",
+        "hardware_completion": "not_observed"
+      }
+    },
+    {
+      "cell": {
+        "gap": 64,
+        "key": "w4_c10_l2_g64",
+        "locality": "l2",
+        "protocol": "c10",
+        "stage": "identification_async_factorial",
+        "warps": 4
+      },
+      "correctness": {
+        "correct": true,
+        "checksum": 16089096904608057344,
+        "groups": 64,
+        "warps": 4,
+        "protocol": "c10_wait_only",
+        "locality": "l2_rotation",
+        "gap_cycles": 64
+      },
+      "trace": {
+        "thread_instructions": 39048,
+        "warp_records": 12432,
+        "blocks": 1,
+        "threads": 128,
+        "kernel": "_Z21async_barrier_overlapILi2EEvPKcPcPyPjimm"
+      },
+      "simulator": {
+        "records": 12432,
+        "lower_bound_cycles": 38368,
+        "diagnostic_cycles": 12432,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "readiness_schema_version": 25
+      },
+      "tail_facts": {
+        "records": 12432,
+        "memory_records": 2832,
+        "async_copies": 2048,
+        "stores": 12,
+        "atomics": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false,
+        "async_protocol_lane_facts": {
+          "committed_lane_groups": 8192,
+          "copy_lane_operations": 65536,
+          "empty_lane_groups": 0,
+          "masked_protocol_records_unknown": 0,
+          "terminal_uncommitted_lane_copies": 0,
+          "terminal_unwaited_lane_copies": 0,
+          "terminal_unwaited_lane_groups": 0,
+          "waited_lane_copies": 65536,
+          "waited_lane_groups": 8192
+        }
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          29654.0,
+          31885.0,
+          29650.0,
+          29441.0,
+          29645.0
+        ],
+        "median": 29650.0,
+        "min": 29441.0,
+        "max": 31885.0,
+        "stdev": 1026.9885588457157,
+        "instruction_count": 12432,
+        "kernel": "void async_barrier_overlap<2>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+        "clock_control": "base",
+        "cache_control": "none"
+      },
+      "comparison": {
+        "lower_bound_consistency": false,
+        "gap_cycles": -8718.0,
+        "gap_fraction": -0.29403035413153455,
+        "native_macro_dispatches": 0,
+        "point_estimator": "not_claimed",
+        "hardware_completion": "not_observed"
+      }
+    },
+    {
+      "cell": {
+        "gap": 0,
+        "key": "w4_c10_dram_g0",
+        "locality": "dram",
+        "protocol": "c10",
+        "stage": "identification_async_factorial",
+        "warps": 4
+      },
+      "correctness": {
+        "correct": true,
+        "checksum": 15341371686336980992,
+        "groups": 64,
+        "warps": 4,
+        "protocol": "c10_wait_only",
+        "locality": "dram_stream",
+        "gap_cycles": 0
+      },
+      "trace": {
+        "thread_instructions": 26504,
+        "warp_records": 8848,
+        "blocks": 1,
+        "threads": 128,
+        "kernel": "_Z21async_barrier_overlapILi2EEvPKcPcPyPjimm"
+      },
+      "simulator": {
+        "records": 8848,
+        "lower_bound_cycles": 38368,
+        "diagnostic_cycles": 8848,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "readiness_schema_version": 25
+      },
+      "tail_facts": {
+        "records": 8848,
+        "memory_records": 2832,
+        "async_copies": 2048,
+        "stores": 12,
+        "atomics": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false,
+        "async_protocol_lane_facts": {
+          "committed_lane_groups": 8192,
+          "copy_lane_operations": 65536,
+          "empty_lane_groups": 0,
+          "masked_protocol_records_unknown": 0,
+          "terminal_uncommitted_lane_copies": 0,
+          "terminal_unwaited_lane_copies": 0,
+          "terminal_unwaited_lane_groups": 0,
+          "waited_lane_copies": 65536,
+          "waited_lane_groups": 8192
+        }
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          45039.0,
+          45075.0,
+          44353.0,
+          45075.0,
+          44433.0
+        ],
+        "median": 45039.0,
+        "min": 44353.0,
+        "max": 45075.0,
+        "stdev": 368.3558062525959,
+        "instruction_count": 8848,
+        "kernel": "void async_barrier_overlap<2>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+        "clock_control": "base",
+        "cache_control": "none"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 6671.0,
+        "gap_fraction": 0.14811607717755723,
+        "native_macro_dispatches": 0,
+        "point_estimator": "not_claimed",
+        "hardware_completion": "not_observed"
+      }
+    },
+    {
+      "cell": {
+        "gap": 64,
+        "key": "w4_c10_dram_g64",
+        "locality": "dram",
+        "protocol": "c10",
+        "stage": "identification_async_factorial",
+        "warps": 4
+      },
+      "correctness": {
+        "correct": true,
+        "checksum": 15341371686336980992,
+        "groups": 64,
+        "warps": 4,
+        "protocol": "c10_wait_only",
+        "locality": "dram_stream",
+        "gap_cycles": 64
+      },
+      "trace": {
+        "thread_instructions": 39048,
+        "warp_records": 12432,
+        "blocks": 1,
+        "threads": 128,
+        "kernel": "_Z21async_barrier_overlapILi2EEvPKcPcPyPjimm"
+      },
+      "simulator": {
+        "records": 12432,
+        "lower_bound_cycles": 38368,
+        "diagnostic_cycles": 12432,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "readiness_schema_version": 25
+      },
+      "tail_facts": {
+        "records": 12432,
+        "memory_records": 2832,
+        "async_copies": 2048,
+        "stores": 12,
+        "atomics": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false,
+        "async_protocol_lane_facts": {
+          "committed_lane_groups": 8192,
+          "copy_lane_operations": 65536,
+          "empty_lane_groups": 0,
+          "masked_protocol_records_unknown": 0,
+          "terminal_uncommitted_lane_copies": 0,
+          "terminal_unwaited_lane_copies": 0,
+          "terminal_unwaited_lane_groups": 0,
+          "waited_lane_copies": 65536,
+          "waited_lane_groups": 8192
+        }
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          44802.0,
+          44439.0,
+          44501.0,
+          44325.0,
+          44792.0
+        ],
+        "median": 44501.0,
+        "min": 44325.0,
+        "max": 44802.0,
+        "stdev": 215.08068253564753,
+        "instruction_count": 12432,
+        "kernel": "void async_barrier_overlap<2>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+        "clock_control": "base",
+        "cache_control": "none"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 6133.0,
+        "gap_fraction": 0.1378171277049954,
+        "native_macro_dispatches": 0,
+        "point_estimator": "not_claimed",
+        "hardware_completion": "not_observed"
+      }
+    },
+    {
+      "cell": {
+        "gap": 0,
+        "key": "w4_c11_l1_g0",
+        "locality": "l1",
+        "protocol": "c11",
+        "stage": "identification_async_factorial",
+        "warps": 4
+      },
+      "correctness": {
+        "correct": true,
+        "checksum": 5025747196710545408,
+        "groups": 64,
+        "warps": 4,
+        "protocol": "c11_wait_barrier",
+        "locality": "l1_reuse",
+        "gap_cycles": 0
+      },
+      "trace": {
+        "thread_instructions": 26760,
+        "warp_records": 9104,
+        "blocks": 1,
+        "threads": 128,
+        "kernel": "_Z21async_barrier_overlapILi3EEvPKcPcPyPjimm"
+      },
+      "simulator": {
+        "records": 9104,
+        "lower_bound_cycles": 24386,
+        "diagnostic_cycles": 9104,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "readiness_schema_version": 25
+      },
+      "tail_facts": {
+        "records": 9104,
+        "memory_records": 2832,
+        "async_copies": 2048,
+        "stores": 12,
+        "atomics": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false,
+        "async_protocol_lane_facts": {
+          "committed_lane_groups": 8192,
+          "copy_lane_operations": 65536,
+          "empty_lane_groups": 0,
+          "masked_protocol_records_unknown": 0,
+          "terminal_uncommitted_lane_copies": 0,
+          "terminal_unwaited_lane_copies": 0,
+          "terminal_unwaited_lane_groups": 0,
+          "waited_lane_copies": 65536,
+          "waited_lane_groups": 8192
+        }
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          21266.0,
+          21270.0,
+          21275.0,
+          21249.0,
+          21683.0
+        ],
+        "median": 21270.0,
+        "min": 21249.0,
+        "max": 21683.0,
+        "stdev": 187.19054463300222,
+        "instruction_count": 9104,
+        "kernel": "void async_barrier_overlap<3>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+        "clock_control": "base",
+        "cache_control": "none"
+      },
+      "comparison": {
+        "lower_bound_consistency": false,
+        "gap_cycles": -3116.0,
+        "gap_fraction": -0.1464974141984015,
+        "native_macro_dispatches": 0,
+        "point_estimator": "not_claimed",
+        "hardware_completion": "not_observed"
+      }
+    },
+    {
+      "cell": {
+        "gap": 64,
+        "key": "w4_c11_l1_g64",
+        "locality": "l1",
+        "protocol": "c11",
+        "stage": "identification_async_factorial",
+        "warps": 4
+      },
+      "correctness": {
+        "correct": true,
+        "checksum": 5025747196710545408,
+        "groups": 64,
+        "warps": 4,
+        "protocol": "c11_wait_barrier",
+        "locality": "l1_reuse",
+        "gap_cycles": 64
+      },
+      "trace": {
+        "thread_instructions": 39304,
+        "warp_records": 12688,
+        "blocks": 1,
+        "threads": 128,
+        "kernel": "_Z21async_barrier_overlapILi3EEvPKcPcPyPjimm"
+      },
+      "simulator": {
+        "records": 12688,
+        "lower_bound_cycles": 24386,
+        "diagnostic_cycles": 12688,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "readiness_schema_version": 25
+      },
+      "tail_facts": {
+        "records": 12688,
+        "memory_records": 2832,
+        "async_copies": 2048,
+        "stores": 12,
+        "atomics": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false,
+        "async_protocol_lane_facts": {
+          "committed_lane_groups": 8192,
+          "copy_lane_operations": 65536,
+          "empty_lane_groups": 0,
+          "masked_protocol_records_unknown": 0,
+          "terminal_uncommitted_lane_copies": 0,
+          "terminal_unwaited_lane_copies": 0,
+          "terminal_unwaited_lane_groups": 0,
+          "waited_lane_copies": 65536,
+          "waited_lane_groups": 8192
+        }
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          21900.0,
+          21513.0,
+          21514.0,
+          21515.0,
+          21959.0
+        ],
+        "median": 21515.0,
+        "min": 21513.0,
+        "max": 21959.0,
+        "stdev": 228.53380493922558,
+        "instruction_count": 12688,
+        "kernel": "void async_barrier_overlap<3>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+        "clock_control": "base",
+        "cache_control": "none"
+      },
+      "comparison": {
+        "lower_bound_consistency": false,
+        "gap_cycles": -2871.0,
+        "gap_fraction": -0.13344178480130142,
+        "native_macro_dispatches": 0,
+        "point_estimator": "not_claimed",
+        "hardware_completion": "not_observed"
+      }
+    },
+    {
+      "cell": {
+        "gap": 0,
+        "key": "w4_c11_l2_g0",
+        "locality": "l2",
+        "protocol": "c11",
+        "stage": "identification_async_factorial",
+        "warps": 4
+      },
+      "correctness": {
+        "correct": true,
+        "checksum": 16089096904608057344,
+        "groups": 64,
+        "warps": 4,
+        "protocol": "c11_wait_barrier",
+        "locality": "l2_rotation",
+        "gap_cycles": 0
+      },
+      "trace": {
+        "thread_instructions": 26760,
+        "warp_records": 9104,
+        "blocks": 1,
+        "threads": 128,
+        "kernel": "_Z21async_barrier_overlapILi3EEvPKcPcPyPjimm"
+      },
+      "simulator": {
+        "records": 9104,
+        "lower_bound_cycles": 45365,
+        "diagnostic_cycles": 9104,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "readiness_schema_version": 25
+      },
+      "tail_facts": {
+        "records": 9104,
+        "memory_records": 2832,
+        "async_copies": 2048,
+        "stores": 12,
+        "atomics": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false,
+        "async_protocol_lane_facts": {
+          "committed_lane_groups": 8192,
+          "copy_lane_operations": 65536,
+          "empty_lane_groups": 0,
+          "masked_protocol_records_unknown": 0,
+          "terminal_uncommitted_lane_copies": 0,
+          "terminal_unwaited_lane_copies": 0,
+          "terminal_unwaited_lane_groups": 0,
+          "waited_lane_copies": 65536,
+          "waited_lane_groups": 8192
+        }
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          35254.0,
+          35252.0,
+          35505.0,
+          49471.0,
+          36129.0
+        ],
+        "median": 35505.0,
+        "min": 35252.0,
+        "max": 49471.0,
+        "stdev": 6242.644928233545,
+        "instruction_count": 9104,
+        "kernel": "void async_barrier_overlap<3>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+        "clock_control": "base",
+        "cache_control": "none"
+      },
+      "comparison": {
+        "lower_bound_consistency": false,
+        "gap_cycles": -9860.0,
+        "gap_fraction": -0.2777073651598366,
+        "native_macro_dispatches": 0,
+        "point_estimator": "not_claimed",
+        "hardware_completion": "not_observed"
+      }
+    },
+    {
+      "cell": {
+        "gap": 64,
+        "key": "w4_c11_l2_g64",
+        "locality": "l2",
+        "protocol": "c11",
+        "stage": "identification_async_factorial",
+        "warps": 4
+      },
+      "correctness": {
+        "correct": true,
+        "checksum": 16089096904608057344,
+        "groups": 64,
+        "warps": 4,
+        "protocol": "c11_wait_barrier",
+        "locality": "l2_rotation",
+        "gap_cycles": 64
+      },
+      "trace": {
+        "thread_instructions": 39304,
+        "warp_records": 12688,
+        "blocks": 1,
+        "threads": 128,
+        "kernel": "_Z21async_barrier_overlapILi3EEvPKcPcPyPjimm"
+      },
+      "simulator": {
+        "records": 12688,
+        "lower_bound_cycles": 45365,
+        "diagnostic_cycles": 12688,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "readiness_schema_version": 25
+      },
+      "tail_facts": {
+        "records": 12688,
+        "memory_records": 2832,
+        "async_copies": 2048,
+        "stores": 12,
+        "atomics": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false,
+        "async_protocol_lane_facts": {
+          "committed_lane_groups": 8192,
+          "copy_lane_operations": 65536,
+          "empty_lane_groups": 0,
+          "masked_protocol_records_unknown": 0,
+          "terminal_uncommitted_lane_copies": 0,
+          "terminal_unwaited_lane_copies": 0,
+          "terminal_unwaited_lane_groups": 0,
+          "waited_lane_copies": 65536,
+          "waited_lane_groups": 8192
+        }
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          37622.0,
+          37240.0,
+          35440.0,
+          35466.0,
+          37406.0
+        ],
+        "median": 37240.0,
+        "min": 35440.0,
+        "max": 37622.0,
+        "stdev": 1087.3385857220371,
+        "instruction_count": 12688,
+        "kernel": "void async_barrier_overlap<3>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+        "clock_control": "base",
+        "cache_control": "none"
+      },
+      "comparison": {
+        "lower_bound_consistency": false,
+        "gap_cycles": -8125.0,
+        "gap_fraction": -0.21817937701396348,
+        "native_macro_dispatches": 0,
+        "point_estimator": "not_claimed",
+        "hardware_completion": "not_observed"
+      }
+    },
+    {
+      "cell": {
+        "gap": 0,
+        "key": "w4_c11_dram_g0",
+        "locality": "dram",
+        "protocol": "c11",
+        "stage": "identification_async_factorial",
+        "warps": 4
+      },
+      "correctness": {
+        "correct": true,
+        "checksum": 15341371686336980992,
+        "groups": 64,
+        "warps": 4,
+        "protocol": "c11_wait_barrier",
+        "locality": "dram_stream",
+        "gap_cycles": 0
+      },
+      "trace": {
+        "thread_instructions": 26760,
+        "warp_records": 9104,
+        "blocks": 1,
+        "threads": 128,
+        "kernel": "_Z21async_barrier_overlapILi3EEvPKcPcPyPjimm"
+      },
+      "simulator": {
+        "records": 9104,
+        "lower_bound_cycles": 45365,
+        "diagnostic_cycles": 9104,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "readiness_schema_version": 25
+      },
+      "tail_facts": {
+        "records": 9104,
+        "memory_records": 2832,
+        "async_copies": 2048,
+        "stores": 12,
+        "atomics": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false,
+        "async_protocol_lane_facts": {
+          "committed_lane_groups": 8192,
+          "copy_lane_operations": 65536,
+          "empty_lane_groups": 0,
+          "masked_protocol_records_unknown": 0,
+          "terminal_uncommitted_lane_copies": 0,
+          "terminal_unwaited_lane_copies": 0,
+          "terminal_unwaited_lane_groups": 0,
+          "waited_lane_copies": 65536,
+          "waited_lane_groups": 8192
+        }
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          50553.0,
+          49913.0,
+          50055.0,
+          50125.0,
+          49951.0
+        ],
+        "median": 50055.0,
+        "min": 49913.0,
+        "max": 50553.0,
+        "stdev": 256.48937599830526,
+        "instruction_count": 9104,
+        "kernel": "void async_barrier_overlap<3>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+        "clock_control": "base",
+        "cache_control": "none"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 4690.0,
+        "gap_fraction": 0.09369693337328938,
+        "native_macro_dispatches": 0,
+        "point_estimator": "not_claimed",
+        "hardware_completion": "not_observed"
+      }
+    },
+    {
+      "cell": {
+        "gap": 64,
+        "key": "w4_c11_dram_g64",
+        "locality": "dram",
+        "protocol": "c11",
+        "stage": "identification_async_factorial",
+        "warps": 4
+      },
+      "correctness": {
+        "correct": true,
+        "checksum": 15341371686336980992,
+        "groups": 64,
+        "warps": 4,
+        "protocol": "c11_wait_barrier",
+        "locality": "dram_stream",
+        "gap_cycles": 64
+      },
+      "trace": {
+        "thread_instructions": 39304,
+        "warp_records": 12688,
+        "blocks": 1,
+        "threads": 128,
+        "kernel": "_Z21async_barrier_overlapILi3EEvPKcPcPyPjimm"
+      },
+      "simulator": {
+        "records": 12688,
+        "lower_bound_cycles": 45365,
+        "diagnostic_cycles": 12688,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "readiness_schema_version": 25
+      },
+      "tail_facts": {
+        "records": 12688,
+        "memory_records": 2832,
+        "async_copies": 2048,
+        "stores": 12,
+        "atomics": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false,
+        "async_protocol_lane_facts": {
+          "committed_lane_groups": 8192,
+          "copy_lane_operations": 65536,
+          "empty_lane_groups": 0,
+          "masked_protocol_records_unknown": 0,
+          "terminal_uncommitted_lane_copies": 0,
+          "terminal_unwaited_lane_copies": 0,
+          "terminal_unwaited_lane_groups": 0,
+          "waited_lane_copies": 65536,
+          "waited_lane_groups": 8192
+        }
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          49881.0,
+          50666.0,
+          50046.0,
+          50065.0,
+          50101.0
+        ],
+        "median": 50065.0,
+        "min": 49881.0,
+        "max": 50666.0,
+        "stdev": 299.6009012002467,
+        "instruction_count": 12688,
+        "kernel": "void async_barrier_overlap<3>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+        "clock_control": "base",
+        "cache_control": "none"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 4700.0,
+        "gap_fraction": 0.09387795865375012,
+        "native_macro_dispatches": 0,
+        "point_estimator": "not_claimed",
+        "hardware_completion": "not_observed"
+      }
+    },
+    {
+      "cell": {
+        "gap": 0,
+        "key": "w4_c12_l1_g0",
+        "locality": "l1",
+        "protocol": "c12",
+        "stage": "asymmetric_diagnosis",
+        "warps": 4
+      },
+      "correctness": {
+        "correct": true,
+        "checksum": 4121365497082257552,
+        "groups": 64,
+        "warps": 4,
+        "protocol": "c12_producer_consumer",
+        "locality": "l1_reuse",
+        "gap_cycles": 0
+      },
+      "trace": {
+        "thread_instructions": 21840,
+        "warp_records": 7780,
+        "blocks": 1,
+        "threads": 128,
+        "kernel": "_Z21async_barrier_overlapILi4EEvPKcPcPyPjimm"
+      },
+      "simulator": {
+        "records": 7780,
+        "lower_bound_cycles": 20036,
+        "diagnostic_cycles": 7780,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "readiness_schema_version": 25
+      },
+      "tail_facts": {
+        "records": 7780,
+        "memory_records": 724,
+        "async_copies": 512,
+        "stores": 12,
+        "atomics": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false,
+        "async_protocol_lane_facts": {
+          "committed_lane_groups": 2048,
+          "copy_lane_operations": 16384,
+          "empty_lane_groups": 0,
+          "masked_protocol_records_unknown": 0,
+          "terminal_uncommitted_lane_copies": 0,
+          "terminal_unwaited_lane_copies": 0,
+          "terminal_unwaited_lane_groups": 0,
+          "waited_lane_copies": 16384,
+          "waited_lane_groups": 2048
+        }
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          17408.0,
+          17411.0,
+          17427.0,
+          17838.0,
+          17418.0
+        ],
+        "median": 17418.0,
+        "min": 17408.0,
+        "max": 17838.0,
+        "stdev": 188.86582538934883,
+        "instruction_count": 7780,
+        "kernel": "void async_barrier_overlap<4>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+        "clock_control": "base",
+        "cache_control": "none"
+      },
+      "comparison": {
+        "lower_bound_consistency": false,
+        "gap_cycles": -2618.0,
+        "gap_fraction": -0.15030428292570905,
+        "native_macro_dispatches": 0,
+        "point_estimator": "not_claimed",
+        "hardware_completion": "not_observed"
+      }
+    },
+    {
+      "cell": {
+        "gap": 64,
+        "key": "w4_c12_l1_g64",
+        "locality": "l1",
+        "protocol": "c12",
+        "stage": "asymmetric_diagnosis",
+        "warps": 4
+      },
+      "correctness": {
+        "correct": true,
+        "checksum": 13336639807926232190,
+        "groups": 64,
+        "warps": 4,
+        "protocol": "c12_producer_consumer",
+        "locality": "l1_reuse",
+        "gap_cycles": 64
+      },
+      "trace": {
+        "thread_instructions": 34384,
+        "warp_records": 11364,
+        "blocks": 1,
+        "threads": 128,
+        "kernel": "_Z21async_barrier_overlapILi4EEvPKcPcPyPjimm"
+      },
+      "simulator": {
+        "records": 11364,
+        "lower_bound_cycles": 20036,
+        "diagnostic_cycles": 11364,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "readiness_schema_version": 25
+      },
+      "tail_facts": {
+        "records": 11364,
+        "memory_records": 724,
+        "async_copies": 512,
+        "stores": 12,
+        "atomics": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false,
+        "async_protocol_lane_facts": {
+          "committed_lane_groups": 2048,
+          "copy_lane_operations": 16384,
+          "empty_lane_groups": 0,
+          "masked_protocol_records_unknown": 0,
+          "terminal_uncommitted_lane_copies": 0,
+          "terminal_unwaited_lane_copies": 0,
+          "terminal_unwaited_lane_groups": 0,
+          "waited_lane_copies": 16384,
+          "waited_lane_groups": 2048
+        }
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          18439.0,
+          18423.0,
+          18433.0,
+          18867.0,
+          18431.0
+        ],
+        "median": 18433.0,
+        "min": 18423.0,
+        "max": 18867.0,
+        "stdev": 194.84557988314745,
+        "instruction_count": 11364,
+        "kernel": "void async_barrier_overlap<4>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+        "clock_control": "base",
+        "cache_control": "none"
+      },
+      "comparison": {
+        "lower_bound_consistency": false,
+        "gap_cycles": -1603.0,
+        "gap_fraction": -0.08696359789507947,
+        "native_macro_dispatches": 0,
+        "point_estimator": "not_claimed",
+        "hardware_completion": "not_observed"
+      }
+    },
+    {
+      "cell": {
+        "gap": 0,
+        "key": "w4_c12_dram_g0",
+        "locality": "dram",
+        "protocol": "c12",
+        "stage": "asymmetric_diagnosis",
+        "warps": 4
+      },
+      "correctness": {
+        "correct": true,
+        "checksum": 14307513514953839120,
+        "groups": 64,
+        "warps": 4,
+        "protocol": "c12_producer_consumer",
+        "locality": "dram_stream",
+        "gap_cycles": 0
+      },
+      "trace": {
+        "thread_instructions": 21840,
+        "warp_records": 7780,
+        "blocks": 1,
+        "threads": 128,
+        "kernel": "_Z21async_barrier_overlapILi4EEvPKcPcPyPjimm"
+      },
+      "simulator": {
+        "records": 7780,
+        "lower_bound_cycles": 41015,
+        "diagnostic_cycles": 7780,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "readiness_schema_version": 25
+      },
+      "tail_facts": {
+        "records": 7780,
+        "memory_records": 724,
+        "async_copies": 512,
+        "stores": 12,
+        "atomics": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false,
+        "async_protocol_lane_facts": {
+          "committed_lane_groups": 2048,
+          "copy_lane_operations": 16384,
+          "empty_lane_groups": 0,
+          "masked_protocol_records_unknown": 0,
+          "terminal_uncommitted_lane_copies": 0,
+          "terminal_unwaited_lane_copies": 0,
+          "terminal_unwaited_lane_groups": 0,
+          "waited_lane_copies": 16384,
+          "waited_lane_groups": 2048
+        }
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          46002.0,
+          46199.0,
+          46610.0,
+          46112.0,
+          45962.0
+        ],
+        "median": 46112.0,
+        "min": 45962.0,
+        "max": 46610.0,
+        "stdev": 259.34918546238004,
+        "instruction_count": 7780,
+        "kernel": "void async_barrier_overlap<4>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+        "clock_control": "base",
+        "cache_control": "none"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 5097.0,
+        "gap_fraction": 0.11053521859819569,
+        "native_macro_dispatches": 0,
+        "point_estimator": "not_claimed",
+        "hardware_completion": "not_observed"
+      }
+    },
+    {
+      "cell": {
+        "gap": 64,
+        "key": "w4_c12_dram_g64",
+        "locality": "dram",
+        "protocol": "c12",
+        "stage": "asymmetric_diagnosis",
+        "warps": 4
+      },
+      "correctness": {
+        "correct": true,
+        "checksum": 6192366367776213838,
+        "groups": 64,
+        "warps": 4,
+        "protocol": "c12_producer_consumer",
+        "locality": "dram_stream",
+        "gap_cycles": 64
+      },
+      "trace": {
+        "thread_instructions": 34384,
+        "warp_records": 11364,
+        "blocks": 1,
+        "threads": 128,
+        "kernel": "_Z21async_barrier_overlapILi4EEvPKcPcPyPjimm"
+      },
+      "simulator": {
+        "records": 11364,
+        "lower_bound_cycles": 41015,
+        "diagnostic_cycles": 11364,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "readiness_schema_version": 25
+      },
+      "tail_facts": {
+        "records": 11364,
+        "memory_records": 724,
+        "async_copies": 512,
+        "stores": 12,
+        "atomics": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false,
+        "async_protocol_lane_facts": {
+          "committed_lane_groups": 2048,
+          "copy_lane_operations": 16384,
+          "empty_lane_groups": 0,
+          "masked_protocol_records_unknown": 0,
+          "terminal_uncommitted_lane_copies": 0,
+          "terminal_unwaited_lane_copies": 0,
+          "terminal_unwaited_lane_groups": 0,
+          "waited_lane_copies": 16384,
+          "waited_lane_groups": 2048
+        }
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          47081.0,
+          46586.0,
+          45961.0,
+          46463.0,
+          46370.0
+        ],
+        "median": 46463.0,
+        "min": 45961.0,
+        "max": 47081.0,
+        "stdev": 404.17904448400094,
+        "instruction_count": 11364,
+        "kernel": "void async_barrier_overlap<4>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+        "clock_control": "base",
+        "cache_control": "none"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 5448.0,
+        "gap_fraction": 0.11725458967350365,
+        "native_macro_dispatches": 0,
+        "point_estimator": "not_claimed",
+        "hardware_completion": "not_observed"
+      }
+    },
+    {
+      "cell": {
+        "gap": 0,
+        "key": "w2_c00_na_g0",
+        "locality": "na",
+        "protocol": "c00",
+        "stage": "held_out_cta_shapes",
+        "warps": 2
+      },
+      "correctness": {
+        "correct": true,
+        "checksum": 7636318027450715712,
+        "groups": 64,
+        "warps": 2,
+        "protocol": "c00_baseline",
+        "locality": "l1_reuse",
+        "gap_cycles": 0
+      },
+      "trace": {
+        "thread_instructions": 8860,
+        "warp_records": 2492,
+        "blocks": 1,
+        "threads": 64,
+        "kernel": "_Z21async_barrier_overlapILi0EEvPKcPcPyPjimm"
+      },
+      "simulator": {
+        "records": 2492,
+        "lower_bound_cycles": 6000,
+        "diagnostic_cycles": 2492,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "readiness_schema_version": 25
+      },
+      "tail_facts": {
+        "records": 2492,
+        "memory_records": 6,
+        "async_copies": 0,
+        "stores": 6,
+        "atomics": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false,
+        "async_protocol_lane_facts": {
+          "committed_lane_groups": 0,
+          "copy_lane_operations": 0,
+          "empty_lane_groups": 0,
+          "masked_protocol_records_unknown": 0,
+          "terminal_uncommitted_lane_copies": 0,
+          "terminal_unwaited_lane_copies": 0,
+          "terminal_unwaited_lane_groups": 0,
+          "waited_lane_copies": 0,
+          "waited_lane_groups": 0
+        }
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          7588.0,
+          7576.0,
+          7578.0,
+          7573.0,
+          7791.0
+        ],
+        "median": 7578.0,
+        "min": 7573.0,
+        "max": 7791.0,
+        "stdev": 95.08785411397189,
+        "instruction_count": 2492,
+        "kernel": "void async_barrier_overlap<0>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+        "clock_control": "base",
+        "cache_control": "none"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 1578.0,
+        "gap_fraction": 0.2082343626286619,
+        "native_macro_dispatches": 0,
+        "point_estimator": "not_claimed",
+        "hardware_completion": "not_observed"
+      }
+    },
+    {
+      "cell": {
+        "gap": 0,
+        "key": "w2_c01_na_g0",
+        "locality": "na",
+        "protocol": "c01",
+        "stage": "held_out_cta_shapes",
+        "warps": 2
+      },
+      "correctness": {
+        "correct": true,
+        "checksum": 7636318027450715712,
+        "groups": 64,
+        "warps": 2,
+        "protocol": "c01_barrier_only",
+        "locality": "l1_reuse",
+        "gap_cycles": 0
+      },
+      "trace": {
+        "thread_instructions": 8988,
+        "warp_records": 2620,
+        "blocks": 1,
+        "threads": 64,
+        "kernel": "_Z21async_barrier_overlapILi1EEvPKcPcPyPjimm"
+      },
+      "simulator": {
+        "records": 2620,
+        "lower_bound_cycles": 6207,
+        "diagnostic_cycles": 2620,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "readiness_schema_version": 25
+      },
+      "tail_facts": {
+        "records": 2620,
+        "memory_records": 6,
+        "async_copies": 0,
+        "stores": 6,
+        "atomics": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false,
+        "async_protocol_lane_facts": {
+          "committed_lane_groups": 0,
+          "copy_lane_operations": 0,
+          "empty_lane_groups": 0,
+          "masked_protocol_records_unknown": 0,
+          "terminal_uncommitted_lane_copies": 0,
+          "terminal_unwaited_lane_copies": 0,
+          "terminal_unwaited_lane_groups": 0,
+          "waited_lane_copies": 0,
+          "waited_lane_groups": 0
+        }
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          8488.0,
+          8487.0,
+          8510.0,
+          8481.0,
+          8491.0
+        ],
+        "median": 8488.0,
+        "min": 8481.0,
+        "max": 8510.0,
+        "stdev": 11.013627921806693,
+        "instruction_count": 2620,
+        "kernel": "void async_barrier_overlap<1>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+        "clock_control": "base",
+        "cache_control": "none"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 2281.0,
+        "gap_fraction": 0.26873232799245994,
+        "native_macro_dispatches": 0,
+        "point_estimator": "not_claimed",
+        "hardware_completion": "not_observed"
+      }
+    },
+    {
+      "cell": {
+        "gap": 0,
+        "key": "w8_c00_na_g0",
+        "locality": "na",
+        "protocol": "c00",
+        "stage": "held_out_cta_shapes",
+        "warps": 8
+      },
+      "correctness": {
+        "correct": true,
+        "checksum": 13968710126781083008,
+        "groups": 64,
+        "warps": 8,
+        "protocol": "c00_baseline",
+        "locality": "l1_reuse",
+        "gap_cycles": 0
+      },
+      "trace": {
+        "thread_instructions": 35440,
+        "warp_records": 9968,
+        "blocks": 1,
+        "threads": 256,
+        "kernel": "_Z21async_barrier_overlapILi0EEvPKcPcPyPjimm"
+      },
+      "simulator": {
+        "records": 9968,
+        "lower_bound_cycles": 6038,
+        "diagnostic_cycles": 9968,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "readiness_schema_version": 25
+      },
+      "tail_facts": {
+        "records": 9968,
+        "memory_records": 24,
+        "async_copies": 0,
+        "stores": 24,
+        "atomics": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false,
+        "async_protocol_lane_facts": {
+          "committed_lane_groups": 0,
+          "copy_lane_operations": 0,
+          "empty_lane_groups": 0,
+          "masked_protocol_records_unknown": 0,
+          "terminal_uncommitted_lane_copies": 0,
+          "terminal_unwaited_lane_copies": 0,
+          "terminal_unwaited_lane_groups": 0,
+          "waited_lane_copies": 0,
+          "waited_lane_groups": 0
+        }
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          8218.0,
+          8213.0,
+          8221.0,
+          8190.0,
+          8210.0
+        ],
+        "median": 8213.0,
+        "min": 8190.0,
+        "max": 8221.0,
+        "stdev": 12.177848742696716,
+        "instruction_count": 9968,
+        "kernel": "void async_barrier_overlap<0>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+        "clock_control": "base",
+        "cache_control": "none"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 2175.0,
+        "gap_fraction": 0.26482405941799586,
+        "native_macro_dispatches": 0,
+        "point_estimator": "not_claimed",
+        "hardware_completion": "not_observed"
+      }
+    },
+    {
+      "cell": {
+        "gap": 0,
+        "key": "w8_c01_na_g0",
+        "locality": "na",
+        "protocol": "c01",
+        "stage": "held_out_cta_shapes",
+        "warps": 8
+      },
+      "correctness": {
+        "correct": true,
+        "checksum": 13968710126781083008,
+        "groups": 64,
+        "warps": 8,
+        "protocol": "c01_barrier_only",
+        "locality": "l1_reuse",
+        "gap_cycles": 0
+      },
+      "trace": {
+        "thread_instructions": 35952,
+        "warp_records": 10480,
+        "blocks": 1,
+        "threads": 256,
+        "kernel": "_Z21async_barrier_overlapILi1EEvPKcPcPyPjimm"
+      },
+      "simulator": {
+        "records": 10480,
+        "lower_bound_cycles": 7011,
+        "diagnostic_cycles": 10480,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "readiness_schema_version": 25
+      },
+      "tail_facts": {
+        "records": 10480,
+        "memory_records": 24,
+        "async_copies": 0,
+        "stores": 24,
+        "atomics": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false,
+        "async_protocol_lane_facts": {
+          "committed_lane_groups": 0,
+          "copy_lane_operations": 0,
+          "empty_lane_groups": 0,
+          "masked_protocol_records_unknown": 0,
+          "terminal_uncommitted_lane_copies": 0,
+          "terminal_unwaited_lane_copies": 0,
+          "terminal_unwaited_lane_groups": 0,
+          "waited_lane_copies": 0,
+          "waited_lane_groups": 0
+        }
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          10004.0,
+          10014.0,
+          10003.0,
+          10006.0,
+          10001.0
+        ],
+        "median": 10004.0,
+        "min": 10001.0,
+        "max": 10014.0,
+        "stdev": 5.029910535983717,
+        "instruction_count": 10480,
+        "kernel": "void async_barrier_overlap<1>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+        "clock_control": "base",
+        "cache_control": "none"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 2993.0,
+        "gap_fraction": 0.29918032786885246,
+        "native_macro_dispatches": 0,
+        "point_estimator": "not_claimed",
+        "hardware_completion": "not_observed"
+      }
+    },
+    {
+      "cell": {
+        "gap": 0,
+        "key": "w2_c10_l1_g0",
+        "locality": "l1",
+        "protocol": "c10",
+        "stage": "held_out_async_extremes",
+        "warps": 2
+      },
+      "correctness": {
+        "correct": true,
+        "checksum": 3307904147693270016,
+        "groups": 64,
+        "warps": 2,
+        "protocol": "c10_wait_only",
+        "locality": "l1_reuse",
+        "gap_cycles": 0
+      },
+      "trace": {
+        "thread_instructions": 13252,
+        "warp_records": 4424,
+        "blocks": 1,
+        "threads": 64,
+        "kernel": "_Z21async_barrier_overlapILi2EEvPKcPcPyPjimm"
+      },
+      "simulator": {
+        "records": 4424,
+        "lower_bound_cycles": 17283,
+        "diagnostic_cycles": 4424,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "readiness_schema_version": 25
+      },
+      "tail_facts": {
+        "records": 4424,
+        "memory_records": 1416,
+        "async_copies": 1024,
+        "stores": 6,
+        "atomics": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false,
+        "async_protocol_lane_facts": {
+          "committed_lane_groups": 4096,
+          "copy_lane_operations": 32768,
+          "empty_lane_groups": 0,
+          "masked_protocol_records_unknown": 0,
+          "terminal_uncommitted_lane_copies": 0,
+          "terminal_unwaited_lane_copies": 0,
+          "terminal_unwaited_lane_groups": 0,
+          "waited_lane_copies": 32768,
+          "waited_lane_groups": 4096
+        }
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          15554.0,
+          15932.0,
+          15532.0,
+          15547.0,
+          15544.0
+        ],
+        "median": 15547.0,
+        "min": 15532.0,
+        "max": 15932.0,
+        "stdev": 173.58917016910934,
+        "instruction_count": 4424,
+        "kernel": "void async_barrier_overlap<2>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+        "clock_control": "base",
+        "cache_control": "none"
+      },
+      "comparison": {
+        "lower_bound_consistency": false,
+        "gap_cycles": -1736.0,
+        "gap_fraction": -0.11166141377757767,
+        "native_macro_dispatches": 0,
+        "point_estimator": "not_claimed",
+        "hardware_completion": "not_observed"
+      }
+    },
+    {
+      "cell": {
+        "gap": 0,
+        "key": "w2_c10_dram_g0",
+        "locality": "dram",
+        "protocol": "c10",
+        "stage": "held_out_async_extremes",
+        "warps": 2
+      },
+      "correctness": {
+        "correct": true,
+        "checksum": 1912676532678882304,
+        "groups": 64,
+        "warps": 2,
+        "protocol": "c10_wait_only",
+        "locality": "dram_stream",
+        "gap_cycles": 0
+      },
+      "trace": {
+        "thread_instructions": 13252,
+        "warp_records": 4424,
+        "blocks": 1,
+        "threads": 64,
+        "kernel": "_Z21async_barrier_overlapILi2EEvPKcPcPyPjimm"
+      },
+      "simulator": {
+        "records": 4424,
+        "lower_bound_cycles": 38260,
+        "diagnostic_cycles": 4424,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "readiness_schema_version": 25
+      },
+      "tail_facts": {
+        "records": 4424,
+        "memory_records": 1416,
+        "async_copies": 1024,
+        "stores": 6,
+        "atomics": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false,
+        "async_protocol_lane_facts": {
+          "committed_lane_groups": 4096,
+          "copy_lane_operations": 32768,
+          "empty_lane_groups": 0,
+          "masked_protocol_records_unknown": 0,
+          "terminal_uncommitted_lane_copies": 0,
+          "terminal_unwaited_lane_copies": 0,
+          "terminal_unwaited_lane_groups": 0,
+          "waited_lane_copies": 32768,
+          "waited_lane_groups": 4096
+        }
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          43207.0,
+          43826.0,
+          43486.0,
+          43450.0,
+          43827.0
+        ],
+        "median": 43486.0,
+        "min": 43207.0,
+        "max": 43827.0,
+        "stdev": 266.56462631039403,
+        "instruction_count": 4424,
+        "kernel": "void async_barrier_overlap<2>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+        "clock_control": "base",
+        "cache_control": "none"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 5226.0,
+        "gap_fraction": 0.12017660856367567,
+        "native_macro_dispatches": 0,
+        "point_estimator": "not_claimed",
+        "hardware_completion": "not_observed"
+      }
+    },
+    {
+      "cell": {
+        "gap": 0,
+        "key": "w2_c11_l1_g0",
+        "locality": "l1",
+        "protocol": "c11",
+        "stage": "held_out_async_extremes",
+        "warps": 2
+      },
+      "correctness": {
+        "correct": true,
+        "checksum": 3307904147693270016,
+        "groups": 64,
+        "warps": 2,
+        "protocol": "c11_wait_barrier",
+        "locality": "l1_reuse",
+        "gap_cycles": 0
+      },
+      "trace": {
+        "thread_instructions": 13380,
+        "warp_records": 4552,
+        "blocks": 1,
+        "threads": 64,
+        "kernel": "_Z21async_barrier_overlapILi3EEvPKcPcPyPjimm"
+      },
+      "simulator": {
+        "records": 4552,
+        "lower_bound_cycles": 18230,
+        "diagnostic_cycles": 4552,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "readiness_schema_version": 25
+      },
+      "tail_facts": {
+        "records": 4552,
+        "memory_records": 1416,
+        "async_copies": 1024,
+        "stores": 6,
+        "atomics": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false,
+        "async_protocol_lane_facts": {
+          "committed_lane_groups": 4096,
+          "copy_lane_operations": 32768,
+          "empty_lane_groups": 0,
+          "masked_protocol_records_unknown": 0,
+          "terminal_uncommitted_lane_copies": 0,
+          "terminal_unwaited_lane_copies": 0,
+          "terminal_unwaited_lane_groups": 0,
+          "waited_lane_copies": 32768,
+          "waited_lane_groups": 4096
+        }
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          16162.0,
+          15755.0,
+          15751.0,
+          15731.0,
+          16170.0
+        ],
+        "median": 15755.0,
+        "min": 15731.0,
+        "max": 16170.0,
+        "stdev": 230.42287212861487,
+        "instruction_count": 4552,
+        "kernel": "void async_barrier_overlap<3>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+        "clock_control": "base",
+        "cache_control": "none"
+      },
+      "comparison": {
+        "lower_bound_consistency": false,
+        "gap_cycles": -2475.0,
+        "gap_fraction": -0.15709298635353855,
+        "native_macro_dispatches": 0,
+        "point_estimator": "not_claimed",
+        "hardware_completion": "not_observed"
+      }
+    },
+    {
+      "cell": {
+        "gap": 0,
+        "key": "w2_c11_dram_g0",
+        "locality": "dram",
+        "protocol": "c11",
+        "stage": "held_out_async_extremes",
+        "warps": 2
+      },
+      "correctness": {
+        "correct": true,
+        "checksum": 1912676532678882304,
+        "groups": 64,
+        "warps": 2,
+        "protocol": "c11_wait_barrier",
+        "locality": "dram_stream",
+        "gap_cycles": 0
+      },
+      "trace": {
+        "thread_instructions": 13380,
+        "warp_records": 4552,
+        "blocks": 1,
+        "threads": 64,
+        "kernel": "_Z21async_barrier_overlapILi3EEvPKcPcPyPjimm"
+      },
+      "simulator": {
+        "records": 4552,
+        "lower_bound_cycles": 39209,
+        "diagnostic_cycles": 4552,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "readiness_schema_version": 25
+      },
+      "tail_facts": {
+        "records": 4552,
+        "memory_records": 1416,
+        "async_copies": 1024,
+        "stores": 6,
+        "atomics": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false,
+        "async_protocol_lane_facts": {
+          "committed_lane_groups": 4096,
+          "copy_lane_operations": 32768,
+          "empty_lane_groups": 0,
+          "masked_protocol_records_unknown": 0,
+          "terminal_uncommitted_lane_copies": 0,
+          "terminal_unwaited_lane_copies": 0,
+          "terminal_unwaited_lane_groups": 0,
+          "waited_lane_copies": 32768,
+          "waited_lane_groups": 4096
+        }
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          44733.0,
+          44168.0,
+          44241.0,
+          45396.0,
+          44593.0
+        ],
+        "median": 44593.0,
+        "min": 44168.0,
+        "max": 45396.0,
+        "stdev": 490.7715354418999,
+        "instruction_count": 4552,
+        "kernel": "void async_barrier_overlap<3>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+        "clock_control": "base",
+        "cache_control": "none"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 5384.0,
+        "gap_fraction": 0.12073643845446595,
+        "native_macro_dispatches": 0,
+        "point_estimator": "not_claimed",
+        "hardware_completion": "not_observed"
+      }
+    },
+    {
+      "cell": {
+        "gap": 0,
+        "key": "w8_c10_l1_g0",
+        "locality": "l1",
+        "protocol": "c10",
+        "stage": "held_out_async_extremes",
+        "warps": 8
+      },
+      "correctness": {
+        "correct": true,
+        "checksum": 13876796208543027200,
+        "groups": 64,
+        "warps": 8,
+        "protocol": "c10_wait_only",
+        "locality": "l1_reuse",
+        "gap_cycles": 0
+      },
+      "trace": {
+        "thread_instructions": 53008,
+        "warp_records": 17696,
+        "blocks": 1,
+        "threads": 256,
+        "kernel": "_Z21async_barrier_overlapILi2EEvPKcPcPyPjimm"
+      },
+      "simulator": {
+        "records": 17696,
+        "lower_bound_cycles": 26533,
+        "diagnostic_cycles": 17696,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "readiness_schema_version": 25
+      },
+      "tail_facts": {
+        "records": 17696,
+        "memory_records": 5664,
+        "async_copies": 4096,
+        "stores": 24,
+        "atomics": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false,
+        "async_protocol_lane_facts": {
+          "committed_lane_groups": 16384,
+          "copy_lane_operations": 131072,
+          "empty_lane_groups": 0,
+          "masked_protocol_records_unknown": 0,
+          "terminal_uncommitted_lane_copies": 0,
+          "terminal_unwaited_lane_copies": 0,
+          "terminal_unwaited_lane_groups": 0,
+          "waited_lane_copies": 131072,
+          "waited_lane_groups": 16384
+        }
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          30036.0,
+          30040.0,
+          30459.0,
+          30100.0,
+          30044.0
+        ],
+        "median": 30044.0,
+        "min": 30036.0,
+        "max": 30459.0,
+        "stdev": 182.55464935191324,
+        "instruction_count": 17696,
+        "kernel": "void async_barrier_overlap<2>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+        "clock_control": "base",
+        "cache_control": "none"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 3511.0,
+        "gap_fraction": 0.11686193582745306,
+        "native_macro_dispatches": 0,
+        "point_estimator": "not_claimed",
+        "hardware_completion": "not_observed"
+      }
+    },
+    {
+      "cell": {
+        "gap": 0,
+        "key": "w8_c10_dram_g0",
+        "locality": "dram",
+        "protocol": "c10",
+        "stage": "held_out_async_extremes",
+        "warps": 8
+      },
+      "correctness": {
+        "correct": true,
+        "checksum": 2239237377668403200,
+        "groups": 64,
+        "warps": 8,
+        "protocol": "c10_wait_only",
+        "locality": "dram_stream",
+        "gap_cycles": 0
+      },
+      "trace": {
+        "thread_instructions": 53008,
+        "warp_records": 17696,
+        "blocks": 1,
+        "threads": 256,
+        "kernel": "_Z21async_barrier_overlapILi2EEvPKcPcPyPjimm"
+      },
+      "simulator": {
+        "records": 17696,
+        "lower_bound_cycles": 38570,
+        "diagnostic_cycles": 17696,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "readiness_schema_version": 25
+      },
+      "tail_facts": {
+        "records": 17696,
+        "memory_records": 5664,
+        "async_copies": 4096,
+        "stores": 24,
+        "atomics": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false,
+        "async_protocol_lane_facts": {
+          "committed_lane_groups": 16384,
+          "copy_lane_operations": 131072,
+          "empty_lane_groups": 0,
+          "masked_protocol_records_unknown": 0,
+          "terminal_uncommitted_lane_copies": 0,
+          "terminal_unwaited_lane_copies": 0,
+          "terminal_unwaited_lane_groups": 0,
+          "waited_lane_copies": 131072,
+          "waited_lane_groups": 16384
+        }
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          44327.0,
+          44463.0,
+          44536.0,
+          44214.0,
+          44361.0
+        ],
+        "median": 44361.0,
+        "min": 44214.0,
+        "max": 44536.0,
+        "stdev": 124.44958818734597,
+        "instruction_count": 17696,
+        "kernel": "void async_barrier_overlap<2>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+        "clock_control": "base",
+        "cache_control": "none"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 5791.0,
+        "gap_fraction": 0.13054259371970875,
+        "native_macro_dispatches": 0,
+        "point_estimator": "not_claimed",
+        "hardware_completion": "not_observed"
+      }
+    },
+    {
+      "cell": {
+        "gap": 0,
+        "key": "w8_c11_l1_g0",
+        "locality": "l1",
+        "protocol": "c11",
+        "stage": "held_out_async_extremes",
+        "warps": 8
+      },
+      "correctness": {
+        "correct": true,
+        "checksum": 13876796208543027200,
+        "groups": 64,
+        "warps": 8,
+        "protocol": "c11_wait_barrier",
+        "locality": "l1_reuse",
+        "gap_cycles": 0
+      },
+      "trace": {
+        "thread_instructions": 53520,
+        "warp_records": 18208,
+        "blocks": 1,
+        "threads": 256,
+        "kernel": "_Z21async_barrier_overlapILi3EEvPKcPcPyPjimm"
+      },
+      "simulator": {
+        "records": 18208,
+        "lower_bound_cycles": 37706,
+        "diagnostic_cycles": 18208,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "readiness_schema_version": 25
+      },
+      "tail_facts": {
+        "records": 18208,
+        "memory_records": 5664,
+        "async_copies": 4096,
+        "stores": 24,
+        "atomics": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false,
+        "async_protocol_lane_facts": {
+          "committed_lane_groups": 16384,
+          "copy_lane_operations": 131072,
+          "empty_lane_groups": 0,
+          "masked_protocol_records_unknown": 0,
+          "terminal_uncommitted_lane_copies": 0,
+          "terminal_unwaited_lane_copies": 0,
+          "terminal_unwaited_lane_groups": 0,
+          "waited_lane_copies": 131072,
+          "waited_lane_groups": 16384
+        }
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          33348.0,
+          33374.0,
+          33369.0,
+          33364.0,
+          33354.0
+        ],
+        "median": 33364.0,
+        "min": 33348.0,
+        "max": 33374.0,
+        "stdev": 10.686440005914037,
+        "instruction_count": 18208,
+        "kernel": "void async_barrier_overlap<3>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+        "clock_control": "base",
+        "cache_control": "none"
+      },
+      "comparison": {
+        "lower_bound_consistency": false,
+        "gap_cycles": -4342.0,
+        "gap_fraction": -0.13014027095072533,
+        "native_macro_dispatches": 0,
+        "point_estimator": "not_claimed",
+        "hardware_completion": "not_observed"
+      }
+    },
+    {
+      "cell": {
+        "gap": 0,
+        "key": "w8_c11_dram_g0",
+        "locality": "dram",
+        "protocol": "c11",
+        "stage": "held_out_async_extremes",
+        "warps": 8
+      },
+      "correctness": {
+        "correct": true,
+        "checksum": 2239237377668403200,
+        "groups": 64,
+        "warps": 8,
+        "protocol": "c11_wait_barrier",
+        "locality": "dram_stream",
+        "gap_cycles": 0
+      },
+      "trace": {
+        "thread_instructions": 53520,
+        "warp_records": 18208,
+        "blocks": 1,
+        "threads": 256,
+        "kernel": "_Z21async_barrier_overlapILi3EEvPKcPcPyPjimm"
+      },
+      "simulator": {
+        "records": 18208,
+        "lower_bound_cycles": 57677,
+        "diagnostic_cycles": 18208,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "readiness_schema_version": 25
+      },
+      "tail_facts": {
+        "records": 18208,
+        "memory_records": 5664,
+        "async_copies": 4096,
+        "stores": 24,
+        "atomics": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false,
+        "async_protocol_lane_facts": {
+          "committed_lane_groups": 16384,
+          "copy_lane_operations": 131072,
+          "empty_lane_groups": 0,
+          "masked_protocol_records_unknown": 0,
+          "terminal_uncommitted_lane_copies": 0,
+          "terminal_unwaited_lane_copies": 0,
+          "terminal_unwaited_lane_groups": 0,
+          "waited_lane_copies": 131072,
+          "waited_lane_groups": 16384
+        }
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          60342.0,
+          61369.0,
+          60493.0,
+          60694.0,
+          60368.0
+        ],
+        "median": 60493.0,
+        "min": 60342.0,
+        "max": 61369.0,
+        "stdev": 423.6398234349552,
+        "instruction_count": 18208,
+        "kernel": "void async_barrier_overlap<3>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+        "clock_control": "base",
+        "cache_control": "none"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 2816.0,
+        "gap_fraction": 0.046550840593126475,
+        "native_macro_dispatches": 0,
+        "point_estimator": "not_claimed",
+        "hardware_completion": "not_observed"
+      }
+    },
+    {
+      "cell": {
+        "gap": 0,
+        "key": "w2_c12_l1_g0",
+        "locality": "l1",
+        "protocol": "c12",
+        "stage": "held_out_asymmetry",
+        "warps": 2
+      },
+      "correctness": {
+        "correct": true,
+        "checksum": 14187861991884365456,
+        "groups": 64,
+        "warps": 2,
+        "protocol": "c12_producer_consumer",
+        "locality": "l1_reuse",
+        "gap_cycles": 0
+      },
+      "trace": {
+        "thread_instructions": 12008,
+        "warp_records": 4370,
+        "blocks": 1,
+        "threads": 64,
+        "kernel": "_Z21async_barrier_overlapILi4EEvPKcPcPyPjimm"
+      },
+      "simulator": {
+        "records": 4370,
+        "lower_bound_cycles": 20032,
+        "diagnostic_cycles": 4370,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "readiness_schema_version": 25
+      },
+      "tail_facts": {
+        "records": 4370,
+        "memory_records": 714,
+        "async_copies": 512,
+        "stores": 6,
+        "atomics": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false,
+        "async_protocol_lane_facts": {
+          "committed_lane_groups": 2048,
+          "copy_lane_operations": 16384,
+          "empty_lane_groups": 0,
+          "masked_protocol_records_unknown": 0,
+          "terminal_uncommitted_lane_copies": 0,
+          "terminal_unwaited_lane_copies": 0,
+          "terminal_unwaited_lane_groups": 0,
+          "waited_lane_copies": 16384,
+          "waited_lane_groups": 2048
+        }
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          17848.0,
+          17826.0,
+          17418.0,
+          17421.0,
+          17866.0
+        ],
+        "median": 17826.0,
+        "min": 17418.0,
+        "max": 17866.0,
+        "stdev": 234.3996587028232,
+        "instruction_count": 4370,
+        "kernel": "void async_barrier_overlap<4>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+        "clock_control": "base",
+        "cache_control": "none"
+      },
+      "comparison": {
+        "lower_bound_consistency": false,
+        "gap_cycles": -2206.0,
+        "gap_fraction": -0.12375182317962527,
+        "native_macro_dispatches": 0,
+        "point_estimator": "not_claimed",
+        "hardware_completion": "not_observed"
+      }
+    },
+    {
+      "cell": {
+        "gap": 0,
+        "key": "w2_c12_dram_g0",
+        "locality": "dram",
+        "protocol": "c12",
+        "stage": "held_out_asymmetry",
+        "warps": 2
+      },
+      "correctness": {
+        "correct": true,
+        "checksum": 2047913277283004176,
+        "groups": 64,
+        "warps": 2,
+        "protocol": "c12_producer_consumer",
+        "locality": "dram_stream",
+        "gap_cycles": 0
+      },
+      "trace": {
+        "thread_instructions": 12008,
+        "warp_records": 4370,
+        "blocks": 1,
+        "threads": 64,
+        "kernel": "_Z21async_barrier_overlapILi4EEvPKcPcPyPjimm"
+      },
+      "simulator": {
+        "records": 4370,
+        "lower_bound_cycles": 41011,
+        "diagnostic_cycles": 4370,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "readiness_schema_version": 25
+      },
+      "tail_facts": {
+        "records": 4370,
+        "memory_records": 714,
+        "async_copies": 512,
+        "stores": 6,
+        "atomics": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false,
+        "async_protocol_lane_facts": {
+          "committed_lane_groups": 2048,
+          "copy_lane_operations": 16384,
+          "empty_lane_groups": 0,
+          "masked_protocol_records_unknown": 0,
+          "terminal_uncommitted_lane_copies": 0,
+          "terminal_unwaited_lane_copies": 0,
+          "terminal_unwaited_lane_groups": 0,
+          "waited_lane_copies": 16384,
+          "waited_lane_groups": 2048
+        }
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          45998.0,
+          46124.0,
+          46045.0,
+          46474.0,
+          46226.0
+        ],
+        "median": 46124.0,
+        "min": 45998.0,
+        "max": 46474.0,
+        "stdev": 188.95713799695423,
+        "instruction_count": 4370,
+        "kernel": "void async_barrier_overlap<4>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+        "clock_control": "base",
+        "cache_control": "none"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 5113.0,
+        "gap_fraction": 0.11085335183418611,
+        "native_macro_dispatches": 0,
+        "point_estimator": "not_claimed",
+        "hardware_completion": "not_observed"
+      }
+    },
+    {
+      "cell": {
+        "gap": 0,
+        "key": "w8_c12_l1_g0",
+        "locality": "l1",
+        "protocol": "c12",
+        "stage": "held_out_asymmetry",
+        "warps": 8
+      },
+      "correctness": {
+        "correct": true,
+        "checksum": 12271150189268385232,
+        "groups": 64,
+        "warps": 8,
+        "protocol": "c12_producer_consumer",
+        "locality": "l1_reuse",
+        "gap_cycles": 0
+      },
+      "trace": {
+        "thread_instructions": 41504,
+        "warp_records": 14600,
+        "blocks": 1,
+        "threads": 256,
+        "kernel": "_Z21async_barrier_overlapILi4EEvPKcPcPyPjimm"
+      },
+      "simulator": {
+        "records": 14600,
+        "lower_bound_cycles": 20241,
+        "diagnostic_cycles": 14600,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "readiness_schema_version": 25
+      },
+      "tail_facts": {
+        "records": 14600,
+        "memory_records": 744,
+        "async_copies": 512,
+        "stores": 24,
+        "atomics": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false,
+        "async_protocol_lane_facts": {
+          "committed_lane_groups": 2048,
+          "copy_lane_operations": 16384,
+          "empty_lane_groups": 0,
+          "masked_protocol_records_unknown": 0,
+          "terminal_uncommitted_lane_copies": 0,
+          "terminal_unwaited_lane_copies": 0,
+          "terminal_unwaited_lane_groups": 0,
+          "waited_lane_copies": 16384,
+          "waited_lane_groups": 2048
+        }
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          18030.0,
+          18018.0,
+          18493.0,
+          18021.0,
+          18443.0
+        ],
+        "median": 18030.0,
+        "min": 18018.0,
+        "max": 18493.0,
+        "stdev": 244.41665246050647,
+        "instruction_count": 14600,
+        "kernel": "void async_barrier_overlap<4>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+        "clock_control": "base",
+        "cache_control": "none"
+      },
+      "comparison": {
+        "lower_bound_consistency": false,
+        "gap_cycles": -2211.0,
+        "gap_fraction": -0.12262895174708818,
+        "native_macro_dispatches": 0,
+        "point_estimator": "not_claimed",
+        "hardware_completion": "not_observed"
+      }
+    },
+    {
+      "cell": {
+        "gap": 0,
+        "key": "w8_c12_dram_g0",
+        "locality": "dram",
+        "protocol": "c12",
+        "stage": "held_out_asymmetry",
+        "warps": 8
+      },
+      "correctness": {
+        "correct": true,
+        "checksum": 2627319629691122000,
+        "groups": 64,
+        "warps": 8,
+        "protocol": "c12_producer_consumer",
+        "locality": "dram_stream",
+        "gap_cycles": 0
+      },
+      "trace": {
+        "thread_instructions": 41504,
+        "warp_records": 14600,
+        "blocks": 1,
+        "threads": 256,
+        "kernel": "_Z21async_barrier_overlapILi4EEvPKcPcPyPjimm"
+      },
+      "simulator": {
+        "records": 14600,
+        "lower_bound_cycles": 41491,
+        "diagnostic_cycles": 14600,
+        "coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "readiness_schema_version": 25
+      },
+      "tail_facts": {
+        "records": 14600,
+        "memory_records": 744,
+        "async_copies": 512,
+        "stores": 24,
+        "atomics": 0,
+        "hardware_completion_token_observed": false,
+        "global_event_order_observed": false,
+        "async_protocol_lane_facts": {
+          "committed_lane_groups": 2048,
+          "copy_lane_operations": 16384,
+          "empty_lane_groups": 0,
+          "masked_protocol_records_unknown": 0,
+          "terminal_uncommitted_lane_copies": 0,
+          "terminal_unwaited_lane_copies": 0,
+          "terminal_unwaited_lane_groups": 0,
+          "waited_lane_copies": 16384,
+          "waited_lane_groups": 2048
+        }
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          46964.0,
+          46490.0,
+          47095.0,
+          47201.0,
+          46769.0
+        ],
+        "median": 46964.0,
+        "min": 46490.0,
+        "max": 47201.0,
+        "stdev": 281.9178958491284,
+        "instruction_count": 14600,
+        "kernel": "void async_barrier_overlap<4>(const char *, char *, unsigned long long *, unsigned int *, int, unsigned long, unsigned long)",
+        "clock_control": "base",
+        "cache_control": "none"
+      },
+      "comparison": {
+        "lower_bound_consistency": true,
+        "gap_cycles": 5473.0,
+        "gap_fraction": 0.11653607018141555,
+        "native_macro_dispatches": 0,
+        "point_estimator": "not_claimed",
+        "hardware_completion": "not_observed"
+      }
+    }
+  ],
+  "interpretation": "All 36 configured async_barrier_overlap cells use the matched 64-group trace binary for correctness, NVBit, replay, and five NCU repetitions. NCU instruction counts crosswalk to simulator warp records per cell; NVBit stats report separate active-thread instruction totals. Lower-bound consistency is reported per mechanism/locality cell without fitting a fixed barrier latency; completion uppers remain open and native macro dispatch is zero."
+}
