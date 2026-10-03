@@ -1,6 +1,6 @@
 {
   "host_architecture": "sm86",
-  "interpretation": "The portable 15-row population has a completed bounded live pipeline. Seven SimBench SM86 rows now have direct timing-shape native/NVBit/replay/five-NCU slices: fp32_fma_dep_chain, cp_async_shared_tile_copy, global_atomic_histogram, global_vectorized_128b_copy, bf16_hmma_gemm_traceable, global_scalar_32b_copy, and repaired global_atomic_return_used. The active wrapper remains blocked by external tracer/runtime-sidecar requirements. This inventory prevents calling the slices a full repository campaign; remaining SimBench rows, research probes, and SOL populations remain explicit.",
+  "interpretation": "The portable 15-row population has a completed bounded live pipeline. Eight SimBench SM86 rows now have direct timing-shape native/NVBit/replay/five-NCU slices: fp32_fma_dep_chain, cp_async_shared_tile_copy, global_atomic_histogram, global_vectorized_128b_copy, bf16_hmma_gemm_traceable, global_scalar_32b_copy, repaired global_atomic_return_used, and fp16_hmma_gemm_traceable. The int8_imma_gemm_traceable row passes correctness, tracing, and NCU but is explicitly blocked at simulator replay because the SM86 model lacks an IMMA pipeline model. The active wrapper remains blocked by external tracer/runtime-sidecar requirements. This inventory prevents calling the slices a full repository campaign; remaining SimBench rows, research probes, and SOL populations remain explicit.",
   "populations": {
     "portable_lcd": {
       "active_count": 15,
@@ -65,7 +65,7 @@
     },
     "simbench_bw": {
       "direct_slice_artifact": "docs/sm86_c7_simbench_fp32_direct_live_v1.json",
-      "live_pipeline_status": "seven direct SM86 rows complete (fp32 scalar, cp.async, global RED atomics, global 128-bit copy, BF16 HMMA, global scalar 32-bit copy, repaired returning ATOM); wrapper_trace_path_blocked_external_runtime_sidecar; remaining_sm86_rows_pending",
+      "live_pipeline_status": "eight direct SM86 rows complete (fp32 scalar, cp.async, global RED atomics, global 128-bit copy, BF16 HMMA, global scalar 32-bit copy, repaired returning ATOM, FP16 HMMA); one INT8 IMMA row blocked by missing SM86 pipeline model; wrapper_trace_path_blocked_external_runtime_sidecar; remaining_sm86_rows_pending",
       "roster_rows": 92,
       "sm86_arch_rows": 31,
       "sm86_arch_rows_list": [
@@ -109,7 +109,8 @@
         "docs/sm86_c7_simbench_global_vectorized_128b_copy_direct_live_v1.json",
         "docs/sm86_c7_simbench_bf16_hmma_gemm_direct_live_v1.json",
         "docs/sm86_c7_simbench_global_scalar_32b_copy_direct_live_v1.json",
-        "docs/sm86_c7_simbench_global_atomic_return_used_direct_live_v1.json"
+        "docs/sm86_c7_simbench_global_atomic_return_used_direct_live_v1.json",
+        "docs/sm86_c7_simbench_fp16_hmma_gemm_direct_live_v1.json"
       ],
       "direct_sm86_rows_completed": [
         "fp32_fma_dep_chain",
@@ -118,7 +119,18 @@
         "global_vectorized_128b_copy",
         "bf16_hmma_gemm_traceable",
         "global_scalar_32b_copy",
-        "global_atomic_return_used"
+        "global_atomic_return_used",
+        "fp16_hmma_gemm_traceable"
+      ],
+      "blocked_slice_artifacts": [
+        "docs/sm86_c7_simbench_int8_imma_gemm_blocked_live_v1.json"
+      ],
+      "blocked_sm86_rows": [
+        {
+          "row": "int8_imma_gemm_traceable",
+          "reason": "sim-run_unsupported_sass_pipeline_model",
+          "ncu_median_cycles": 4545
+        }
       ]
     },
     "sol_execbench_baselines": {

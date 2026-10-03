@@ -80,7 +80,7 @@ Three distinct questions must not be conflated:
 | C4 | Independently fit mechanism/observer models using new calibration-only probes, then materialize predictions on untouched cases. No ad-hoc padding or post-score model selection | partial: async group + destination-layout calibration |
 | C5 | Live held-out evaluation of point error, signed bias, finite statistical interval coverage/width, repeat dispersion and OOD; keep semantic tails separate | partial: two controlled async/layout holdouts |
 | C6 | Real scalar native region transition with full front-end/pipeline continuation differential and pre-mutation fallback; extend only after the first real positive case | pending |
-| C7 | Inventory all available workload families (portable, native probes, SOL/other rosters). Full live campaign over the declared supported population; failures remain in coverage denominator | partial: 15-row portable population plus 7 direct SimBench rows complete; remaining populations pending |
+| C7 | Inventory all available workload families (portable, native probes, SOL/other rosters). Full live campaign over the declared supported population; failures remain in coverage denominator | partial: 15-row portable population plus 8 direct SimBench rows complete; one IMMA blocker and remaining populations pending |
 | C8 | Rerun corrected workload failures, remove obsolete interfaces, synchronize supported claims, results and runbook; no unfinished mechanism called complete | pending |
 
 C0-R/C1-R repair the previous work; they do not finish C3/C5/C6. C7 is not
@@ -381,7 +381,7 @@ population; native macro dispatch remains zero. Evidence and schema:
 This closes only this repaired slice; C3/C5/C6 and the wider C7 campaign
 remain open.
 
-### C7-S7 — next active milestone
+### C7-S7 — execution specification
 
 Run one additional direct SM86 SimBench row from a different atomic or tensor
 family (prefer `global_atomic_and_return_used` or
@@ -389,11 +389,61 @@ family (prefer `global_atomic_and_return_used` or
 resource safety before profiling, preserve exact binary/arguments, and retain
 any OOM/OOD/unsupported-SASS disposition without silent shape substitution.
 
+### C7-S7 — INT8 IMMA blocked disposition — complete
+
+The exact rebuilt int8_imma_gemm_traceable binary passes the host quantized
+reference check, emits a fresh NVBit trace with 432 records and eight IMMA
+instructions, and completes five same-binary NCU captures:
+4526,4624,4545,4542,4567 cycles (median 4545). The independent extractor
+observes 40 cross-SM line-topology events but no hardware completion token or
+global instrumentation order. Replay is explicitly blocked before any timing
+frontier because sim-run reports that IMMA.16832.S8.S8 has no SM86
+execution-pipeline model. No simulator endpoint, fast-frontier result, native
+dispatch, or accuracy comparison is claimed. The bounded blocker is preserved
+in docs/sm86_c7_simbench_int8_imma_gemm_blocked_live_v1.json and its schema;
+this is not a silently substituted shape or a passing pipeline row.
+
+### C7-S8 — next active milestone
+
+Run fp16_hmma_gemm_traceable as the next tensor-family complete slice. Reuse
+the checked BF16-HMMA host safety/reference pattern, preserve exact binary and
+trace arguments, and record any unsupported-SASS disposition separately from
+the successful BF16 row. Do not infer INT8 accuracy from the BF16/FP32 rows.
+
+### C7-S8 — direct SimBench FP16 HMMA slice — complete
+
+The fp16_hmma_gemm_traceable row now has a direct SM86 timing-shape slice
+using one rebuilt binary and identical m=32,n=16,k=64,seed=42 arguments for
+host correctness, NVBit, replay, and five fresh NCU application captures. The
+host FP16-cast FP32 reference check passed with zero mismatches and maximum
+absolute error 9.54e-7; SASS contains HMMA.16816.F32. Replay has full
+four-block coverage and 404 records, and NCU reports the same 404 warp
+instructions plus 16 HMMA tensor-pipeline instructions. NCU
+gpc__cycles_elapsed.max is 4934,4910,4990,4900,5096 (median 4934); the
+simulator completion lower bound is 3337, so lower-bound consistency is true
+but no point estimator or finite upper is claimed. The independent extractor
+observes 16 HMMA records and 64 cross-SM line-topology events, but no hardware
+completion token, owner/read-from relation, or global instrumentation order.
+Dirty-writeback and coherence tails remain open. The fast analyzer refuses all
+four warps for nonfull predicate populations; native macro dispatch remains
+zero. Evidence and schema:
+docs/sm86_c7_simbench_fp16_hmma_gemm_direct_live_v1.json and its schema. This
+closes only this slice; C3/C5/C6 and the wider C7 campaign remain open.
+
+### C7-S9 — next active milestone
+
+Run one additional direct SM86 SimBench row from the remaining memory, control,
+or tensor populations (prefer global_vectorized_64b_copy,
+shared_bank_conflict_stride, or tf32_hmma_gemm_traceable). Preserve the same
+checked correctness, exact binary/arguments, fresh NVBit, replay, and
+five-repetition NCU contract; retain any unsupported-SASS or OOM/OOD
+disposition without silent shape substitution.
+
 The active SimBench wrapper still rejects the repository-contained NVBit
 tracer because it requires an external split-v2 tracer root; see
 `docs/sm86_c7_simbench_population_slice_v1.json`. The blocker is recorded,
 not bypassed with a hidden tracer or substituted shape. It does not invalidate
-the seven direct bounded slices, which use the repository tracer explicitly and
+the eight direct bounded slices, which use the repository tracer explicitly and
 retain their own exact binary/trace/control identities.
 
 The wrapper blocker did not prevent a direct bounded timing-shape check: the

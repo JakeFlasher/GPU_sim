@@ -353,13 +353,14 @@ not requested.
 
 The C7 inventory lists 15 portable rows, 31 SM86-capable rows among 92
 SimBench rows, 34 research-probe directories, and 203 SOL baseline problems.
-Portable timing paths and six direct SimBench slices have completed:
+Portable timing paths and eight direct SimBench slices have completed:
 `fp32_fma_dep_chain`, `cp_async_shared_tile_copy`, `global_atomic_histogram`,
-`global_vectorized_128b_copy`, `bf16_hmma_gemm_traceable`, and
-`global_scalar_32b_copy`. These check outputs at the captured shape;
+`global_vectorized_128b_copy`, `bf16_hmma_gemm_traceable`,
+`global_scalar_32b_copy`, `global_atomic_return_used`, and
+`fp16_hmma_gemm_traceable`. These check outputs at the captured shape;
 the FP32 direct slice is timing-only (its separate correctness-shape run does
-not validate that captured shape). All six retain open tails and zero native
-macro dispatch. Instruction counts match NCU in the scalar/vector/atomic/BF16
+not validate that captured shape). All eight retain open tails and zero native
+macro dispatch. Instruction counts match NCU in the scalar/vector/atomic/tensor
 slices; that does not identify the cause of their timing gaps. Results and
 remaining populations: `docs/sm86_c7_workload_population_inventory_v1.json`.
 The legacy wrapper's external-tracer/runtime-sidecar requirements remain
@@ -375,6 +376,18 @@ the order-independent sum of returned old values on the trace shape and 32x8,
 match at 47,139 warp instructions; the lower-bound gap remains open for
 dirty-writeback and coherence. See
 `docs/sm86_c7_simbench_global_atomic_return_used_direct_live_v1.json`.
+
+C7-S7 INT8 IMMA is a bounded replay blocker: its correctness, NVBit trace, and
+five NCU captures complete (432 instructions; NCU median 4,545), but sim-run
+refuses IMMA.16832.S8.S8 because the SM86 execution-pipeline model is missing.
+No simulator endpoint or accuracy comparison is claimed. See
+`docs/sm86_c7_simbench_int8_imma_gemm_blocked_live_v1.json`.
+
+C7-S8 FP16 HMMA is complete: the checked FP16-cast reference, fresh NVBit
+trace, replay, and five NCU captures match at 404 warp instructions. NCU
+median is 4,934 cycles versus the simulator lower bound 3,337; dirty-writeback
+and coherence tails remain open and native dispatch remains zero. See
+`docs/sm86_c7_simbench_fp16_hmma_gemm_direct_live_v1.json`.
 
 ## Retained evidence
 
