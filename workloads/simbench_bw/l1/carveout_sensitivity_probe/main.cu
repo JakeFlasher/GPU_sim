@@ -1,177 +1,19 @@
-// Host driver for carveout_sensitivity_probe.
-//   in_fp32 = seeded(allocation_floats, seed, [-1.0, 1.0))
-// Reference: identity round-trip; correctness shape's hash
-// digest verifies determinism (the carveout preference does not
-// affect the deterministic identity output).
-
+// Host driver for carveout_sensitivity_probe with bounded resources and exact
+// identity-output checks. Carveout is advisory; its effective setting is only
+// a host/runtime observation.
 #include <cuda_runtime.h>
+#include <errno.h>
+#include <limits.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-extern "C" void carveout_sensitivity_probe_launch(
-    const float *d_in, float *d_out, float *d_sink,
-    int allocation_floats, int accesses, int warps,
-    int shared_floats,
-    cudaStream_t stream);
-
-extern "C" __global__ void carveout_sensitivity_probe_kernel(
-    const float *__restrict__ in, float *__restrict__ out,
-    float *__restrict__ sink,
-    int32_t allocation_floats, int32_t accesses, int32_t warps,
-    int32_t shared_floats);
-
-static inline uint32_t next_u32(uint32_t *s) {
-    *s = (*s) * 1103515245u + 12345u;
-    return *s;
-}
-
-static void seed_tensor(float *flat, size_t n, uint32_t seed,
-                        double lo, double hi) {
-    uint32_t st = seed * 2654435761u + 1u;
-    for (size_t i = 0; i < n; ++i) {
-        double r = (double)next_u32(&st) / 4294967296.0;
-        flat[i] = (float)(lo + (hi - lo) * r);
-    }
-}
-
-static void fail(const char *msg, int rc) {
-    fprintf(stderr, "carveout_sensitivity_probe_run: %s "
-            "(rc=%d: %s)\n", msg, rc,
-            cudaGetErrorString((cudaError_t)rc));
-    exit(1);
-}
-
-int main(int argc, char **argv) {
-    int allocation_bytes = 4096;
-    int shared_bytes = 16384;
-    int carveout_percent = 50;
-    int accesses = 64;
-    int warps = 4;
-    uint32_t seed = 42;
-    const char *shape_point = "correctness_00";
-    for (int i = 1; i < argc; ++i) {
-        if (strcmp(argv[i], "--allocation-bytes") == 0 && i + 1 < argc)
-            allocation_bytes = atoi(argv[++i]);
-        else if (strcmp(argv[i], "--shared-bytes") == 0 && i + 1 < argc)
-            shared_bytes = atoi(argv[++i]);
-        else if (strcmp(argv[i], "--carveout-percent") == 0 && i + 1 < argc)
-            carveout_percent = atoi(argv[++i]);
-        else if (strcmp(argv[i], "--accesses") == 0 && i + 1 < argc)
-            accesses = atoi(argv[++i]);
-        else if (strcmp(argv[i], "--warps") == 0 && i + 1 < argc)
-            warps = atoi(argv[++i]);
-        else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc)
-            seed = (uint32_t)atoi(argv[++i]);
-        else if (strcmp(argv[i], "--shape-point") == 0 && i + 1 < argc)
-            shape_point = argv[++i];
-        else {
-            fprintf(stderr, "carveout_sensitivity_probe_run: "
-                    "unknown arg %s\n", argv[i]);
-            return 2;
-        }
-    }
-    int allocation_floats = allocation_bytes / 4;
-    if (allocation_floats < 32) allocation_floats = 32;
-    int shared_floats = shared_bytes / 4;
-    if (shared_floats < 32) shared_floats = 32;
-    int output_count = warps * 32;
-
-    // Probe support up-front. cudaDevAttrMaxSharedMemoryPerBlockOptin
-    // is the canonical query for whether the runtime admits
-    // per-kernel carveout selection (CC >= 7.0). On devices that
-    // do not advertise the attribute we emit a structured typed-
-    // unavailable JSON document on stdout (no `output` field,
-    // result_kind == "typed_unavailable",
-    // typed_reason == "arch_feature_unavailable_carveout") and
-    // exit cleanly. The simbench harness's correctness path
-    // detects the typed-unavailable result_kind and persists it
-    // as an unsupported typed outcome rather than comparing to
-    // the reference.
-    int max_optin = 0;
-    cudaError_t rc;
-    rc = cudaDeviceGetAttribute(
-        &max_optin,
-        cudaDevAttrMaxSharedMemoryPerBlockOptin,
-        0);
-    if (rc != cudaSuccess || max_optin <= 0) {
-        printf("{\n  \"schema_version\": 1,\n");
-        printf("  \"slug\": \"carveout_sensitivity_probe\",\n");
-        printf("  \"shape_set\": \"correctness_shapes\",\n");
-        printf("  \"shape_point\": \"%s\",\n", shape_point);
-        printf("  \"result_kind\": \"typed_unavailable\",\n");
-        printf("  \"typed_reason\": "
-               "\"arch_feature_unavailable_carveout\"\n}\n");
-        return 0;
-    }
-
-    float *h_in = (float *)malloc(allocation_floats * sizeof(float));
-    float *h_out = (float *)malloc(output_count * sizeof(float));
-    seed_tensor(h_in, allocation_floats, seed, -1.0, 1.0);
-
-    float *d_in = nullptr, *d_out = nullptr, *d_sink = nullptr;
-    rc = cudaMalloc(&d_in, allocation_floats * sizeof(float));
-    if (rc) fail("mc in", rc);
-    rc = cudaMalloc(&d_out, output_count * sizeof(float));
-    if (rc) fail("mc out", rc);
-    rc = cudaMalloc(&d_sink, sizeof(float));
-    if (rc) fail("mc sink", rc);
-    rc = cudaMemcpy(d_in, h_in, allocation_floats * sizeof(float),
-                    cudaMemcpyHostToDevice);
-    if (rc) fail("H2D", rc);
-
-    // Set the per-kernel preferred shared-carveout split. The
-    // runtime is hardware-advisory and may legally clip the
-    // requested percentage to the device's supported partition
-    // points (0, 25, 50, 75, 100 on most architectures).
-    if (carveout_percent < 0) carveout_percent = 0;
-    if (carveout_percent > 100) carveout_percent = 100;
-    rc = cudaFuncSetAttribute(
-        (const void *)carveout_sensitivity_probe_kernel,
-        cudaFuncAttributePreferredSharedMemoryCarveout,
-        carveout_percent);
-    if (rc) fail("set carveout", rc);
-    // Opt the kernel into the requested dynamic-shared budget so
-    // the runtime grants the sweepable shared tile (default 16 KiB
-    // per launch). cudaFuncAttributeMaxDynamicSharedMemorySize is
-    // the canonical opt-in for >48 KiB; for the default 16 KiB
-    // budget the call is a no-op admission. The call is hardware-
-    // advisory: the runtime clips to the carveout-bounded budget
-    // already advertised via cudaDevAttrMaxSharedMemoryPerBlockOptin.
-    rc = cudaFuncSetAttribute(
-        (const void *)carveout_sensitivity_probe_kernel,
-        cudaFuncAttributeMaxDynamicSharedMemorySize,
-        shared_bytes);
-    if (rc) fail("set shared bytes", rc);
-
-    carveout_sensitivity_probe_launch(
-        d_in, d_out, d_sink,
-        allocation_floats, accesses, warps, shared_floats,
-        /*stream=*/0);
-    rc = cudaDeviceSynchronize();
-    if (rc) fail("sync", rc);
-    rc = cudaMemcpy(h_out, d_out, output_count * sizeof(float),
-                    cudaMemcpyDeviceToHost);
-    if (rc) fail("D2H", rc);
-
-    printf("{\n  \"schema_version\": 1,\n");
-    printf("  \"slug\": \"carveout_sensitivity_probe\",\n");
-    printf("  \"shape_set\": \"correctness_shapes\",\n");
-    printf("  \"shape_point\": \"%s\",\n", shape_point);
-    printf("  \"output\": [");
-    for (int w = 0; w < warps; ++w) {
-        if (w > 0) printf(",");
-        printf("[");
-        for (int l = 0; l < 32; ++l) {
-            if (l > 0) printf(",");
-            printf("%.6g", h_out[w * 32 + l]);
-        }
-        printf("]");
-    }
-    printf("]\n}\n");
-
-    cudaFree(d_in); cudaFree(d_out); cudaFree(d_sink);
-    free(h_in); free(h_out);
-    return 0;
-}
+extern "C" void carveout_sensitivity_probe_launch(const float*,float*,float*,int,int,int,int,cudaStream_t);
+extern "C" __global__ void carveout_sensitivity_probe_kernel(const float*,float*,float*,int32_t,int32_t,int32_t,int32_t);
+static inline uint32_t next_u32(uint32_t*s){*s=(*s)*1103515245u+12345u;return*s;}
+static void seed_tensor(float*p,size_t n,uint32_t seed){uint32_t st=seed*2654435761u+1u;for(size_t i=0;i<n;++i){double r=(double)next_u32(&st)/4294967296.0;p[i]=(float)(-1.0+2.0*r);}}
+static void fail(const char*m,int rc){fprintf(stderr,"carveout_sensitivity_probe_run: %s (rc=%d: %s)\n",m,rc,cudaGetErrorString((cudaError_t)rc));exit(1);}
+static uint32_t parse_u32(const char*name,const char*text,uint32_t max){char*e=nullptr;errno=0;unsigned long long v=strtoull(text,&e,10);if(text[0]<'0'||text[0]>'9'||errno||!e||*e||v>max){fprintf(stderr,"carveout_sensitivity_probe_run: out_of_domain: invalid %s: %s\n",name,text);exit(2);}return(uint32_t)v;}
+int main(int argc,char**argv){int allocation_bytes=4096,shared_bytes=16384,carveout=50,accesses=64,warps=4;uint32_t seed=42;const char*shape="correctness_00";bool summary=false;for(int i=1;i<argc;++i){if(!strcmp(argv[i],"--allocation-bytes")&&i+1<argc)allocation_bytes=(int)parse_u32("allocation-bytes",argv[++i],INT_MAX);else if(!strcmp(argv[i],"--shared-bytes")&&i+1<argc)shared_bytes=(int)parse_u32("shared-bytes",argv[++i],INT_MAX);else if(!strcmp(argv[i],"--carveout-percent")&&i+1<argc)carveout=(int)parse_u32("carveout-percent",argv[++i],100);else if(!strcmp(argv[i],"--accesses")&&i+1<argc)accesses=(int)parse_u32("accesses",argv[++i],INT_MAX);else if(!strcmp(argv[i],"--warps")&&i+1<argc)warps=(int)parse_u32("warps",argv[++i],INT_MAX/32);else if(!strcmp(argv[i],"--seed")&&i+1<argc)seed=parse_u32("seed",argv[++i],UINT32_MAX);else if(!strcmp(argv[i],"--shape-point")&&i+1<argc)shape=argv[++i];else if(!strcmp(argv[i],"--summary"))summary=true;else{fprintf(stderr,"carveout_sensitivity_probe_run: unknown arg %s\n",argv[i]);return 2;}}
+if(!*shape||strspn(shape,"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")!=strlen(shape)||allocation_bytes%4||shared_bytes%4){fprintf(stderr,"carveout_sensitivity_probe_run: out_of_domain: invalid label or byte alignment\n");return 2;}uint64_t alloc64=(uint64_t)allocation_bytes/4,shared64=(uint64_t)shared_bytes/4,output64=(uint64_t)warps*32;if(alloc64<32||shared64<32||alloc64>INT_MAX||shared64>INT_MAX||output64>SIZE_MAX/sizeof(float)){fprintf(stderr,"carveout_sensitivity_probe_run: out_of_domain: shape overflows index or allocation\n");return 2;}size_t alloc=(size_t)alloc64,shared=(size_t)shared64,output=(size_t)output64,alloc_bytes=alloc*sizeof(float),shared_bytes_actual=shared*sizeof(float),output_bytes=output*sizeof(float),free_bytes=0,total_bytes=0;cudaError_t rc=cudaMemGetInfo(&free_bytes,&total_bytes);if(rc)fail("memory query",rc);int max_optin=0;rc=cudaDeviceGetAttribute(&max_optin,cudaDevAttrMaxSharedMemoryPerBlockOptin,0);if(rc!=cudaSuccess||max_optin<=0){printf("{\n  \"schema_version\":1,\n  \"slug\":\"carveout_sensitivity_probe\",\n  \"shape_point\":\"%s\",\n  \"result_kind\":\"typed_unavailable\",\n  \"typed_reason\":\"arch_feature_unavailable_carveout\"\n}\n",shape);return 0;}if(shared_bytes_actual>(size_t)max_optin){fprintf(stderr,"carveout_sensitivity_probe_run: out_of_domain: shared bytes exceed opt-in limit\n");return 2;}if(alloc_bytes+output_bytes>free_bytes/2){fprintf(stderr,"carveout_sensitivity_probe_run: out of memory: requested shape exceeds free device memory\n");return 1;}float*h_in=(float*)malloc(alloc_bytes),*h_out=(float*)malloc(output_bytes);if(!h_in||!h_out){fprintf(stderr,"carveout_sensitivity_probe_run: out of memory: host allocation failed\n");return 1;}seed_tensor(h_in,alloc,seed);float*d_in=nullptr,*d_out=nullptr,*d_sink=nullptr;rc=cudaMalloc(&d_in,alloc_bytes);if(rc)fail("mc in",rc);rc=cudaMalloc(&d_out,output_bytes);if(rc)fail("mc out",rc);rc=cudaMalloc(&d_sink,sizeof(float));if(rc)fail("mc sink",rc);rc=cudaMemset(d_out,0xff,output_bytes);if(rc)fail("memset out",rc);rc=cudaMemset(d_sink,0xff,sizeof(float));if(rc)fail("memset sink",rc);rc=cudaMemcpy(d_in,h_in,alloc_bytes,cudaMemcpyHostToDevice);if(rc)fail("H2D",rc);rc=cudaFuncSetAttribute((const void*)carveout_sensitivity_probe_kernel,cudaFuncAttributePreferredSharedMemoryCarveout,carveout);if(rc)fail("set carveout",rc);rc=cudaFuncSetAttribute((const void*)carveout_sensitivity_probe_kernel,cudaFuncAttributeMaxDynamicSharedMemorySize,(int)shared_bytes_actual);if(rc)fail("set shared bytes",rc);carveout_sensitivity_probe_launch(d_in,d_out,d_sink,(int)alloc,accesses,warps,(int)shared,0);rc=cudaGetLastError();if(rc)fail("launch",rc);rc=cudaDeviceSynchronize();if(rc)fail("sync",rc);rc=cudaMemcpy(h_out,d_out,output_bytes,cudaMemcpyDeviceToHost);if(rc)fail("D2H",rc);size_t mismatch=0;for(size_t i=0;i<output;++i){size_t src=(i/32u)*32u+(i%32u);if(!isfinite(h_out[i])||h_out[i]!=h_in[src])++mismatch;}bool correct=mismatch==0;const char*shape_set=strncmp(shape,"trace_",6)==0?"trace_shapes":strncmp(shape,"timing_",7)==0?"timing_shapes":"correctness_shapes";printf("{\n  \"schema_version\":1,\n  \"slug\":\"carveout_sensitivity_probe\",\n  \"shape_set\":\"%s\",\n  \"shape_point\":\"%s\",\n  \"allocation_bytes\":%d,\n  \"shared_bytes\":%d,\n  \"carveout_percent\":%d,\n  \"accesses\":%d,\n  \"warps\":%d,\n  \"correct\":%s,\n  \"mismatch_count\":%zu",shape_set,shape,allocation_bytes,shared_bytes,carveout,accesses,warps,correct?"true":"false",mismatch);if(!summary){printf(",\n  \"output\":[");for(int w=0;w<warps;++w){if(w)printf(",");printf("[");for(int l=0;l<32;++l){if(l)printf(",");printf("%.6g",h_out[w*32+l]);}printf("]");}printf("]");}printf("\n}\n");cudaFree(d_in);cudaFree(d_out);cudaFree(d_sink);free(h_in);free(h_out);return correct?0:1;}

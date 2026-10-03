@@ -20,7 +20,7 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    opt-in and a corrected original-shape recapture. Keep the superseded
    pre-opt-in artifact historical, not active evidence.
    [Ampere shared memory](https://docs.nvidia.com/cuda/ampere-tuning-guide/#unified-shared-memory-l1-texture-cache)
-3. **C7-S17 complete; C7-S18 next.** Tensor refusals and
+3. **C7-S19 complete; C7-S20 next.** Tensor refusals and
    measured timing mismatches stay open deliverables, not completed mechanisms.
    No timing/card parameter is selected from these scored NCU targets.
 
@@ -834,10 +834,22 @@ records; NCU reports the same instruction count. NCU gpc cycles are
 916220 remains separated by open completion tails. Native dispatch is zero.
 Evidence: `docs/sm86_c7_simbench_global_atomic_and_return_used_direct_live_v1.json`.
 
-### C7-S19 — next active milestone
+### C7-S19 — carveout sensitivity slice — complete
 
-Run one additional unrun SM86 SimBench row from the remaining control/vendor
-population (prefer `vendor_sgemm_cublas` or `carveout_sensitivity_probe`).
+`carveout_sensitivity_probe` now validates its identity output after explicit
+shared-memory/carveout attribute setup and launch-error checks. The exact
+allocation=1MiB, shared=16KiB, carveout=25%, accesses=256, warps=32 binary
+passes fresh NVBit, detailed replay, memcheck, and five NCU captures. Replay
+has full 32-block coverage and 824,576 records; NCU reports the same
+instruction count. NCU gpc cycles are 178537,177540,177927,178647,178521
+(median 178521); simulator lower is 211002, a 32,481-cycle (18.2%) falsifier.
+Open writeback/coherence tails and zero native dispatch remain explicit.
+Evidence: `docs/sm86_c7_simbench_carveout_sensitivity_probe_direct_live_v1.json`.
+
+### C7-S20 — next active milestone
+
+Run one additional unrun SM86 SimBench row from the remaining vendor/control
+population (prefer `vendor_sgemm_cublas` or `vendor_sgemm_strided_batched_cublas`).
 Preserve checked correctness, exact binary/arguments, fresh NVBit, replay, and
 five-repetition NCU; retain every unsupported-SASS, OOM/OOD, or falsifying
 outcome without tuning scored parameters.

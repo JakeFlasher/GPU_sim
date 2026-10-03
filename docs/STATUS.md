@@ -242,16 +242,17 @@ open dirty-writeback/coherence tails; no native macro dispatch was requested.
 
 The C7 inventory lists 15 portable rows, 31 SM86-capable rows among 92
 SimBench rows, 34 research-probe directories, and 203 SOL baseline problems.
-Portable timing paths and fourteen direct SimBench slices have completed:
+Portable timing paths and sixteen direct SimBench slices have completed:
 `fp32_fma_dep_chain`, `cp_async_shared_tile_copy`, `global_atomic_histogram`,
 `global_vectorized_128b_copy`, `bf16_hmma_gemm_traceable`,
 `global_scalar_32b_copy`, `global_atomic_return_used`,
 `fp16_hmma_gemm_traceable`, `global_vectorized_64b_copy`,
 `shared_bank_conflict_stride`, `l2_thrash_pointer_chase`,
 `l2_persisting_window_sweep`, `l2_prefetch_hint_sweep`, and
-`warm_cold_pair_relaunch`. These check outputs at the captured shape; the FP32
+`warm_cold_pair_relaunch`, and
+`carveout_sensitivity_probe`. These check outputs at the captured shape; the FP32
 direct slice is timing-only (its separate correctness-shape run does not
-validate that captured shape). All fourteen retain open tails and zero native
+validate that captured shape). All sixteen retain open tails and zero native
 macro dispatch. The inventory is
 `docs/sm86_c7_workload_population_inventory_v1.json`.
 
@@ -277,6 +278,7 @@ Corrected active evidence:
 - `docs/sm86_c7_simbench_l2_persisting_window_sweep_corrected_live_v1.json`
 - `docs/sm86_c7_simbench_l2_prefetch_hint_sweep_corrected_live_v1.json`
 - `docs/sm86_c7_simbench_warm_cold_pair_relaunch_direct_live_v1.json`
+- `docs/sm86_c7_simbench_carveout_sensitivity_probe_direct_live_v1.json`
 Superseded artifacts remain historical and are not current evidence.
 
 The `async_visibility_phase` probe now independently recomputes and checks its
