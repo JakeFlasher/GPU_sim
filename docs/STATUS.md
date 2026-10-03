@@ -295,6 +295,16 @@ unobservable. The corrected shared-bank shape uses SM86 dynamic shared-memory
 opt-in (65,536 bytes against default 49,152 and opt-in 101,376), superseding
 its old false OOD disposition.
 
+The remaining BF16 cuBLAS control row is now also dispositioned in
+`docs/sm86_c7_simbench_vendor_gemm_cublas_blocked_live_v1.json`: host BF16
+reference validation and Compute Sanitizer pass, five NCU rows observe the
+dynamic `cutlass_80_wmma_tensorop_s161616gemm_bf16_16x16_32x1_nn_align8`
+kernel (1456 warp instructions; median 5347 cycles), but the repository
+control sidecar has zero functions and NVBit refuses the tensor shape before
+publishing a complete trace. All 31 SM86 SimBench roster rows therefore have
+either a direct live artifact or an explicit replay blocker; this does not
+close the separate research-probe or SOL populations.
+
 Warm/cold multi-launch is complete with separate outputs/sinks, zero
 Compute-Sanitizer errors, detailed three-launch replay, launch/stream-L2
 separated simulator scopes, and cache-control=none NCU observations. First,

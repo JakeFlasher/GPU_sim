@@ -25,7 +25,12 @@ extern "C" int vendor_gemm_cublas_launch(
         fprintf(stderr, "cublasCreate failed: %d\n", st);
         return 1;
     }
-    cublasSetStream(handle, stream);
+    st = cublasSetStream(handle, stream);
+    if (st != CUBLAS_STATUS_SUCCESS) {
+        fprintf(stderr, "cublasSetStream failed: %d\n", st);
+        cublasDestroy(handle);
+        return 1;
+    }
     const float alpha = 1.0f, beta = 0.0f;
 
     // C[m, n] = sum_k A[m, k] * B[k, n].

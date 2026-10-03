@@ -22,12 +22,13 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    `docs/sm86_c7_simbench_dram_streaming_dot_product_direct_live_v1.json`;
    the former tiny `trace_00` run is only a smoke check.
    [Ampere shared memory](https://docs.nvidia.com/cuda/ampere-tuning-guide/#unified-shared-memory-l1-texture-cache)
-3. **C7-S31 complete; C7-S32 next.** The atomic-AND reduction row now checks
-   its deterministic histogram and uses a bounded timing shape instead of the
-   stale billion-operation allocation. The only unrun SM86 roster row is the
-   BF16 cuBLAS control row; capture its correctness/NVBit/NCU surface and keep
-   replay blocked if the vendor module still lacks a stable crosswalk. No
-   timing/card parameter is selected from scored NCU targets.
+3. **C7-S32 complete; C7-S33 next.** The BF16 cuBLAS control row now has a
+   correctness/memcheck result and five independent NCU observations, while
+   both static control extraction and NVBit fail closed on the dynamic
+   tensor-core kernel. All 31 SM86 SimBench rows have a direct artifact or a
+   typed blocker. The next phase inventories and samples the separate native
+   research-probe and SOL populations; no timing/card parameter is selected
+   from scored NCU targets.
 
 ## Outcome
 
@@ -106,7 +107,7 @@ Three distinct questions must not be conflated:
 | C4 | Independently fit mechanism/observer models using new calibration-only probes, then materialize predictions on untouched cases. No ad-hoc padding or post-score model selection | partial: async group + destination-layout calibration |
 | C5 | Live held-out evaluation of point error, signed bias, finite statistical interval coverage/width, repeat dispersion and OOD; keep semantic tails separate | partial: two controlled async/layout holdouts |
 | C6 | Real scalar native region transition with full front-end/pipeline continuation differential and pre-mutation fallback; extend only after the first real positive case | pending |
-| C7 | Inventory all available workload families (portable, native probes, SOL/other rosters). Full live campaign over the declared supported population; failures remain in coverage denominator | partial: 15-row portable population plus 26 direct SimBench rows complete; INT8/TF32 replay blockers, four vendor/tensor blockers, one vendor-control row, and SOL/native-probe populations remain |
+| C7 | Inventory all available workload families (portable, native probes, SOL/other rosters). Full live campaign over the declared supported population; failures remain in coverage denominator | partial: 15-row portable population plus 26 direct SimBench rows complete; five explicit tensor/vendor replay blockers cover the other SM86 rows; research probes and SOL populations remain |
 | C8 | Rerun corrected workload failures, remove obsolete interfaces, synchronize supported claims, results and runbook; no unfinished mechanism called complete | pending |
 
 C0-R/C1-R repair the previous work; they do not finish C3/C5/C6. C7 is not
@@ -997,10 +998,27 @@ remain open and native dispatch is zero. Evidence:
 `docs/sm86_c7_simbench_global_atomic_and_histogram_direct_live_v1.json` and
 its schema. This is not a point-accuracy or speedup claim.
 
-### C7-S32 — next active milestone
+### C7-S32 — vendor BF16 cuBLAS control disposition — complete
 
-Capture the `vendor_gemm_cublas` control row's correctness, fresh NVBit, and
-five NCU repetitions with exact arguments. Attempt detailed replay only if the
-trace has a stable static module/control sidecar; otherwise record a typed
-vendor-library replay blocker rather than crosswalking dynamic records to NCU
-or calling the control row a simulator result.
+The repaired `vendor_gemm_cublas` driver passes the exact `32x32x32` BF16
+reference check and Compute Sanitizer. Five same-binary application-replay NCU
+captures observe the dynamic
+`cutlass_80_wmma_tensorop_s161616gemm_bf16_16x16_32x1_nn_align8` kernel with
+1,456 warp instructions and gpc cycles 5347,5360,5397,5245,5235 (median
+5347). The repository binary's control sidecar has zero functions; NVBit fails
+closed on the unsupported tensor-core shape before publishing a complete
+trace, even with enhanced tracing disabled. Because the kernel originates in
+cuBLASLt and no stable static control crosswalk exists, replay, simulator
+timing, native dispatch, and accuracy comparison remain blocked. Evidence:
+`docs/sm86_c7_simbench_vendor_gemm_cublas_blocked_live_v1.json` and its
+schema. This is not a point-accuracy or speedup claim.
+
+### C7-S33 — next active milestone
+
+Inventory the 34 native research-probe directories and 203 SOL-ExecBench
+problem directories as separate populations. For each candidate, record a
+bounded SM86 build/shape/memory disposition first; run live native/NVBit/NCU
+and replay only for rows whose binary and trace path are actually supported.
+Keep unsupported architecture, OOM/OOD, timeout, tracer, and vendor failures
+in the denominator, and do not call C7 complete until those populations have
+an explicit disposition.

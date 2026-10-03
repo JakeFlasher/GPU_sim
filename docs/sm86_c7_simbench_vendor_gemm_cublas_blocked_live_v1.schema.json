@@ -1,0 +1,19 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://gpu-simulator.local/schemas/sm86_c7_simbench_vendor_gemm_cublas_blocked_live_v1.schema.json",
+  "title":"SM86 SimBench vendor BF16 GEMM blocked live result",
+  "type":"object",
+  "required":["schema","status","identity","host_identity","correctness","trace","replay","ncu","comparison","interpretation"],
+  "properties":{
+    "schema":{"const":"sm86_c7_simbench_vendor_gemm_cublas_blocked_live_v1"},
+    "status":{"const":"correctness_ncu_complete_trace_replay_blocked_static_module"},
+    "host_observation":{"type":"string"},"host_identity":{"type":"object","additionalProperties":true},"identity":{"type":"object","additionalProperties":true},
+    "correctness":{"type":"object","required":["status","correct"],"properties":{"status":{"const":"passed"},"correct":{"const":true}},"additionalProperties":true},
+    "trace":{"type":"object","additionalProperties":true},
+    "replay":{"type":"object","required":["status","classification"],"properties":{"status":{"const":"blocked"},"classification":{"const":"vendor_library_no_stable_static_module"}},"additionalProperties":true},
+    "fast_frontier":{"type":"object","additionalProperties":true},
+    "ncu":{"type":"object","required":["metric","values","median"],"properties":{"metric":{"const":"gpc__cycles_elapsed.max"},"values":{"type":"array","minItems":5,"items":{"type":"number"}},"median":{"type":"number"}},"additionalProperties":true},
+    "comparison":{"type":"object","required":["native_macro_dispatches","hardware_completion","point_estimator"],"properties":{"native_macro_dispatches":{"const":"not_run"},"hardware_completion":{"const":"not_observed"},"point_estimator":{"const":"not_claimed"}},"additionalProperties":true},
+    "interpretation":{"type":"string","minLength":1}
+  },"additionalProperties":false
+}
