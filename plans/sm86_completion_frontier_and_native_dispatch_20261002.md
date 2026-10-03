@@ -822,10 +822,22 @@ failures). The corrected shared-bank and persisting-window artifacts are the
 active records; their pre-opt-in/pre-sink artifacts remain superseded history.
 No scored NCU target was used to change simulator parameters.
 
-### C7-S18 — next active milestone
+### C7-S18 — repaired atomic-and-return slice — complete
+
+`global_atomic_and_return_used` was repaired before capture: ordinary stores
+that raced with histogram bins were removed, disjoint return sinks were added,
+and the host now checks the identity output plus deterministic final bitwise-AND
+histogram. The exact trace shape passes; SASS contains
+`ATOMG.E.AND.STRONG.GPU`. Replay has full one-block coverage and 46,882
+records; NCU reports the same instruction count. NCU gpc cycles are
+1060292,1060281,1060397,1061866,1060637 (median 1060397); simulator lower
+916220 remains separated by open completion tails. Native dispatch is zero.
+Evidence: `docs/sm86_c7_simbench_global_atomic_and_return_used_direct_live_v1.json`.
+
+### C7-S19 — next active milestone
 
 Run one additional unrun SM86 SimBench row from the remaining control/vendor
-population (prefer `vendor_sgemm_cublas` or `global_atomic_and_return_used`).
+population (prefer `vendor_sgemm_cublas` or `carveout_sensitivity_probe`).
 Preserve checked correctness, exact binary/arguments, fresh NVBit, replay, and
 five-repetition NCU; retain every unsupported-SASS, OOM/OOD, or falsifying
-disposition without tuning scored parameters.
+outcome without tuning scored parameters.

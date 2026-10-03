@@ -246,97 +246,38 @@ Portable timing paths and fourteen direct SimBench slices have completed:
 `fp32_fma_dep_chain`, `cp_async_shared_tile_copy`, `global_atomic_histogram`,
 `global_vectorized_128b_copy`, `bf16_hmma_gemm_traceable`,
 `global_scalar_32b_copy`, `global_atomic_return_used`,
-`fp16_hmma_gemm_traceable`, `global_vectorized_64b_copy`, and
+`fp16_hmma_gemm_traceable`, `global_vectorized_64b_copy`,
 `shared_bank_conflict_stride`, `l2_thrash_pointer_chase`,
 `l2_persisting_window_sweep`, `l2_prefetch_hint_sweep`, and
-`warm_cold_pair_relaunch`. These check outputs at the captured shape;
-the FP32 direct slice is timing-only (its separate correctness-shape run does
-not validate that captured shape). All fourteen retain open tails and zero native
-macro dispatch. Instruction counts match NCU in the scalar/vector/atomic/tensor
-slices; that does not identify the cause of their timing gaps. Results and
-remaining populations: `docs/sm86_c7_workload_population_inventory_v1.json`.
-The legacy wrapper's external-tracer/runtime-sidecar requirements remain
-obsolete blockers; direct local captures do not depend on those procedures.
-C7-S5 scalar copy is complete (11,809 instructions; model lower 245,262,
-NCU median 249,151). C7-S6 returning-atomic repair and full live capture are
-also complete (47,139 instructions; model lower 917,785, NCU median
-1,060,145). Full-population accuracy and C3/C5/C6 are not complete.
+`warm_cold_pair_relaunch`. These check outputs at the captured shape; the FP32
+direct slice is timing-only (its separate correctness-shape run does not
+validate that captured shape). All fourteen retain open tails and zero native
+macro dispatch. The inventory is
+`docs/sm86_c7_workload_population_inventory_v1.json`.
 
-The returning-atomic slice validates identity output, every histogram bin, and
-the order-independent sum of returned old values on the trace shape and 32x8,
-37x13, and 1x1 checks. Its fresh ATOMG trace/replay and five NCU captures
-match at 47,139 warp instructions; the lower-bound gap remains open for
-dirty-writeback and coherence. See
-`docs/sm86_c7_simbench_global_atomic_return_used_direct_live_v1.json`.
+Two tensor rows (INT8 IMMA and TF32 HMMA) pass host correctness, NVBit, and NCU
+but are blocked before simulator timing because their SM86 pipeline models are
+missing. Three L2 rows remain real lower-bound falsifiers: pointer chase
+(59,545 vs NCU median 49,580), persisting window (31,173 vs 29,846 after the
+sink repair), and prefetch hint (46,874 vs 40,598). The prefetch binary emits
+five static `CCTL.E.PF2` instructions; cache effect and completion remain
+unobservable. The corrected shared-bank shape uses SM86 dynamic shared-memory
+opt-in (65,536 bytes against default 49,152 and opt-in 101,376), superseding
+its old false OOD disposition.
 
-C7-S7 INT8 IMMA is a bounded replay blocker: its correctness, NVBit trace, and
-five NCU captures complete (432 instructions; NCU median 4,545), but sim-run
-refuses IMMA.16832.S8.S8 because the SM86 execution-pipeline model is missing.
-No simulator endpoint or accuracy comparison is claimed. See
-`docs/sm86_c7_simbench_int8_imma_gemm_blocked_live_v1.json`.
-
-C7-S11 TF32 HMMA is another bounded replay blocker: correctness, NVBit trace,
-and five NCU captures complete (588 instructions; NCU median 6,373), but
-sim-run refuses HMMA.1688.F32.TF32 because the SM86 execution-pipeline
-model is missing. No simulator endpoint or accuracy comparison is claimed.
-See `docs/sm86_c7_simbench_tf32_hmma_gemm_blocked_live_v1.json`.
-
-C7-S12 pointer chase is a real lower-bound falsifier: after repairing its
-unsigned bit-hash index arithmetic, the trace shape passes identity/sink checks
-and matches 118,976 replay/NCU instructions, but simulator lower 59,545 is
-9,965 cycles (20.1%) above NCU median 49,580. No post-score tuning or point
-error claim is made. See
-`docs/sm86_c7_simbench_l2_thrash_pointer_chase_direct_live_v1.json`.
-
-C7-S13 persisting-window historical artifact is superseded: its host sink
-reference omitted four Stage-1 anchor revisits. C7-S16a rebuilt the exact
-trace_00 path with the complete sink reference, and fresh instruction-matched
-NCU shows simulator lower 31,173 versus NCU median 29,846 (1,327 cycles,
-4.44%); the falsifier remains, but the correctness check is now meaningful.
-See `docs/sm86_c7_simbench_l2_persisting_window_sweep_corrected_live_v1.json`.
-
-C7-S14 prefetch-hint historical artifact is superseded: its static SASS was
-not interpreted correctly. Five CCTL.E.PF2 instructions are observed in the
-exact binary; their cache effect and completion remain unobservable. The live
-lower-bound falsifier remains 46,874 versus NCU median 40,598 (6,276 cycles,
-15.46%). See `docs/sm86_c7_simbench_l2_prefetch_hint_sweep_corrected_live_v1.json`.
-
-C7-S15 warm/cold multi-launch is complete with separate first/repeat outputs
-and sinks. Compute Sanitizer reports zero errors; detailed replay completes all
-three launches. Launch-scope lower bounds are 69,383/116,502/69,383 and
-stream-L2 lower bounds are 69,383/116,502/52,557. Five application-replay NCU
-processes use cache-control=none; instruction counts match, but cache-state
-dispersion is large (first median 63,183, eviction 66,548, repeat 46,876).
-This is cache-scope plumbing evidence, not point accuracy or completion proof.
+Warm/cold multi-launch is complete with separate outputs/sinks, zero
+Compute-Sanitizer errors, detailed three-launch replay, launch/stream-L2
+separated simulator scopes, and cache-control=none NCU observations. First,
+eviction, and repeat medians are 63,183 / 66,548 / 46,876 with large cache-state
+dispersion; this is plumbing evidence, not point accuracy or completion proof.
 See `docs/sm86_c7_simbench_warm_cold_pair_relaunch_direct_live_v1.json`.
 
-C7-S15 warm/cold multi-launch is complete with separate first/repeat outputs
-and sinks. Compute Sanitizer reports zero errors; detailed replay completes all
-three launches. Launch-scope lower bounds are 69,383/116,502/69,383 and
-stream-L2 lower bounds are 69,383/116,502/52,557. Five application-replay NCU
-processes use cache-control=none; instruction counts match, but cache-state
-dispersion is large (first median 63,183, eviction 66,548, repeat 46,876).
-This is cache-scope plumbing evidence, not point accuracy or completion proof.
-See `docs/sm86_c7_simbench_warm_cold_pair_relaunch_direct_live_v1.json`.
-
-C7-S8 FP16 HMMA is complete: the checked FP16-cast reference, fresh NVBit
-trace, replay, and five NCU captures match at 404 warp instructions. NCU
-median is 4,934 cycles versus the simulator lower bound 3,337; dirty-writeback
-and coherence tails remain open and native dispatch remains zero. See
-`docs/sm86_c7_simbench_fp16_hmma_gemm_direct_live_v1.json`.
-
-C7-S9 64-bit vector copy is complete: its host identity check, fresh NVBit
-trace, replay, and five NCU captures match at 5,921 warp instructions. NCU
-median is 129,721 cycles versus the simulator lower bound 123,918; writeback
-and coherence tails remain open and native dispatch remains zero. See
-`docs/sm86_c7_simbench_global_vectorized_64b_copy_direct_live_v1.json`.
-
-C7-S10 shared-bank stride is complete on trace_l2_accuracy_xl: the hardened
-driver refuses trace_00 before allocation because its 65,536-byte dynamic shared
-request exceeds SM86 per-block memory. The completed shape matches 2,022
-replay/NCU instructions; simulator lower is 15,081 and NCU median 16,003, with
-writeback/coherence tails open. See
-`docs/sm86_c7_simbench_shared_bank_conflict_stride_direct_live_v1.json`.
+Corrected active evidence:
+- `docs/sm86_c7_simbench_shared_bank_conflict_stride_corrected_live_v1.json`
+- `docs/sm86_c7_simbench_l2_persisting_window_sweep_corrected_live_v1.json`
+- `docs/sm86_c7_simbench_l2_prefetch_hint_sweep_corrected_live_v1.json`
+- `docs/sm86_c7_simbench_warm_cold_pair_relaunch_direct_live_v1.json`
+Superseded artifacts remain historical and are not current evidence.
 
 The `async_visibility_phase` probe now independently recomputes and checks its
 returned lane-0 token from the deterministic source initialization; it no

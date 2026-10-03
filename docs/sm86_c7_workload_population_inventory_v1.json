@@ -1,6 +1,6 @@
 {
   "host_architecture": "sm86",
-  "interpretation": "The portable 15-row population has a completed bounded live pipeline. Fourteen SimBench SM86 rows have direct timing-shape native/NVBit/replay/five-NCU slices, including corrected shared-bank opt-in, corrected prefetch-control evidence, and warm/cold multi-launch. Three L2 rows are real lower-bound falsifiers. The int8_imma_gemm_traceable and tf32_hmma_gemm_traceable rows pass correctness, tracing, and NCU but are explicitly blocked at simulator replay because the SM86 model lacks their pipeline models. The active wrapper remains blocked by external tracer/runtime-sidecar requirements. This inventory prevents calling the slices a full repository campaign; remaining SimBench rows, research probes, and SOL populations remain explicit.",
+  "interpretation": "The portable 15-row population has a completed bounded live pipeline. Fifteen SimBench SM86 rows now have direct timing-shape native/NVBit/replay/five-NCU slices, including repaired atomic-and-return, shared-bank opt-in, persisting-window, prefetch-hint, pointer-chase, and warm/cold workloads. Three L2 rows are real lower-bound falsifiers. The int8_imma_gemm_traceable and tf32_hmma_gemm_traceable rows pass correctness, tracing, and NCU but are explicitly blocked at simulator replay because the SM86 model lacks their pipeline models. The active wrapper remains blocked by external tracer/runtime-sidecar requirements. This inventory prevents calling the slices a full repository campaign; remaining SimBench rows, research probes, and SOL populations remain explicit.",
   "populations": {
     "portable_lcd": {
       "active_count": 15,
@@ -65,7 +65,7 @@
     },
     "simbench_bw": {
       "direct_slice_artifact": "docs/sm86_c7_simbench_fp32_direct_live_v1.json",
-      "live_pipeline_status": "fourteen direct SM86 rows complete; corrected shared-bank trace_00 uses dynamic shared-memory opt-in; corrected prefetch slice observes CCTL.E.PF2; two tensor rows replay-blocked by missing SM86 pipeline models; three L2 rows lower-bound falsifiers; warm/cold multi-launch complete; remaining population pending",
+      "live_pipeline_status": "fifteen direct SM86 rows complete; two tensor rows replay-blocked by missing SM86 pipeline models; three L2 rows are lower-bound falsifiers; corrected shared-bank/persisting/prefetch artifacts active; warm/cold complete; remaining rows pending",
       "roster_rows": 92,
       "sm86_arch_rows": 31,
       "sm86_arch_rows_list": [
@@ -116,7 +116,8 @@
         "docs/sm86_c7_simbench_l2_thrash_pointer_chase_direct_live_v1.json",
         "docs/sm86_c7_simbench_l2_persisting_window_sweep_corrected_live_v1.json",
         "docs/sm86_c7_simbench_l2_prefetch_hint_sweep_corrected_live_v1.json",
-        "docs/sm86_c7_simbench_warm_cold_pair_relaunch_direct_live_v1.json"
+        "docs/sm86_c7_simbench_warm_cold_pair_relaunch_direct_live_v1.json",
+        "docs/sm86_c7_simbench_global_atomic_and_return_used_direct_live_v1.json"
       ],
       "direct_sm86_rows_completed": [
         "fp32_fma_dep_chain",
@@ -132,7 +133,8 @@
         "l2_thrash_pointer_chase",
         "l2_persisting_window_sweep",
         "l2_prefetch_hint_sweep",
-        "warm_cold_pair_relaunch"
+        "warm_cold_pair_relaunch",
+        "global_atomic_and_return_used"
       ],
       "blocked_slice_artifacts": [
         "docs/sm86_c7_simbench_int8_imma_gemm_blocked_live_v1.json",
