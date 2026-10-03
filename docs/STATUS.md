@@ -243,24 +243,25 @@ open dirty-writeback/coherence tails; no native macro dispatch was requested.
 The C7 population inventory is explicit in
 `docs/sm86_c7_workload_population_inventory_v1.json`: 15 active portable-LCD
 rows, 92 SimBench-BW rows (31 SM86-gated), 34 research-probe directories, and
-203 SOL baseline problem directories. The portable 15 and four direct SimBench
+203 SOL baseline problem directories. The portable 15 and five direct SimBench
 rows have completed bounded slices; the remaining populations need bounded
 shape/memory/OOM dispositions before a repository-wide campaign claim.
 
-Four SM86 SimBench direct slices (`fp32_fma_dep_chain`,
-`cp_async_shared_tile_copy`, `global_atomic_histogram`, and
-`global_vectorized_128b_copy`) pass their
+Five SM86 SimBench direct slices (`fp32_fma_dep_chain`,
+`cp_async_shared_tile_copy`, `global_atomic_histogram`,
+`global_vectorized_128b_copy`, and `bf16_hmma_gemm_traceable`) pass their
 correctness shapes. Each completed a direct bounded native execution, NVBit
 trace, replay, and five same-binary NCU runs; all analyzers refused all
 candidates and native dispatch was zero. The atomic row checks its complete
 histogram against a host reference, and the vectorized row checks its identity
-output. The active SimBench wrapper
+output; the BF16 row checks an independent BF16-cast reference. The active SimBench wrapper
 still rejects repository-contained tracers and then requires an unavailable
 runtime sidecar, so that wrapper path remains blocked. See
 `docs/sm86_c7_simbench_fp32_direct_live_v1.json`,
 `docs/sm86_c7_simbench_cp_async_direct_live_v1.json`,
 `docs/sm86_c7_simbench_global_atomic_histogram_direct_live_v1.json`,
-`docs/sm86_c7_simbench_global_vectorized_128b_copy_direct_live_v1.json`, and
+`docs/sm86_c7_simbench_global_vectorized_128b_copy_direct_live_v1.json`,
+`docs/sm86_c7_simbench_bf16_hmma_gemm_direct_live_v1.json`, and
 the wrapper-blocker record `docs/sm86_c7_simbench_population_slice_v1.json`.
 
 The `async_visibility_phase` probe now independently recomputes and checks its

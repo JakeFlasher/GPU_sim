@@ -354,23 +354,25 @@ not requested.
 The C7 population inventory is explicit in
 `docs/sm86_c7_workload_population_inventory_v1.json`: 15 active portable-LCD
 rows, 92 SimBench-BW rows (31 SM86-gated), 34 research-probe directories, and
-203 SOL baseline problem directories. The portable 15 and four direct SimBench
+203 SOL baseline problem directories. The portable 15 and five direct SimBench
 rows have completed bounded slices; the remaining populations need bounded
 shape/memory/OOM dispositions before a repository-wide campaign claim.
 
-Four SM86 SimBench direct slices now pass their workload correctness checks.
+Five SM86 SimBench direct slices now pass their workload correctness checks.
 `fp32_fma_dep_chain` and `cp_async_shared_tile_copy` each completed native
 timing, NVBit, replay, and five same-binary NCU runs; `global_atomic_histogram`
 completed the same pipeline and additionally passed an independent histogram
 check; `global_vectorized_128b_copy` completed the same pipeline and passed an
-independent identity-output check. All four analyzers refused all candidates
-and native dispatch was zero.
+independent identity-output check; `bf16_hmma_gemm_traceable` completed the
+same pipeline with an independent BF16-cast reference check. All five analyzers
+refused all candidates and native dispatch was zero.
 The active wrapper still rejects repository-contained tracers and requires an
 unavailable runtime sidecar, so that wrapper path remains blocked. Direct results:
 `docs/sm86_c7_simbench_fp32_direct_live_v1.json` and
 `docs/sm86_c7_simbench_cp_async_direct_live_v1.json`,
 `docs/sm86_c7_simbench_global_atomic_histogram_direct_live_v1.json`, and
-`docs/sm86_c7_simbench_global_vectorized_128b_copy_direct_live_v1.json`; wrapper blocker:
+`docs/sm86_c7_simbench_global_vectorized_128b_copy_direct_live_v1.json`, and
+`docs/sm86_c7_simbench_bf16_hmma_gemm_direct_live_v1.json`; wrapper blocker:
 `docs/sm86_c7_simbench_population_slice_v1.json`.
 
 ## Retained evidence
