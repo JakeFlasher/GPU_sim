@@ -1,30 +1,49 @@
 {
   "coverage": {
-    "kind": "full_unsampled_input_assumed_from_payload_roster",
+    "kind": "full_block_roster",
     "launches": 1,
     "payload_files": 1
   },
   "facts": {
     "active_mask_missing_records": 0,
+    "address_compression_formats": {
+      "1": 960
+    },
+    "address_operands_unknown": 0,
     "allocation_ids": [
       1
     ],
     "async_copies": 256,
+    "async_protocol_lane_facts": {
+      "committed_lane_groups": 2048,
+      "copy_lane_operations": 8192,
+      "empty_lane_groups": 0,
+      "masked_protocol_records_unknown": 0,
+      "terminal_uncommitted_lane_copies": 0,
+      "terminal_unwaited_lane_copies": 0,
+      "terminal_unwaited_lane_groups": 0,
+      "waited_lane_copies": 8192,
+      "waited_lane_groups": 2048
+    },
     "async_protocol_opcodes_observed": [
+      "DEPBAR.LE SB0, 0x0",
       "LDGDEPBAR",
-      "LDGSTS.E.128"
+      "LDGSTS.E.128 [R7+0x1000], [R2.64+0x400]",
+      "LDGSTS.E.128 [R7+0x2000], [R4.64+-0x800]",
+      "LDGSTS.E.128 [R7+0x3000], [R4.64+-0x400]",
+      "LDGSTS.E.128 [R7], [R2.64]"
     ],
     "atomics": 0,
     "cross_sm_line_topology": 0,
     "fence_opcodes_observed": [
-      "DEPBAR.LE",
+      "DEPBAR.LE SB0, 0x0",
       "LDGDEPBAR"
     ],
     "fence_scope_semantics_closed": false,
     "global_event_order_observed": false,
     "hardware_completion_token_observed": false,
     "instrumentation_order_records": 0,
-    "instrumentation_order_strictly_unique": true,
+    "instrumentation_order_strictly_unique": null,
     "instrumentation_order_unique": 0,
     "line_generation_observed": false,
     "memory_records": 704,
@@ -44,11 +63,14 @@
     },
     "owner_read_from_observed": false,
     "predicate_mask_missing_records": 0,
+    "predicated_off_memory_records": 192,
     "protocol_record_counts": {
       "async_commit_records": 64,
       "async_issue_records": 256,
       "async_wait_records": 64,
-      "fence_records": 128
+      "block_barrier_records": 0,
+      "membar_records": 0,
+      "synchronization_records": 128
     },
     "records": 1039,
     "reductions": 0,
@@ -57,13 +79,27 @@
     "static_opcode_records": 1039,
     "stores": 0
   },
-  "interpretation": "observed_trace_facts_only_unknown_owner_read_from_generation_scope_and_hardware_completion_remain_open",
+  "interpretation": "observed_trace_facts_only; topology is launch scoped; callback order is not hardware issue order; ownership/read_from/generation/hardware_completion remain unknown",
   "launches": [
     {
+      "blocks_observed": 1,
+      "coverage_complete": true,
+      "cross_sm_line_topology": 0,
       "device_id": 0,
+      "function_unique_id": 1,
+      "grid": [
+        1,
+        1,
+        1
+      ],
+      "instrumentation_order_duplicate_records": 0,
       "instrumentation_order_records": 0,
+      "instrumentation_order_strictly_unique": null,
+      "instrumentation_order_unique": 0,
       "kernel_id": 1,
+      "kernel_name": "_Z18source_only_kernelILi4ELb0ELb0ELi0EEvPKci___0",
       "memory_records": 704,
+      "population_blocks": 1,
       "records": 1039,
       "same_warp_program_order_edges": 1038,
       "sm_ids": [
@@ -78,7 +114,7 @@
   "schema": "sm86_tail_facts_v1",
   "source": {
     "control": "results/alpha/c3_source_only_20261003/control.json",
-    "extraction": "raw_protobuf_plus_static_control_separate_pass",
+    "extraction": "raw_protobuf_launch_function_pc_join_and_decoded_lane_addresses",
     "trace": "results/alpha/c3_source_only_20261003/nvbit_fresh"
   }
 }

@@ -1,223 +1,306 @@
 #!/usr/bin/env python3
-"""Extract observable SM86 tail facts from raw trace payloads and SASS control.
+"""Extract launch-scoped, observed tail facts without simulator or NCU inputs.
 
-This is a plain analysis pass, not a witness authority and not an execution
-gate. It deliberately reports unknown ownership/read-from/generation and
-hardware completion instead of deriving them from counts.
+Warp program order is not inter-warp execution order. Static SASS scope tokens
+are not ownership/read-from or hardware completion observations.
 """
-
 from __future__ import annotations
 
 import argparse
+from collections import Counter, defaultdict, deque
 import json
+from pathlib import Path
 import re
 import sys
-from collections import Counter, defaultdict
-from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
-
-from tools.nvbit_tracer.proto_binding_loader import load_dynamic_trace_bindings
-
+sys.path.insert(0, str(REPO_ROOT))
+# Ordinary generated protobuf imports, not a hash/authority workflow.
+sys.path.insert(0, str(REPO_ROOT / "workloads/simbench_bw/_pb_generated"))
+import threadblock_pb2
+import trace_pb2
+from tools.nvbit_tracer.import_trace_contract import _reconstruct_lane_vector
 
 SCHEMA = "sm86_tail_facts_v1"
-DEVICE_RE = re.compile(r"device_(-?\d+)$")
-STREAM_RE = re.compile(r"stream_(-?\d+)$")
-KERNEL_RE = re.compile(r"kernel_(-?\d+)$")
+WAIT = re.compile(r"^DEPBAR\.LE\s+SB0,\s*(0x[0-9a-fA-F]+|[0-9]+)(?:\s|,|$)")
 
 
 def _identity(path: Path, root: Path) -> tuple[int, int, int]:
     parts = path.relative_to(root / "threadblocks").parts
-    if len(parts) < 4:
-        raise ValueError(f"payload path is too shallow: {path}")
-    matches = (DEVICE_RE.fullmatch(parts[0]), STREAM_RE.fullmatch(parts[1]), KERNEL_RE.fullmatch(parts[2]))
-    if any(match is None for match in matches):
-        raise ValueError(f"payload path has malformed launch identity: {path}")
-    return tuple(int(match.group(1)) for match in matches if match is not None)  # type: ignore[return-value]
+    if len(parts) != 4:
+        raise ValueError(f"unexpected payload path: {path}")
+    result = []
+    for prefix, part in zip(("device", "stream", "kernel"), parts[:3]):
+        match = re.fullmatch(prefix + r"_(-?\d+)", part)
+        if match is None:
+            raise ValueError(f"malformed launch path: {path}")
+        result.append(int(match[1]))
+    return tuple(result)
 
 
-def _has_scalar(message: Any, field: str) -> bool:
-    try:
-        return bool(message.HasField(field))
-    except (ValueError, TypeError):
-        return True
+def _present(message: Any, field: str) -> bool:
+    return message.HasField(field)
+
+
+def _async_protocol(instructions: Any, opcodes: dict) -> Counter:
+    """Per-thread logical commit/wait relation; no service cycles or silicon order.
+
+    Empty commits remain in the prefix: a wait immediate counts recent groups,
+    not recent *nonempty* groups. This pass is independent of SmCore's queues.
+    """
+    opened = [0] * 32
+    groups = [deque() for _ in range(32)]
+    facts = Counter(copy_lane_operations=0, committed_lane_groups=0,
+                    empty_lane_groups=0, waited_lane_groups=0, waited_lane_copies=0,
+                    terminal_uncommitted_lane_copies=0, terminal_unwaited_lane_groups=0,
+                    terminal_unwaited_lane_copies=0, masked_protocol_records_unknown=0)
+    for instruction in instructions:
+        opcode = opcodes[(int(instruction.function_unique_id), int(instruction.pc))]
+        head = opcode.split()[0].split(".")[0]
+        wait = WAIT.match(opcode)
+        if head not in {"LDGSTS", "LDGDEPBAR"} and not wait:
+            continue
+        if not all(_present(instruction, f) for f in ("active_mask", "predicate_mask")):
+            facts["masked_protocol_records_unknown"] += 1
+            continue
+        mask = instruction.active_mask & instruction.predicate_mask
+        for lane in range(32):
+            if not (mask >> lane) & 1:
+                continue
+            if head == "LDGSTS":
+                opened[lane] += 1
+                facts["copy_lane_operations"] += 1
+            elif head == "LDGDEPBAR":
+                groups[lane].append(opened[lane])
+                facts["committed_lane_groups"] += 1
+                facts["empty_lane_groups"] += opened[lane] == 0
+                opened[lane] = 0
+            elif wait:
+                retained = int(wait[1], 0) if wait[1].startswith("0x") else int(wait[1])
+                while len(groups[lane]) > retained:
+                    facts["waited_lane_groups"] += 1
+                    facts["waited_lane_copies"] += groups[lane].popleft()
+    facts["terminal_uncommitted_lane_copies"] = sum(opened)
+    facts["terminal_unwaited_lane_groups"] = sum(map(len, groups))
+    facts["terminal_unwaited_lane_copies"] = sum(sum(g) for g in groups)
+    return facts
+
+
+def _opcodes(trace: Path, root: Any, control: Path) -> dict[tuple[int, int], str]:
+    functions = json.loads(control.read_text())["functions"]
+    names = {}
+    for device in root.gpu_device.values():
+        for stream in device.streams.values():
+            for kernel in stream.kernels:
+                name = re.sub(r"___\d+$", "", kernel.name)
+                key = int(kernel.function_unique_id)
+                if key in names and names[key] != name:
+                    raise ValueError(f"function id {key} has conflicting names")
+                names[key] = name
+    # Call targets may have static metadata without a launch of their own.
+    path = trace / "extra_info/enhanced_execution_info.json"
+    static = json.loads(path.read_text()).get("kernels", []) if path.is_file() else []
+    for kernel in static:
+        key = int(kernel["unique_function_id"])
+        name = re.sub(r"___\d+$", "", kernel["kernel_name"])
+        if key in names and names[key] != name:
+            raise ValueError(f"function id {key} disagrees between launch and static metadata")
+        names[key] = name
+    joined = {}
+    for key, name in names.items():
+        if name not in functions:
+            raise ValueError(f"control sidecar has no function {name!r}")
+        for row in functions[name]:
+            pc, opcode = row["pc"], row["opcode_text"]
+            if type(pc) is not int or not isinstance(opcode, str) or not opcode.strip():
+                raise ValueError(f"invalid SASS row in {name!r}")
+            if (key, pc) in joined:
+                raise ValueError(f"duplicate SASS PC in {name!r}: {pc}")
+            joined[key, pc] = opcode
+    for kernel in static:
+        key = int(kernel["unique_function_id"])
+        for row in kernel.get("instructions", []):
+            opcode = joined.get((key, row["pc_num_dec"]))
+            if opcode is None or opcode.split()[0] != row["op_code"]:
+                raise ValueError(f"trace/control opcode mismatch: function {key}, PC {row['pc_num_dec']}")
+    return joined
 
 
 def extract_tail_facts(trace: Path, control: Path) -> dict[str, Any]:
-    bindings = load_dynamic_trace_bindings()
-    control_doc = json.loads(control.read_text())
-    functions = control_doc.get("functions")
-    if not isinstance(functions, dict):
-        raise ValueError("control sidecar functions must be an object")
-    for function, rows in functions.items():
-        if not isinstance(rows, list):
-            raise ValueError(f"control function {function} is not an array")
-
-    # Prefer the tracer's static execution-info join when it is available.
-    # The control sidecar remains a separate input; this optional map only
-    # binds its decoded SASS to the raw record's function id and PC.  Never use
-    # Python's process-randomized hash as an identity fallback.
-    static_by_function_pc: dict[tuple[int, int], str] = {}
-    execution_info = trace / "extra_info" / "enhanced_execution_info.json"
-    if execution_info.is_file():
-        info = json.loads(execution_info.read_text())
-        for kernel in info.get("kernels", []):
-            if not isinstance(kernel, dict):
-                continue
-            function_id = kernel.get("unique_function_id")
-            if not isinstance(function_id, int):
-                continue
-            for row in kernel.get("instructions", []):
-                if not isinstance(row, dict):
-                    continue
-                pc = row.get("pc_num_dec")
-                opcode = row.get("op_code")
-                if isinstance(pc, int) and isinstance(opcode, str):
-                    static_by_function_pc[(function_id, pc)] = opcode
-    opcode_by_pc: dict[int, set[str]] = defaultdict(set)
-    for rows in functions.values():
-        if isinstance(rows, list):
-            for row in rows:
-                if isinstance(row, dict) and isinstance(row.get("pc"), int) and isinstance(row.get("opcode_text"), str):
-                    opcode_by_pc[int(row["pc"])].add(row["opcode_text"])
-
-    payloads = sorted(trace.joinpath("threadblocks").rglob("d_*.pb"))
+    root = trace_pb2.Trace.FromString((trace / "dynamic_trace.pb").read_bytes())
+    opcodes = _opcodes(trace, root, control)
+    launches = {}
+    for device_id, device in root.gpu_device.items():
+        for stream_id, stream in device.streams.items():
+            for kernel in stream.kernels:
+                identity = (device_id, stream_id, int(kernel.id))
+                if identity in launches:
+                    raise ValueError(f"duplicate launch {identity}")
+                grid = (kernel.grid_dim.x, kernel.grid_dim.y, kernel.grid_dim.z)
+                if min(grid) <= 0:
+                    raise ValueError(f"nonpositive grid in {identity}")
+                launches[identity] = {
+                    "device_id": device_id, "stream_id": stream_id, "kernel_id": kernel.id,
+                    "function_unique_id": kernel.function_unique_id, "kernel_name": kernel.name,
+                    "grid": grid, "population_blocks": grid[0] * grid[1] * grid[2],
+                    "blocks": set(), "warps": 0, "records": 0, "memory_records": 0,
+                    "same_warp_program_order_edges": 0, "sm_ids": set(), "orders": set(),
+                    "instrumentation_order_records": 0, "instrumentation_order_duplicate_records": 0,
+                    "static_opcode_records": 0, "static_opcode_ambiguity_records": 0,
+                }
+    payloads = sorted((trace / "threadblocks").rglob("d_*.pb"))
     if not payloads:
         raise ValueError("trace has no d_*.pb payloads")
-    launch_rows: dict[tuple[int, int, int], dict[str, Any]] = {}
-    total_records = 0
-    memory_records = 0
-    stores = atomics = reductions = async_copies = 0
-    active_missing = predicate_missing = 0
-    line_sms: dict[tuple[int, int], set[int]] = defaultdict(set)
-    allocation_ids: set[int] = set()
-    fence_opcodes: set[str] = set()
-    async_protocol_opcodes: set[str] = set()
-    protocol_counts = Counter()
-    opcode_heads = Counter()
-    same_warp_program_order_edges = 0
-    instrumentation_orders: list[int] = []
-    static_opcode_records = 0
-    static_opcode_ambiguity_records = 0
+    counts = Counter(records=0, memory_records=0, stores=0, atomics=0, reductions=0,
+                     async_copies=0, active_mask_missing_records=0, predicate_mask_missing_records=0,
+                     address_operands_unknown=0, predicated_off_memory_records=0)
+    protocols, heads, formats, async_protocol = Counter(), Counter(), Counter(), Counter()
+    fences, async_ops, allocations = set(), set(), set()
+    # Launch and allocation identity are part of every address key. Do not
+    # invent sharing across sequential launches or recycled virtual addresses.
+    line_sms = defaultdict(set)
     for payload in payloads:
         identity = _identity(payload, trace)
-        row = launch_rows.setdefault(
-            identity,
-            {
-                "device_id": identity[0],
-                "stream_id": identity[1],
-                "kernel_id": identity[2],
-                "records": 0,
-                "sm_ids": set(),
-                "memory_records": 0,
-                "warps": 0,
-                "same_warp_program_order_edges": 0,
-                "instrumentation_order_records": 0,
-                "static_opcode_records": 0,
-                "static_opcode_ambiguity_records": 0,
-            },
-        )
-        block = bindings.threadblock_pb2.threadblock()
-        block.ParseFromString(payload.read_bytes())
-        for warp in block.warps.values():
+        if identity not in launches:
+            raise ValueError(f"payload for unknown launch: {payload}")
+        row = launches[identity]
+        block = threadblock_pb2.threadblock.FromString(payload.read_bytes())
+        block_id = (block.block_id.x, block.block_id.y, block.block_id.z)
+        if any(v < 0 or v >= dim for v, dim in zip(block_id, row["grid"])):
+            raise ValueError(f"block outside launch grid: {payload}")
+        if block_id in row["blocks"]:
+            raise ValueError(f"duplicate block payload: {payload}")
+        row["blocks"].add(block_id)
+        for warp_id in sorted(block.warps):
+            warp = block.warps[warp_id]
+            missing = [(i.function_unique_id, i.pc) for i in warp.instructions
+                       if (int(i.function_unique_id), int(i.pc)) not in opcodes]
+            if missing:
+                raise ValueError(f"missing static function/PC {missing[0]} in {payload}")
+            async_protocol.update(_async_protocol(warp.instructions, opcodes))
             row["warps"] += 1
-            order_edges = max(0, len(warp.instructions) - 1)
-            row["same_warp_program_order_edges"] += order_edges
-            same_warp_program_order_edges += order_edges
+            row["same_warp_program_order_edges"] += max(0, len(warp.instructions) - 1)
             for instruction in warp.instructions:
-                total_records += 1
+                counts["records"] += 1
                 row["records"] += 1
-                sm_id = int(instruction.sm_id) if _has_scalar(instruction, "sm_id") else None
-                if sm_id is not None:
-                    row["sm_ids"].add(sm_id)
-                if not _has_scalar(instruction, "active_mask"):
-                    active_missing += 1
-                if not _has_scalar(instruction, "predicate_mask"):
-                    predicate_missing += 1
-                function_opcode = static_by_function_pc.get(
-                    (int(instruction.function_unique_id), int(instruction.pc))
-                )
-                static_opcodes = (
-                    {function_opcode}
-                    if function_opcode is not None
-                    else opcode_by_pc.get(int(instruction.pc), set())
-                )
-                if function_opcode is not None:
-                    static_opcode_records += 1
-                    row["static_opcode_records"] += 1
-                elif len(static_opcodes) > 1:
-                    static_opcode_ambiguity_records += 1
-                    row["static_opcode_ambiguity_records"] += 1
-                # Zero is the protobuf default, so it is the absence marker
-                # for the optional tracer order field in this payload format.
-                if int(instruction.instrumentation_order) > 0:
-                    instrumentation_orders.append(int(instruction.instrumentation_order))
-                    row["instrumentation_order_records"] += 1
-                for opcode in static_opcodes:
-                    head = opcode.split()[0].split(".")[0].upper()
-                    opcode_heads[head] += 1
+                key = (int(instruction.function_unique_id), int(instruction.pc))
+                opcode = opcodes.get(key)
+                if opcode is None:
+                    raise ValueError(f"missing static function/PC {key} in {payload}")
+                row["static_opcode_records"] += 1
+                head = opcode.split()[0].split(".")[0]
+                heads[head] += 1
+                present = [_present(instruction, f) for f in ("active_mask", "predicate_mask")]
+                counts["active_mask_missing_records"] += not present[0]
+                counts["predicate_mask_missing_records"] += not present[1]
+                mask = (instruction.active_mask & instruction.predicate_mask) if all(present) else None
+                if mask:
                     if head in {"MEMBAR", "BAR", "ERRBAR", "DEPBAR", "LDGDEPBAR"}:
-                        fence_opcodes.add(opcode)
-                        protocol_counts["fence_records"] += 1
-                    if head in {"CP", "LDGSTS", "LDGDEPBAR"} or "CP.ASYNC" in opcode.upper():
-                        async_protocol_opcodes.add(opcode)
-                    if head == "LDGSTS":
-                        protocol_counts["async_issue_records"] += 1
-                    elif head == "LDGDEPBAR":
-                        protocol_counts["async_commit_records"] += 1
-                    elif head == "DEPBAR":
-                        protocol_counts["async_wait_records"] += 1
-                    elif head == "MEMBAR":
-                        protocol_counts["membar_records"] += 1
-                    elif head == "BAR":
-                        protocol_counts["block_barrier_records"] += 1
-                if not _has_scalar(instruction, "memory_op_class"):
+                        fences.add(opcode)
+                        protocols["synchronization_records"] += 1
+                    if head in {"LDGSTS", "LDGDEPBAR"} or WAIT.match(opcode):
+                        async_ops.add(opcode)
+                    for name, matches in (
+                        ("async_issue_records", head == "LDGSTS"),
+                        ("async_commit_records", head == "LDGDEPBAR"),
+                        ("async_wait_records", bool(WAIT.match(opcode))),
+                        ("membar_records", head == "MEMBAR"),
+                        ("block_barrier_records", head == "BAR"),
+                    ):
+                        protocols[name] += matches
+                if _present(instruction, "instrumentation_order"):
+                    order = int(instruction.instrumentation_order)
+                    if order <= 0:
+                        raise ValueError(f"invalid instrumentation order in {payload}")
+                    row["instrumentation_order_records"] += 1
+                    row["instrumentation_order_duplicate_records"] += order in row["orders"]
+                    row["orders"].add(order)
+                sm = int(instruction.sm_id) if _present(instruction, "sm_id") else None
+                if sm is not None:
+                    row["sm_ids"].add(sm)
+                if not _present(instruction, "memory_op_class"):
                     continue
-                memory_records += 1
+                counts["memory_records"] += 1
                 row["memory_records"] += 1
-                access = int(instruction.memory_op_access_kind) if _has_scalar(instruction, "memory_op_access_kind") else 0
-                op_class = int(instruction.memory_op_class)
-                if access == 2: stores += 1
-                elif access == 3: atomics += 1
-                elif access == 5: reductions += 1
-                elif access == 4 or op_class == 8: async_copies += 1
+                if mask == 0:
+                    counts["predicated_off_memory_records"] += 1
+                if mask:
+                    access = instruction.memory_op_access_kind
+                    if head.startswith("RED"):
+                        counts["reductions"] += 1
+                    elif access == 2:
+                        counts["stores"] += 1
+                    elif access == 3:
+                        counts["atomics"] += 1
+                    elif access == 4:
+                        counts["async_copies"] += 1
                 for address in instruction.addresses:
-                    if _has_scalar(address, "allocation_id"):
-                        allocation_ids.add(int(address.allocation_id))
-                    for value in address.addrs:
-                        if value < 0 or op_class != 1 or sm_id is None:
+                    formats[str(address.compression_format)] += 1
+                    if mask is None:
+                        counts["address_operands_unknown"] += 1
+                        continue
+                    lanes = address.lane_mask if _present(address, "lane_mask") else mask
+                    if lanes & ~mask:
+                        raise ValueError(f"operand widens instruction mask in {payload}")
+                    vector, error = _reconstruct_lane_vector(address, lanes)
+                    if error:
+                        raise ValueError(f"{payload}: {error}")
+                    space = address.address_space if _present(address, "address_space") else None
+                    if space != 1:
+                        if space is None:
+                            counts["address_operands_unknown"] += 1
+                        continue
+                    alloc = address.allocation_id if _present(address, "allocation_id") else 0
+                    if not alloc or sm is None:
+                        counts["address_operands_unknown"] += 1
+                        continue
+                    width = address.data_width
+                    if not 1 <= width <= 128:
+                        raise ValueError(f"unsupported lane width {width} in {payload}")
+                    allocations.add(int(alloc))
+                    for lane, value in enumerate(vector):
+                        if not (lanes >> lane) & 1:
                             continue
-                        line_sms[(int(address.allocation_id) if _has_scalar(address, "allocation_id") else -1, int(value) // 128)].add(sm_id)
-    for row in launch_rows.values():
+                        if value < 0 or value + width - 1 > (1 << 63) - 1:
+                            raise ValueError(f"invalid lane address in {payload}")
+                        for line in range(value // 128, (value + width - 1) // 128 + 1):
+                            line_sms[identity, int(alloc), line].add(sm)
+    rows = []
+    for identity, row in sorted(launches.items()):
+        row["blocks_observed"] = len(row.pop("blocks"))
+        row["coverage_complete"] = row["blocks_observed"] == row["population_blocks"]
+        row["instrumentation_order_unique"] = len(row.pop("orders"))
+        row["instrumentation_order_strictly_unique"] = (
+            row["instrumentation_order_duplicate_records"] == 0
+            if row["instrumentation_order_records"] else None
+        )
         row["sm_ids"] = sorted(row["sm_ids"])
-    cross_sm_lines = sum(len(sms) > 1 for sms in line_sms.values())
+        row["cross_sm_line_topology"] = sum(len(sms) > 1 for (launch, _, _), sms in line_sms.items() if launch == identity)
+        rows.append(row)
+    order_records = sum(row["instrumentation_order_records"] for row in rows)
+    facts = dict(counts)
+    facts.update(
+        allocation_ids=sorted(allocations), cross_sm_line_topology=sum(row["cross_sm_line_topology"] for row in rows),
+        fence_opcodes_observed=sorted(fences), async_protocol_opcodes_observed=sorted(async_ops),
+        protocol_record_counts=dict(sorted(protocols.items())), opcode_heads_observed=dict(sorted(heads.items())),
+        same_warp_program_order_edges=sum(row["same_warp_program_order_edges"] for row in rows),
+        instrumentation_order_records=order_records,
+        instrumentation_order_unique=sum(row["instrumentation_order_unique"] for row in rows),
+        instrumentation_order_strictly_unique=all(row["instrumentation_order_duplicate_records"] == 0 for row in rows) if order_records else None,
+        static_opcode_records=sum(row["static_opcode_records"] for row in rows), static_opcode_ambiguity_records=0,
+        address_compression_formats=dict(sorted(formats.items())),
+        async_protocol_lane_facts=dict(sorted(async_protocol.items())),
+        line_generation_observed=False, owner_read_from_observed=False, fence_scope_semantics_closed=False,
+        hardware_completion_token_observed=False, global_event_order_observed=False,
+    )
     return {
         "schema": SCHEMA,
-        "source": {"trace": str(trace), "control": str(control), "extraction": "raw_protobuf_plus_static_control_separate_pass"},
-        "coverage": {"payload_files": len(payloads), "launches": len(launch_rows), "kind": "full_unsampled_input_assumed_from_payload_roster"},
-        "facts": {
-            "records": total_records, "memory_records": memory_records, "stores": stores,
-            "atomics": atomics, "reductions": reductions, "async_copies": async_copies,
-            "allocation_ids": sorted(allocation_ids), "cross_sm_line_topology": cross_sm_lines,
-            "active_mask_missing_records": active_missing, "predicate_mask_missing_records": predicate_missing,
-            "fence_opcodes_observed": sorted(fence_opcodes), "async_protocol_opcodes_observed": sorted(async_protocol_opcodes),
-            "protocol_record_counts": dict(sorted(protocol_counts.items())),
-            "opcode_heads_observed": dict(sorted(opcode_heads.items())),
-            "same_warp_program_order_edges": same_warp_program_order_edges,
-            "instrumentation_order_records": len(instrumentation_orders),
-            "instrumentation_order_unique": len(set(instrumentation_orders)),
-            "instrumentation_order_strictly_unique": len(instrumentation_orders) == len(set(instrumentation_orders)),
-            "static_opcode_records": static_opcode_records,
-            "static_opcode_ambiguity_records": static_opcode_ambiguity_records,
-            "line_generation_observed": False, "owner_read_from_observed": False,
-            "fence_scope_semantics_closed": False, "hardware_completion_token_observed": False,
-            "global_event_order_observed": False,
-        },
-        "launches": sorted(launch_rows.values(), key=lambda row: (row["device_id"], row["stream_id"], row["kernel_id"])),
-        "interpretation": "observed_trace_facts_only_unknown_owner_read_from_generation_scope_and_hardware_completion_remain_open"
+        "source": {"trace": str(trace), "control": str(control), "extraction": "raw_protobuf_launch_function_pc_join_and_decoded_lane_addresses"},
+        "coverage": {"payload_files": len(payloads), "launches": len(rows),
+                     "kind": "full_block_roster" if all(row["coverage_complete"] for row in rows) else "partial_block_roster"},
+        "facts": facts, "launches": rows,
+        "interpretation": "observed_trace_facts_only; topology is launch scoped; callback order is not hardware issue order; ownership/read_from/generation/hardware_completion remain unknown",
     }
 
 
@@ -229,7 +312,7 @@ def main() -> int:
     args = parser.parse_args()
     report = extract_tail_facts(args.trace, args.control)
     args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
-    print(json.dumps({"output": str(args.output), "records": report["facts"]["records"]}, sort_keys=True))
+    print(json.dumps({"output": str(args.output), "records": report["facts"]["records"]}))
     return 0
 
 

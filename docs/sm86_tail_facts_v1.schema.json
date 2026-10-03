@@ -84,7 +84,11 @@
         "instrumentation_order_strictly_unique",
         "static_opcode_records",
         "static_opcode_ambiguity_records",
-        "global_event_order_observed"
+        "global_event_order_observed",
+        "address_operands_unknown",
+        "predicated_off_memory_records",
+        "address_compression_formats",
+        "async_protocol_lane_facts"
       ],
       "properties": {
         "records": {
@@ -171,7 +175,10 @@
           "minimum": 0
         },
         "instrumentation_order_strictly_unique": {
-          "type": "boolean"
+          "type": [
+            "boolean",
+            "null"
+          ]
         },
         "static_opcode_records": {
           "type": "integer",
@@ -183,6 +190,28 @@
         },
         "global_event_order_observed": {
           "type": "boolean"
+        },
+        "address_operands_unknown": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "predicated_off_memory_records": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "address_compression_formats": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "async_protocol_lane_facts": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
         }
       },
       "additionalProperties": false

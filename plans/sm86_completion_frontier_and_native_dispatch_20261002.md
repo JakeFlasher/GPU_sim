@@ -218,9 +218,13 @@ owner/read-from, fence semantics and hardware completion unknown. Reports:
 `docs/sm86_c2_async_tail_facts_v1.json`. The extractor now uses the tracer's
 static function-id/PC map when available, reports deterministic same-warp
 program-order edges and protocol counts, and explicitly records that no
-global instrumentation order was present in either capture. This closes the
-observed-fact deliverable. It is still not an independent native witness;
-effect/continuation construction belongs to C3/C6.
+global instrumentation order was present in either capture. It now also
+reconstructs a launch-scoped logical async prefix relation (copy, commit,
+wait, empty-group, and terminal-unwaited counts) from raw instructions and
+decoded masks, without using SmCore aggregates. This closes the observed-fact
+and protocol-partial-order deliverable. It is still not an independent native
+witness: owner/read-from/generation/fence-scope/hardware completion and a
+native effect/continuation relation remain open for C3/C6.
 
 ### C4/C5 exploratory observer calibration — positive statistical slice
 

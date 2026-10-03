@@ -1,20 +1,35 @@
 {
   "coverage": {
-    "kind": "full_unsampled_input_assumed_from_payload_roster",
+    "kind": "full_block_roster",
     "launches": 16,
     "payload_files": 32
   },
   "facts": {
     "active_mask_missing_records": 0,
+    "address_compression_formats": {
+      "2": 80
+    },
+    "address_operands_unknown": 0,
     "allocation_ids": [
       1,
       2,
       3
     ],
     "async_copies": 0,
+    "async_protocol_lane_facts": {
+      "committed_lane_groups": 0,
+      "copy_lane_operations": 0,
+      "empty_lane_groups": 0,
+      "masked_protocol_records_unknown": 0,
+      "terminal_uncommitted_lane_copies": 0,
+      "terminal_unwaited_lane_copies": 0,
+      "terminal_unwaited_lane_groups": 0,
+      "waited_lane_copies": 0,
+      "waited_lane_groups": 0
+    },
     "async_protocol_opcodes_observed": [],
     "atomics": 32,
-    "cross_sm_line_topology": 0,
+    "cross_sm_line_topology": 32,
     "fence_opcodes_observed": [
       "ERRBAR",
       "MEMBAR.SC.GPU"
@@ -23,7 +38,7 @@
     "global_event_order_observed": false,
     "hardware_completion_token_observed": false,
     "instrumentation_order_records": 0,
-    "instrumentation_order_strictly_unique": true,
+    "instrumentation_order_strictly_unique": null,
     "instrumentation_order_unique": 0,
     "line_generation_observed": false,
     "memory_records": 80,
@@ -50,9 +65,14 @@
     },
     "owner_read_from_observed": false,
     "predicate_mask_missing_records": 0,
+    "predicated_off_memory_records": 0,
     "protocol_record_counts": {
-      "fence_records": 32,
-      "membar_records": 16
+      "async_commit_records": 0,
+      "async_issue_records": 0,
+      "async_wait_records": 0,
+      "block_barrier_records": 0,
+      "membar_records": 16,
+      "synchronization_records": 32
     },
     "records": 752,
     "reductions": 0,
@@ -61,13 +81,27 @@
     "static_opcode_records": 752,
     "stores": 32
   },
-  "interpretation": "observed_trace_facts_only_unknown_owner_read_from_generation_scope_and_hardware_completion_remain_open",
+  "interpretation": "observed_trace_facts_only; topology is launch scoped; callback order is not hardware issue order; ownership/read_from/generation/hardware_completion remain unknown",
   "launches": [
     {
+      "blocks_observed": 2,
+      "coverage_complete": true,
+      "cross_sm_line_topology": 2,
       "device_id": 0,
+      "function_unique_id": 1,
+      "grid": [
+        2,
+        1,
+        1
+      ],
+      "instrumentation_order_duplicate_records": 0,
       "instrumentation_order_records": 0,
+      "instrumentation_order_strictly_unique": null,
+      "instrumentation_order_unique": 0,
       "kernel_id": 1,
+      "kernel_name": "_Z22message_passing_devicePjS_S_j___0",
       "memory_records": 5,
+      "population_blocks": 2,
       "records": 47,
       "same_warp_program_order_edges": 45,
       "sm_ids": [
@@ -80,10 +114,24 @@
       "warps": 2
     },
     {
+      "blocks_observed": 2,
+      "coverage_complete": true,
+      "cross_sm_line_topology": 2,
       "device_id": 0,
+      "function_unique_id": 1,
+      "grid": [
+        2,
+        1,
+        1
+      ],
+      "instrumentation_order_duplicate_records": 0,
       "instrumentation_order_records": 0,
+      "instrumentation_order_strictly_unique": null,
+      "instrumentation_order_unique": 0,
       "kernel_id": 2,
+      "kernel_name": "_Z22message_passing_devicePjS_S_j___0",
       "memory_records": 5,
+      "population_blocks": 2,
       "records": 47,
       "same_warp_program_order_edges": 45,
       "sm_ids": [
@@ -96,10 +144,24 @@
       "warps": 2
     },
     {
+      "blocks_observed": 2,
+      "coverage_complete": true,
+      "cross_sm_line_topology": 2,
       "device_id": 0,
+      "function_unique_id": 1,
+      "grid": [
+        2,
+        1,
+        1
+      ],
+      "instrumentation_order_duplicate_records": 0,
       "instrumentation_order_records": 0,
+      "instrumentation_order_strictly_unique": null,
+      "instrumentation_order_unique": 0,
       "kernel_id": 3,
+      "kernel_name": "_Z22message_passing_devicePjS_S_j___0",
       "memory_records": 5,
+      "population_blocks": 2,
       "records": 47,
       "same_warp_program_order_edges": 45,
       "sm_ids": [
@@ -112,10 +174,24 @@
       "warps": 2
     },
     {
+      "blocks_observed": 2,
+      "coverage_complete": true,
+      "cross_sm_line_topology": 2,
       "device_id": 0,
+      "function_unique_id": 1,
+      "grid": [
+        2,
+        1,
+        1
+      ],
+      "instrumentation_order_duplicate_records": 0,
       "instrumentation_order_records": 0,
+      "instrumentation_order_strictly_unique": null,
+      "instrumentation_order_unique": 0,
       "kernel_id": 4,
+      "kernel_name": "_Z22message_passing_devicePjS_S_j___0",
       "memory_records": 5,
+      "population_blocks": 2,
       "records": 47,
       "same_warp_program_order_edges": 45,
       "sm_ids": [
@@ -128,10 +204,24 @@
       "warps": 2
     },
     {
+      "blocks_observed": 2,
+      "coverage_complete": true,
+      "cross_sm_line_topology": 2,
       "device_id": 0,
+      "function_unique_id": 1,
+      "grid": [
+        2,
+        1,
+        1
+      ],
+      "instrumentation_order_duplicate_records": 0,
       "instrumentation_order_records": 0,
+      "instrumentation_order_strictly_unique": null,
+      "instrumentation_order_unique": 0,
       "kernel_id": 5,
+      "kernel_name": "_Z22message_passing_devicePjS_S_j___0",
       "memory_records": 5,
+      "population_blocks": 2,
       "records": 47,
       "same_warp_program_order_edges": 45,
       "sm_ids": [
@@ -144,10 +234,24 @@
       "warps": 2
     },
     {
+      "blocks_observed": 2,
+      "coverage_complete": true,
+      "cross_sm_line_topology": 2,
       "device_id": 0,
+      "function_unique_id": 1,
+      "grid": [
+        2,
+        1,
+        1
+      ],
+      "instrumentation_order_duplicate_records": 0,
       "instrumentation_order_records": 0,
+      "instrumentation_order_strictly_unique": null,
+      "instrumentation_order_unique": 0,
       "kernel_id": 6,
+      "kernel_name": "_Z22message_passing_devicePjS_S_j___0",
       "memory_records": 5,
+      "population_blocks": 2,
       "records": 47,
       "same_warp_program_order_edges": 45,
       "sm_ids": [
@@ -160,10 +264,24 @@
       "warps": 2
     },
     {
+      "blocks_observed": 2,
+      "coverage_complete": true,
+      "cross_sm_line_topology": 2,
       "device_id": 0,
+      "function_unique_id": 1,
+      "grid": [
+        2,
+        1,
+        1
+      ],
+      "instrumentation_order_duplicate_records": 0,
       "instrumentation_order_records": 0,
+      "instrumentation_order_strictly_unique": null,
+      "instrumentation_order_unique": 0,
       "kernel_id": 7,
+      "kernel_name": "_Z22message_passing_devicePjS_S_j___0",
       "memory_records": 5,
+      "population_blocks": 2,
       "records": 47,
       "same_warp_program_order_edges": 45,
       "sm_ids": [
@@ -176,10 +294,24 @@
       "warps": 2
     },
     {
+      "blocks_observed": 2,
+      "coverage_complete": true,
+      "cross_sm_line_topology": 2,
       "device_id": 0,
+      "function_unique_id": 1,
+      "grid": [
+        2,
+        1,
+        1
+      ],
+      "instrumentation_order_duplicate_records": 0,
       "instrumentation_order_records": 0,
+      "instrumentation_order_strictly_unique": null,
+      "instrumentation_order_unique": 0,
       "kernel_id": 8,
+      "kernel_name": "_Z22message_passing_devicePjS_S_j___0",
       "memory_records": 5,
+      "population_blocks": 2,
       "records": 47,
       "same_warp_program_order_edges": 45,
       "sm_ids": [
@@ -192,10 +324,24 @@
       "warps": 2
     },
     {
+      "blocks_observed": 2,
+      "coverage_complete": true,
+      "cross_sm_line_topology": 2,
       "device_id": 0,
+      "function_unique_id": 1,
+      "grid": [
+        2,
+        1,
+        1
+      ],
+      "instrumentation_order_duplicate_records": 0,
       "instrumentation_order_records": 0,
+      "instrumentation_order_strictly_unique": null,
+      "instrumentation_order_unique": 0,
       "kernel_id": 9,
+      "kernel_name": "_Z22message_passing_devicePjS_S_j___0",
       "memory_records": 5,
+      "population_blocks": 2,
       "records": 47,
       "same_warp_program_order_edges": 45,
       "sm_ids": [
@@ -208,10 +354,24 @@
       "warps": 2
     },
     {
+      "blocks_observed": 2,
+      "coverage_complete": true,
+      "cross_sm_line_topology": 2,
       "device_id": 0,
+      "function_unique_id": 1,
+      "grid": [
+        2,
+        1,
+        1
+      ],
+      "instrumentation_order_duplicate_records": 0,
       "instrumentation_order_records": 0,
+      "instrumentation_order_strictly_unique": null,
+      "instrumentation_order_unique": 0,
       "kernel_id": 10,
+      "kernel_name": "_Z22message_passing_devicePjS_S_j___0",
       "memory_records": 5,
+      "population_blocks": 2,
       "records": 47,
       "same_warp_program_order_edges": 45,
       "sm_ids": [
@@ -224,10 +384,24 @@
       "warps": 2
     },
     {
+      "blocks_observed": 2,
+      "coverage_complete": true,
+      "cross_sm_line_topology": 2,
       "device_id": 0,
+      "function_unique_id": 1,
+      "grid": [
+        2,
+        1,
+        1
+      ],
+      "instrumentation_order_duplicate_records": 0,
       "instrumentation_order_records": 0,
+      "instrumentation_order_strictly_unique": null,
+      "instrumentation_order_unique": 0,
       "kernel_id": 11,
+      "kernel_name": "_Z22message_passing_devicePjS_S_j___0",
       "memory_records": 5,
+      "population_blocks": 2,
       "records": 47,
       "same_warp_program_order_edges": 45,
       "sm_ids": [
@@ -240,10 +414,24 @@
       "warps": 2
     },
     {
+      "blocks_observed": 2,
+      "coverage_complete": true,
+      "cross_sm_line_topology": 2,
       "device_id": 0,
+      "function_unique_id": 1,
+      "grid": [
+        2,
+        1,
+        1
+      ],
+      "instrumentation_order_duplicate_records": 0,
       "instrumentation_order_records": 0,
+      "instrumentation_order_strictly_unique": null,
+      "instrumentation_order_unique": 0,
       "kernel_id": 12,
+      "kernel_name": "_Z22message_passing_devicePjS_S_j___0",
       "memory_records": 5,
+      "population_blocks": 2,
       "records": 47,
       "same_warp_program_order_edges": 45,
       "sm_ids": [
@@ -256,10 +444,24 @@
       "warps": 2
     },
     {
+      "blocks_observed": 2,
+      "coverage_complete": true,
+      "cross_sm_line_topology": 2,
       "device_id": 0,
+      "function_unique_id": 1,
+      "grid": [
+        2,
+        1,
+        1
+      ],
+      "instrumentation_order_duplicate_records": 0,
       "instrumentation_order_records": 0,
+      "instrumentation_order_strictly_unique": null,
+      "instrumentation_order_unique": 0,
       "kernel_id": 13,
+      "kernel_name": "_Z22message_passing_devicePjS_S_j___0",
       "memory_records": 5,
+      "population_blocks": 2,
       "records": 47,
       "same_warp_program_order_edges": 45,
       "sm_ids": [
@@ -272,10 +474,24 @@
       "warps": 2
     },
     {
+      "blocks_observed": 2,
+      "coverage_complete": true,
+      "cross_sm_line_topology": 2,
       "device_id": 0,
+      "function_unique_id": 1,
+      "grid": [
+        2,
+        1,
+        1
+      ],
+      "instrumentation_order_duplicate_records": 0,
       "instrumentation_order_records": 0,
+      "instrumentation_order_strictly_unique": null,
+      "instrumentation_order_unique": 0,
       "kernel_id": 14,
+      "kernel_name": "_Z22message_passing_devicePjS_S_j___0",
       "memory_records": 5,
+      "population_blocks": 2,
       "records": 47,
       "same_warp_program_order_edges": 45,
       "sm_ids": [
@@ -288,10 +504,24 @@
       "warps": 2
     },
     {
+      "blocks_observed": 2,
+      "coverage_complete": true,
+      "cross_sm_line_topology": 2,
       "device_id": 0,
+      "function_unique_id": 1,
+      "grid": [
+        2,
+        1,
+        1
+      ],
+      "instrumentation_order_duplicate_records": 0,
       "instrumentation_order_records": 0,
+      "instrumentation_order_strictly_unique": null,
+      "instrumentation_order_unique": 0,
       "kernel_id": 15,
+      "kernel_name": "_Z22message_passing_devicePjS_S_j___0",
       "memory_records": 5,
+      "population_blocks": 2,
       "records": 47,
       "same_warp_program_order_edges": 45,
       "sm_ids": [
@@ -304,10 +534,24 @@
       "warps": 2
     },
     {
+      "blocks_observed": 2,
+      "coverage_complete": true,
+      "cross_sm_line_topology": 2,
       "device_id": 0,
+      "function_unique_id": 1,
+      "grid": [
+        2,
+        1,
+        1
+      ],
+      "instrumentation_order_duplicate_records": 0,
       "instrumentation_order_records": 0,
+      "instrumentation_order_strictly_unique": null,
+      "instrumentation_order_unique": 0,
       "kernel_id": 16,
+      "kernel_name": "_Z22message_passing_devicePjS_S_j___0",
       "memory_records": 5,
+      "population_blocks": 2,
       "records": 47,
       "same_warp_program_order_edges": 45,
       "sm_ids": [
@@ -323,7 +567,7 @@
   "schema": "sm86_tail_facts_v1",
   "source": {
     "control": "results/alpha/c1r_message_device_20261003/control.json",
-    "extraction": "raw_protobuf_plus_static_control_separate_pass",
+    "extraction": "raw_protobuf_launch_function_pc_join_and_decoded_lane_addresses",
     "trace": "results/alpha/c1r_message_device_20261003/trace"
   }
 }
