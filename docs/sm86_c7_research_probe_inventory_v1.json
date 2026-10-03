@@ -1,7 +1,7 @@
 {
   "schema": "sm86_c7_research_probe_inventory_v1",
   "architecture": "sm_86",
-  "status": "inventory_build_matrix_and_five_probe_campaign_stages_complete",
+  "status": "inventory_build_matrix_and_five_probe_campaigns_complete",
   "root": "workloads/research_probes",
   "population": {
     "directory_count": 42,
@@ -247,10 +247,11 @@
           "stdout": "results/alpha/c7_s33_probe_build_20261003/barrier_pipeline.stdout",
           "stderr": "results/alpha/c7_s33_probe_build_20261003/barrier_pipeline.stderr"
         },
-        "live_status": "one_vertical_slice_complete",
-        "live_artifact": "docs/sm86_c7_research_probe_barrier_pipeline_live_v1.json",
+        "live_status": "33_cell_matrix_complete",
+        "live_artifact": "docs/sm86_c7_research_probe_barrier_pipeline_matrix_live_v1.json",
         "live_cell": "w4_b10_s0",
-        "disposition": "matched correctness/NVBit/replay/five-NCU complete; lower-bound consistent; matrix expansion pending"
+        "disposition": "matched correctness/NVBit/replay/five-NCU complete; all lower-bound-consistent; open tails",
+        "live_cells": 33
       },
       {
         "name": "constant_load_path",
@@ -1029,8 +1030,8 @@
     },
     {
       "probe": "barrier_pipeline",
-      "cell": "w4_b10_s0",
-      "artifact": "docs/sm86_c7_research_probe_barrier_pipeline_live_v1.json",
+      "cells": 33,
+      "artifact": "docs/sm86_c7_research_probe_barrier_pipeline_matrix_live_v1.json",
       "status": "complete"
     }
   ]

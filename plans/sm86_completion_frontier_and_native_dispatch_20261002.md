@@ -1181,9 +1181,20 @@ lower-bound consistency is true. Barrier rendezvous/retirement tails remain
 open and native dispatch is zero. Evidence:
 `docs/sm86_c7_research_probe_barrier_pipeline_live_v1.json` and its schema.
 
-### C7-S33O — next active milestone
+### C7-S33O — matched barrier-pipeline 33-cell matrix — complete
 
-Expand `barrier_pipeline` over its declared 33-cell matrix using the matched
-64-generation trace binary and the same correctness/NVBit/replay/five-NCU
-contract. Keep skew, protocol, and warp-width effects separate; do not infer a
-fixed barrier latency or treat lower-bound consistency as completion proof.
+All 33 declared `barrier_pipeline` cells use the matched 64-generation trace
+binary for correctness, fresh NVBit, deterministic replay, and five NCU
+repetitions. Every cell has an instruction-count crosswalk and remains
+lower-bound-consistent; barrier protocol, warp width, and skew effects remain
+mechanism-local observations with open completion tails. Native dispatch is
+zero. Evidence:
+`docs/sm86_c7_research_probe_barrier_pipeline_matrix_live_v1.json` and its
+schema.
+
+### C7-S33P — next active milestone
+
+Select the next bounded probe family from the remaining buildable inventory,
+preferably `l1tex_admission_backpressure` or `l2_queue_frontier`. Run one
+matched correctness/NVBit/replay/five-NCU vertical cell first, preserving
+typed unsupported and open-tail outcomes before any matrix expansion.
