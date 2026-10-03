@@ -333,6 +333,11 @@ independently checked direct token. Its simulator endpoint is 18,305 cycles
 versus NCU median 16,658 (9.89% APE); result-store writeback/coherence tails
 remain open.
 
+The same resident-device message trace’s service differential completes 3
+model-local writeback sectors and 2 coherence transactions but leaves both
+dirty-writeback/coherence tail flags true, proving queue drain is not hardware
+completion.
+
 ## Retained evidence
 
 The 2026-09-30 cold/warm campaigns completed 15/15 workloads on RTX 3090 Ti / SM86,

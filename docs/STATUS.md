@@ -236,6 +236,12 @@ its independently checked direct token is correct, simulator endpoint is
 writeback/coherence tails remain open. See
 `docs/sm86_completion_frontier_c3_async_phase_corrected_live_v1.json`.
 
+The resident-device message trace has a same-input service differential in
+`docs/sm86_completion_frontier_c3_message_service_differential_v1.json`:
+explicit model-local queues complete 3 writeback sectors and 2 coherence
+transactions, but both dirty-writeback/coherence tail flags remain true. This
+demonstrates queue drain without manufacturing a semantic upper.
+
 A matched one-warp `c00`/`c11` differential is retained in
 `docs/sm86_completion_frontier_c3_async_endpoint_differential_warp1_v1.json`.
 Five fresh NCU medians are 7,194 and 14,668 cycles (7,474-cycle increment),

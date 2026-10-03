@@ -1,0 +1,74 @@
+{
+  "default_replay": {
+    "completion": {
+      "lower_bound_cycles": 1753,
+      "status": "incomplete_unmodeled_retirement_tails",
+      "unmodeled_tails": {
+        "async_copy_shared_visibility": false,
+        "coherence": true,
+        "dirty_writeback": true,
+        "reduction_read_modify_write": false
+      }
+    },
+    "dram": {
+      "atomic_rmw_read_sectors": 1,
+      "bandwidth_delayed_responses": 0,
+      "maximum_terminal_l2_dirty_lines": 3,
+      "maximum_terminal_l2_dirty_sectors": 3,
+      "read_sectors": 1
+    },
+    "terminal_modeled_event_time": 1753
+  },
+  "differential": {
+    "coherence_completed_transactions": 2,
+    "tails_cleared": false,
+    "terminal_cycles_delta": 1,
+    "writeback_completed_sectors": 3
+  },
+  "explicit_model_service_replay": {
+    "completion": {
+      "lower_bound_cycles": 1754,
+      "status": "incomplete_unmodeled_retirement_tails",
+      "unmodeled_tails": {
+        "async_copy_shared_visibility": false,
+        "coherence": true,
+        "dirty_writeback": true,
+        "reduction_read_modify_write": false
+      }
+    },
+    "configuration": [
+      "--carded-dram",
+      "--dirty-writeback-capacity-sectors",
+      "4",
+      "--coherence-service-cycles",
+      "20",
+      "--coherence-capacity-sectors",
+      "4"
+    ],
+    "dram": {
+      "atomic_rmw_read_sectors": 1,
+      "bandwidth_delayed_responses": 0,
+      "coherence_completed_sectors": 2,
+      "coherence_completed_transactions": 2,
+      "coherence_completion_frontier": 1506,
+      "maximum_terminal_l2_dirty_lines": 3,
+      "maximum_terminal_l2_dirty_sectors": 3,
+      "read_sectors": 1,
+      "writeback_completed_bytes": 96,
+      "writeback_completed_lines": 3,
+      "writeback_completed_sectors": 3,
+      "writeback_completion_frontier": 1754
+    },
+    "terminal_modeled_event_time": 1754
+  },
+  "identity": {
+    "control": "results/alpha/c1r_message_device_20261003/control.json",
+    "ncu_target_artifact": "docs/sm86_completion_frontier_c1r_message_device_v1.json",
+    "same_trace_and_control": true,
+    "target_kernel_id": 16,
+    "trace": "results/alpha/c1r_message_device_20261003/trace"
+  },
+  "interpretation": "The same resident-device trace runs with and without explicit model-local writeback/coherence queues. The configured queues drain and report completions, but dirty-writeback/coherence tails remain true in both reports; service counters are not ownership/read-from or hardware-completion evidence and cannot close the semantic upper.",
+  "schema": "sm86_completion_frontier_c3_message_service_differential_v1",
+  "status": "modeled_service_drained_physical_tails_open"
+}

@@ -194,6 +194,12 @@ sum; the simulator endpoint is 18,305 cycles versus NCU median 16,658 (9.89%
 APE), with the result-store writeback/coherence tails open. Artifact:
 `docs/sm86_completion_frontier_c3_async_phase_corrected_live_v1.json`.
 
+The resident-device message trace also has a same-input service differential:
+the explicit model-local writeback/coherence queues complete 3 sectors and 2
+coherence transactions, but the terminal tail flags remain true and the
+semantic upper remains open. See
+`docs/sm86_completion_frontier_c3_message_service_differential_v1.json`.
+
 The next source-side repair corrected a concrete granularity error in the
 model-local LDGSTS return ledger. The old code charged the eight-cycle
 architecture-local token once per returned 32-byte sector; the raw trace
