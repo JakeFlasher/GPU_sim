@@ -242,14 +242,16 @@ open dirty-writeback/coherence tails; no native macro dispatch was requested.
 
 The C7 inventory lists 15 portable rows, 31 SM86-capable rows among 92
 SimBench rows, 34 research-probe directories, and 203 SOL baseline problems.
-Portable timing paths and ten direct SimBench slices have completed:
+Portable timing paths and fourteen direct SimBench slices have completed:
 `fp32_fma_dep_chain`, `cp_async_shared_tile_copy`, `global_atomic_histogram`,
 `global_vectorized_128b_copy`, `bf16_hmma_gemm_traceable`,
 `global_scalar_32b_copy`, `global_atomic_return_used`,
 `fp16_hmma_gemm_traceable`, `global_vectorized_64b_copy`, and
-`shared_bank_conflict_stride`. These check outputs at the captured shape;
+`shared_bank_conflict_stride`, `l2_thrash_pointer_chase`,
+`l2_persisting_window_sweep`, `l2_prefetch_hint_sweep`, and
+`warm_cold_pair_relaunch`. These check outputs at the captured shape;
 the FP32 direct slice is timing-only (its separate correctness-shape run does
-not validate that captured shape). All ten retain open tails and zero native
+not validate that captured shape). All fourteen retain open tails and zero native
 macro dispatch. Instruction counts match NCU in the scalar/vector/atomic/tensor
 slices; that does not identify the cause of their timing gaps. Results and
 remaining populations: `docs/sm86_c7_workload_population_inventory_v1.json`.
@@ -298,6 +300,15 @@ simulator lower 46,874 is 6,276 cycles (15.46%) above NCU median 40,598.
 Static SASS has no explicit prefetch mnemonic, so the hint is recorded as
 advisory/unobserved. See
 `docs/sm86_c7_simbench_l2_prefetch_hint_sweep_direct_live_v1.json`.
+
+C7-S15 warm/cold multi-launch is complete with separate first/repeat outputs
+and sinks. Compute Sanitizer reports zero errors; detailed replay completes all
+three launches. Launch-scope lower bounds are 69,383/116,502/69,383 and
+stream-L2 lower bounds are 69,383/116,502/52,557. Five application-replay NCU
+processes use cache-control=none; instruction counts match, but cache-state
+dispersion is large (first median 63,183, eviction 66,548, repeat 46,876).
+This is cache-scope plumbing evidence, not point accuracy or completion proof.
+See `docs/sm86_c7_simbench_warm_cold_pair_relaunch_direct_live_v1.json`.
 
 C7-S8 FP16 HMMA is complete: the checked FP16-cast reference, fresh NVBit
 trace, replay, and five NCU captures match at 404 warp instructions. NCU

@@ -3,17 +3,10 @@
 // arch_gate: sm_86 sm_90a sm_120
 //
 // Warm/cold cache pair: two launches over the same allocation.
-// The first launch (cold) reads through the input fresh from
-// DRAM; the second launch (warm) re-reads the same window after
-// an optional eviction step. The HRD-profiler criterion compares
-// per-launch hit-rate distributions to recover the warm/cold
-// delta — the per-line miss rate should drop on the warm pass
-// proportional to the L2 capacity vs. allocation-size ratio.
-//
-// `eviction_bytes` shape axis controls how many bytes the
-// scratch sweep touches between the two launches. When 0, the
-// warm launch hits whatever survived in cache. When sized at
-// 2× L2, the warm launch is forced cold.
+// The two passes read the same input, with an optional scratch sweep between
+// them. Neither a cold first pass nor eviction of every input line is assured.
+// Separate output buffers and sinks allow checking both passes after all
+// launches without inserting cache-perturbing host readbacks between them.
 
 #include <cuda_runtime.h>
 #include <stdint.h>
@@ -52,32 +45,37 @@ extern "C" __global__ void warm_cold_pair_eviction_kernel(
     // Round-18 review P2 fix as warm_cold_pair_kernel above).
     const int tid = blockIdx.x * blockDim.x + threadIdx.x;
     const int lanes = gridDim.x * blockDim.x;
-    // Force every line of `scratch` through the cache so the
-    // primary allocation is partially evicted between launches.
+    // Touch every scratch element. How much input data this evicts is measured,
+    // not assumed from the ratio of scratch size to nominal L2 capacity.
     for (int i = tid; i < scratch_floats; i += lanes) {
         scratch[i] = scratch[i] + 1.0f;
     }
 }
 
-extern "C" void warm_cold_pair_relaunch_launch(
-    const float *d_in, float *d_out, float *d_sink,
+extern "C" cudaError_t warm_cold_pair_relaunch_launch(
+    const float *d_in, float *d_first_out, float *d_repeat_out, float *d_sinks,
     float *d_scratch,
     int allocation_floats, int accesses,
     int eviction_floats, int warps, cudaStream_t stream)
 {
     int threads = 32;
-    int blocks = warps > 0 ? warps : 1;
+    int blocks = warps;
     dim3 grid(blocks, 1, 1);
     dim3 block(threads, 1, 1);
     // Cold launch.
     warm_cold_pair_kernel<<<grid, block, 0, stream>>>(
-        d_in, d_out, d_sink, allocation_floats, accesses);
+        d_in, d_first_out, d_sinks, allocation_floats, accesses);
+    cudaError_t rc = cudaGetLastError();
+    if (rc != cudaSuccess) return rc;
     if (eviction_floats > 0 && d_scratch != nullptr) {
         // Eviction sweep.
         warm_cold_pair_eviction_kernel<<<grid, block, 0, stream>>>(
             d_scratch, eviction_floats);
+        rc = cudaGetLastError();
+        if (rc != cudaSuccess) return rc;
     }
     // Warm launch (re-read same allocation).
     warm_cold_pair_kernel<<<grid, block, 0, stream>>>(
-        d_in, d_out, d_sink, allocation_floats, accesses);
+        d_in, d_repeat_out, d_sinks + 1, allocation_floats, accesses);
+    return cudaGetLastError();
 }

@@ -3,6 +3,28 @@
 Revised 2026-10-03 on `GPUSim_main`. This is a technical milestone plan, not
 an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
 
+## Current focused work (2026-10-03 continuation)
+
+1. **C7-S15 complete — warm/cold multi-launch correctness and capture.** Keep all
+   three launches, use disjoint first/repeat output buffers so the second copy
+   cannot hide a first-pass error, and check the eviction output and both sinks.
+   No host readback between launches. Profile with application replay and
+   cache-control=none; compare stream-L2 replay separately from launch-reset
+   replay, with every endpoint and simulator runtime recorded before NCU.
+   The fast analyzer's single-launch limitation is not a detailed replay failure.
+   [NCU cache control](https://docs.nvidia.com/nsight-compute/ProfilingGuide/index.html#cache-control)
+2. **C7-S16 active — correct recent evidence defects before expanding coverage.**
+   C7-S13's host sink reference omitted four anchor revisits; its failed check
+   must not be dropped as a diagnostic or attributed to reassociation. Restore
+   full checking and recapture. C7-S14 emits CCTL.E.PF2 in SASS; correct its
+   false “unobserved prefetch” statement. C7-S10's 64 KiB request exceeds the
+   default 48 KiB limit, not SM86's 99 KiB opt-in limit; repair and recapture
+   the original shape instead of declaring it hardware OOD.
+   [Ampere shared memory](https://docs.nvidia.com/cuda/ampere-tuning-guide/#unified-shared-memory-l1-texture-cache)
+3. **Then resume remaining population/mechanism work.** Tensor refusals and
+   measured timing mismatches stay open deliverables, not completed mechanisms.
+   No timing/card parameter is selected from these scored NCU targets.
+
 ## Outcome
 
 A useful native GPU simulator must predict kernel performance, conserve the
@@ -80,7 +102,7 @@ Three distinct questions must not be conflated:
 | C4 | Independently fit mechanism/observer models using new calibration-only probes, then materialize predictions on untouched cases. No ad-hoc padding or post-score model selection | partial: async group + destination-layout calibration |
 | C5 | Live held-out evaluation of point error, signed bias, finite statistical interval coverage/width, repeat dispersion and OOD; keep semantic tails separate | partial: two controlled async/layout holdouts |
 | C6 | Real scalar native region transition with full front-end/pipeline continuation differential and pre-mutation fallback; extend only after the first real positive case | pending |
-| C7 | Inventory all available workload families (portable, native probes, SOL/other rosters). Full live campaign over the declared supported population; failures remain in coverage denominator | partial: 15-row portable population plus 13 direct SimBench rows complete; INT8/TF32 replay blockers, one shared-shape OOD disposition, and three lower-bound falsifiers remain |
+| C7 | Inventory all available workload families (portable, native probes, SOL/other rosters). Full live campaign over the declared supported population; failures remain in coverage denominator | partial: 15-row portable population plus 14 direct SimBench rows complete; INT8/TF32 replay blockers, one shared-shape OOD disposition, and three lower-bound falsifiers remain |
 | C8 | Rerun corrected workload failures, remove obsolete interfaces, synchronize supported claims, results and runbook; no unfinished mechanism called complete | pending |
 
 C0-R/C1-R repair the previous work; they do not finish C3/C5/C6. C7 is not
@@ -750,10 +772,37 @@ and coherence tails remain open; native dispatch remains zero. Evidence:
 docs/sm86_c7_simbench_l2_prefetch_hint_sweep_direct_live_v1.json and its schema.
 This closes only this slice; C3/C5/C6 and the wider C7 campaign remain open.
 
-### C7-S15 — next active milestone
+### C7-S15 — warm/cold multi-launch slice — complete
 
-Run one additional direct SM86 SimBench row from the remaining control or
-vendor-memory populations (prefer warm_cold_pair_relaunch or
-vendor_sgemm_cublas). Preserve checked correctness, exact binary/arguments,
-fresh NVBit, replay, and five-repetition NCU; retain every unsupported-SASS,
-OOM/OOD, or falsifying disposition without tuning scored parameters.
+The corrected warm_cold_pair_relaunch binary uses separate first/repeat output
+buffers and sinks, so the repeat pass cannot hide a first-pass error. The
+uninterrupted sequence is cold pass, optional scratch eviction, and repeat pass;
+host validation checks both outputs, both sinks with a floating-point error
+bound, and every eviction element. Compute Sanitizer memcheck reports zero
+errors. Fresh NVBit tracing records three launches with full coverage: 185,440
+records for each warm/cold kernel and 44,224 for eviction. Detailed simulator
+replay completes all three launches. Launch-scope lower bounds are 69,383 /
+116,502 / 69,383 cycles; stream-L2 replay gives 69,383 / 116,502 / 52,557,
+which demonstrates why cache scope must remain explicit. The fast frontier
+refuses the multi-launch trace by its single-launch contract; this is not a
+detailed replay failure.
+
+Five application-replay NCU processes use `cache-control=none`, preserving the
+application-managed cache sequence rather than flushing each replay. Instruction
+counts match each launch. Cycle medians are 63,183 (first), 66,548 (eviction),
+and 46,876 (repeat), with large repeat/eviction dispersion retained rather
+than converted into a point score. This is cache-state observation and
+multi-launch plumbing evidence, not a finite completion upper, point-accuracy,
+or speedup claim. Evidence and schema:
+`docs/sm86_c7_simbench_warm_cold_pair_relaunch_direct_live_v1.json` and its
+schema.
+
+### C7-S16 — next active milestone
+
+Repair and recapture the recent evidence defects before adding another row:
+(1) recompute C7-S13's persisting-window sink expectation for every anchor
+revisit and restore a meaningful sink check; (2) keep C7-S14's emitted CCTL
+prefetch evidence rather than calling the hint unobserved; and (3) opt in to
+SM86 dynamic shared memory above 48 KiB, then recapture the original C7-S10
+`trace_00` shape instead of excluding it. Do not change simulator parameters
+from these scored observations.
