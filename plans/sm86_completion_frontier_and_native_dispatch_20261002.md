@@ -80,7 +80,7 @@ Three distinct questions must not be conflated:
 | C4 | Independently fit mechanism/observer models using new calibration-only probes, then materialize predictions on untouched cases. No ad-hoc padding or post-score model selection | partial: async group + destination-layout calibration |
 | C5 | Live held-out evaluation of point error, signed bias, finite statistical interval coverage/width, repeat dispersion and OOD; keep semantic tails separate | partial: two controlled async/layout holdouts |
 | C6 | Real scalar native region transition with full front-end/pipeline continuation differential and pre-mutation fallback; extend only after the first real positive case | pending |
-| C7 | Inventory all available workload families (portable, native probes, SOL/other rosters). Full live campaign over the declared supported population; failures remain in coverage denominator | partial: 15-row portable population plus 6 direct SimBench rows complete; remaining populations pending |
+| C7 | Inventory all available workload families (portable, native probes, SOL/other rosters). Full live campaign over the declared supported population; failures remain in coverage denominator | partial: 15-row portable population plus 7 direct SimBench rows complete; remaining populations pending |
 | C8 | Rerun corrected workload failures, remove obsolete interfaces, synchronize supported claims, results and runbook; no unfinished mechanism called complete | pending |
 
 C0-R/C1-R repair the previous work; they do not finish C3/C5/C6. C7 is not
@@ -343,25 +343,57 @@ population; native macro dispatch remains zero. Evidence and schema:
 `docs/sm86_c7_simbench_global_scalar_32b_copy_direct_live_v1.schema.json`.
 This closes only this slice; C3/C5/C6 and the wider C7 campaign remain open.
 
-### C7-S6 — next active milestone
+### C7-S6 — execution specification
 
 Repair `global_atomic_return_used` before capturing it: its per-lane ordinary
 stores currently overwrite shared histogram bins, and its host only prints
 an unrelated identity copy. Store returned-value sums in disjoint per-lane
 64-bit outputs; independently check the histogram and the order-independent
 sum of returned old values. Keep the registered `trace_00` shape unchanged,
-verify SASS still emits ATOM, then run native, NVBit, replay and five NCU
+verify SASS still emits ATOM/ATOMG, then run native, NVBit, replay and five NCU
 processes. Check non-power-of-two/tail shapes and invalid inputs. Do not tune
 the simulator from these scored values. Related MAX/AND returning variants
 have the same sink defect and are next after this first real repaired slice.
 Atomicity is not synchronization for the old ordinary histogram stores:
 [NVIDIA legacy atomics](https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/cpp-language-extensions.html#legacy-atomic-functions).
 
+### C7-S6 — repaired returning-atomic live slice — complete
+
+`global_atomic_return_used` was repaired before capture. The old host driver
+only checked an identity copy while the kernel overwrote histogram bins with
+ordinary per-lane stores; that was not a valid atomic-return workload. The
+repaired kernel writes one disjoint 64-bit returned-old-value sum per lane and
+the host checks the identity output, every histogram bin, and the
+order-independent sum `count*(count-1)/2`. The trace shape (`samples=1024,
+bins=64,seed=42`) and three additional shapes (`32x8`, `37x13`, `1x1`) pass.
+Fresh SASS contains `ATOMG.E.ADD.STRONG.GPU`. Replay has one-block coverage
+and 47,139 records; NCU reports the same 47,139 warp instructions. NCU
+`gpc__cycles_elapsed.max` is `1059805,1059871,1060145,1060504,1061112`
+(median `1060145`); the simulator completion lower bound is `917785`, so
+lower-bound consistency is true but no point estimator or finite upper is
+claimed. The independent extractor observes 2,080 ATOMG records, 2,049
+stores, and one block barrier, but no hardware completion token, owner/read-from
+relation, or global instrumentation order. Dirty-writeback and coherence tails
+remain open. The fast analyzer refuses the one warp for a nonfull predicate
+population; native macro dispatch remains zero. Evidence and schema:
+`docs/sm86_c7_simbench_global_atomic_return_used_direct_live_v1.json` and
+`docs/sm86_c7_simbench_global_atomic_return_used_direct_live_v1.schema.json`.
+This closes only this repaired slice; C3/C5/C6 and the wider C7 campaign
+remain open.
+
+### C7-S7 — next active milestone
+
+Run one additional direct SM86 SimBench row from a different atomic or tensor
+family (prefer `global_atomic_and_return_used` or
+`int8_imma_gemm_traceable`). Apply the same rule: repair correctness and
+resource safety before profiling, preserve exact binary/arguments, and retain
+any OOM/OOD/unsupported-SASS disposition without silent shape substitution.
+
 The active SimBench wrapper still rejects the repository-contained NVBit
 tracer because it requires an external split-v2 tracer root; see
 `docs/sm86_c7_simbench_population_slice_v1.json`. The blocker is recorded,
 not bypassed with a hidden tracer or substituted shape. It does not invalidate
-the six direct bounded slices, which use the repository tracer explicitly and
+the seven direct bounded slices, which use the repository tracer explicitly and
 retain their own exact binary/trace/control identities.
 
 The wrapper blocker did not prevent a direct bounded timing-shape check: the

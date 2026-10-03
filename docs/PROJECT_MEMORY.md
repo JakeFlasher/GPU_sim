@@ -356,7 +356,7 @@ SimBench rows, 34 research-probe directories, and 203 SOL baseline problems.
 Portable timing paths and six direct SimBench slices have completed:
 `fp32_fma_dep_chain`, `cp_async_shared_tile_copy`, `global_atomic_histogram`,
 `global_vectorized_128b_copy`, `bf16_hmma_gemm_traceable`, and
-`global_scalar_32b_copy`. The latter five check outputs at the captured shape;
+`global_scalar_32b_copy`. These check outputs at the captured shape;
 the FP32 direct slice is timing-only (its separate correctness-shape run does
 not validate that captured shape). All six retain open tails and zero native
 macro dispatch. Instruction counts match NCU in the scalar/vector/atomic/BF16
@@ -365,8 +365,16 @@ remaining populations: `docs/sm86_c7_workload_population_inventory_v1.json`.
 The legacy wrapper's external-tracer/runtime-sidecar requirements remain
 obsolete blockers; direct local captures do not depend on those procedures.
 C7-S5 scalar copy is complete (11,809 instructions; model lower 245,262,
-NCU median 249,151). Next: C7-S6 returning-atomic race repair and full live
-capture. Full-population accuracy and C3/C5/C6 are not complete.
+NCU median 249,151). C7-S6 returning-atomic repair and full live capture are
+also complete (47,139 instructions; model lower 917,785, NCU median
+1,060,145). Full-population accuracy and C3/C5/C6 are not complete.
+
+The returning-atomic slice validates identity output, every histogram bin, and
+the order-independent sum of returned old values on the trace shape and 32x8,
+37x13, and 1x1 checks. Its fresh ATOMG trace/replay and five NCU captures
+match at 47,139 warp instructions; the lower-bound gap remains open for
+dirty-writeback and coherence. See
+`docs/sm86_c7_simbench_global_atomic_return_used_direct_live_v1.json`.
 
 ## Retained evidence
 
