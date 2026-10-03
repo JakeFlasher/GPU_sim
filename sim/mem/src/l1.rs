@@ -2401,6 +2401,14 @@ impl L1Cache {
         Ok(sectors)
     }
 
+    /// Earliest timestamp at which all currently timed L1 fills have become
+    /// eligible for completion.  A `None` result means either that no fill is
+    /// pending or that at least one fill is event-driven/untimed; callers
+    /// must not invent a cycle in the latter case.
+    pub fn pending_fill_ready_at(&self) -> Option<u64> {
+        self.min_fill_due
+    }
+
     fn commit_due_fills(
         &mut self,
         due: Vec<(u64, u8, u64, i64, u8, u32)>,

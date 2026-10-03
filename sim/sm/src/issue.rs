@@ -12873,6 +12873,30 @@ impl<'a> SmCore<'a> {
             )?;
         }
 
+        // CCTL.IVALL is a cache-state transition, not an ordinary issue-only
+        // instruction.  Do not attempt to invalidate a cache while an earlier
+        // L1 fill token is still pending: the cache layer deliberately rejects
+        // that mutation.  Timed fills provide a real readiness frontier; an
+        // untimed/event-driven pending fill remains conservative refusal.
+        if slot.is_cctl_invalidate_all()
+            && let MemModel::L1Shared(state) = &self.mem
+            && let Some(until) = state.l1.pending_fill_ready_at()
+        {
+            observe_readiness_constraint(
+                projected,
+                base,
+                until,
+                // Reuse the compact memory-issue readiness bucket so this
+                // added cache-fill frontier does not enlarge the hot
+                // diagnostics struct; the pending-fill contract is retained
+                // by the explicit comment and readiness constraint.
+                ReadinessCause::MemoryIssueQueue,
+                &mut ready_at,
+                &mut limiting,
+                &mut tied,
+            )?;
+        }
+
         observe_readiness_constraint(
             projected,
             base,

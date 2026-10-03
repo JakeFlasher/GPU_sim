@@ -763,10 +763,11 @@
           "stdout": "results/alpha/c7_s33_probe_build_20261003/memory_retirement_service.stdout",
           "stderr": "results/alpha/c7_s33_probe_build_20261003/memory_retirement_service.stderr"
         },
-        "live_status": "one_vertical_slice_complete",
-        "live_artifact": "docs/sm86_c7_research_probe_memory_retirement_service_live_v1.json",
+        "live_status": "102_cell_matrix_complete_with_typed_replay_blockers",
+        "live_artifact": "docs/sm86_c7_research_probe_memory_retirement_service_matrix_live_v1.json",
         "live_cell": "b1_store_none_line_stream_d4_l32",
-        "disposition": "matched correctness/NVBit/replay/five-NCU complete; lower-bound consistent; matrix expansion pending"
+        "disposition": "102 correctness/NVBit/NCU rows complete; 98 replay-complete, 4 L1 pending-fill blockers, 6 instruction-crosswalk mismatches retained",
+        "live_cells": 102
       },
       {
         "name": "phasefuse_scaling",
@@ -1018,9 +1019,9 @@
     },
     {
       "probe": "memory_retirement_service",
-      "cell": "b1_store_none_line_stream_d4_l32",
-      "artifact": "docs/sm86_c7_research_probe_memory_retirement_service_live_v1.json",
-      "status": "complete"
+      "cells": 102,
+      "artifact": "docs/sm86_c7_research_probe_memory_retirement_service_matrix_live_v1.json",
+      "status": "complete_with_replay_blockers"
     }
   ]
 }

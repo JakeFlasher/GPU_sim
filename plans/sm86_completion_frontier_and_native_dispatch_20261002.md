@@ -1123,10 +1123,25 @@ completion remains open and native dispatch is zero. Evidence:
 `docs/sm86_c7_research_probe_memory_retirement_service_live_v1.json` and its
 schema.
 
-### C7-S33J — next active milestone
+### C7-S33J — memory-retirement 102-cell matrix — complete with blockers
 
-Expand `memory_retirement_service` over its declared 102-cell matrix with
-matched trace binary, host correctness, NVBit, replay, five NCU repetitions,
-and per-cell instruction crosswalks. Treat fence/tail/layout changes as
-mechanism-local observations; do not call lower-bound consistency a hardware
-completion result.
+All 102 declared cells pass host correctness, fresh NVBit capture, and five
+NCU repetitions. Replay completes 98 cells with per-cell instruction
+crosswalks. Four load/system-or-device fence cells remain explicit replay
+blockers because `CCTL.IVALL` encounters pending L1 fills; six system-fence
+cells have NCU/replay instruction-count mismatches and are retained as
+crosswalk failures rather than scored. The readiness change now waits on
+timed pending fills before cache invalidation, while untimed/event-driven
+fills remain conservative blockers. No hardware completion upper or native
+dispatch is claimed. Evidence:
+`docs/sm86_c7_research_probe_memory_retirement_service_matrix_live_v1.json`
+and its schema.
+
+### C7-S33K — next active milestone
+
+Repair the remaining four `CCTL.IVALL` pending-fill blockers without dropping
+or inventing response tokens. The implementation must distinguish timed fills
+that can be parked until completion from event-driven fills that lack an
+observable deadline; the latter should remain typed refusal. Re-run the four
+blocked cells and the six instruction-mismatch cells before expanding another
+probe family.
