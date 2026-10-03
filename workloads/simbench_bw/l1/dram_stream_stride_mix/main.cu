@@ -1,6 +1,8 @@
 // Host driver for dram_stream_stride_mix.
 
 #include <cuda_runtime.h>
+#include <errno.h>
+#include <limits.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -19,6 +21,7 @@ static void seed_tensor(float *flat, size_t n, uint32_t seed, double lo, double 
         flat[i] = (float)(lo + (hi - lo) * r);
     }
 }
+static uint32_t parse_u32(const char *name, const char *text, uint32_t max) { char *end=nullptr; errno=0; unsigned long long v=strtoull(text,&end,10); if(text[0]<'0'||text[0]>'9'||errno||!end||*end||v==0||v>max){fprintf(stderr,"dram_stream_stride_mix_run: out_of_domain: invalid %s: %s\n",name,text);exit(2);} return (uint32_t)v; }
 static void fail(const char *msg, int rc) {
     fprintf(stderr, "dram_stream_stride_mix_run: %s (rc=%d: %s)\n", msg, rc, cudaGetErrorString((cudaError_t)rc));
     exit(1);
@@ -146,10 +149,10 @@ int main(int argc, char **argv) {
     const char *shape_point = "correctness_00";
     const char *output_mode = "json";
     for (int i = 1; i < argc; ++i) {
-        if      (strcmp(argv[i], "--warps")          == 0 && i + 1 < argc) warps = atoi(argv[++i]);
-        else if (strcmp(argv[i], "--accesses")       == 0 && i + 1 < argc) accesses = atoi(argv[++i]);
-        else if (strcmp(argv[i], "--stride-classes") == 0 && i + 1 < argc) stride_classes = atoi(argv[++i]);
-        else if (strcmp(argv[i], "--seed")           == 0 && i + 1 < argc) seed = (uint32_t)atoi(argv[++i]);
+        if      (strcmp(argv[i], "--warps")          == 0 && i + 1 < argc) warps = (int)parse_u32("warps", argv[++i], INT_MAX);
+        else if (strcmp(argv[i], "--accesses")       == 0 && i + 1 < argc) accesses = (int)parse_u32("accesses", argv[++i], INT_MAX);
+        else if (strcmp(argv[i], "--stride-classes") == 0 && i + 1 < argc) stride_classes = (int)parse_u32("stride-classes", argv[++i], INT_MAX);
+        else if (strcmp(argv[i], "--seed")           == 0 && i + 1 < argc) seed = parse_u32("seed", argv[++i], UINT32_MAX);
         else if (strcmp(argv[i], "--shape-point")    == 0 && i + 1 < argc) shape_point = argv[++i];
         else if (strcmp(argv[i], "--output-mode")    == 0 && i + 1 < argc) output_mode = argv[++i];
         else { fprintf(stderr, "dram_stream_stride_mix_run: unknown arg %s\n", argv[i]); return 2; }
@@ -158,17 +161,21 @@ int main(int argc, char **argv) {
         fprintf(stderr, "dram_stream_stride_mix_run: --output-mode must be 'json' or 'sha256_f32le'\n");
         return 2;
     }
-    const size_t n = (size_t)warps * accesses * stride_classes;
-    float *h_in = (float *)malloc(n * sizeof(float));
-    float *h_out = (float *)malloc(n * sizeof(float));
+    if (!*shape_point || strspn(shape_point, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") != strlen(shape_point)) { fprintf(stderr,"dram_stream_stride_mix_run: out_of_domain: invalid shape-point token\n"); return 2; }
+    const uint64_t n64=(uint64_t)warps*accesses*stride_classes;
+    if(n64>(uint64_t)INT_MAX-32 || n64>SIZE_MAX/sizeof(float)){fprintf(stderr,"dram_stream_stride_mix_run: out_of_domain: shape overflows index/allocation\n");return 2;}
+    const size_t n=(size_t)n64, bytes=n*sizeof(float); size_t free_bytes=0,total_bytes=0; cudaError_t memrc=cudaMemGetInfo(&free_bytes,&total_bytes); if(memrc)fail("memory query",memrc); if(bytes*2>free_bytes){fprintf(stderr,"dram_stream_stride_mix_run: out of memory: requested shape exceeds free device memory\n");return 1;}
+    float *h_in = (float *)malloc(bytes);
+    float *h_out = (float *)malloc(bytes);
+    if(!h_in||!h_out){fprintf(stderr,"dram_stream_stride_mix_run: out of memory: host allocation\n");return 1;}
     seed_tensor(h_in, n, seed, -1.0, 1.0);
 
     float *d_in = nullptr, *d_out = nullptr, *d_sink = nullptr;
     cudaError_t rc;
-    rc = cudaMalloc(&d_in,   n * sizeof(float)); if (rc) fail("mc in",   rc);
+    rc = cudaMalloc(&d_in,   bytes); if (rc) fail("mc in",   rc);
     rc = cudaMalloc(&d_out,  n * sizeof(float)); if (rc) fail("mc out",  rc);
     rc = cudaMalloc(&d_sink, sizeof(float));     if (rc) fail("mc sink", rc);
-    rc = cudaMemcpy(d_in, h_in, n * sizeof(float), cudaMemcpyHostToDevice); if (rc) fail("H2D", rc);
+    rc = cudaMemcpy(d_in, h_in, bytes, cudaMemcpyHostToDevice); if (rc) fail("H2D", rc);
 
     // Bracket the kernel launch with cudaEvents so the runner reports a
     // cudaEventElapsedTime-derived wall-clock measurement. This is the only
@@ -181,6 +188,7 @@ int main(int argc, char **argv) {
     rc = cudaEventCreate(&kernel_stop);  if (rc) fail("eventCreate stop", rc);
     rc = cudaEventRecord(kernel_start, 0); if (rc) fail("eventRecord start", rc);
     dram_stream_stride_mix_launch(d_in, d_out, d_sink, warps, accesses, stride_classes, 0);
+    rc = cudaGetLastError(); if (rc) fail("launch", rc);
     rc = cudaEventRecord(kernel_stop, 0); if (rc) fail("eventRecord stop", rc);
     rc = cudaEventSynchronize(kernel_stop); if (rc) fail("eventSynchronize", rc);
     float elapsed_ms = 0.0f;
@@ -192,7 +200,8 @@ int main(int argc, char **argv) {
     cudaEventDestroy(kernel_stop);
     rc = cudaDeviceSynchronize(); if (rc) fail("sync", rc);
 
-    rc = cudaMemcpy(h_out, d_out, n * sizeof(float), cudaMemcpyDeviceToHost); if (rc) fail("D2H", rc);
+    rc = cudaMemcpy(h_out, d_out, bytes, cudaMemcpyDeviceToHost); if (rc) fail("D2H", rc);
+    size_t mismatch_count=0; for(size_t i=0;i<n;++i) if(!isfinite(h_out[i])||h_out[i]!=h_in[i]) ++mismatch_count; const bool correct=mismatch_count==0;
 
     if (strcmp(output_mode, "sha256_f32le") == 0) {
         // The perturbation-harness digest mode hashes the FP32
@@ -214,6 +223,7 @@ int main(int argc, char **argv) {
         printf("{\n  \"schema_version\": 1,\n  \"slug\": \"dram_stream_stride_mix\",\n");
         printf("  \"shape_set\": \"correctness_shapes\",\n  \"shape_point\": \"%s\",\n", shape_point);
         printf("  \"wall_time_ms\": %.9f,\n", wall_time_ms);
+        printf("  \"correct\": %s, \"mismatch_count\": %zu,\n", correct?"true":"false", mismatch_count);
         printf("  \"output_mode\": \"sha256_f32le\",\n");
         printf("  \"output_sha256\": \"%s\",\n", hex);
         printf("  \"element_count\": %zu\n}\n", n);
@@ -221,6 +231,7 @@ int main(int argc, char **argv) {
         printf("{\n  \"schema_version\": 1,\n  \"slug\": \"dram_stream_stride_mix\",\n");
         printf("  \"shape_set\": \"correctness_shapes\",\n  \"shape_point\": \"%s\",\n", shape_point);
         printf("  \"wall_time_ms\": %.9f,\n", wall_time_ms);
+        printf("  \"correct\": %s, \"mismatch_count\": %zu,\n", correct?"true":"false", mismatch_count);
         printf("  \"output\": [");
         for (int w = 0; w < warps; ++w) {
             if (w > 0) printf(",");
@@ -241,5 +252,5 @@ int main(int argc, char **argv) {
 
     cudaFree(d_in); cudaFree(d_out); cudaFree(d_sink);
     free(h_in); free(h_out);
-    return 0;
+    return correct ? 0 : 1;
 }

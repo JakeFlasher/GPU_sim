@@ -1,0 +1,230 @@
+{
+  "schema": "sm86_c7_simbench_dram_stream_stride_mix_direct_live_v1",
+  "status": "correctness_trace_replay_ncu_complete_native_dispatch_refused",
+  "host_observation": "0, NVIDIA GeForce RTX 3090 Ti, GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c, 8.6, 615.71.09",
+  "host_identity": {
+    "device_index": 0,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "compute_capability": "8.6",
+    "driver": "615.71.09",
+    "pstate": "P0",
+    "graphics_clock_mhz": 1350,
+    "memory_clock_mhz": 10501
+  },
+  "identity": {
+    "source": "workloads/simbench_bw/l1/dram_stream_stride_mix",
+    "binary": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s23_dram_20261003/dram_stream_stride_mix_run",
+    "binary_sha256": "f186554f543694e4e44ea3b8d727bd56aa87e49c42e6b0ddf6e282fc6d21e8b3",
+    "control": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s23_dram_20261003/control.json",
+    "control_sha256": "dfda1cc1c07ce77808f50729463c7975d1bae885af9673ee39030de6235cc650",
+    "trace": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s23_dram_20261003/trace",
+    "trace_stats": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s23_dram_20261003/trace/stats.csv",
+    "args": [
+      "--warps",
+      "32",
+      "--accesses",
+      "128",
+      "--stride-classes",
+      "2",
+      "--seed",
+      "42",
+      "--shape-point",
+      "trace_00",
+      "--output-mode",
+      "json"
+    ],
+    "kernel": "dram_stream_stride_mix_kernel",
+    "metric": "gpc__cycles_elapsed.max",
+    "ncu_repeats": 5,
+    "ncu_cache": "all",
+    "ncu_clock": "none"
+  },
+  "correctness": {
+    "status": "passed",
+    "correct": true,
+    "shape_point": "trace_00",
+    "mismatch_count": 0,
+    "validation": "host identity output checked after cudaGetLastError and cudaDeviceSynchronize"
+  },
+  "trace": {
+    "stats": {
+      "device_id": 0,
+      "stream_id": 7,
+      "kernel id": "kernel-1.trace",
+      "kernel mangled name": "dram_stream_stride_mix_kernel",
+      "grid_dimX": 32,
+      "grid_dimY": 1,
+      "grid_dimZ": 1,
+      "#blocks": 32,
+      "block_dimX": 32,
+      "block_dimY": 1,
+      "block_dimZ": 1,
+      "#threads": 32,
+      "total_insts": 5965952,
+      "total_reported_insts": 5965952
+    },
+    "records_replayed": 1716864,
+    "independent_tail_facts": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s23_dram_20261003/tail_facts.json"
+  },
+  "simulator": {
+    "records": 1716864,
+    "instructions": 1716864,
+    "completion_lower_bound_cycles": 550005,
+    "completion_status": "incomplete_unmodeled_retirement_tails",
+    "unmodeled_tails": {
+      "reduction_read_modify_write": false,
+      "dirty_writeback": true,
+      "coherence": true,
+      "async_copy_shared_visibility": false
+    },
+    "gpc_observation_frontier": {
+      "lower_bound_cycles": 550005,
+      "envelope_cycles": 1816,
+      "grid_blocks": 32,
+      "grid_log2": 5,
+      "cycles": 551821,
+      "role": "architecture_scoped_gpc_observation_boundary_not_timing_crosswalk"
+    }
+  },
+  "fast_frontier": {
+    "device_id": 0,
+    "stream_id": 7,
+    "kernel_id": 1,
+    "function_unique_id": 1,
+    "kernel_name": "dram_stream_stride_mix_kernel___0",
+    "summary": {
+      "contract": "sm86_fast_exact_scalar_regions_v1",
+      "architecture": "sm_86",
+      "blocks_seen": 32,
+      "warps_seen": 32,
+      "eligible_warps": 0,
+      "candidate_regions": 0,
+      "certified_regions": 0,
+      "reified_regions": 0,
+      "candidate_instructions": 0,
+      "collapsed_instructions": 0,
+      "exact_execution_steps": 0,
+      "summarized_execution_steps": 0,
+      "macro_dispatches": 0,
+      "maximum_exact_final_cycle": 0,
+      "maximum_summarized_final_cycle": 0,
+      "terminal_state_matches": true,
+      "coverage": {
+        "trace_records": 1716864,
+        "candidate_records": 0,
+        "summarized_records": 0,
+        "reified_records": 0,
+        "uncovered_records": 1716864
+      },
+      "refusal_reasons": {
+        "nonfull_predicate_population": 32
+      }
+    }
+  },
+  "tail_facts": {
+    "records": 1716864,
+    "memory_records": 57888,
+    "cross_sm_line_topology": 256,
+    "address_operands_unknown": 31,
+    "hardware_completion_token_observed": false,
+    "global_event_order_observed": false
+  },
+  "ncu": {
+    "metric": "gpc__cycles_elapsed.max",
+    "values": [
+      418778.0,
+      418925.0,
+      419105.0,
+      419040.0,
+      419638.0
+    ],
+    "median": 419040.0,
+    "min": 418778.0,
+    "max": 419638.0,
+    "stdev": 326.85577859355647,
+    "rows": [
+      {
+        "ID": "0",
+        "Kernel Name": "dram_stream_stride_mix_kernel",
+        "Grid Size": "(32, 1, 1)",
+        "Block Size": "(32, 1, 1)",
+        "Device": "0",
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 418778.0,
+        "gpu__time_duration.sum": 310.24,
+        "sm__cycles_active.max": 416854.0,
+        "smsp__inst_executed.sum": 1716864.0,
+        "dram__sectors_read.sum": 1500.0,
+        "dram__sectors_write.sum": 12.0
+      },
+      {
+        "ID": "0",
+        "Kernel Name": "dram_stream_stride_mix_kernel",
+        "Grid Size": "(32, 1, 1)",
+        "Block Size": "(32, 1, 1)",
+        "Device": "0",
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 418925.0,
+        "gpu__time_duration.sum": 310.336,
+        "sm__cycles_active.max": 416987.0,
+        "smsp__inst_executed.sum": 1716864.0,
+        "dram__sectors_read.sum": 1552.0,
+        "dram__sectors_write.sum": 12.0
+      },
+      {
+        "ID": "0",
+        "Kernel Name": "dram_stream_stride_mix_kernel",
+        "Grid Size": "(32, 1, 1)",
+        "Block Size": "(32, 1, 1)",
+        "Device": "0",
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 419105.0,
+        "gpu__time_duration.sum": 310.496,
+        "sm__cycles_active.max": 417191.0,
+        "smsp__inst_executed.sum": 1716864.0,
+        "dram__sectors_read.sum": 6428.0,
+        "dram__sectors_write.sum": 16.0
+      },
+      {
+        "ID": "0",
+        "Kernel Name": "dram_stream_stride_mix_kernel",
+        "Grid Size": "(32, 1, 1)",
+        "Block Size": "(32, 1, 1)",
+        "Device": "0",
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 419040.0,
+        "gpu__time_duration.sum": 310.4,
+        "sm__cycles_active.max": 417105.0,
+        "smsp__inst_executed.sum": 1716864.0,
+        "dram__sectors_read.sum": 1500.0,
+        "dram__sectors_write.sum": 0.0
+      },
+      {
+        "ID": "0",
+        "Kernel Name": "dram_stream_stride_mix_kernel",
+        "Grid Size": "(32, 1, 1)",
+        "Block Size": "(32, 1, 1)",
+        "Device": "0",
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 419638.0,
+        "gpu__time_duration.sum": 310.88,
+        "sm__cycles_active.max": 417709.0,
+        "smsp__inst_executed.sum": 1716864.0,
+        "dram__sectors_read.sum": 193024.0,
+        "dram__sectors_write.sum": 28.0
+      }
+    ]
+  },
+  "comparison": {
+    "hardware_completion": "not_observed",
+    "native_macro_dispatches": 0,
+    "lower_bound_cycles": 550005,
+    "ncu_median_cycles": 419040.0,
+    "lower_bound_consistency": false,
+    "gap_cycles": 130965.0,
+    "gap_fraction": 0.31253579610538373,
+    "point_estimator": "not_claimed"
+  },
+  "interpretation": "The repaired dram_stream_stride_mix binary passes host identity-output checks at warps=32,accesses=128,stride_classes=2, produces fresh NVBit/replay/five-NCU evidence, and has full 32-block replay coverage. Replay has 1,716,864 records and NCU reports the same 1,716,864 warp instructions. NCU gpc cycles are 418778,418925,419105,419040,419638 (median 419040), while simulator lower is 550005: lower-bound consistency is false by 130965 cycles (31.25%). This is a real DRAM-stream lower-bound falsifier; dirty-writeback/coherence tails remain open and native dispatch is zero."
+}

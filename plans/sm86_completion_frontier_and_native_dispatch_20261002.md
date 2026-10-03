@@ -880,10 +880,22 @@ NCU reports the same 789,888 warp instructions. NCU gpc cycles are
 real memory-capacity falsifier; tails remain open and native dispatch is zero.
 Evidence: `docs/sm86_c7_simbench_working_set_capacity_sweep_direct_live_v1.json`.
 
-### C7-S23 — next active milestone
+### C7-S23 — DRAM stream stride slice — complete
+
+The repaired dram_stream_stride_mix binary passes host identity-output checks at
+warps=32,accesses=128,stride_classes=2 and completes fresh NVBit, replay, and
+five NCU captures. Replay has full 32-block coverage and 1,716,864 records;
+NCU reports the same instruction count. NCU gpc cycles are
+418778,418925,419105,419040,419638 (median 419040), while simulator lower is
+550005: lower-bound consistency is false by 130,965 cycles (31.25%). This is a
+real DRAM-stream falsifier, not a point-error score or tuning target. Tails
+remain open and native dispatch is zero. Evidence:
+`docs/sm86_c7_simbench_dram_stream_stride_mix_direct_live_v1.json`.
+
+### C7-S24 — next active milestone
 
 Run one additional unrun SM86 SimBench row from the remaining memory/control
-population (prefer dram_stream_stride_mix or local_dynamic_index_array).
+population (prefer local_dynamic_index_array or register_spill_local_mem).
 Preserve checked correctness, exact binary/arguments, fresh NVBit, replay, and
 five-repetition NCU; retain every unsupported-SASS, OOM/OOD, or falsifying
 outcome without tuning scored parameters.
