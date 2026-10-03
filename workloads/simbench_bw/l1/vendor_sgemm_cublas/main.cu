@@ -1,101 +1,18 @@
-// Host driver for vendor_sgemm_cublas. FP32 GEMM via cublasSgemm
-// under CUBLAS_PEDANTIC_MATH (no TF32, no tensor cores).
-
+// Host driver for vendor_sgemm_cublas. cuBLAS is a black-box kernel source;
+// the host checks a CPU FP32 reference and records the exact launch shape.
 #include <cuda_runtime.h>
+#include <errno.h>
+#include <limits.h>
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-extern "C" int vendor_sgemm_cublas_launch(const float *d_A, const float *d_B,
-                                          float *d_C, int M, int N, int K, cudaStream_t stream);
-
-static inline uint32_t next_u32(uint32_t *s) { *s = (*s) * 1103515245u + 12345u; return *s; }
-static void seed_tensor(float *flat, size_t n, uint32_t seed, double lo, double hi) {
-    uint32_t st = seed * 2654435761u + 1u;
-    for (size_t i = 0; i < n; ++i) {
-        double r = (double)next_u32(&st) / 4294967296.0;
-        flat[i] = (float)(lo + (hi - lo) * r);
-    }
-}
-static void fail(const char *msg, int rc) {
-    fprintf(stderr, "vendor_sgemm_cublas_run: %s (rc=%d)\n", msg, rc);
-    exit(1);
-}
-
-int main(int argc, char **argv) {
-    int M = 32, N = 32, K = 32;
-    uint32_t seed = 42;
-    int warmup = 0;
-    int reps = 1;
-    const char *shape_point = "correctness_00";
-    for (int i = 1; i < argc; ++i) {
-        if      (strcmp(argv[i], "--m") == 0 && i + 1 < argc) M = atoi(argv[++i]);
-        else if (strcmp(argv[i], "--n") == 0 && i + 1 < argc) N = atoi(argv[++i]);
-        else if (strcmp(argv[i], "--k") == 0 && i + 1 < argc) K = atoi(argv[++i]);
-        else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc) seed = (uint32_t)atoi(argv[++i]);
-        else if (strcmp(argv[i], "--shape-point") == 0 && i + 1 < argc) shape_point = argv[++i];
-        // Legacy workload-mode aliases for compatibility with
-        // tools/local_labels/label_driver.sh's shape_point=timing_shape /
-        // correctness_shape special-cases.
-        else if (strcmp(argv[i], "--timing_shape") == 0) shape_point = "timing_shape";
-        else if (strcmp(argv[i], "--correctness_shape") == 0) shape_point = "correctness_shape";
-        else if (strcmp(argv[i], "--warmup") == 0 && i + 1 < argc) warmup = atoi(argv[++i]);
-        else if (strcmp(argv[i], "--reps") == 0 && i + 1 < argc) reps = atoi(argv[++i]);
-        else { fprintf(stderr, "vendor_sgemm_cublas_run: unknown arg %s\n", argv[i]); return 2; }
-    }
-    const size_t n_a = (size_t)M * K, n_b = (size_t)K * N, n_c = (size_t)M * N;
-    float *A_f = (float *)malloc(n_a * sizeof(float));
-    float *B_f = (float *)malloc(n_b * sizeof(float));
-    float *h_C = (float *)malloc(n_c * sizeof(float));
-    seed_tensor(A_f, n_a, seed,     -0.5, 0.5);
-    seed_tensor(B_f, n_b, seed + 1, -0.5, 0.5);
-
-    float *d_A = nullptr, *d_B = nullptr, *d_C = nullptr;
-    cudaError_t rc;
-    rc = cudaMalloc(&d_A, n_a * sizeof(float)); if (rc) fail("mc A", rc);
-    rc = cudaMalloc(&d_B, n_b * sizeof(float)); if (rc) fail("mc B", rc);
-    rc = cudaMalloc(&d_C, n_c * sizeof(float)); if (rc) fail("mc C", rc);
-    rc = cudaMemcpy(d_A, A_f, n_a * sizeof(float), cudaMemcpyHostToDevice); if (rc) fail("H2D A", rc);
-    rc = cudaMemcpy(d_B, B_f, n_b * sizeof(float), cudaMemcpyHostToDevice); if (rc) fail("H2D B", rc);
-
-    // Optional warmup launches before the timed/profiled invocation.
-    // label_driver.sh's shape_point=timing_shape auto-appends --warmup <count>
-    // so the runner must accept the flag.
-    for (int w = 0; w < warmup; ++w) {
-        int wc = vendor_sgemm_cublas_launch(d_A, d_B, d_C, M, N, K, 0);
-        if (wc) fail("cublas warmup", wc);
-    }
-    if (warmup > 0) {
-        rc = cudaDeviceSynchronize();
-        if (rc) fail("sync warmup", rc);
-    }
-
-    // Timed/profiled invocations. --reps controls how many measured
-    // launches the binary issues (default 1 preserves the existing
-    // single-launch behavior).
-    for (int r = 0; r < reps; ++r) {
-        int rc2 = vendor_sgemm_cublas_launch(d_A, d_B, d_C, M, N, K, 0);
-        if (rc2) fail("cublas", rc2);
-    }
-    rc = cudaDeviceSynchronize(); if (rc) fail("sync", rc);
-    rc = cudaMemcpy(h_C, d_C, n_c * sizeof(float), cudaMemcpyDeviceToHost); if (rc) fail("D2H", rc);
-
-    printf("{\n  \"schema_version\": 1,\n  \"slug\": \"vendor_sgemm_cublas\",\n");
-    printf("  \"shape_set\": \"correctness_shapes\",\n  \"shape_point\": \"%s\",\n", shape_point);
-    printf("  \"output\": [");
-    for (int m = 0; m < M; ++m) {
-        if (m > 0) printf(",");
-        printf("[");
-        for (int n = 0; n < N; ++n) {
-            if (n > 0) printf(",");
-            printf("%.6g", h_C[m * N + n]);
-        }
-        printf("]");
-    }
-    printf("]\n}\n");
-
-    cudaFree(d_A); cudaFree(d_B); cudaFree(d_C);
-    free(A_f); free(B_f); free(h_C);
-    return 0;
-}
+extern "C" int vendor_sgemm_cublas_launch(const float*,const float*,float*,int,int,int,cudaStream_t);
+static inline uint32_t next_u32(uint32_t*s){*s=(*s)*1103515245u+12345u;return*s;}
+static void seed_tensor(float*p,size_t n,uint32_t seed){uint32_t st=seed*2654435761u+1u;for(size_t i=0;i<n;++i){double r=(double)next_u32(&st)/4294967296.0;p[i]=(float)(-0.5+1.0*r);}}
+static void fail(const char*m,int rc){fprintf(stderr,"vendor_sgemm_cublas_run: %s (rc=%d)\n",m,rc);exit(1);}
+static uint32_t parse_u32(const char*name,const char*text,uint32_t max,bool zero_ok){char*e=nullptr;errno=0;unsigned long long v=strtoull(text,&e,10);if(text[0]<'0'||text[0]>'9'||errno||!e||*e||v>max||(!zero_ok&&v==0)){fprintf(stderr,"vendor_sgemm_cublas_run: out_of_domain: invalid %s: %s\n",name,text);exit(2);}return(uint32_t)v;}
+int main(int argc,char**argv){int M=32,N=32,K=32,warmup=0,reps=1;uint32_t seed=42;const char*shape="correctness_00";bool summary=false;for(int i=1;i<argc;++i){if(!strcmp(argv[i],"--m")&&i+1<argc)M=(int)parse_u32("m",argv[++i],INT_MAX,false);else if(!strcmp(argv[i],"--n")&&i+1<argc)N=(int)parse_u32("n",argv[++i],INT_MAX,false);else if(!strcmp(argv[i],"--k")&&i+1<argc)K=(int)parse_u32("k",argv[++i],INT_MAX,false);else if(!strcmp(argv[i],"--seed")&&i+1<argc)seed=parse_u32("seed",argv[++i],UINT32_MAX,true);else if(!strcmp(argv[i],"--shape-point")&&i+1<argc)shape=argv[++i];else if(!strcmp(argv[i],"--timing_shape"))shape="timing_shape";else if(!strcmp(argv[i],"--correctness_shape"))shape="correctness_shape";else if(!strcmp(argv[i],"--warmup")&&i+1<argc)warmup=(int)parse_u32("warmup",argv[++i],INT_MAX,true);else if(!strcmp(argv[i],"--reps")&&i+1<argc)reps=(int)parse_u32("reps",argv[++i],INT_MAX,false);else if(!strcmp(argv[i],"--summary"))summary=true;else{fprintf(stderr,"vendor_sgemm_cublas_run: unknown arg %s\n",argv[i]);return 2;}}
+if(!*shape||strspn(shape,"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")!=strlen(shape)){fprintf(stderr,"vendor_sgemm_cublas_run: out_of_domain: invalid shape-point token\n");return 2;}uint64_t na=(uint64_t)M*K,nb=(uint64_t)K*N,nc=(uint64_t)M*N;if(na>SIZE_MAX/sizeof(float)||nb>SIZE_MAX/sizeof(float)||nc>SIZE_MAX/sizeof(float)||na>INT_MAX||nb>INT_MAX||nc>INT_MAX){fprintf(stderr,"vendor_sgemm_cublas_run: out_of_domain: shape overflows allocation/index\n");return 2;}size_t ba=(size_t)na*sizeof(float),bb=(size_t)nb*sizeof(float),bc=(size_t)nc*sizeof(float),free_bytes=0,total_bytes=0;cudaError_t rc=cudaMemGetInfo(&free_bytes,&total_bytes);if(rc)fail("memory query",rc);if(ba+bb+bc>free_bytes/2){fprintf(stderr,"vendor_sgemm_cublas_run: out of memory: requested shape exceeds free device memory\n");return 1;}float*A=(float*)malloc(ba),*B=(float*)malloc(bb),*C=(float*)malloc(bc),*ref=(float*)malloc(bc);if(!A||!B||!C||!ref){fprintf(stderr,"vendor_sgemm_cublas_run: out of memory: host allocation\n");return 1;}seed_tensor(A,na,seed);seed_tensor(B,nb,seed+1);for(int m=0;m<M;++m)for(int n=0;n<N;++n){float x=0;for(int k=0;k<K;++k)x+=A[(size_t)m*K+k]*B[(size_t)k*N+n];ref[(size_t)m*N+n]=x;}
+float*dA=nullptr,*dB=nullptr,*dC=nullptr;rc=cudaMalloc(&dA,ba);if(rc)fail("mc A",rc);rc=cudaMalloc(&dB,bb);if(rc)fail("mc B",rc);rc=cudaMalloc(&dC,bc);if(rc)fail("mc C",rc);rc=cudaMemset(dC,0xff,bc);if(rc)fail("memset C",rc);rc=cudaMemcpy(dA,A,ba,cudaMemcpyHostToDevice);if(rc)fail("H2D A",rc);rc=cudaMemcpy(dB,B,bb,cudaMemcpyHostToDevice);if(rc)fail("H2D B",rc);for(int i=0;i<warmup;++i){int br=vendor_sgemm_cublas_launch(dA,dB,dC,M,N,K,0);if(br)fail("cublas warmup",br);rc=cudaGetLastError();if(rc)fail("warmup launch",rc);}for(int i=0;i<reps;++i){int br=vendor_sgemm_cublas_launch(dA,dB,dC,M,N,K,0);if(br)fail("cublas",br);rc=cudaGetLastError();if(rc)fail("launch",rc);}rc=cudaDeviceSynchronize();if(rc)fail("sync",rc);rc=cudaMemcpy(C,dC,bc,cudaMemcpyDeviceToHost);if(rc)fail("D2H",rc);size_t mismatch=0;double maxerr=0;for(size_t i=0;i<nc;++i){double e=fabs((double)C[i]-ref[i]);if(!isfinite(C[i])||e>1e-3)++mismatch;if(e>maxerr)maxerr=e;}bool correct=mismatch==0;printf("{\n  \"schema_version\":1,\n  \"slug\":\"vendor_sgemm_cublas\",\n  \"shape_point\":\"%s\",\n  \"m\":%d,\n  \"n\":%d,\n  \"k\":%d,\n  \"warmup\":%d,\n  \"reps\":%d,\n  \"correct\":%s,\n  \"mismatch_count\":%zu,\n  \"max_abs_error\":%.9g",shape,M,N,K,warmup,reps,correct?"true":"false",mismatch,maxerr);if(!summary){printf(",\n  \"output\":[");for(int m=0;m<M;++m){if(m)printf(",");printf("[");for(int n=0;n<N;++n){if(n)printf(",");printf("%.6g",C[(size_t)m*N+n]);}printf("]");}printf("]");}printf("\n}\n");cudaFree(dA);cudaFree(dB);cudaFree(dC);free(A);free(B);free(C);free(ref);return correct?0:1;}

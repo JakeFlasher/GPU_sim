@@ -281,6 +281,14 @@ Corrected active evidence:
 - `docs/sm86_c7_simbench_carveout_sensitivity_probe_direct_live_v1.json`
 Superseded artifacts remain historical and are not current evidence.
 
+C7-S18 atomic-and-return is complete after repairing its shared-bin sink
+race: disjoint return sinks and a deterministic final bitwise-AND histogram pass;
+46,882 replay/NCU instructions match. C7-S19 carveout sensitivity is complete
+and falsifies the lower-bound consistency (211,002 simulator lower vs 178,521
+NCU median). C7-S20 vendor SGEMM is an explicit replay blocker: cuBLAS emits
+ampere_sgemm_128x32_nn from libcublasLt.so without a stable static control
+sidecar; 29,752 traced records cannot be crosswalked to 8,784 NCU instructions.
+
 The `async_visibility_phase` probe now independently recomputes and checks its
 returned lane-0 token from the deterministic source initialization; it no
 longer prints an unconditional correctness boolean. Fresh direct runs for

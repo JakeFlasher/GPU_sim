@@ -20,7 +20,7 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    opt-in and a corrected original-shape recapture. Keep the superseded
    pre-opt-in artifact historical, not active evidence.
    [Ampere shared memory](https://docs.nvidia.com/cuda/ampere-tuning-guide/#unified-shared-memory-l1-texture-cache)
-3. **C7-S19 complete; C7-S20 next.** Tensor refusals and
+3. **C7-S20 complete; C7-S21 next.** Tensor refusals and
    measured timing mismatches stay open deliverables, not completed mechanisms.
    No timing/card parameter is selected from these scored NCU targets.
 
@@ -846,10 +846,21 @@ instruction count. NCU gpc cycles are 178537,177540,177927,178647,178521
 Open writeback/coherence tails and zero native dispatch remain explicit.
 Evidence: `docs/sm86_c7_simbench_carveout_sensitivity_probe_direct_live_v1.json`.
 
-### C7-S20 — next active milestone
+### C7-S20 — vendor SGEMM blocked disposition — complete
+
+The exact rebuilt cuBLAS FP32 binary passes host correctness and produces a
+fresh NVBit trace of ampere_sgemm_128x32_nn. Five same-binary NCU captures
+report 8,784 warp instructions and cycles 8904,8905,8894,8955,8898 (median
+8904). Replay is explicitly blocked: the kernel is loaded from libcublasLt.so
+with no stable static module/control sidecar, and the traced dynamic record
+count (29,752) cannot be silently crosswalked to NCU's 8,784. No simulator
+endpoint, native dispatch, or accuracy comparison is claimed. Evidence:
+`docs/sm86_c7_simbench_vendor_sgemm_cublas_blocked_live_v1.json`.
+
+### C7-S21 — next active milestone
 
 Run one additional unrun SM86 SimBench row from the remaining vendor/control
-population (prefer `vendor_sgemm_cublas` or `vendor_sgemm_strided_batched_cublas`).
+population (prefer `vendor_sgemm_strided_batched_cublas` or a non-vendor row).
 Preserve checked correctness, exact binary/arguments, fresh NVBit, replay, and
 five-repetition NCU; retain every unsupported-SASS, OOM/OOD, or falsifying
 outcome without tuning scored parameters.
