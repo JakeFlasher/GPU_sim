@@ -1087,11 +1087,23 @@ writeback, and coherence uppers remain open, and native macro dispatch is zero.
 Evidence: `docs/sm86_c7_research_probe_async_barrier_overlap_matrix_live_v1.json`
 and its schema. No fixed barrier latency or point-accuracy claim is made.
 
-### C7-S33G — next active milestone
+### C7-S33G — store-ack vertical slice — complete
 
-Select the next probe family from the repaired build inventory, prioritizing a
-memory-retirement/store-ack or barrier-pipeline family with a bounded host
-correctness path. Apply the same matched-binary contract, live NVBit/replay,
-five NCU repetitions, instruction crosswalk, and open-tail accounting. Keep
-analysis-only and source/preserved-binary directories out of the supported
-denominator until their launch contracts are repaired.
+The `store_ack_frontier` store-none arm (`b1_d4_l32_line_unique_g0`) passes
+seven host correctness trials, fresh NVBit tracing, full replay, independent
+tail extraction, and five same-binary NCU captures. Replay and NCU both report
+662 warp instructions; NCU gpc cycles are 6963,6890,6881,6892,6912 (median
+6892), while simulator lower is 5238, so lower-bound consistency is true.
+Store acknowledgement, writeback, and coherence completion remain unobserved;
+native dispatch is zero. Evidence:
+`docs/sm86_c7_research_probe_store_ack_frontier_live_v1.json` and its schema.
+This is not a point-accuracy or speedup claim.
+
+### C7-S33H — next active milestone
+
+Expand `store_ack_frontier` over its bounded cell/arm matrix, using explicit
+trace arms rather than the campaign's paired prewarm path. Match each traced
+arm to its NCU executable, crosswalk warp records, and retain the write-ack
+candidate as a separate model intervention—not as hardware completion proof.
+Keep the remaining probe families outside the supported denominator until
+their own launch contracts are captured.

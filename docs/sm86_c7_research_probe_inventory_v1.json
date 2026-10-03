@@ -1,7 +1,7 @@
 {
   "schema": "sm86_c7_research_probe_inventory_v1",
   "architecture": "sm_86",
-  "status": "inventory_build_matrix_issue_port_matrix_and_async_barrier_matrix_complete",
+  "status": "inventory_build_matrix_and_three_probe_vertical_slices_complete",
   "root": "workloads/research_probes",
   "population": {
     "directory_count": 42,
@@ -941,7 +941,11 @@
         "build_logs": {
           "stdout": "results/alpha/c7_s33_probe_build_20261003/store_ack_frontier.stdout",
           "stderr": "results/alpha/c7_s33_probe_build_20261003/store_ack_frontier.stderr"
-        }
+        },
+        "live_status": "one_vertical_slice_complete",
+        "live_artifact": "docs/sm86_c7_research_probe_store_ack_frontier_live_v1.json",
+        "live_cell": "b1_d4_l32_line_unique_g0_store_none",
+        "disposition": "matched correctness/NVBit/replay/five-NCU complete; matrix expansion pending"
       },
       {
         "name": "task_done_boundary",
@@ -999,6 +1003,12 @@
       "probe": "async_barrier_overlap",
       "cells": 36,
       "artifact": "docs/sm86_c7_research_probe_async_barrier_overlap_matrix_live_v1.json",
+      "status": "complete"
+    },
+    {
+      "probe": "store_ack_frontier",
+      "cell": "b1_d4_l32_line_unique_g0_store_none",
+      "artifact": "docs/sm86_c7_research_probe_store_ack_frontier_live_v1.json",
       "status": "complete"
     }
   ]
