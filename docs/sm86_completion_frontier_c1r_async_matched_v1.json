@@ -10,6 +10,7 @@
   "control": "results/alpha/c1r_async_matched_20261003/control.json",
   "finite_interval_coverage": null,
   "groups_compile_time": 64,
+  "identity": "docs/sm86_completion_frontier_c1r_identity_async.json",
   "interpretation": "matched binary_shape_and_target_launch; simulator async target lower bound is 84866 while NCU median is 20946, so the lower bound itself is inconsistent and the model has a timing error. dirty_writeback/coherence remain open. This is a live model mismatch, not accuracy evidence.",
   "launch_selection": {
     "ncu_launch_skip": 1,

@@ -1,83 +1,83 @@
 {
+  "binary": "results/alpha/c1r_message_device_20261003/message_passing_device",
+  "case": "message_device",
   "contract": "docs/sm86_completion_frontier_contract_v1.json",
-  "row": {
-    "binary": "results/alpha/c1r_message_device_20261003/message_passing_device",
-    "case": "message_device",
-    "finite_interval_coverage": null,
-    "interpretation": "matched resident-device capture; simulator lower bound remains below NCU median 4321 and semantic tails remain open; no finite upper or hardware claim.",
-    "kernel_name": "_Z22message_passing_devicePjS_S_j___0",
-    "mechanism_metrics": {
-      "dram__sectors_read.sum": [
-        116.0,
-        124.0,
-        112.0,
-        112.0,
-        112.0
-      ],
-      "dram__sectors_write.sum": [
-        0.0,
-        28.0,
-        0.0,
-        8.0,
-        0.0
-      ],
-      "gpu__time_duration.max": [
-        3232.0,
-        3232.0,
-        3232.0,
-        3232.0,
-        3360.0
-      ],
-      "lts__t_sectors_srcunit_tex.sum": [
-        6.0,
-        6.0,
-        6.0,
-        6.0,
-        6.0
-      ],
-      "sm__cycles_active.max": [
-        2599.0,
-        2586.0,
-        2568.0,
-        2571.0,
-        2775.0
-      ],
-      "sm__inst_executed.sum": [
-        56.0,
-        56.0,
-        56.0,
-        56.0,
-        56.0
-      ]
-    },
-    "ncu_launch_selection": {
-      "launch_count": 1,
-      "launch_skip": 0,
-      "mode": "application"
-    },
-    "ncu_median_cycles": 4321.0,
-    "ncu_target_cycles": [
-      4325.0,
-      4321.0,
-      4300.0,
-      4304.0,
-      4503.0
+  "finite_interval_coverage": null,
+  "identity": "docs/sm86_completion_frontier_c1r_identity_message_device.json",
+  "interpretation": "matched resident-device capture; simulator lower bound remains below NCU median 4321 and semantic tails remain open; no finite upper or hardware claim.",
+  "kernel_name": "_Z22message_passing_devicePjS_S_j___0",
+  "mechanism_metrics": {
+    "dram__sectors_read.sum": [
+      116.0,
+      124.0,
+      112.0,
+      112.0,
+      112.0
     ],
-    "open_lower_consistency": true,
-    "same_binary_for_native_nvbit_ncu": true,
-    "simulator_completion": {
-      "lower_bound_cycles": 1753,
-      "status": "incomplete_unmodeled_retirement_tails",
-      "unmodeled_tails": {
-        "async_copy_shared_visibility": false,
-        "coherence": true,
-        "dirty_writeback": true,
-        "reduction_read_modify_write": false
-      }
-    },
-    "simulator_lower_bound_cycles": 1753,
-    "simulator_records": 47
+    "dram__sectors_write.sum": [
+      0.0,
+      28.0,
+      0.0,
+      8.0,
+      0.0
+    ],
+    "gpu__time_duration.max": [
+      3232.0,
+      3232.0,
+      3232.0,
+      3232.0,
+      3360.0
+    ],
+    "lts__t_sectors_srcunit_tex.sum": [
+      6.0,
+      6.0,
+      6.0,
+      6.0,
+      6.0
+    ],
+    "sm__cycles_active.max": [
+      2599.0,
+      2586.0,
+      2568.0,
+      2571.0,
+      2775.0
+    ],
+    "sm__inst_executed.sum": [
+      56.0,
+      56.0,
+      56.0,
+      56.0,
+      56.0
+    ]
   },
+  "ncu_launch_selection": {
+    "launch_count": 1,
+    "launch_skip": 0,
+    "mode": "application"
+  },
+  "ncu_median_cycles": 4321.0,
+  "ncu_target_cycles": [
+    4325.0,
+    4321.0,
+    4300.0,
+    4304.0,
+    4503.0
+  ],
+  "open_lower_consistency": true,
+  "same_binary_for_native_nvbit_ncu": true,
   "schema": "sm86_completion_frontier_c1r_message_device_v1",
+  "simulator_completion": {
+    "lower_bound_cycles": 1753,
+    "status": "incomplete_unmodeled_retirement_tails",
+    "unmodeled_tails": {
+      "async_copy_shared_visibility": false,
+      "coherence": true,
+      "dirty_writeback": true,
+      "reduction_read_modify_write": false
+    }
+  },
+  "simulator_records": 47,
+  "simulator_target_lower_cycles": 1753,
+  "simulator_target_upper_cycles": null,
   "status": "matched_live_model_mismatch"
 }
