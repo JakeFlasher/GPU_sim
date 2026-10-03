@@ -6,7 +6,7 @@
 // one of `bins` slots. The kernel has both contended (all threads ->
 // same bin) and dispersed (each thread -> distinct bin) paths.
 // Identity round-trip on the seeded input/output buffer; the atomic
-// counters are folded into a sink.
+// counters are copied back and checked against an independent host histogram.
 
 #include <cuda_runtime.h>
 #include <stdint.h>
