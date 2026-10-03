@@ -1192,9 +1192,22 @@ zero. Evidence:
 `docs/sm86_c7_research_probe_barrier_pipeline_matrix_live_v1.json` and its
 schema.
 
-### C7-S33P — next active milestone
+### C7-S33P — l1tex admission vertical slice — complete
 
-Select the next bounded probe family from the remaining buildable inventory,
-preferably `l1tex_admission_backpressure` or `l2_queue_frontier`. Run one
-matched correctness/NVBit/replay/five-NCU vertical cell first, preserving
-typed unsupported and open-tail outcomes before any matrix expansion.
+The matched 64-generation `l1tex_admission_backpressure` store/line-unique
+cell (`blocks=1, warps=4, depth=4, active_lanes=32, gap=0, all pattern`)
+passes seven host correctness trials, fresh NVBit, full replay, independent
+tail extraction, and five NCU captures. Replay and NCU both report 2,980 warp
+instructions; NCU gpc cycles are 8898,8956,8887,8905,8976 (median 8905),
+while simulator lower is 6524, so lower-bound consistency is true. The
+post-burst MEMBAR/ERRBAR/CCTL sequence and writeback/coherence tails remain
+open; native dispatch is zero. Evidence:
+`docs/sm86_c7_research_probe_l1tex_admission_backpressure_live_v1.json` and
+its schema.
+
+### C7-S33Q — next active milestone
+
+Expand `l1tex_admission_backpressure` over its declared campaign matrix, or
+select `l2_queue_frontier` if the matrix contract cannot be made bounded.
+Match each cell's trace binary, host output, NVBit/replay records, five NCU
+repetitions, and instruction crosswalk before reporting lower-bound evidence.

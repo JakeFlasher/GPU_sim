@@ -1,0 +1,131 @@
+{
+  "schema": "sm86_c7_research_probe_l1tex_admission_backpressure_live_v1",
+  "status": "correctness_trace_replay_ncu_complete_native_dispatch_refused",
+  "host_identity": {
+    "device_index": 0,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "compute_capability": "8.6",
+    "driver": "615.71.09",
+    "pstate": "P0",
+    "graphics_clock_mhz": 1350,
+    "memory_clock_mhz": 10501
+  },
+  "identity": {
+    "source": "workloads/research_probes/l1tex_admission_backpressure",
+    "binary": "workloads/research_probes/l1tex_admission_backpressure/l1tex_admission_backpressure_trace",
+    "control": "results/alpha/c7_s33_l1tex_20261003_v2/control.json",
+    "trace": "results/alpha/c7_s33_l1tex_20261003_v2/trace",
+    "args": [
+      "store",
+      "line_unique",
+      "1",
+      "4",
+      "4",
+      "32",
+      "0",
+      "all",
+      "1"
+    ],
+    "correctness_args": [
+      "store",
+      "line_unique",
+      "1",
+      "4",
+      "4",
+      "32",
+      "0",
+      "all",
+      "7"
+    ],
+    "kernel": "_Z27admission_backpressure_tailILi1EEvPjPyS1_iiiiii",
+    "metric": "gpc__cycles_elapsed.max",
+    "ncu_repeats": 5,
+    "ncu_replay_mode": "application",
+    "ncu_clock_control": "none",
+    "ncu_cache_control": "all"
+  },
+  "correctness": {
+    "status": "passed",
+    "correct": true,
+    "tail": "store",
+    "layout": "line_unique",
+    "blocks": 1,
+    "warps": 4,
+    "depth": 4,
+    "active_lanes": 32,
+    "pattern": "all",
+    "trials": 7,
+    "validation": "host checksum and final payload checks over seven trials"
+  },
+  "trace": {
+    "stats": {
+      "device_id": 0,
+      "stream_id": 7,
+      "kernel id": "kernel-1.trace",
+      "kernel mangled name": "_Z27admission_backpressure_tailILi1EEvPjPyS1_iiiiii",
+      "grid_dimX": 1,
+      "grid_dimY": 1,
+      "grid_dimZ": 1,
+      "#blocks": 1,
+      "block_dimX": 128,
+      "block_dimY": 1,
+      "block_dimZ": 1,
+      "#threads": 128,
+      "total_insts": 8400,
+      "total_reported_insts": 8400
+    },
+    "records_replayed": 2980,
+    "independent_tail_facts": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s33_l1tex_20261003_v2/tail_facts.json"
+  },
+  "simulator": {
+    "records": 2980,
+    "instructions": 2980,
+    "completion_lower_bound_cycles": 6524,
+    "completion_status": "incomplete_unmodeled_retirement_tails",
+    "unmodeled_tails": {
+      "reduction_read_modify_write": false,
+      "dirty_writeback": true,
+      "coherence": true,
+      "async_copy_shared_visibility": false
+    }
+  },
+  "tail_facts": {
+    "records": 2980,
+    "memory_records": 32,
+    "stores": 32,
+    "atomics": 0,
+    "address_operands_unknown": 0,
+    "hardware_completion_token_observed": false,
+    "global_event_order_observed": false
+  },
+  "ncu": {
+    "metric": "gpc__cycles_elapsed.max",
+    "values": [
+      8898.0,
+      8956.0,
+      8887.0,
+      8905.0,
+      8976.0
+    ],
+    "median": 8905.0,
+    "min": 8887.0,
+    "max": 8976.0,
+    "stdev": 39.157374784323835,
+    "instruction_count": 2980,
+    "kernel": "void admission_backpressure_tail<1>(unsigned int *, unsigned long long *, unsigned long long *, int, int, int, int, int, int)",
+    "clock_control": "none",
+    "cache_control": "all"
+  },
+  "comparison": {
+    "lower_bound_consistency": true,
+    "lower_bound_cycles": 6524,
+    "ncu_median_cycles": 8905.0,
+    "gap_cycles": 2381.0,
+    "gap_fraction": 0.2673778775968557,
+    "native_macro_dispatches": 0,
+    "hardware_completion": "not_observed",
+    "point_estimator": "not_claimed"
+  },
+  "interpretation": "The matched 64-generation l1tex_admission_backpressure store/line_unique cell passes seven host correctness trials, fresh NVBit, full replay, independent tail extraction, and five NCU captures. Replay and NCU both report 2980 warp instructions; NCU gpc cycles are 8898,8956,8887,8905,8976 (median 8905). Simulator lower is 6524, below the NCU median, so lower-bound consistency is true. The post-burst MEMBAR/ERRBAR/CCTL sequence and writeback/coherence tails remain open; native dispatch is zero. This is not a point-accuracy or speedup claim."
+}

@@ -1,7 +1,7 @@
 {
   "schema": "sm86_c7_research_probe_inventory_v1",
   "architecture": "sm_86",
-  "status": "inventory_build_matrix_and_five_probe_campaigns_complete",
+  "status": "inventory_build_matrix_and_six_probe_campaign_stages_complete",
   "root": "workloads/research_probes",
   "population": {
     "directory_count": 42,
@@ -648,7 +648,11 @@
         "build_logs": {
           "stdout": "results/alpha/c7_s33_probe_build_20261003/l1tex_admission_backpressure.stdout",
           "stderr": "results/alpha/c7_s33_probe_build_20261003/l1tex_admission_backpressure.stderr"
-        }
+        },
+        "live_status": "one_vertical_slice_complete",
+        "live_artifact": "docs/sm86_c7_research_probe_l1tex_admission_backpressure_live_v1.json",
+        "live_cell": "store_line_unique_b1_w4_d4_l32_gap0_all",
+        "disposition": "matched correctness/NVBit/replay/five-NCU complete; lower-bound consistent; matrix expansion pending"
       },
       {
         "name": "l1tex_arrival_replay_service",
@@ -1032,6 +1036,12 @@
       "probe": "barrier_pipeline",
       "cells": 33,
       "artifact": "docs/sm86_c7_research_probe_barrier_pipeline_matrix_live_v1.json",
+      "status": "complete"
+    },
+    {
+      "probe": "l1tex_admission_backpressure",
+      "cell": "store_line_unique_b1_w4_d4_l32_gap0_all",
+      "artifact": "docs/sm86_c7_research_probe_l1tex_admission_backpressure_live_v1.json",
       "status": "complete"
     }
   ]
