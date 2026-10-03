@@ -1170,9 +1170,20 @@ unresolved; no simulator padding or hidden-instruction synthesis is applied.
 Diagnostic evidence is
 `docs/sm86_c7_memory_retirement_system_fence_crosswalk_diagnostic_v1.json`.
 
-### C7-S33N — next active milestone
+### C7-S33N — barrier-pipeline vertical slice — complete
 
-Select the next bounded probe family, prioritizing `barrier_pipeline`, and run
-one matched correctness/NVBit/replay/five-NCU vertical cell before expanding
-its matrix. Preserve all open-tail, unsupported, and instruction-crosswalk
-outcomes explicitly.
+The matched 64-generation `barrier_pipeline` cell `w4_b10_s0` (one CTA
+barrier, four warps, zero skew) passes seven host correctness trials, fresh
+NVBit, full replay, independent tail extraction, and five NCU captures. Replay
+and NCU both report 1,884 warp instructions; NCU gpc cycles are
+5731,5732,5755,5728,5732 (median 5732), while simulator lower is 3545, so
+lower-bound consistency is true. Barrier rendezvous/retirement tails remain
+open and native dispatch is zero. Evidence:
+`docs/sm86_c7_research_probe_barrier_pipeline_live_v1.json` and its schema.
+
+### C7-S33O — next active milestone
+
+Expand `barrier_pipeline` over its declared 33-cell matrix using the matched
+64-generation trace binary and the same correctness/NVBit/replay/five-NCU
+contract. Keep skew, protocol, and warp-width effects separate; do not infer a
+fixed barrier latency or treat lower-bound consistency as completion proof.
