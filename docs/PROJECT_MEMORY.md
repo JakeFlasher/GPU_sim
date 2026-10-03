@@ -351,6 +351,13 @@ not complete yet; probes/SOL/other suites and correctness joins remain to be
 inventoried. Portable replay tails remain open and native macro dispatch was
 not requested.
 
+The C7 population inventory is explicit in
+`docs/sm86_c7_workload_population_inventory_v1.json`: 15 active portable-LCD
+rows, 92 SimBench-BW rows (31 SM86-gated), 34 research-probe directories, and
+203 SOL baseline problem directories. Only the portable 15 have the completed
+full pipeline; the remaining populations need bounded shape/memory/OOM
+dispositions before a repository-wide campaign claim.
+
 ## Retained evidence
 
 The 2026-09-30 cold/warm campaigns completed 15/15 workloads on RTX 3090 Ti / SM86,

@@ -1,0 +1,123 @@
+{
+  "host_architecture": "sm86",
+  "interpretation": "The portable 15-row population has a completed bounded live pipeline. This inventory prevents calling that slice a full repository campaign; SimBench, research-probe, and SOL populations remain explicit future campaign populations, with failures retained rather than silently omitted.",
+  "populations": {
+    "portable_lcd": {
+      "active_count": 15,
+      "live_pipeline_status": "15_row_campaign_complete_in_docs_sm86_c7_full_live_campaign_v1",
+      "rows": [
+        "conv2d_implicit_gemm_bf16_sm80",
+        "cross_entropy_fwd_fp32_sm80",
+        "embedding_gather_int32_sm80",
+        "flash_attn_bwd_bf16_sm80",
+        "flash_attn_fwd_bf16_sm80",
+        "gemm_hmma_bf16_sm80",
+        "gemm_hmma_fp16_sm80",
+        "gemm_imma_int8_sm80",
+        "gemm_sparse_2to4_bf16_sm80",
+        "layernorm_fwd_bf16_sm80",
+        "rmsnorm_bwd_bf16_sm80",
+        "rmsnorm_fwd_bf16_sm80",
+        "silu_fwd_bf16_sm80",
+        "softmax_safe_bf16_sm80",
+        "swiglu_fwd_bf16_sm80"
+      ]
+    },
+    "research_probes": {
+      "campaign_or_makefile_directories": 34,
+      "directories": [
+        "async_barrier_overlap",
+        "async_source_only",
+        "atomic_alias_adversarial",
+        "atomic_completion_serialization",
+        "atomic_lts_mapping",
+        "atomic_many_region",
+        "atomic_multism_service",
+        "atomic_vmm_alias",
+        "barrier_pipeline",
+        "fixed_latency_allocate",
+        "fixed_latency_completion",
+        "fixed_latency_front_end_footprint",
+        "fixed_latency_producer_shift",
+        "fixed_latency_result_bypass",
+        "fixed_latency_result_capacity",
+        "fixed_latency_result_load_priority",
+        "fixed_latency_result_order",
+        "fixed_latency_result_queue",
+        "fixed_latency_result_same_bank",
+        "fixed_latency_reuse",
+        "front_end_ibuffer_depth",
+        "immediate_constant_frontier",
+        "issue_port_control",
+        "l1tex_admission_backpressure",
+        "l1tex_arrival_replay_service",
+        "l2_queue_frontier",
+        "launch_cycle_semantics",
+        "ldgsts_burst_release",
+        "memory_retirement_service",
+        "sfu_frontier",
+        "sm86_ncu_demo_benchmark",
+        "smsp_scheduler_contention",
+        "store_ack_frontier",
+        "task_done_boundary"
+      ],
+      "live_pipeline_status": "targeted_slices_only"
+    },
+    "simbench_bw": {
+      "live_pipeline_status": "not_started",
+      "roster_rows": 92,
+      "sm86_arch_rows": 31,
+      "sm86_arch_rows_list": [
+        "bf16_hmma_gemm_traceable",
+        "carveout_sensitivity_probe",
+        "cp_async_shared_tile_copy",
+        "dram_stream_stride_mix",
+        "dram_streaming_dot_product",
+        "fp16_hmma_gemm_traceable",
+        "fp32_fma_dep_chain",
+        "global_atomic_and_histogram",
+        "global_atomic_and_return_used",
+        "global_atomic_histogram",
+        "global_atomic_max_histogram",
+        "global_atomic_max_return_used",
+        "global_atomic_return_used",
+        "global_scalar_32b_copy",
+        "global_vectorized_128b_copy",
+        "global_vectorized_64b_copy",
+        "int8_imma_gemm_traceable",
+        "l2_persisting_window_sweep",
+        "l2_prefetch_hint_sweep",
+        "l2_thrash_pointer_chase",
+        "local_dynamic_index_array",
+        "local_volatile_array",
+        "register_spill_local_mem",
+        "rmsnorm_fwd_bf16",
+        "shared_bank_conflict_stride",
+        "tf32_hmma_gemm_traceable",
+        "vendor_gemm_cublas",
+        "vendor_sgemm_cublas",
+        "vendor_sgemm_strided_batched_cublas",
+        "warm_cold_pair_relaunch",
+        "working_set_capacity_sweep"
+      ]
+    },
+    "sol_execbench_baselines": {
+      "families": [
+        "FIB",
+        "L1",
+        "L2",
+        "Quant"
+      ],
+      "live_pipeline_status": "not_started",
+      "problem_directories": 203
+    }
+  },
+  "schema": "sm86_c7_workload_population_inventory_v1",
+  "selection_rules": {
+    "portable_control_row": "exclude ac4_mixed_long_sm80 from active portable population",
+    "probe_population": "include native CUDA/NVBit/NCU probes with current source and bounded execution path",
+    "sm86_campaign_arch_gate": "include rows whose roster arch_gate contains sm_86",
+    "sol_population": "inventory only until each problem has an SM86 build/shape/memory disposition"
+  },
+  "status": "inventory_declared_portable_campaign_complete_other_populations_pending"
+}

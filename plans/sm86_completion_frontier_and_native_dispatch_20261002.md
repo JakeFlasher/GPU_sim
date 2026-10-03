@@ -191,6 +191,13 @@ and correctness-mode joins still need an explicit population inventory. All
 portable replay rows retain open dirty-writeback/coherence tails and the
 campaign did not request native macro dispatch.
 
+The population inventory is now explicit in
+`docs/sm86_c7_workload_population_inventory_v1.json`: 15 active portable-LCD
+rows, 92 SimBench-BW rows (31 with an SM86 arch gate), 34 research-probe
+directories, and 203 SOL baseline problem directories. Only the portable 15
+have the completed full pipeline; the other populations remain pending and
+must receive memory/shape/OOM dispositions before any repository-wide claim.
+
 C6 now has a real same-shape scalar negative slice. The fixed-latency
 `w4_d4_split` trace uses the exact 64-generation trace cubin for correctness,
 NVBit, replay, and five NCU captures. Correctness passes; the analyzer refuses

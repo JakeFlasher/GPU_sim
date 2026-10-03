@@ -240,6 +240,13 @@ population: native probes, fixed-latency rosters, SOL/other suites, and
 correctness-mode joins remain to be inventoried. Portable replay rows retain
 open dirty-writeback/coherence tails; no native macro dispatch was requested.
 
+The C7 population inventory is explicit in
+`docs/sm86_c7_workload_population_inventory_v1.json`: 15 active portable-LCD
+rows, 92 SimBench-BW rows (31 SM86-gated), 34 research-probe directories, and
+203 SOL baseline problem directories. Only the portable 15 have the completed
+full pipeline; the remaining populations need bounded shape/memory/OOM
+dispositions before a repository-wide campaign claim.
+
 The `async_visibility_phase` probe now independently recomputes and checks its
 returned lane-0 token from the deterministic source initialization; it no
 longer prints an unconditional correctness boolean. Fresh direct runs for
