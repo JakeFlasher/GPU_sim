@@ -1,24 +1,27 @@
 schema_version = 1
 slug = "rmsnorm_fwd_bf16"
 
+# The host driver launches one block per row with 256 threads. Keep the
+# metadata equal to the actual launch; a stale grid/block here makes a trace
+# and NCU row incomparable even when their tensor axes match.
 [[timing_shapes]]
 name = "timing_00"
 axes = { rows = 1024, hidden = 4096 }
-launch_config = { grid = [32, 1, 1], block = [128, 1, 1] }
+launch_config = { grid = [1024, 1, 1], block = [256, 1, 1] }
 warm_up_iters = 5
 repeat_iters = 30
 
 [[timing_shapes]]
 name = "timing_01"
 axes = { rows = 16, hidden = 8192 }
-launch_config = { grid = [32, 1, 1], block = [128, 1, 1] }
+launch_config = { grid = [16, 1, 1], block = [256, 1, 1] }
 warm_up_iters = 5
 repeat_iters = 30
 
 [[trace_shapes]]
 name = "trace_00"
 axes = { rows = 256, hidden = 1024 }
-launch_config = { grid = [32, 1, 1], block = [128, 1, 1] }
+launch_config = { grid = [256, 1, 1], block = [256, 1, 1] }
 predicted_bytes = 41943040
 estimator_source = "static"
 
@@ -35,7 +38,7 @@ estimator_source = "static"
 [[timing_shapes]]
 name = "correctness_calibration"
 axes = { rows = 32, hidden = 512 }
-launch_config = { grid = [32, 1, 1], block = [128, 1, 1] }
+launch_config = { grid = [32, 1, 1], block = [256, 1, 1] }
 # Larger sample size than the standard timing shapes so the calibrated
 # tolerance captures the laptop's DVFS-induced timing tail. The
 # correctness_calibration shape is consumed only by the calibration
@@ -59,19 +62,19 @@ repeat_iters = 100
 [[timing_shapes]]
 name = "joined_ac8_evidence"
 axes = { rows = 256, hidden = 1024 }
-launch_config = { grid = [32, 1, 1], block = [128, 1, 1] }
+launch_config = { grid = [256, 1, 1], block = [256, 1, 1] }
 warm_up_iters = 5
 repeat_iters = 30
 
 [[trace_shapes]]
 name = "joined_ac8_evidence"
 axes = { rows = 256, hidden = 1024 }
-launch_config = { grid = [32, 1, 1], block = [128, 1, 1] }
+launch_config = { grid = [256, 1, 1], block = [256, 1, 1] }
 predicted_bytes = 41943040
 estimator_source = "static"
 
 [[correctness_shapes]]
 name = "correctness_00"
 axes = { rows = 32, hidden = 512 }
-launch_config = { grid = [32, 1, 1], block = [128, 1, 1] }
+launch_config = { grid = [32, 1, 1], block = [256, 1, 1] }
 digest_kind = "full_tensor"

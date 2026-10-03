@@ -1,0 +1,278 @@
+{
+  "schema": "sm86_c7_simbench_rmsnorm_fwd_bf16_direct_live_v1",
+  "status": "correctness_trace_replay_ncu_complete_native_dispatch_refused",
+  "host_observation": "0, NVIDIA GeForce RTX 3090 Ti, GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c, 8.6, 615.71.09",
+  "host_identity": {
+    "device_index": 0,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "compute_capability": "8.6",
+    "driver": "615.71.09",
+    "pstate": "P0",
+    "graphics_clock_mhz": 1350,
+    "memory_clock_mhz": 10501
+  },
+  "identity": {
+    "source": "workloads/simbench_bw/l2/rmsnorm_fwd_bf16",
+    "binary": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s30_rmsnorm_20261003/rmsnorm_fwd_bf16_run",
+    "binary_sha256": "80b0f7bdeb730a7d4b23ae635d47560c265fa5b05befab792d18b61fa527a4d1",
+    "control": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s30_rmsnorm_20261003/control.json",
+    "control_sha256": "732410397127664b6b67231c5b7461df946e30e3fff97c24b1ecb1f80f50db8f",
+    "trace": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s30_rmsnorm_20261003/trace",
+    "trace_stats": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s30_rmsnorm_20261003/trace/stats.csv",
+    "args": [
+      "--rows",
+      "1024",
+      "--hidden",
+      "4096",
+      "--shape-point",
+      "timing_00",
+      "--seed",
+      "42",
+      "--summary"
+    ],
+    "kernel": "rmsnorm_fwd_bf16_kernel",
+    "metric": "gpc__cycles_elapsed.max",
+    "ncu_repeats": 5,
+    "ncu_cache": "all",
+    "ncu_clock": "none",
+    "replay_mode": "application",
+    "launch_skip": 0,
+    "launch_count": 1,
+    "shape_metadata": "workloads/simbench_bw/shapes/rmsnorm_fwd_bf16.toml"
+  },
+  "correctness": {
+    "status": "passed",
+    "correct": true,
+    "shape_point": "timing_00",
+    "rows": 1024,
+    "hidden": 4096,
+    "threads": 256,
+    "mismatch_count": 0,
+    "max_abs_error": 0.00781236828,
+    "max_relative_error": 0.00389074756,
+    "validation": "host BF16-input double-reference comparison with per-element BF16-relative tolerance after launch/error handling",
+    "memcheck": "compute-sanitizer memcheck passed with 0 errors"
+  },
+  "trace": {
+    "stats": {
+      "device_id": 0,
+      "stream_id": 7,
+      "kernel id": "kernel-1.trace",
+      "kernel mangled name": "rmsnorm_fwd_bf16_kernel",
+      "grid_dimX": 1024,
+      "grid_dimY": 1,
+      "grid_dimZ": 1,
+      "#blocks": 1024,
+      "block_dimX": 256,
+      "block_dimY": 1,
+      "block_dimZ": 1,
+      "#threads": 256,
+      "total_insts": 11673600,
+      "total_reported_insts": 11673600
+    },
+    "records_replayed": 4235264,
+    "warp_instructions_replayed": 4235264,
+    "independent_tail_facts": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s30_rmsnorm_20261003/tail_facts.json"
+  },
+  "simulator": {
+    "records": 4235264,
+    "instructions": 4235264,
+    "completion_lower_bound_cycles": 43214,
+    "completion_status": "incomplete_unmodeled_retirement_tails",
+    "unmodeled_tails": {
+      "reduction_read_modify_write": false,
+      "dirty_writeback": true,
+      "coherence": true,
+      "async_copy_shared_visibility": false
+    },
+    "gpc_observation_frontier": {
+      "lower_bound_cycles": 43214,
+      "envelope_cycles": 1856,
+      "grid_blocks": 1024,
+      "grid_log2": 10,
+      "cycles": 45070,
+      "role": "architecture_scoped_gpc_observation_boundary_not_timing_crosswalk"
+    },
+    "l1": {
+      "hits": 398126,
+      "misses": 388306,
+      "merges": 317167,
+      "pending_lookup_hits": 0,
+      "stall_events": 0,
+      "line_fills": 71139,
+      "bypass_sectors": 0,
+      "store_sectors": 262144,
+      "store_hits": 0,
+      "store_tag_hits": 0,
+      "write_lookup_hits": 131072,
+      "reduction_sectors": 0
+    },
+    "l2": {
+      "hits": 196608,
+      "misses": 350092,
+      "lookup_hits": 284280,
+      "lookup_requests": 546700,
+      "line_misses": 131141,
+      "sector_fill_misses": 218951,
+      "write_tag_hits": 196608
+    },
+    "dram": {
+      "read_sectors": 262420,
+      "bandwidth_delayed_responses": 0,
+      "l2_evicted_lines": 81989,
+      "l2_evicted_valid_sectors": 327956,
+      "l2_dirty_eviction_lines": 32256,
+      "l2_dirty_evicted_sectors": 129024,
+      "maximum_terminal_l2_dirty_lines": 33280,
+      "maximum_terminal_l2_dirty_sectors": 133120
+    }
+  },
+  "fast_frontier": {
+    "device_id": 0,
+    "stream_id": 7,
+    "kernel_id": 1,
+    "function_unique_id": 1,
+    "kernel_name": "rmsnorm_fwd_bf16_kernel___0",
+    "summary": {
+      "contract": "sm86_fast_exact_scalar_regions_v1",
+      "architecture": "sm_86",
+      "blocks_seen": 1024,
+      "warps_seen": 8192,
+      "eligible_warps": 0,
+      "candidate_regions": 0,
+      "certified_regions": 0,
+      "reified_regions": 0,
+      "candidate_instructions": 0,
+      "collapsed_instructions": 0,
+      "exact_execution_steps": 0,
+      "summarized_execution_steps": 0,
+      "macro_dispatches": 0,
+      "maximum_exact_final_cycle": 0,
+      "maximum_summarized_final_cycle": 0,
+      "terminal_state_matches": true,
+      "coverage": {
+        "trace_records": 4235264,
+        "candidate_records": 0,
+        "summarized_records": 0,
+        "reified_records": 0,
+        "uncovered_records": 4235264
+      },
+      "refusal_reasons": {
+        "nonfull_predicate_population": 8192
+      }
+    }
+  },
+  "tail_facts": {
+    "records": 4235264,
+    "memory_records": 737280,
+    "stores": 151552,
+    "atomics": 0,
+    "cross_sm_line_topology": 64,
+    "address_operands_unknown": 0,
+    "hardware_completion_token_observed": false,
+    "global_event_order_observed": false
+  },
+  "ncu": {
+    "metric": "gpc__cycles_elapsed.max",
+    "values": [
+      48453.0,
+      48106.0,
+      48931.0,
+      50179.0,
+      48481.0
+    ],
+    "median": 48481.0,
+    "min": 48106.0,
+    "max": 50179.0,
+    "stdev": 809.0284296611585,
+    "rows": [
+      {
+        "ID": 0,
+        "Kernel Name": "rmsnorm_fwd_bf16_kernel",
+        "Grid Size": "(1024, 1, 1)",
+        "Block Size": "(256, 1, 1)",
+        "Device": 0,
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 48453.0,
+        "gpu__time_duration.sum": 35904.0,
+        "sm__cycles_active.max": 46486.0,
+        "smsp__inst_executed.sum": 4235264.0,
+        "dram__sectors_read.sum": 269276.0,
+        "dram__sectors_write.sum": 233760.0,
+        "lts__t_sectors_srcunit_tex_lookup_hit.sum": 316232.0
+      },
+      {
+        "ID": 0,
+        "Kernel Name": "rmsnorm_fwd_bf16_kernel",
+        "Grid Size": "(1024, 1, 1)",
+        "Block Size": "(256, 1, 1)",
+        "Device": 0,
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 48106.0,
+        "gpu__time_duration.sum": 35648.0,
+        "sm__cycles_active.max": 46178.0,
+        "smsp__inst_executed.sum": 4235264.0,
+        "dram__sectors_read.sum": 267804.0,
+        "dram__sectors_write.sum": 240576.0,
+        "lts__t_sectors_srcunit_tex_lookup_hit.sum": 310256.0
+      },
+      {
+        "ID": 0,
+        "Kernel Name": "rmsnorm_fwd_bf16_kernel",
+        "Grid Size": "(1024, 1, 1)",
+        "Block Size": "(256, 1, 1)",
+        "Device": 0,
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 48931.0,
+        "gpu__time_duration.sum": 36288.0,
+        "sm__cycles_active.max": 47010.0,
+        "smsp__inst_executed.sum": 4235264.0,
+        "dram__sectors_read.sum": 270240.0,
+        "dram__sectors_write.sum": 236944.0,
+        "lts__t_sectors_srcunit_tex_lookup_hit.sum": 315832.0
+      },
+      {
+        "ID": 0,
+        "Kernel Name": "rmsnorm_fwd_bf16_kernel",
+        "Grid Size": "(1024, 1, 1)",
+        "Block Size": "(256, 1, 1)",
+        "Device": 0,
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 50179.0,
+        "gpu__time_duration.sum": 37184.0,
+        "sm__cycles_active.max": 48249.0,
+        "smsp__inst_executed.sum": 4235264.0,
+        "dram__sectors_read.sum": 269776.0,
+        "dram__sectors_write.sum": 234112.0,
+        "lts__t_sectors_srcunit_tex_lookup_hit.sum": 313206.0
+      },
+      {
+        "ID": 0,
+        "Kernel Name": "rmsnorm_fwd_bf16_kernel",
+        "Grid Size": "(1024, 1, 1)",
+        "Block Size": "(256, 1, 1)",
+        "Device": 0,
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 48481.0,
+        "gpu__time_duration.sum": 35936.0,
+        "sm__cycles_active.max": 46594.0,
+        "smsp__inst_executed.sum": 4235264.0,
+        "dram__sectors_read.sum": 269832.0,
+        "dram__sectors_write.sum": 239868.0,
+        "lts__t_sectors_srcunit_tex_lookup_hit.sum": 314004.0
+      }
+    ]
+  },
+  "comparison": {
+    "hardware_completion": "not_observed",
+    "native_macro_dispatches": 0,
+    "lower_bound_cycles": 43214,
+    "ncu_median_cycles": 48481.0,
+    "lower_bound_consistency": true,
+    "gap_cycles": 5267.0,
+    "gap_fraction": 0.1086404983395557,
+    "point_estimator": "not_claimed"
+  },
+  "interpretation": "The repaired rmsnorm_fwd_bf16 timing-shape binary uses one 256-thread block per row at rows=1024, hidden=4096, passes host BF16-reference validation with zero mismatches and zero Compute Sanitizer errors. Fresh NVBit covers all 1024 blocks; replay has 4235264 warp records and NCU reports the same 4235264. Five same-binary application-replay NCU captures use cache-control=all and clock-control=none; gpc cycles are 48453,48106,48931,50179,48481 (median 48481). Simulator completion lower bound is 43214, below the NCU median, so lower-bound consistency is true; dirty-writeback and coherence tails remain open, fast-frontier candidates and native macro dispatch remain zero. This is a live direct timing-shape slice, not a point-accuracy or speedup claim."
+}

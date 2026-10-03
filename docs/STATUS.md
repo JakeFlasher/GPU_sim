@@ -242,7 +242,7 @@ open dirty-writeback/coherence tails; no native macro dispatch was requested.
 
 The C7 inventory lists 15 portable rows, 31 SM86-capable rows among 92
 SimBench rows, 34 research-probe directories, and 203 SOL baseline problems.
-Portable timing paths and twenty-four direct SimBench slices have completed:
+Portable timing paths and twenty-five direct SimBench slices have completed:
 `fp32_fma_dep_chain`, `cp_async_shared_tile_copy`, `global_atomic_histogram`,
 `global_vectorized_128b_copy`, `bf16_hmma_gemm_traceable`,
 `global_scalar_32b_copy`, `global_atomic_return_used`,
@@ -250,9 +250,9 @@ Portable timing paths and twenty-four direct SimBench slices have completed:
 `shared_bank_conflict_stride`, `l2_thrash_pointer_chase`,
 `l2_persisting_window_sweep`, `l2_prefetch_hint_sweep`, and
 `warm_cold_pair_relaunch`, and
-`carveout_sensitivity_probe`, and `working_set_capacity_sweep`, and `dram_stream_stride_mix`, and `local_dynamic_index_array`, and `local_volatile_array`, `register_spill_local_mem`, and `global_atomic_max_histogram`, and `global_atomic_max_return_used`. These check outputs at the captured shape; the FP32
+`carveout_sensitivity_probe`, and `working_set_capacity_sweep`, and `dram_stream_stride_mix`, and `local_dynamic_index_array`, and `local_volatile_array`, `register_spill_local_mem`, and `global_atomic_max_histogram`, and `global_atomic_max_return_used`, and `rmsnorm_fwd_bf16`. These check outputs at the captured shape; the FP32
 direct slice is timing-only (its separate correctness-shape run does not
-validate that captured shape). All twenty-four retain open tails and zero native
+validate that captured shape). All twenty-five retain open tails and zero native
 macro dispatch. The inventory is
 `docs/sm86_c7_workload_population_inventory_v1.json`.
 
@@ -265,11 +265,22 @@ blocks with 297,600 warp instructions, and five NCU gpc-cycle values are
 so lower-bound consistency is true; dirty-writeback/coherence and native
 dispatch remain open.
 
+The full-shape `rmsnorm_fwd_bf16` slice is recorded in
+`docs/sm86_c7_simbench_rmsnorm_fwd_bf16_direct_live_v1.json`. Its repaired
+driver validates BF16 inputs element-by-element, uses one 256-thread block per
+row, and has explicit OOM/OOD/launch checks. The `rows=1024, hidden=4096`
+capture passes Compute Sanitizer; NVBit/replay cover 1,024 blocks with
+4,235,264 warp instructions, and five NCU gpc-cycle values are
+48453/48106/48931/50179/48481 (median 48481). The simulator lower is 43214,
+so lower-bound consistency is true; dirty-writeback/coherence and native
+dispatch remain open.
+
 Two tensor rows (INT8 IMMA and TF32 HMMA) pass host correctness, NVBit, and NCU
 but are blocked before simulator timing because their SM86 pipeline models are
-missing. Three L2 rows remain real lower-bound falsifiers: pointer chase
-(59,545 vs NCU median 49,580), persisting window (31,173 vs 29,846 after the
-sink repair), and prefetch hint (46,874 vs 40,598). The prefetch binary emits
+missing. Ten memory/control rows remain real lower-bound falsifiers; three L2
+examples are pointer chase (59,545 vs NCU median 49,580), persisting window
+(31,173 vs 29,846 after the sink repair), and prefetch hint (46,874 vs
+40,598). The prefetch binary emits
 five static `CCTL.E.PF2` instructions; cache effect and completion remain
 unobservable. The corrected shared-bank shape uses SM86 dynamic shared-memory
 opt-in (65,536 bytes against default 49,152 and opt-in 101,376), superseding
