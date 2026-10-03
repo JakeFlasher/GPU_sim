@@ -338,15 +338,17 @@ sectors but retains dirty-writeback/coherence uncertainty and an open observer
 upper. Prior finite-upper claims are withdrawn. C1-R is now active: recapture
 matched async/fence cases with fresh controls and exact launch selection.
 
-2026-10-03 continuation: C2's observed-fact extractor is now deterministic and
-reports raw dynamic order edges, static opcode joins, fence/async protocol
-counts, and explicit absence of global instrumentation order. The cacheable
-LDGSTS source-return ledger was repaired to charge one service token per
-coalesced warp instruction rather than per sector. Focused Rust tests pass; a
-fresh release replay of the captured group sweep terminates and retains the
-same open writeback/coherence tails. The repair is a live mechanism result,
-not a tuned NCU fit: group-128 remains 46,978 modeled cycles versus NCU median
-38,348, so C3 remains active for source/destination scheduling and completion
-semantics. Next seam: independently validate the repaired source/destination
-decomposition on a new source-only live capture before any further timing
-change, then exercise fence/visibility service perturbations.
+2026-10-03 continuation: C2's extractor is now independent of the replay
+validator and reports compressed-address reconstruction, launch-scoped
+topology, raw dynamic order edges, static opcode joins, and logical async
+copy/commit/wait prefix facts. The cacheable LDGSTS source-return ledger was
+repaired to charge one service token per coalesced warp instruction rather than
+per sector. Fresh source-only compact/conflict/severe captures show a
+4,070-cycle NCU layout delta versus a 4,096-cycle model delta; the severe
+holdout interval covers its five NCU repeats. A corrected phase probe checks
+its data token independently. A real scalar fixed-latency trace remains
+negative (zero candidates/native dispatch; 47.5% low on matched NCU), while
+the full 15-row portable C7 live pipeline completes with 75 NCU captures,
+15 NVBit traces, and 30 simulator replays. C3/C4/C5 remain partial: tails,
+absolute endpoint bias, native selective dispatch, and non-portable populations
+are still open.
