@@ -892,10 +892,22 @@ real DRAM-stream falsifier, not a point-error score or tuning target. Tails
 remain open and native dispatch is zero. Evidence:
 `docs/sm86_c7_simbench_dram_stream_stride_mix_direct_live_v1.json`.
 
-### C7-S24 — next active milestone
+### C7-S24 — local dynamic-index slice — complete
 
-Run one additional unrun SM86 SimBench row from the remaining memory/control
-population (prefer local_dynamic_index_array or register_spill_local_mem).
-Preserve checked correctness, exact binary/arguments, fresh NVBit, replay, and
+The repaired local_dynamic_index_array binary passes host identity-output checks
+at samples=1024,bins=64, exposes STL.128/LDL local traffic in SASS, and
+completes fresh NVBit, replay, and five NCU captures. Replay has full one-block
+coverage and 72,655 records; NCU reports the same 72,655 warp instructions.
+NCU gpc cycles are 1243158,1244664,1244381,1243032,1243714 (median 1243714),
+while simulator lower is 1443183: lower-bound consistency is false by 199,469
+cycles (16.04%). This is a real local-memory falsifier; tails remain open and
+native dispatch is zero. Evidence:
+`docs/sm86_c7_simbench_local_dynamic_index_array_direct_live_v1.json`.
+
+### C7-S25 — next active milestone
+
+Run one additional unrun SM86 SimBench row from the remaining local/control
+population (prefer local_volatile_array or register_spill_local_mem). Preserve
+checked correctness, exact binary/arguments, fresh NVBit, replay, and
 five-repetition NCU; retain every unsupported-SASS, OOM/OOD, or falsifying
 outcome without tuning scored parameters.

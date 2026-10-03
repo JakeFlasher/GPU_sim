@@ -353,7 +353,7 @@ not requested.
 
 The C7 inventory lists 15 portable rows, 31 SM86-capable rows among 92
 SimBench rows, 34 research-probe directories, and 203 SOL baseline problems.
-Portable timing paths and eighteen direct SimBench slices have completed:
+Portable timing paths and nineteen direct SimBench slices have completed:
 `fp32_fma_dep_chain`, `cp_async_shared_tile_copy`, `global_atomic_histogram`,
 `global_vectorized_128b_copy`, `bf16_hmma_gemm_traceable`,
 `global_scalar_32b_copy`, `global_atomic_return_used`,
@@ -361,9 +361,9 @@ Portable timing paths and eighteen direct SimBench slices have completed:
 `shared_bank_conflict_stride`, `l2_thrash_pointer_chase`,
 `l2_persisting_window_sweep`, `l2_prefetch_hint_sweep`, and
 `warm_cold_pair_relaunch`, and
-`carveout_sensitivity_probe`, and `working_set_capacity_sweep`, and `dram_stream_stride_mix`. These check outputs at the captured shape; the FP32
+`carveout_sensitivity_probe`, and `working_set_capacity_sweep`, and `dram_stream_stride_mix`, and `local_dynamic_index_array`. These check outputs at the captured shape; the FP32
 direct slice is timing-only (its separate correctness-shape run does not
-validate that captured shape). All eighteen retain open tails and zero native
+validate that captured shape). All nineteen retain open tails and zero native
 macro dispatch. The inventory is
 `docs/sm86_c7_workload_population_inventory_v1.json`.
 
@@ -404,6 +404,8 @@ C7-S22 working-set capacity is complete: the repaired anchor identity checks
 pass at a 1MiB working set, replay/NCU match at 789,888 instructions, and
 simulator lower 143,555 exceeds NCU median 129,756 by 13,799 cycles (10.63%).
 See `docs/sm86_c7_simbench_working_set_capacity_sweep_direct_live_v1.json`.
+
+C7-S24 local dynamic-index is complete: STL/LDL local traffic is exposed, replay/NCU match at 72,655 instructions, and simulator lower 1,443,183 exceeds NCU median 1,243,714 by 199,469 cycles (16.04%). See `docs/sm86_c7_simbench_local_dynamic_index_array_direct_live_v1.json`.
 
 C7-S23 DRAM stream stride is complete: replay/NCU match at 1,716,864
 instructions, while simulator lower 550,005 exceeds NCU median 419,040 by

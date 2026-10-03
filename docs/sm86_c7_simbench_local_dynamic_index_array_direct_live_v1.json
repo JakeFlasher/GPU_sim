@@ -1,0 +1,226 @@
+{
+  "schema": "sm86_c7_simbench_local_dynamic_index_array_direct_live_v1",
+  "status": "correctness_trace_replay_ncu_complete_native_dispatch_refused",
+  "host_observation": "0, NVIDIA GeForce RTX 3090 Ti, GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c, 8.6, 615.71.09",
+  "host_identity": {
+    "device_index": 0,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "compute_capability": "8.6",
+    "driver": "615.71.09",
+    "pstate": "P0",
+    "graphics_clock_mhz": 1350,
+    "memory_clock_mhz": 10501
+  },
+  "identity": {
+    "source": "workloads/simbench_bw/l1/local_dynamic_index_array",
+    "binary": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s24_local_20261003/local_dynamic_index_array_run",
+    "binary_sha256": "8f59a7f1a0029697a9630e6db650cadd4b4a8b9fd2e274cc49b631c3e54016d8",
+    "control": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s24_local_20261003/control.json",
+    "control_sha256": "4dbff7c87283493291e21b5341bc07170c5235db672aeffaec61bd89927921a7",
+    "trace": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s24_local_20261003/trace",
+    "trace_stats": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s24_local_20261003/trace/stats.csv",
+    "args": [
+      "--samples",
+      "1024",
+      "--bins",
+      "64",
+      "--seed",
+      "42",
+      "--shape-point",
+      "trace_00",
+      "--summary"
+    ],
+    "kernel": "local_dynamic_index_array_kernel",
+    "metric": "gpc__cycles_elapsed.max",
+    "ncu_repeats": 5,
+    "ncu_cache": "all",
+    "ncu_clock": "none"
+  },
+  "correctness": {
+    "status": "passed",
+    "correct": true,
+    "shape_point": "trace_00",
+    "mismatch_count": 0,
+    "validation": "host identity output checked after launch/error handling"
+  },
+  "trace": {
+    "stats": {
+      "device_id": 0,
+      "stream_id": 7,
+      "kernel id": "kernel-1.trace",
+      "kernel mangled name": "local_dynamic_index_array_kernel",
+      "grid_dimX": 1,
+      "grid_dimY": 1,
+      "grid_dimZ": 1,
+      "#blocks": 1,
+      "block_dimX": 32,
+      "block_dimY": 1,
+      "block_dimZ": 1,
+      "#threads": 32,
+      "total_insts": 206723,
+      "total_reported_insts": 206723
+    },
+    "records_replayed": 72655,
+    "independent_tail_facts": "/home/jakeshea/GPU_simulator_rebase/results/alpha/c7_s24_local_20261003/tail_facts.json"
+  },
+  "simulator": {
+    "records": 72655,
+    "instructions": 72655,
+    "completion_lower_bound_cycles": 1443183,
+    "completion_status": "incomplete_unmodeled_retirement_tails",
+    "unmodeled_tails": {
+      "reduction_read_modify_write": false,
+      "dirty_writeback": true,
+      "coherence": true,
+      "async_copy_shared_visibility": false
+    },
+    "gpc_observation_frontier": {
+      "lower_bound_cycles": 1443183,
+      "envelope_cycles": 1776,
+      "grid_blocks": 1,
+      "grid_log2": 0,
+      "cycles": 1444959,
+      "role": "architecture_scoped_gpc_observation_boundary_not_timing_crosswalk"
+    }
+  },
+  "fast_frontier": {
+    "device_id": 0,
+    "stream_id": 7,
+    "kernel_id": 1,
+    "function_unique_id": 1,
+    "kernel_name": "local_dynamic_index_array_kernel___0",
+    "summary": {
+      "contract": "sm86_fast_exact_scalar_regions_v1",
+      "architecture": "sm_86",
+      "blocks_seen": 1,
+      "warps_seen": 1,
+      "eligible_warps": 0,
+      "candidate_regions": 0,
+      "certified_regions": 0,
+      "reified_regions": 0,
+      "candidate_instructions": 0,
+      "collapsed_instructions": 0,
+      "exact_execution_steps": 0,
+      "summarized_execution_steps": 0,
+      "macro_dispatches": 0,
+      "maximum_exact_final_cycle": 0,
+      "maximum_summarized_final_cycle": 0,
+      "terminal_state_matches": true,
+      "coverage": {
+        "trace_records": 72655,
+        "candidate_records": 0,
+        "summarized_records": 0,
+        "reified_records": 0,
+        "uncovered_records": 72655
+      },
+      "refusal_reasons": {
+        "nonfull_predicate_population": 1
+      }
+    }
+  },
+  "tail_facts": {
+    "records": 72655,
+    "memory_records": 16465,
+    "cross_sm_line_topology": 0,
+    "hardware_completion_token_observed": false,
+    "global_event_order_observed": false
+  },
+  "ncu": {
+    "metric": "gpc__cycles_elapsed.max",
+    "values": [
+      1243158.0,
+      1244664.0,
+      1244381.0,
+      1243032.0,
+      1243714.0
+    ],
+    "median": 1243714.0,
+    "min": 1243032.0,
+    "max": 1244664.0,
+    "stdev": 723.3465282974682,
+    "rows": [
+      {
+        "ID": "0",
+        "Kernel Name": "local_dynamic_index_array_kernel",
+        "Grid Size": "(1, 1, 1)",
+        "Block Size": "(32, 1, 1)",
+        "Device": "0",
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 1243158.0,
+        "gpu__time_duration.sum": 920.896,
+        "sm__cycles_active.max": 1241368.0,
+        "smsp__inst_executed.sum": 72655.0,
+        "dram__sectors_read.sum": 8868.0,
+        "dram__sectors_write.sum": 1556.0
+      },
+      {
+        "ID": "0",
+        "Kernel Name": "local_dynamic_index_array_kernel",
+        "Grid Size": "(1, 1, 1)",
+        "Block Size": "(32, 1, 1)",
+        "Device": "0",
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 1244664.0,
+        "gpu__time_duration.sum": 922.016,
+        "sm__cycles_active.max": 1242852.0,
+        "smsp__inst_executed.sum": 72655.0,
+        "dram__sectors_read.sum": 100304.0,
+        "dram__sectors_write.sum": 1360.0
+      },
+      {
+        "ID": "0",
+        "Kernel Name": "local_dynamic_index_array_kernel",
+        "Grid Size": "(1, 1, 1)",
+        "Block Size": "(32, 1, 1)",
+        "Device": "0",
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 1244381.0,
+        "gpu__time_duration.sum": 921.792,
+        "sm__cycles_active.max": 1242571.0,
+        "smsp__inst_executed.sum": 72655.0,
+        "dram__sectors_read.sum": 19204.0,
+        "dram__sectors_write.sum": 344.0
+      },
+      {
+        "ID": "0",
+        "Kernel Name": "local_dynamic_index_array_kernel",
+        "Grid Size": "(1, 1, 1)",
+        "Block Size": "(32, 1, 1)",
+        "Device": "0",
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 1243032.0,
+        "gpu__time_duration.sum": 920.8,
+        "sm__cycles_active.max": 1241255.0,
+        "smsp__inst_executed.sum": 72655.0,
+        "dram__sectors_read.sum": 15300.0,
+        "dram__sectors_write.sum": 3372.0
+      },
+      {
+        "ID": "0",
+        "Kernel Name": "local_dynamic_index_array_kernel",
+        "Grid Size": "(1, 1, 1)",
+        "Block Size": "(32, 1, 1)",
+        "Device": "0",
+        "CC": "8.6",
+        "gpc__cycles_elapsed.max": 1243714.0,
+        "gpu__time_duration.sum": 921.344,
+        "sm__cycles_active.max": 1241947.0,
+        "smsp__inst_executed.sum": 72655.0,
+        "dram__sectors_read.sum": 18804.0,
+        "dram__sectors_write.sum": 244.0
+      }
+    ]
+  },
+  "comparison": {
+    "hardware_completion": "not_observed",
+    "native_macro_dispatches": 0,
+    "lower_bound_cycles": 1443183,
+    "ncu_median_cycles": 1243714.0,
+    "lower_bound_consistency": false,
+    "gap_cycles": 199469.0,
+    "gap_fraction": 0.16038172763191538,
+    "point_estimator": "not_claimed"
+  },
+  "interpretation": "The repaired local-dynamic-index binary passes host identity-output checks at samples=1024,bins=64, produces fresh NVBit/replay/five-NCU evidence, and exposes LDL/STL local traffic in SASS. Replay has full one-block coverage and 72,655 records; NCU reports the same 72,655 warp instructions. NCU gpc cycles are 1243158,1244664,1244381,1243032,1243714 (median 1243714), while simulator lower is 1443183: lower-bound consistency is false by 199469 cycles (16.04%). This is a real local-memory lower-bound falsifier; dirty-writeback/coherence tails remain open and native dispatch is zero."
+}
