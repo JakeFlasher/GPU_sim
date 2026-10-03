@@ -1,0 +1,149 @@
+{
+  "schema": "sm86_c7_memory_retirement_system_fence_crosswalk_diagnostic_v1",
+  "status": "observed_metric_crosswalk_mismatch_not_resolved",
+  "host_identity": {
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "compute_capability": "8.6",
+    "driver": "615.71.09"
+  },
+  "binary": "workloads/research_probes/memory_retirement_service/memory_retirement_service_trace",
+  "matched_args": {
+    "control": [
+      "control",
+      "none",
+      "line_stream",
+      "1",
+      "16",
+      "32",
+      "1"
+    ],
+    "system_fence": [
+      "control",
+      "system",
+      "line_stream",
+      "1",
+      "16",
+      "32",
+      "1"
+    ]
+  },
+  "ncu_metric_surface": {
+    "metric": "smsp__inst_executed.sum",
+    "single_capture_each": true,
+    "cache_control": "all",
+    "clock_control": "none",
+    "replay_mode": "application",
+    "observations": {
+      "smsp__inst_executed.sum": {
+        "control": 1101.0,
+        "system_fence": 1113.0,
+        "delta": 12.0
+      },
+      "smsp__inst_executed_pipe_alu.sum": {
+        "control": 548.0,
+        "system_fence": 550.0,
+        "delta": 2.0
+      },
+      "smsp__inst_executed_pipe_fma.sum": {
+        "control": 276.0,
+        "system_fence": 276.0,
+        "delta": 0.0
+      },
+      "smsp__inst_executed_pipe_lsu.sum": {
+        "control": 2.0,
+        "system_fence": 7.0,
+        "delta": 5.0
+      },
+      "smsp__inst_executed_pipe_cbu.sum": {
+        "control": 1.0,
+        "system_fence": 1.0,
+        "delta": 0.0
+      },
+      "smsp__inst_executed_pipe_uniform.sum": {
+        "control": 0.0,
+        "system_fence": 0.0,
+        "delta": 0.0
+      },
+      "smsp__inst_executed_pipe_xu.sum": {
+        "control": 0.0,
+        "system_fence": 0.0,
+        "delta": 0.0
+      },
+      "smsp__inst_executed_pipe_ipa.sum": {
+        "control": 0.0,
+        "system_fence": 0.0,
+        "delta": 0.0
+      },
+      "smsp__inst_executed_pipe_tex.sum": {
+        "control": 0.0,
+        "system_fence": 1.0,
+        "delta": 1.0
+      },
+      "smsp__inst_executed_op_branch.sum": {
+        "control": 274.0,
+        "system_fence": 276.0,
+        "delta": 2.0
+      },
+      "smsp__inst_executed_op_global_ld.sum": {
+        "control": 0.0,
+        "system_fence": 0.0,
+        "delta": 0.0
+      },
+      "smsp__inst_executed_op_global_st.sum": {
+        "control": 0.0,
+        "system_fence": 1.0,
+        "delta": 1.0
+      },
+      "smsp__inst_executed_op_global_red.sum": {
+        "control": 0.0,
+        "system_fence": 0.0,
+        "delta": 0.0
+      },
+      "smsp__inst_executed_op_shared_st.sum": {
+        "control": 1.0,
+        "system_fence": 1.0,
+        "delta": 0.0
+      },
+      "smsp__inst_executed_op_shared_ld.sum": {
+        "control": 0.0,
+        "system_fence": 0.0,
+        "delta": 0.0
+      }
+    }
+  },
+  "independent_trace_surface": {
+    "b1_control_none_line_stream_d16_l32": {
+      "records": 1101,
+      "opcode_heads": {
+        "BRA": 273,
+        "EXIT": 1,
+        "IADD3": 272,
+        "IMAD": 276,
+        "ISETP": 273,
+        "LOP3": 1,
+        "MOV": 2,
+        "S2R": 2,
+        "STS": 1
+      }
+    },
+    "b1_control_system_line_stream_d16_l32": {
+      "records": 1104,
+      "opcode_heads": {
+        "BRA": 273,
+        "CCTL": 1,
+        "ERRBAR": 1,
+        "EXIT": 1,
+        "IADD3": 272,
+        "IMAD": 276,
+        "ISETP": 273,
+        "LOP3": 1,
+        "MEMBAR": 1,
+        "MOV": 2,
+        "S2R": 2,
+        "STS": 1
+      }
+    }
+  },
+  "interpretation": "The system-fence binary adds three visible SASS instructions in NVBit (MEMBAR, ERRBAR, CCTL), but NCU reports twelve additional warp-instruction executions relative to the no-fence control. Pipe/op counters show deltas in branch, ALU, LSU, texture, and global-store categories rather than a single visible opcode. This is an NCU-versus-trace metric-semantics/counter-replay mismatch; no simulator padding or hidden instruction synthesis is applied, and the eight affected matrix rows remain crosswalk exclusions."
+}

@@ -22,12 +22,14 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    `docs/sm86_c7_simbench_dram_streaming_dot_product_direct_live_v1.json`;
    the former tiny `trace_00` run is only a smoke check.
    [Ampere shared memory](https://docs.nvidia.com/cuda/ampere-tuning-guide/#unified-shared-memory-l1-texture-cache)
-3. **C7-S33K complete; C7-S33L active.** All four probe families sampled so
+3. **C7-S33L diagnostic complete; C7-S33M active.** All four probe families sampled so
    far have live evidence: 68 issue-port cells, 36 async-barrier cells, 30
    store-ack arms, and 102 memory-retirement cells. CCTL pending-fill replay
    blockers are repaired; eight system-fence instruction crosswalk mismatches
-   remain. Investigate those mismatches before expanding to another family; no
-   timing/card parameter is selected from scored NCU targets.
+   remain and are now characterized as an NCU-versus-trace counter mismatch.
+   Preserve those exclusions while testing one independent instruction-count
+   crosswalk hypothesis; no timing/card parameter is selected from scored NCU
+   targets.
 
 ## Outcome
 
@@ -1143,10 +1145,25 @@ frontier. Focused sim-mem/sim-sm tests pass (199 + 493 tests), and all four
 previous CCTL replay blockers now complete. No invented completion token or
 upper bound was added.
 
-### C7-S33L — next active milestone
+### C7-S33L — system-fence crosswalk diagnostic — complete
 
 Investigate the eight system-fence NCU/replay instruction-count mismatches.
-Compare static/dynamic opcode populations and NCU metric semantics first; do
-not pad simulator records or reinterpret NCU values. Either establish a
-matched instruction identity contract or retain those rows as explicit
-crosswalk exclusions before expanding another probe family.
+Static/dynamic opcode populations and NCU pipe/op counters were compared on a
+matched no-fence/system-fence pair. NVBit adds three visible SASS instructions
+(`MEMBAR`, `ERRBAR`, `CCTL`), while NCU reports twelve additional warp
+instructions and deltas across branch/ALU/LSU/texture/global-store counters.
+This is an unresolved NCU-versus-trace metric-semantics/counter-replay
+mismatch; simulator padding and hidden-instruction synthesis are explicitly
+rejected. Diagnostic evidence:
+`docs/sm86_c7_memory_retirement_system_fence_crosswalk_diagnostic_v1.json` and
+its schema. The eight rows remain crosswalk exclusions until an independent
+instruction-identity explanation is found.
+
+### C7-S33M — next active milestone
+
+Run one independent crosswalk check using a profiler metric that can be
+reconciled to the traced SASS population (for example a per-op SASS surface or
+source mapping), without using the NCU total as a simulator input. If the
+counter still includes fence micro-operations absent from NVBit records,
+retain the typed exclusion and proceed to the next probe family rather than
+inventing hidden trace instructions.
