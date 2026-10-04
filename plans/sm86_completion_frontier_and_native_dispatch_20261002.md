@@ -22,7 +22,7 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    `docs/sm86_c7_simbench_dram_streaming_dot_product_direct_live_v1.json`;
    the former tiny `trace_00` run is only a smoke check.
    [Ampere shared memory](https://docs.nvidia.com/cuda/ampere-tuning-guide/#unified-shared-memory-l1-texture-cache)
-3. **C7-S33AF active.** Nine probe families now have live
+3. **C7-S33AG active.** Nine probe families now have live
    evidence: 68 issue-port cells, 36 async-barrier cells, 30 store-ack arms,
    102 memory-retirement cells, 33 barrier-pipeline cells, 100 l1tex-admission
    cells, one l2-queue warmup/target cell, one l1tex-arrival store cell, and
@@ -41,12 +41,13 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    lower-bound-consistent NCU slice. C7-S33AB completed the matched bank3 arm;
    the distance-1 layout differential is negligible. C7-S33AC completed the held-out distance-2 pair; its bank3 differential is
    retained as a mechanism-local observation. C7-S33AD completed distance 4; its 65,535-cycle bank3 differential is
-   retained without tuning. C7-S33AE completed distance 8; its 57,315-cycle
-   bank3 differential is also retained without tuning. C7-S33AF now closes the
-   completion-distance vertical family and inventories the remaining live
-   workload/probe population while preserving the eight system-fence crosswalk
-   exclusions and open completion tails; no timing/card parameter is selected
-   from scored NCU targets.
+   retained without tuning. C7-S33AE completed distance 8; its 57,315-cycle bank3 differential is also
+   retained without tuning. C7-S33AF closed the completion-distance vertical
+   family, removed stale paired-binary campaign interfaces, and reconciled 18
+   live probe stages in the inventory. C7-S33AG now begins one atomic completion
+   serialization vertical cell while preserving the eight system-fence
+   crosswalk exclusions and open completion tails; no timing/card parameter is
+   selected from scored NCU targets.
 
 ## Outcome
 
@@ -1416,10 +1417,23 @@ while the 57,315-cycle bank3 differential is retained as mechanism-local
 evidence and no latency is fitted. Evidence:
 `docs/sm86_c7_research_probe_fixed_latency_completion_distance8_pair_live_v1.json`.
 
-### C7-S33AF — next active milestone
+### C7-S33AF — completion-distance family closure and inventory reconciliation — complete
 
-Close this completion-distance vertical family by running the current campaign
-manifest/selection checks and reconciling all live evidence into the population
-inventory. Keep every lower-bound falsifier, crosswalk mismatch, open tail, and
-unsupported mechanism explicit; do not expand to a matrix until the remaining
-probe/workload roster is inventoried and its stale interfaces are removed.
+All current completion/result-queue/L1TEX campaign manifests now use the one
+rebuilt binary per treatment and 8,192-generation contract. Focused correctness
+selection runs pass for the updated drivers; current static projection generation
+works without the old predecessor-sidecar requirement. The stale 64-generation
+paired-binary names are absent from the active campaign interfaces and the
+analyzers now use the current three-cubin/one-pair layouts. The inventory now
+records 18 live probe stages: the original six matrices plus L2, L1TEX arrival,
+SFU, result-queue width arms, and completion distances 1/2/4/8. All negative
+lower-bound, crosswalk, open-tail, and unsupported dispositions remain explicit.
+Evidence: `docs/sm86_c7_research_probe_inventory_v1.json`.
+
+### C7-S33AG — next active milestone
+
+Inspect and harden one `atomic_completion_serialization` vertical cell. Require
+strict bounded arguments/allocations, host output validation, Compute Sanitizer,
+fresh same-binary NVBit/control extraction, replay, and five NCU repetitions.
+Do not integrate an atomic completion model from one probe; retain any
+lower-bound falsifier.

@@ -502,9 +502,16 @@ seven host trials, Compute Sanitizer, NVBit, replay, and five NCU runs at
 without fitting latency. Artifact:
 `docs/sm86_c7_research_probe_fixed_latency_completion_distance8_pair_live_v1.json`.
 
-The next active plan milestone is C7-S33AF: close the vertical family with
-manifest/selection checks, population inventory reconciliation, and stale
-interface cleanup while keeping all falsifiers explicit.
+C7-S33AF closed the completion-distance vertical family and reconciled the
+probe inventory. Current manifests use one rebuilt binary per treatment and the
+8,192-generation contract; focused correctness selections and static projection
+generation pass without the old predecessor-sidecar dependency. Active analyzers
+no longer assume trace twins. The inventory now records 18 live probe stages
+with falsifiers, crosswalk exclusions, open tails, and unsupported rows kept
+explicit. Evidence: `docs/sm86_c7_research_probe_inventory_v1.json`.
+
+The next active plan milestone is C7-S33AG: one hardened
+`atomic_completion_serialization` vertical cell.
 
 ## Retained measurements
 

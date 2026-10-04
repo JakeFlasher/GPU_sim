@@ -611,9 +611,19 @@ and bank3 median 414112. Both lowers are consistent; the 57,315-cycle bank3
 differential is mechanism-local and no latency is fitted. Artifact:
 `docs/sm86_c7_research_probe_fixed_latency_completion_distance8_pair_live_v1.json`.
 
-C7-S33AF is active: close this vertical family by running current manifest and
-selection checks, reconciling the live population inventory, and removing any
-remaining stale interfaces without hiding falsifiers or open tails.
+C7-S33AF closed the completion-distance vertical family and reconciled the
+probe inventory. Current completion/result-queue/L1TEX campaign manifests use
+one rebuilt binary per treatment and the 8,192-generation contract; focused
+correctness selection runs pass, current static projection generation no longer
+requires the old predecessor-sidecar population, and active analyzers no longer
+assume trace-twin binaries. The inventory now records 18 live probe stages
+(including L2, L1TEX arrival, SFU, result-queue width pairs, and completion
+distances 1/2/4/8), retaining all falsifiers, crosswalk exclusions, open tails,
+and unsupported rows. Evidence:
+`docs/sm86_c7_research_probe_inventory_v1.json`.
+
+C7-S33AG is active: inspect and harden one `atomic_completion_serialization`
+vertical cell before capture.
 
 ## Retained evidence
 
