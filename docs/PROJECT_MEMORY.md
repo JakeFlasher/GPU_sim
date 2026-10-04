@@ -688,6 +688,19 @@ Artifact:
 C7-S33AN is active: select the next uncaptured probe after source review, with
 fixed-latency bypass canary safety checked first.
 
+C7-S33AN completed a safe fixed-result bypass vertical slice. One rebuilt
+1,025-generation cubin per safe variant replaces stale 65-generation twins; the
+driver rejects stale generations, validates elapsed/sink outputs, and cleans up.
+The `fixed_retired`, fixed-kind, warps-4 arm passes seven host trials, Compute
+Sanitizer, metadata-enabled NVBit capture, deterministic replay, and five NCU
+runs. Replay/NCU match at 28,788 instructions; simulator lower is 27505 and
+NCU median 34930. The intentionally illegal-address global distance-4 canary
+was not run. No bypass latency model is activated. Artifact:
+`docs/sm86_c7_research_probe_fixed_latency_result_bypass_live_v1.json`.
+
+C7-S33AO is active: select the next uncaptured non-memory probe after source
+review, prioritizing result-capacity or constant-frontier work.
+
 ## Retained evidence
 
 The 2026-09-30 cold/warm campaigns completed 15/15 workloads on RTX 3090 Ti / SM86,

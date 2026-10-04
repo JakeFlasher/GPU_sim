@@ -9,11 +9,6 @@ LONG_VARIANTS = \
 	fixed_latency_result_bypass_fixed_retired.cubin \
 	fixed_latency_result_bypass_global_frontier.cubin \
 	fixed_latency_result_bypass_global_late.cubin
-TRACE_VARIANTS = \
-	fixed_latency_result_bypass_trace_fixed_bypass.cubin \
-	fixed_latency_result_bypass_trace_fixed_retired.cubin \
-	fixed_latency_result_bypass_trace_global_frontier.cubin \
-	fixed_latency_result_bypass_trace_global_late.cubin
 CALIBRATION_VARIANTS = \
 	fixed_latency_result_bypass_fixed_invalid.cubin \
 	fixed_latency_result_bypass_canary_d4.cubin \
@@ -22,13 +17,10 @@ CALIBRATION_VARIANTS = \
 .PHONY: all clean
 
 all: fixed_latency_result_bypass_driver fixed_latency_result_bypass_canary_driver \
-	$(LONG_VARIANTS) $(TRACE_VARIANTS) $(CALIBRATION_VARIANTS)
+	$(LONG_VARIANTS) $(CALIBRATION_VARIANTS)
 
 fixed_latency_result_bypass_native.cubin: fixed_latency_result_bypass.cu
 	$(NVCC) $(NVCC_FLAGS) -cubin -o $@ $<
-
-fixed_latency_result_bypass_trace_native.cubin: fixed_latency_result_bypass.cu
-	$(NVCC) $(NVCC_FLAGS) -DRESULT_BYPASS_GENERATIONS=65 -cubin -o $@ $<
 
 fixed_latency_result_bypass_driver: fixed_latency_result_bypass_driver.cpp
 	$(NVCC) -std=c++17 -O3 -o $@ $< -lcuda
@@ -39,9 +31,6 @@ fixed_latency_result_bypass_canary_driver: fixed_latency_result_bypass_canary_dr
 fixed_latency_result_bypass_native.control_bits.json: fixed_latency_result_bypass_native.cubin
 	$(PYTHON) $(CONTROL_TOOL) --binary $< --arch sm_86 --out $@ --toolkit-bindir $(CUDA_BIN)
 
-fixed_latency_result_bypass_trace_native.control_bits.json: fixed_latency_result_bypass_trace_native.cubin
-	$(PYTHON) $(CONTROL_TOOL) --binary $< --arch sm_86 --out $@ --toolkit-bindir $(CUDA_BIN)
-
 $(LONG_VARIANTS) fixed_latency_result_bypass.patch.json &: \
 		fixed_latency_result_bypass_native.cubin \
 		fixed_latency_result_bypass_native.control_bits.json \
@@ -50,15 +39,6 @@ $(LONG_VARIANTS) fixed_latency_result_bypass.patch.json &: \
 		fixed_latency_result_bypass_native.control_bits.json \
 		--prefix fixed_latency_result_bypass \
 		--report fixed_latency_result_bypass.patch.json
-
-$(TRACE_VARIANTS) fixed_latency_result_bypass_trace.patch.json &: \
-		fixed_latency_result_bypass_trace_native.cubin \
-		fixed_latency_result_bypass_trace_native.control_bits.json \
-		patch_sm86_bypass_pairs.py
-	$(PYTHON) patch_sm86_bypass_pairs.py $< \
-		fixed_latency_result_bypass_trace_native.control_bits.json \
-		--prefix fixed_latency_result_bypass_trace \
-		--report fixed_latency_result_bypass_trace.patch.json
 
 $(CALIBRATION_VARIANTS) fixed_latency_result_bypass_calibration.patch.json &: \
 		fixed_latency_result_bypass_native.cubin \
@@ -72,6 +52,5 @@ $(CALIBRATION_VARIANTS) fixed_latency_result_bypass_calibration.patch.json &: \
 clean:
 	rm -f fixed_latency_result_bypass_driver fixed_latency_result_bypass_canary_driver \
 		fixed_latency_result_bypass_native.cubin \
-		fixed_latency_result_bypass_trace_native.cubin \
-		$(LONG_VARIANTS) $(TRACE_VARIANTS) $(CALIBRATION_VARIANTS) \
+		$(LONG_VARIANTS) $(CALIBRATION_VARIANTS) \
 		*.control_bits.json *.patch.json

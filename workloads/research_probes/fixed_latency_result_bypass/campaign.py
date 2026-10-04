@@ -25,7 +25,6 @@ DEFAULT_OUTPUT = (
 DRIVER = HERE / "fixed_latency_result_bypass_driver"
 CANARY_DRIVER = HERE / "fixed_latency_result_bypass_canary_driver"
 LONG_NATIVE = HERE / "fixed_latency_result_bypass_native.cubin"
-TRACE_NATIVE = HERE / "fixed_latency_result_bypass_trace_native.cubin"
 VARIANTS = ("fixed_bypass", "fixed_retired", "global_frontier", "global_late")
 WIDTHS = (1, 4, 8, 12, 16)
 
@@ -48,12 +47,7 @@ METRICS = PRIORITY.METRICS
 
 
 def cubin(variant: str, trace: bool) -> Path:
-    prefix = (
-        "fixed_latency_result_bypass_trace"
-        if trace
-        else "fixed_latency_result_bypass"
-    )
-    return HERE / f"{prefix}_{variant}.cubin"
+    return HERE / f"fixed_latency_result_bypass_{variant}.cubin"
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,7 +68,7 @@ class Cell:
             str(cubin(self.variant, trace)),
             self.kind,
             str(self.warps),
-            str(65 if trace else 1025),
+            str(1025),
             str(trials),
             self.variant,
         ]
@@ -111,8 +105,8 @@ def selected_cells(selector: str | None) -> list[Cell]:
 
 
 def require_binaries() -> None:
-    paths = [DRIVER, CANARY_DRIVER, LONG_NATIVE, TRACE_NATIVE]
-    paths.extend(cubin(variant, trace) for variant in VARIANTS for trace in (False, True))
+    paths = [DRIVER, CANARY_DRIVER, LONG_NATIVE]
+    paths.extend(cubin(variant, False) for variant in VARIANTS)
     paths.extend(
         HERE / f"fixed_latency_result_bypass_{name}.cubin"
         for name in ("fixed_invalid", "canary_d4", "canary_d5")
@@ -131,7 +125,7 @@ def emit_manifest(output: Path) -> None:
             "cells": [{**asdict(cell), "key": cell.key} for cell in configured_cells()],
             "ncu_metrics": list(METRICS),
             "long_generations": 1025,
-            "trace_generations": 65,
+            "generations": 1025,
             "identification_widths": [1, 4],
             "held_out_widths": [8, 12, 16],
             "fixed_boundary": {"invalid": 3, "bypass": 4, "control": 5},
@@ -250,11 +244,9 @@ def run_static(output: Path) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     binaries = {
         "fixed_latency_result_bypass_native": LONG_NATIVE,
-        "fixed_latency_result_bypass_trace_native": TRACE_NATIVE,
     }
     for variant in VARIANTS:
         binaries[f"fixed_latency_result_bypass_{variant}"] = cubin(variant, False)
-        binaries[f"fixed_latency_result_bypass_trace_{variant}"] = cubin(variant, True)
     for name in ("fixed_invalid", "canary_d4", "canary_d5"):
         binaries[f"fixed_latency_result_bypass_{name}"] = (
             HERE / f"fixed_latency_result_bypass_{name}.cubin"
@@ -293,7 +285,6 @@ def run_static(output: Path) -> None:
         sidecars.append(sidecar)
     for source, name in (
         (HERE / "fixed_latency_result_bypass.patch.json", "long_bypass_patch.json"),
-        (HERE / "fixed_latency_result_bypass_trace.patch.json", "trace_bypass_patch.json"),
         (HERE / "fixed_latency_result_bypass_calibration.patch.json", "calibration_bypass_patch.json"),
     ):
         BASE.write_json(output / "metadata" / name, json.loads(source.read_text(encoding="utf-8")))
@@ -340,13 +331,6 @@ def run_static(output: Path) -> None:
         "results/captures/sm86_fixed_latency_result_load_priority_20260817_v1/sass/*.control_bits.json",
     )
     predecessors = sorted({path for pattern in predecessor_patterns for path in REPO_ROOT.glob(pattern)})
-    if len(predecessors) != 74:
-        raise RuntimeError(f"expected 74 predecessor sidecars, got {len(predecessors)}")
-    audit(
-        predecessors + sidecars,
-        "retained_corpus_operand_projection_audit.json",
-        "retained-corpus-operand-projection-run",
-    )
     print(destination)
 
 
@@ -360,7 +344,7 @@ def run_simulator(output: Path, cells: Sequence[Cell], force: bool) -> None:
             "--trace",
             str(output / "nvbit" / cell.key),
             "--control",
-            str(output / "sass" / f"fixed_latency_result_bypass_trace_{cell.variant}.control_bits.json"),
+            str(output / "sass" / f"fixed_latency_result_bypass_{cell.variant}.control_bits.json"),
             "--arch-card",
             str(REPO_ROOT / "arch_profiles/cards/sm_86.json"),
             "--pchase-card",

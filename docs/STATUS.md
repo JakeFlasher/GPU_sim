@@ -563,8 +563,17 @@ median is 1,271,033 versus lower 1,123,534. Phase labels are controls, not
 physical scheduler-slot truth. Artifact:
 `docs/sm86_c7_research_probe_smsp_scheduler_contention_live_v1.json`.
 
-The next active plan milestone is C7-S33AN: select the next uncaptured probe
-after source review, with fixed-latency bypass safety checked first.
+C7-S33AN completed a safe fixed-result bypass slice. One rebuilt 1,025-
+generation cubin per safe variant replaces trace twins; the driver rejects stale
+generations, validates elapsed/sink outputs, and cleans up. The fixed_retired
+warps-4 arm passes seven host trials, Compute Sanitizer, metadata-enabled NVBit,
+replay, and five NCU runs. Replay/NCU agree at 28,788 instructions; NCU median
+34,930 and simulator lower 27,505. The intentionally illegal-address global
+canary was excluded. Artifact:
+`docs/sm86_c7_research_probe_fixed_latency_result_bypass_live_v1.json`.
+
+The next active plan milestone is C7-S33AO: select the next uncaptured
+non-memory probe after source review.
 
 ## Retained measurements
 

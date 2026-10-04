@@ -22,7 +22,7 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    `docs/sm86_c7_simbench_dram_streaming_dot_product_direct_live_v1.json`;
    the former tiny `trace_00` run is only a smoke check.
    [Ampere shared memory](https://docs.nvidia.com/cuda/ampere-tuning-guide/#unified-shared-memory-l1-texture-cache)
-3. **C7-S33AN active.** Nine probe families now have live
+3. **C7-S33AO active.** Nine probe families now have live
    evidence: 68 issue-port cells, 36 async-barrier cells, 30 store-ack arms,
    102 memory-retirement cells, 33 barrier-pipeline cells, 100 l1tex-admission
    cells, one l2-queue warmup/target cell, one l1tex-arrival store cell, and
@@ -51,10 +51,11 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    scope. C7-S33AK completed a nine-launch task-done boundary slice with full
    multi-kernel replay and per-kernel NCU instruction matches. C7-S33AL reconciled the expanded inventory and remaining unsupported/blocked
    rows. C7-S33AM hardened and captured one SMSP scheduler-contention cell after
-   admitting its bounded 69-MiB payload. C7-S33AN now selects the next
-   uncaptured probe while preserving the eight system-fence crosswalk
-   exclusions and open completion tails; no timing/card parameter is selected
-   from scored NCU targets.
+   admitting its bounded 69-MiB payload. C7-S33AN hardened and captured the
+   safe fixed-retired bypass arm while explicitly excluding the illegal-address
+   canary. C7-S33AO now selects the next uncaptured probe while preserving the
+   eight system-fence crosswalk exclusions and open completion tails; no
+   timing/card parameter is selected from scored NCU targets.
 
 ## Outcome
 
@@ -1526,9 +1527,20 @@ labels remain experimental controls, not physical scheduler-slot truth; no
 scheduler timing model is activated. Evidence:
 `docs/sm86_c7_research_probe_smsp_scheduler_contention_live_v1.json`.
 
-### C7-S33AN — next active milestone
+### C7-S33AN — fixed-result bypass safe-arm vertical slice — complete
 
-Select the next uncaptured probe after source review, prioritizing
-`fixed_latency_result_bypass` only after its illegal-address canary and
-long/trace identity are made safe, or another bounded non-memory family.
-Preserve every replay blocker and lower-bound falsifier.
+The bypass campaign now uses one rebuilt 1,025-generation cubin per safe
+variant; stale 65-generation trace twins are removed. The driver rejects stale
+generation counts, validates elapsed/sink outputs, and cleans up. The safe
+`fixed_retired, kind=fixed, warps=4` arm passes seven host trials, Compute
+Sanitizer, metadata-enabled NVBit capture, deterministic replay, and five NCU
+runs. Replay/NCU match at 28,788 instructions; simulator lower is 27505 and
+NCU median 34930. The intentionally illegal-address global distance-4 canary
+was not run. No bypass latency model is activated. Evidence:
+`docs/sm86_c7_research_probe_fixed_latency_result_bypass_live_v1.json`.
+
+### C7-S33AO — next active milestone
+
+Select the next uncaptured non-memory probe after source review, prioritizing
+`fixed_latency_result_capacity` or `immediate_constant_frontier`. Preserve all
+replay blockers and lower-bound falsifiers.
