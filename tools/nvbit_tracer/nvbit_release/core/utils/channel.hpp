@@ -11,135 +11,194 @@
  *
  * 2. Redistributions in binary form must reproduce the above copyright notice,
  * this list of conditions and the following disclaimer in the documentation
- * and/or other materials provided with the distribution.
- *
- * 3. Neither the name of the copyright holder nor the names of its
- * contributors may be used to endorse or promote products derived from
- * this software without specific prior written permission.
+ * and/or other materials provided with the distribution. Neither the name of
+ * the copyright holder nor the names of its contributors may be used to
+ * endorse or promote products derived from this software without specific
+ * prior written permission.
  *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
- * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
- * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
- * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
- * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
- * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
- * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+ * ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+ * LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+ * CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ * SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ * INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
  */
 
 #pragma once
 
 #include <assert.h>
+#include <atomic>
+#include <cstring>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+
+// Prevent cuda::atomic_ref becoming an indirect call in device code. This is
+// the same CUDA compatibility define used by NVBit 1.8.1's channel.hpp.
+#define _CCCL_ATOMIC_UNSAFE_AUTOMATIC_STORAGE
+
+#include <cuda/atomic>
+#include <cuda_runtime.h>
+
 #include "utils.h"
-#include <cuda.h>
 
-#define ULL unsigned long long int
-
+/*
+ * Synchronization-only port of NVBit 1.8.1's channel implementation.
+ *
+ * The public NVBit 1.8 pthread API is intentionally retained here. In
+ * particular, this file retains the pthread-based registration surface; the
+ * separate 1.8.1 thread-registration rename is out of scope for this patch.
+ *
+ * The device channel uses a byte reservation counter (head_bytes), a byte
+ * publication counter (tail_bytes), and a sealed-round marker. Producers
+ * publish payload completion with device-scope atomics. The flusher publishes
+ * the completed prefix to the host through a system-scope atomic doorbell, and
+ * the host acknowledges it with release semantics. This closes the GPU
+ * producer/CPU reader ordering gap present in NVBit 1.8's volatile-pointer
+ * implementation.
+ */
 class ChannelDev {
   private:
-    int id;
-    volatile int* doorbell;
+    int id{0};
 
-    uint8_t* buff;
-    uint8_t* buff_end;
+    // Mapped pinned host memory visible to both CPU and GPU.
+    int* doorbell{nullptr};
 
-    /* head/tail pointers */
-    uint8_t* volatile buff_write_head_ptr;
-    uint8_t* volatile buff_write_tail_ptr;
+    // With USE_ASYNC_STREAM this is device memory; otherwise it is mapped
+    // pinned host memory. The pointer is passed to the device channel during
+    // init() and is therefore valid in either mode.
+    uint8_t* buff{nullptr};
+    uint32_t buff_size{0};
+
+    // Reservation/publication counters in bytes from buff's base.
+    alignas(8) unsigned long long head_bytes{0};
+    alignas(8) unsigned long long tail_bytes{0};
 
   public:
-    ChannelDev() {}
+    ChannelDev() = default;
 
-    __device__ __forceinline__ void push(void* packet, uint32_t nbytes) {
-#if CUDA_VERSION >= 13010
-        // assert(nbytes != 0);
-#endif
+    __device__ __forceinline__ void push(const void* packet, uint32_t nbytes) {
+        using dev_atomic_u64 =
+            cuda::atomic_ref<unsigned long long, cuda::thread_scope_device>;
 
-        uint8_t* curr_ptr = NULL;
+        if (nbytes == 0 || nbytes > buff_size) {
+            return;
+        }
 
-        while (curr_ptr == NULL) {
-            curr_ptr =
-                (uint8_t*)atomicAdd((ULL*)&buff_write_head_ptr, (ULL)nbytes);
+        dev_atomic_u64 head(head_bytes);
+        dev_atomic_u64 tail(tail_bytes);
 
-            /* if the current position plus nbytes is after buff_end, the
-             * buffer is full.
-             * Many warps could find condition true, but only the first warp
-             * will find true the condition after. */
-            if (curr_ptr + nbytes > buff_end) {
-                /* I am the first warp that found the buffer full and
-                 * I am the one responsible for flushing the buffer out */
-                if (curr_ptr <= buff_end) {
-                    /* wait until everyone completed to write */
-                    while (buff_write_tail_ptr != curr_ptr) {
-                    }
+        unsigned long long curr = 0;
+        while (true) {
+            curr = head.fetch_add(static_cast<unsigned long long>(nbytes),
+                                  cuda::memory_order_relaxed);
 
-                    /* flush buffer */
-                    flush();
-                } else {
-                    /* waiting for buffer to flush */
-                    while (buff_write_head_ptr > buff_end) {
-                    }
+            if (curr + nbytes <= buff_size) {
+                break;
+            }
+
+            // The first reservation that starts in this round and crosses the
+            // end owns the flush. Reservations that start after the boundary
+            // wait for the sealed round to reset.
+            if (curr <= buff_size) {
+                while (tail.load(cuda::memory_order_acquire) != curr) {
                 }
-                curr_ptr = NULL;
+                flush_bytes(curr);
+            } else {
+                while (head.load(cuda::memory_order_acquire) > buff_size) {
+                }
             }
         }
 
-        memcpy(curr_ptr, packet, nbytes);
-        atomicAdd((ULL*)&buff_write_tail_ptr, (ULL)nbytes);
+        memcpy(buff + curr, packet, nbytes);
+
+        // The release publication is paired with the flusher's acquire load.
+        tail.fetch_add(static_cast<unsigned long long>(nbytes),
+                       cuda::memory_order_release);
     }
 
     __device__ __forceinline__ void flush() {
-        uint32_t nbytes = (uint32_t)(buff_write_tail_ptr - buff);
-        // printf("FLUSH CHANNEL#%d: buffer bytes %d\n", id, nbytes);
+        using dev_atomic_u64 =
+            cuda::atomic_ref<unsigned long long, cuda::thread_scope_device>;
+
+        dev_atomic_u64 head(head_bytes);
+        dev_atomic_u64 tail(tail_bytes);
+
+        while (true) {
+            const unsigned long long h =
+                head.load(cuda::memory_order_acquire);
+
+            if (h == 0) {
+                return;
+            }
+
+            if (h > buff_size) {
+                // Another flusher sealed this round.
+                while (head.load(cuda::memory_order_acquire) > buff_size) {
+                }
+                return;
+            }
+
+            // Seal the current round so later producers cannot join it.
+            const unsigned long long sealed =
+                static_cast<unsigned long long>(buff_size) + 1ULL;
+            unsigned long long expected = h;
+            if (head.compare_exchange_strong(
+                    expected, sealed, cuda::memory_order_acq_rel,
+                    cuda::memory_order_acquire)) {
+                while (tail.load(cuda::memory_order_acquire) != h) {
+                }
+                flush_bytes(h);
+                return;
+            }
+        }
+    }
+
+  private:
+    __device__ __forceinline__ void flush_bytes(unsigned long long nbytes) {
+        using dev_atomic_u64 =
+            cuda::atomic_ref<unsigned long long, cuda::thread_scope_device>;
+        using sys_atomic_i32 = cuda::atomic_ref<int, cuda::thread_scope_system>;
+
+        dev_atomic_u64 head(head_bytes);
+        dev_atomic_u64 tail(tail_bytes);
+        sys_atomic_i32 db(*doorbell);
+
         if (nbytes == 0) {
             return;
         }
 
-        /* make sure everything is visible in memory */
-        __threadfence_system();
+        // Ensure every reservation in the sealed prefix has published its
+        // payload before notifying the CPU.
+        while (tail.load(cuda::memory_order_acquire) != nbytes) {
+        }
 
-#if CUDA_VERSION >= 13010
-        // assert(*doorbell == 0);
-#endif
-        /* notify current buffer has something*/
-        *doorbell = nbytes;
+        db.store(static_cast<int>(nbytes), cuda::memory_order_release);
 
-        /* wait for host to release the doorbell */
-        while (*doorbell != 0)
-            ;
+        // The host drains the announced prefix and release-stores zero.
+        while (db.load(cuda::memory_order_acquire) != 0) {
+        }
 
-        /* reset head/tail */
-        buff_write_tail_ptr = buff;
-        __threadfence();
-        buff_write_head_ptr = buff;
-
-        // printf("FLUSH CHANNEL#%d: DONE\n", id);
+        tail.store(0, cuda::memory_order_relaxed);
+        head.store(0, cuda::memory_order_release);
     }
 
-  private:
     /* called by the ChannelHost init */
-    void init(int id, int* h_doorbell, int buff_size) {
-        CUDA_SAFECALL(
-            cudaHostGetDevicePointer((void**)&doorbell, (void*)h_doorbell, 0));
-
-/* allocate large buffer */
-#ifdef USE_ASYNC_STREAM
-        CUDA_SAFECALL(cudaMalloc((void**)&buff, buff_size));
-#else
-        CUDA_SAFECALL(
-            cudaHostAlloc((void**)&buff, buff_size, cudaHostAllocDefault));
-#endif
-        buff_write_head_ptr = buff;
-        buff_write_tail_ptr = buff;
-        buff_end = buff + buff_size;
-        this->id = id;
+    void init(int new_id, int* host_doorbell_ptr, uint8_t* buff_ptr,
+              uint32_t new_buff_size) {
+        id = new_id;
+        doorbell = host_doorbell_ptr;
+        buff = buff_ptr;
+        buff_size = new_buff_size;
+        head_bytes = 0;
+        tail_bytes = 0;
     }
 
     friend class ChannelHost;
@@ -147,30 +206,43 @@ class ChannelDev {
 
 class ChannelHost {
   private:
-    volatile int* doorbell;
+    int* doorbell{nullptr};
 
-    cudaStream_t stream;
-    ChannelDev* ch_dev;
+    cudaStream_t stream{0};
+    ChannelDev* ch_dev{nullptr};
 
-    /* pointers to device buffer */
-    uint8_t* dev_buff_read_head;
-    uint8_t* dev_buff;
+    // The host-side read cursor is a byte offset into the current announced
+    // prefix. It replaces the old raw-pointer cursor while preserving the
+    // existing recv() API.
+    uint8_t* buff{nullptr};
+    uint32_t read_head_bytes{0};
 
-    /* receiving thread */
-    pthread_t thread;
-    volatile bool thread_started;
+    /* receiving thread: retain NVBit 1.8's pthread API intentionally */
+    pthread_t thread{};
+    std::atomic<bool> thread_started{false};
+
+    static int load_doorbell_acquire(const int* p) {
+        return __atomic_load_n(p, __ATOMIC_ACQUIRE);
+    }
+
+    static void store_doorbell_release(int* p, int value) {
+        __atomic_store_n(p, value, __ATOMIC_RELEASE);
+    }
 
   public:
-    int id;
-    int buff_size;
+    int id{0};
+    int buff_size{0};
 
   public:
-    ChannelHost() {}
+    ChannelHost() = default;
 
-    void init(int id, int buff_size, ChannelDev* ch_dev,
+    void init(int new_id, int new_buff_size, ChannelDev* ch_dev_in,
               void* (*thread_fun)(void*), void* args = NULL) {
-        this->buff_size = buff_size;
-        this->id = id;
+        id = new_id;
+        buff_size = new_buff_size;
+        ch_dev = ch_dev_in;
+        read_head_bytes = 0;
+
         /* get device properties */
         cudaDeviceProp prop;
         int device = 0;
@@ -180,90 +252,90 @@ class ChannelHost {
         }
 
 #ifdef USE_ASYNC_STREAM
-        /* create stream that will read memory with highest possible priority */
-        int priority_high, priority_low;
+        int priority_high = 0;
+        int priority_low = 0;
         CUDA_SAFECALL(
             cudaDeviceGetStreamPriorityRange(&priority_low, &priority_high));
         CUDA_SAFECALL(cudaStreamCreateWithPriority(
             &stream, cudaStreamNonBlocking, priority_high));
 #endif
 
-        /* create doorbell */
-        CUDA_SAFECALL(
-            cudaHostAlloc((void**)&doorbell, sizeof(int), cudaHostAllocMapped));
-        /* set doorbell to zero */
+        CUDA_SAFECALL(cudaHostAlloc(reinterpret_cast<void**>(&doorbell),
+                                    sizeof(int), cudaHostAllocMapped));
         *doorbell = 0;
 
-        /* initialize device channel */
-        this->ch_dev = ch_dev;
-        ch_dev->init(id, (int*)doorbell, buff_size);
+#ifdef USE_ASYNC_STREAM
+        CUDA_SAFECALL(cudaMalloc(reinterpret_cast<void**>(&buff), buff_size));
+#else
+        // Explicitly request a mapped host buffer so the device-side pointer
+        // and the CPU reader observe the same storage under the atomic
+        // doorbell protocol.
+        CUDA_SAFECALL(cudaHostAlloc(reinterpret_cast<void**>(&buff),
+                                    buff_size, cudaHostAllocMapped));
+#endif
 
-        dev_buff = ch_dev->buff;
-        dev_buff_read_head = dev_buff;
+        ch_dev->init(id, doorbell, buff, static_cast<uint32_t>(buff_size));
+
         if (thread_fun != NULL) {
-            thread_started = true;
+            thread_started.store(true, std::memory_order_release);
             pthread_create(&thread, NULL, (void* (*)(void*))thread_fun, args);
         } else {
-            thread_started = false;
+            thread_started.store(false, std::memory_order_release);
         }
     }
 
     /* when used in nvbit we don't want to dealloc because
-     * when modules are unloaded the driver automatically
-     * deallocates CUDA malloc, so further deallocs done
-     * here will result in errors */
+     * when modules are unloaded the driver automatically deallocates CUDA
+     * malloc, so further deallocs done here will result in errors */
     void destroy(bool dealloc) {
-        if (thread_started) {
-            thread_started = false;
+        if (thread_started.load(std::memory_order_acquire)) {
+            thread_started.store(false, std::memory_order_release);
             pthread_join(thread, NULL);
         }
         if (dealloc) {
             CUDA_SAFECALL(cudaFreeHost((int*)doorbell));
 #ifdef USE_ASYNC_STREAM
             CUDA_SAFECALL(cudaStreamDestroy(stream));
-            CUDA_SAFECALL(cudaFree(ch_dev->buff));
+            CUDA_SAFECALL(cudaFree(buff));
 #else
-            CUDA_SAFECALL(cudaFreeHost(ch_dev->buff));
+            CUDA_SAFECALL(cudaFreeHost(buff));
 #endif
-
         }
     }
 
-    bool is_active() { return thread_started; }
+    bool is_active() const {
+        return thread_started.load(std::memory_order_acquire);
+    }
 
-    uint32_t recv(void* buff, uint32_t max_buff_size) {
-        assert(max_buff_size > 0);
+    uint32_t recv(void* out, uint32_t max_out_size) {
+        assert(max_out_size > 0);
         assert(doorbell != NULL);
-        uint32_t buff_nbytes = *doorbell;
-        if (buff_nbytes == 0) {
+
+        const int announced = load_doorbell_acquire(doorbell);
+        if (announced == 0) {
             return 0;
         }
-        int nbytes = buff_nbytes;
 
-        if (buff_nbytes > max_buff_size) {
-            nbytes = max_buff_size;
-        }
+        const uint32_t total_nbytes = static_cast<uint32_t>(announced);
+        const uint32_t nbytes =
+            (total_nbytes > max_out_size) ? max_out_size : total_nbytes;
+
 #ifdef USE_ASYNC_STREAM
-        CUDA_SAFECALL(cudaMemcpyAsync(buff, dev_buff_read_head, nbytes,
+        CUDA_SAFECALL(cudaMemcpyAsync(out, buff + read_head_bytes, nbytes,
                                       cudaMemcpyDeviceToHost, stream));
         CUDA_SAFECALL(cudaStreamSynchronize(stream));
 #else
-        memcpy(buff, dev_buff_read_head, nbytes);
+        memcpy(out, buff + read_head_bytes, nbytes);
 #endif
-        int bytes_left = buff_nbytes - nbytes;
-        assert(bytes_left >= 0);
-        if (bytes_left > 0) {
-            dev_buff_read_head += nbytes;
-        } else {
-            dev_buff_read_head = dev_buff;
-        }
 
-        *doorbell = bytes_left;
-        // printf("HOST RECEIVED nbytes %d - bytes left %d\n", nbytes,
-        // bytes_left);
+        const uint32_t bytes_left = total_nbytes - nbytes;
+        read_head_bytes = (bytes_left == 0) ? 0 : (read_head_bytes + nbytes);
+
+        store_doorbell_release(doorbell, static_cast<int>(bytes_left));
         return nbytes;
     }
 
+    /* Retained NVBit 1.8 API; do not rename as part of this patch. */
     pthread_t get_thread() { return thread; }
 
     friend class MultiChannelHost;
