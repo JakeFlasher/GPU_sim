@@ -488,8 +488,23 @@ for both; split median is 340,415 and bank3 median 356,791. The 16,376-cycle
 differential is retained without fitting latency. Artifact:
 `docs/sm86_c7_research_probe_fixed_latency_completion_distance2_pair_live_v1.json`.
 
-The next active plan milestone is C7-S33AD: held-out distance-4, warps-4
-split/bank3 pair under the same single-cubin contract.
+C7-S33AD completed the held-out distance-4 completion pair. Both arms pass
+seven host trials, Compute Sanitizer, NVBit, replay, and five NCU runs at
+622,832 target warp instructions. Simulator lower is 336,826; split median is
+348,610 and bank3 median 414,145. The 65,535-cycle differential is retained
+without fitting latency. Artifact:
+`docs/sm86_c7_research_probe_fixed_latency_completion_distance4_pair_live_v1.json`.
+
+C7-S33AE completed the held-out distance-8 completion pair. Both arms pass
+seven host trials, Compute Sanitizer, NVBit, replay, and five NCU runs at
+622,832 target warp instructions. Simulator lower is 336,826; split median is
+356,797 and bank3 median 414,112. The 57,315-cycle differential is retained
+without fitting latency. Artifact:
+`docs/sm86_c7_research_probe_fixed_latency_completion_distance8_pair_live_v1.json`.
+
+The next active plan milestone is C7-S33AF: close the vertical family with
+manifest/selection checks, population inventory reconciliation, and stale
+interface cleanup while keeping all falsifiers explicit.
 
 ## Retained measurements
 

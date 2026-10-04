@@ -594,8 +594,26 @@ and bank3 median 356791. Both lowers are consistent; the 16,376-cycle bank3
 differential is mechanism-local and no latency is fitted. Artifact:
 `docs/sm86_c7_research_probe_fixed_latency_completion_distance2_pair_live_v1.json`.
 
-C7-S33AD is active: run the held-out `distance=4, warps=4` split/bank3 pair
-under the same contract.
+C7-S33AD completed the held-out `distance=4, warps=4` completion pair. Both
+split and bank3 arms use one patched 8,192-generation cubin and pass seven host
+trials, Compute Sanitizer, full NVBit capture, deterministic replay, and five
+NCU runs with 622,832 matching target warp instructions. Simulator lower is
+336826 for both; split NCU median is 348610 and bank3 median 414145. Both
+lowers are consistent; the 65,535-cycle differential is mechanism-local and no
+latency is fitted. Artifact:
+`docs/sm86_c7_research_probe_fixed_latency_completion_distance4_pair_live_v1.json`.
+
+C7-S33AE completed the held-out `distance=8, warps=4` completion pair. Both
+layouts pass seven host trials, Compute Sanitizer, full NVBit capture,
+deterministic replay, and five NCU runs with 622,832 matching target warp
+instructions. Simulator lower is 336826 for both; split NCU median is 356797
+and bank3 median 414112. Both lowers are consistent; the 57,315-cycle bank3
+differential is mechanism-local and no latency is fitted. Artifact:
+`docs/sm86_c7_research_probe_fixed_latency_completion_distance8_pair_live_v1.json`.
+
+C7-S33AF is active: close this vertical family by running current manifest and
+selection checks, reconciling the live population inventory, and removing any
+remaining stale interfaces without hiding falsifiers or open tails.
 
 ## Retained evidence
 

@@ -22,7 +22,7 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    `docs/sm86_c7_simbench_dram_streaming_dot_product_direct_live_v1.json`;
    the former tiny `trace_00` run is only a smoke check.
    [Ampere shared memory](https://docs.nvidia.com/cuda/ampere-tuning-guide/#unified-shared-memory-l1-texture-cache)
-3. **C7-S33AD active.** Nine probe families now have live
+3. **C7-S33AF active.** Nine probe families now have live
    evidence: 68 issue-port cells, 36 async-barrier cells, 30 store-ack arms,
    102 memory-retirement cells, 33 barrier-pipeline cells, 100 l1tex-admission
    cells, one l2-queue warmup/target cell, one l1tex-arrival store cell, and
@@ -39,11 +39,14 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    increase to 3M instructions/4M decoded nodes; its hardware differential is
    again non-monotonic. C7-S33AA completed one completion-distance split cell with a matched
    lower-bound-consistent NCU slice. C7-S33AB completed the matched bank3 arm;
-   the distance-1 layout differential is negligible. C7-S33AC completed the
-   held-out distance-2 pair; its bank3 differential is retained as a
-   mechanism-local observation. C7-S33AD now tests distance 4 while preserving
-   the eight system-fence crosswalk exclusions and open completion tails; no
-   timing/card parameter is selected from scored NCU targets.
+   the distance-1 layout differential is negligible. C7-S33AC completed the held-out distance-2 pair; its bank3 differential is
+   retained as a mechanism-local observation. C7-S33AD completed distance 4; its 65,535-cycle bank3 differential is
+   retained without tuning. C7-S33AE completed distance 8; its 57,315-cycle
+   bank3 differential is also retained without tuning. C7-S33AF now closes the
+   completion-distance vertical family and inventories the remaining live
+   workload/probe population while preserving the eight system-fence crosswalk
+   exclusions and open completion tails; no timing/card parameter is selected
+   from scored NCU targets.
 
 ## Outcome
 
@@ -1391,9 +1394,32 @@ lower is 336828 for both arms; split NCU median is 340415 and bank3 median is
 is retained as mechanism-local evidence and no latency is fitted. Evidence:
 `docs/sm86_c7_research_probe_fixed_latency_completion_distance2_pair_live_v1.json`.
 
-### C7-S33AD — next active milestone
+### C7-S33AD — completion-distance held-out distance-4 pair — complete
 
-Run one held-out `distance=4, warps=4` split/bank3 pair under the same
-single-cubin contract, with fresh correctness, Compute Sanitizer, NVBit, replay,
-and five NCU captures. Keep the differential observational and retain any
-lower-bound falsifier.
+The `distance=4, warps=4` split/bank3 pair uses one patched 8,192-generation
+cubin per layout across all stages. Both arms pass seven host trials, Compute
+Sanitizer, full NVBit capture, deterministic replay, and five NCU runs with
+622,832 matching target warp instructions. Simulator lower is 336826 for both;
+split NCU median is 348610 and bank3 median 414145. Both lowers are consistent,
+while the 65,535-cycle bank3 differential is retained as mechanism-local
+evidence and no latency is fitted. Evidence:
+`docs/sm86_c7_research_probe_fixed_latency_completion_distance4_pair_live_v1.json`.
+
+### C7-S33AE — completion-distance held-out distance-8 pair — complete
+
+The `distance=8, warps=4` split/bank3 pair uses one patched 8,192-generation
+cubin per layout across all stages. Both arms pass seven host trials, Compute
+Sanitizer, full NVBit capture, deterministic replay, and five NCU runs with
+622,832 matching target warp instructions. Simulator lower is 336826 for both;
+split NCU median is 356797 and bank3 median 414112. Both lowers are consistent,
+while the 57,315-cycle bank3 differential is retained as mechanism-local
+evidence and no latency is fitted. Evidence:
+`docs/sm86_c7_research_probe_fixed_latency_completion_distance8_pair_live_v1.json`.
+
+### C7-S33AF — next active milestone
+
+Close this completion-distance vertical family by running the current campaign
+manifest/selection checks and reconciling all live evidence into the population
+inventory. Keep every lower-bound falsifier, crosswalk mismatch, open tail, and
+unsupported mechanism explicit; do not expand to a matrix until the remaining
+probe/workload roster is inventoried and its stale interfaces are removed.

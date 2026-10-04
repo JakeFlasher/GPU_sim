@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpu-simulator.local/schemas/sm86_c7_research_probe_fixed_latency_completion_distance4_pair_live_v1.schema.json",
+  "title": "SM86 fixed-latency completion split/bank3 pair",
+  "type": "object",
+  "required": ["schema", "status", "host_identity", "protocol", "arms", "differential", "interpretation"],
+  "properties": {
+    "schema": {"const": "sm86_c7_research_probe_fixed_latency_completion_distance4_pair_live_v1"},
+    "status": {"type": "string", "minLength": 1},
+    "host_identity": {"type": "object", "required": ["device_index", "name", "compute_capability", "driver"], "additionalProperties": true},
+    "protocol": {"type": "object", "required": ["driver", "distance", "warps", "generations", "ncu_repeats", "same_binary_contract"], "additionalProperties": true},
+    "arms": {"type": "object", "required": ["split", "bank3"], "additionalProperties": true},
+    "differential": {"type": "object", "required": ["ncu_median_delta_cycles", "simulator_lower_delta_cycles", "delta_residual_cycles", "interpretation"], "additionalProperties": true},
+    "interpretation": {"type": "string", "minLength": 1}
+  },
+  "additionalProperties": false
+}
