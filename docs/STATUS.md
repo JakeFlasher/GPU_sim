@@ -446,8 +446,17 @@ separated median is 438,935 versus lower 369,618. Hardware separated is 8,157
 cycles below collision while simulator lower delta is +49,152; no latency is
 fitted. Artifact: `docs/sm86_c7_research_probe_fixed_latency_result_queue_width8_pair_live_v1.json`.
 
-The next active plan milestone is C7-S33Y: width-12 collision/separated pair
-under the same single-cubin and finite-decoder contract.
+C7-S33Y completed the width-12 result-queue collision/separated pair. Each
+block has 1,573,248 decoded instructions and replays under the two-million
+finite decoder ceiling. Both arms pass seven host trials, Compute Sanitizer,
+NVBit, replay, and five NCU runs. Collision median is 589,202 versus lower
+527,551; separated median is 561,568 versus lower 533,490. Hardware separated
+is 27,634 cycles below collision while simulator lower delta is +5,939; no
+latency is fitted. Artifact:
+`docs/sm86_c7_research_probe_fixed_latency_result_queue_width12_pair_live_v1.json`.
+
+The next active plan milestone is C7-S33Z: declared width-16 collision/
+separated pair, with one finite decoder-limit increase if needed.
 
 ## Retained measurements
 

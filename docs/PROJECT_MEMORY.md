@@ -542,8 +542,19 @@ with matching 1,048,832 target warp instructions. Collision NCU median is
 separated repeats are high-dispersion. No result-queue latency is activated.
 Artifact: `docs/sm86_c7_research_probe_fixed_latency_result_queue_width8_pair_live_v1.json`.
 
-C7-S33Y is active: run one width-12 collision/separated pair under the same
-single-cubin contract and finite decoder limits.
+C7-S33Y completed the width-12 result-queue collision/separated pair under
+the two-million-instruction decoder ceiling. Each block has 1,573,248 decoded
+instructions and replays without truncation. Both arms pass seven host trials,
+Compute Sanitizer, full NVBit capture, deterministic replay, and five NCU runs
+with matching target instructions. Collision NCU median is 589202 with lower
+527551; separated median is 561568 with lower 533490. Both lowers are
+individually consistent, but hardware separated is 27634 cycles below collision
+while simulator lower delta is +5939; repeats remain dispersed and no latency
+is fitted. Artifact:
+`docs/sm86_c7_research_probe_fixed_latency_result_queue_width12_pair_live_v1.json`.
+
+C7-S33Z is active: run the declared width-16 pair, raising the finite decoder
+ceiling once if the exact 2,097,664-record block requires it.
 
 ## Retained evidence
 
