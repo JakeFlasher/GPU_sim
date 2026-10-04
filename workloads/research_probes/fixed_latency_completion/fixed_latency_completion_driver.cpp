@@ -91,7 +91,7 @@ int main(int argc, char** argv) {
     if (argc < 6 || argc > 7) {
         std::fprintf(stderr,
                      "usage: %s CUBIN DISTANCE_0_1_2_4_8 split|bank3 "
-                     "WARPS_4_8_12_16 GENERATIONS_64_8192 [TRIALS]\n",
+                     "WARPS_4_8_12_16 GENERATIONS_8192 [TRIALS]\n",
                      argv[0]);
         return 2;
     }
@@ -110,7 +110,7 @@ int main(int argc, char** argv) {
     if (function_name(distance) == nullptr || (!split && !bank3) ||
         (distance == 0 && bank3) ||
         (warps != 4 && warps != 8 && warps != 12 && warps != 16) ||
-        (generations != 64 && generations != 8192) ||
+        generations != 8192 ||
         trials < 1 || trials > 32) {
         return 2;
     }
@@ -159,6 +159,10 @@ int main(int argc, char** argv) {
 
     std::vector<std::vector<unsigned long long>> samples(
         trials, std::vector<unsigned long long>(warps));
+    std::vector<std::uint32_t> values(warps);
+    bool elapsed_valid = true;
+    bool checksums_valid = true;
+    std::uint64_t checksum = 0;
     for (int trial = 0; trial < trials; ++trial) {
         DRIVER_CHECK(cuMemsetD8(elapsed, 0xff, kElapsedBytes));
         DRIVER_CHECK(cuMemsetD8(sink, 0xa5, kSinkBytes));
@@ -168,25 +172,24 @@ int main(int argc, char** argv) {
         DRIVER_CHECK(cuCtxSynchronize());
         DRIVER_CHECK(cuMemcpyDtoH(samples[trial].data(), elapsed,
                                   warps * sizeof(unsigned long long)));
-    }
-    std::vector<std::uint32_t> values(warps);
-    DRIVER_CHECK(cuMemcpyDtoH(values.data(), sink,
-                              warps * sizeof(std::uint32_t)));
-    bool correct = true;
-    bool elapsed_valid = true;
-    bool checksums_valid = true;
-    std::uint64_t checksum = 0;
-    for (int warp = 0; warp < warps; ++warp) {
-        correct = correct &&
-                  values[warp] == expected(distance, generations, warp, 0);
-        checksums_valid = checksums_valid && values[warp] != 0xa5a5a5a5u;
-        for (int trial = 0; trial < trials; ++trial) {
+        DRIVER_CHECK(cuMemcpyDtoH(values.data(), sink,
+                                  warps * sizeof(std::uint32_t)));
+        checksum = 0;
+        for (int warp = 0; warp < warps; ++warp) {
+            const std::uint32_t wanted = expected(distance, generations, warp, 0);
+            if (values[warp] != wanted && checksums_valid) {
+                std::fprintf(stderr, "trial=%d warp=%d actual=0x%08x expected=0x%08x\n",
+                             trial, warp, values[warp], wanted);
+            }
+            // Compare every trial, not just the last launch. The observable
+            // result is lane zero of each warp, not every lane's register state.
+            checksums_valid = checksums_valid && values[warp] == wanted;
             elapsed_valid = elapsed_valid && samples[trial][warp] != UINT64_MAX &&
                             samples[trial][warp] > 0;
+            checksum = checksum * 131u + values[warp];
         }
-        checksum = checksum * 131u + values[warp];
     }
-    correct = correct && elapsed_valid && checksums_valid;
+    const bool correct = elapsed_valid && checksums_valid;
 
     std::printf(
         "{\"distance\":%d,\"variant\":\"%s\",\"warps\":%d,"
@@ -203,10 +206,10 @@ int main(int argc, char** argv) {
         std::printf("]");
     }
     std::printf("],\"checksum\":%llu,\"correct\":%s,\"elapsed_samples_valid\":%s,"
-                "\"checksum_expected\":%s}\n",
+                "\"checksum_expected\":%s,\"sink_checks\":%d}\n",
                 static_cast<unsigned long long>(checksum),
                 correct ? "true" : "false", elapsed_valid ? "true" : "false",
-                checksums_valid ? "true" : "false");
+                checksums_valid ? "true" : "false", trials * warps);
 
     DRIVER_CHECK(cuMemFree(factors));
     DRIVER_CHECK(cuMemFree(sink));

@@ -414,8 +414,7 @@ def run_static(output: Path) -> None:
         sidecars.append(sidecar)
     for source, name in (
         (HERE / "fixed_latency_completion.patch.json", "long_layout_patch.json"),
-        (HERE / "fixed_latency_completion_trace.patch.json", "trace_layout_patch.json"),
-    ):
+            ):
         BASE.write_json(
             output / "metadata" / name,
             json.loads(source.read_text(encoding="utf-8")),
@@ -448,7 +447,7 @@ def control_path(output: Path, cell: Cell) -> Path:
     return (
         output
         / "sass"
-        / f"fixed_latency_completion_trace_{cell.variant}.control_bits.json"
+        / f"fixed_latency_completion_{cell.variant}.control_bits.json"
     )
 
 

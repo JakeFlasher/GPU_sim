@@ -24,7 +24,7 @@ DEFAULT_ROOT = (
     / "sm86_fixed_latency_completion_20260817_v1"
 )
 LONG_GENERATIONS = 8192
-TRACE_GENERATIONS = 64
+TRACE_GENERATIONS = 8192
 DISTANCES = (1, 2, 4, 8)
 WIDTHS = (4, 8, 12, 16)
 METRICS = (
@@ -125,8 +125,7 @@ def source_summary(path: Path) -> dict[str, Any]:
 
 def validate_static(root: Path) -> dict[str, Any]:
     names = tuple(
-        f"fixed_latency_completion{trace}_{variant}"
-        for trace in ("", "_trace")
+        f"fixed_latency_completion_{variant}"
         for variant in ("native", "split", "bank3")
     )
     binaries = {}
@@ -144,8 +143,8 @@ def validate_static(root: Path) -> dict[str, Any]:
 
     reports = {}
     changed_by_function: dict[str, set[int]] = {}
-    for label in ("long", "trace"):
-        document = read_json(root / "metadata" / f"{label}_layout_patch.json")
+    for label, patch_name in (("long", "long_layout_patch.json"),):
+        document = read_json(root / "metadata" / patch_name)
         require(document["patched_instructions"] == 64, f"{label}: patch count")
         require(document["split_to_bank3_changed_bytes"] == 64, f"{label}: pair bytes")
         require(document["all_changed_bytes_inside_selected_words"] is True, f"{label}: scope")
@@ -173,7 +172,7 @@ def validate_static(root: Path) -> dict[str, Any]:
             for row in document["patches"]:
                 changed_by_function.setdefault(row["function"], set()).add(int(row["pc"]))
 
-    for prefix in ("fixed_latency_completion", "fixed_latency_completion_trace"):
+    for prefix in ("fixed_latency_completion",):
         split = sidecars[f"{prefix}_split"]
         bank3 = sidecars[f"{prefix}_bank3"]
         require(split["functions"].keys() == bank3["functions"].keys(), f"{prefix}: functions")
@@ -192,7 +191,7 @@ def validate_static(root: Path) -> dict[str, Any]:
             require(changed == expected, f"{prefix} {function}: changed PC set")
 
     projection = read_json(root / "metadata" / "operand_projection_audit.json")
-    require(projection["files"] == 6 and projection["gaps"] == 0, "projection coverage")
+    require(projection["files"] == 3 and projection["gaps"] == 0, "projection coverage")
     for variant, expected_demands in (
         ("split", ([2, 1], [1, 2])),
         ("bank3", ([3, 0], [0, 3])),
@@ -203,7 +202,7 @@ def validate_static(root: Path) -> dict[str, Any]:
             if f"_{variant}.control_bits.json" in item["path"]
             and item["function"] in changed_by_function
         ]
-        require(len(targets) == 8, f"{variant}: projected long/trace functions")
+        require(len(targets) == 4, f"{variant}: projected functions")
         for target in targets:
             hot = [
                 row
@@ -535,7 +534,7 @@ def report(summary: dict[str, Any]) -> str:
         "",
         f"All 32 cells pass seven correctness trials ({campaign['correctness_executions']} executions). The result contains {campaign['ncu_profiles']} base-clock NCU profiles, 12 SourceCounters reports, and 32 NVBit captures carrying {campaign['trace_records']:,} replay records. Maximum active-cycle CV is {campaign['maximum_active_cycle_cv_pct']:.2f}%; every issue ratio is 1.0. After candidate removal, all {campaign['restored_outputs_identical']} saved replay outputs are byte-identical to production.",
         "",
-        "Six cubins decode 424/424 instructions across five functions with no unknown controls, spills, or local memory. The matched long and trace pairs each contain 64 patched hot IMADs. Every pairwise byte difference is a first/second source-register byte inside a selected low word; all high/control words, destinations, carried addends, predicates, resources, and reuse-zero masks are identical. Projection covers all 2,544 static records with zero gaps.",
+        "Three current cubins decode 424/424 instructions across five functions with no unknown controls, spills, or local memory. One patched split/bank3 pair contains 64 selected hot IMAD changes. Every pairwise byte difference is a first/second source-register byte inside a selected low word; all high/control words, destinations, carried addends, predicates, resources, and reuse-zero masks are identical. Projection covers the current three-file static set with zero gaps.",
         "",
         "## Exact source-bank treatment by consumer distance",
         "",

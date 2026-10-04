@@ -22,7 +22,7 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    `docs/sm86_c7_simbench_dram_streaming_dot_product_direct_live_v1.json`;
    the former tiny `trace_00` run is only a smoke check.
    [Ampere shared memory](https://docs.nvidia.com/cuda/ampere-tuning-guide/#unified-shared-memory-l1-texture-cache)
-3. **C7-S33AB active.** Nine probe families now have live
+3. **C7-S33AD active.** Nine probe families now have live
    evidence: 68 issue-port cells, 36 async-barrier cells, 30 store-ack arms,
    102 memory-retirement cells, 33 barrier-pipeline cells, 100 l1tex-admission
    cells, one l2-queue warmup/target cell, one l1tex-arrival store cell, and
@@ -38,10 +38,12 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    non-monotonic/high-dispersion. C7-S33Z completed the declared width-16 pair after one finite decoder
    increase to 3M instructions/4M decoded nodes; its hardware differential is
    again non-monotonic. C7-S33AA completed one completion-distance split cell with a matched
-   lower-bound-consistent NCU slice. C7-S33AB now runs the matched bank3
-   treatment while preserving the eight system-fence crosswalk exclusions and
-   open completion tails; no timing/card parameter is selected from scored NCU
-   targets.
+   lower-bound-consistent NCU slice. C7-S33AB completed the matched bank3 arm;
+   the distance-1 layout differential is negligible. C7-S33AC completed the
+   held-out distance-2 pair; its bank3 differential is retained as a
+   mechanism-local observation. C7-S33AD now tests distance 4 while preserving
+   the eight system-fence crosswalk exclusions and open completion tails; no
+   timing/card parameter is selected from scored NCU targets.
 
 ## Outcome
 
@@ -1367,9 +1369,31 @@ Completion tails remain open; this is a narrow mechanism observation, not an
 activated latency or point-accuracy result. Evidence:
 `docs/sm86_c7_research_probe_fixed_latency_completion_live_v1.json`.
 
-### C7-S33AB — next active milestone
+### C7-S33AB — completion-distance bank3 matched arm — complete
 
-Run the matched `distance=1, variant=bank3, warps=4` treatment with the same
-8,192-generation single-cubin contract. Require fresh correctness, Compute
-Sanitizer, NVBit, replay, and five NCU captures; compare split/bank3 only as a
-mechanism-local differential and retain any lower-bound falsifier.
+The matched `distance=1, variant=bank3, warps=4` arm uses one patched
+8,192-generation cubin across correctness, NVBit, replay, and NCU. It passes
+seven host trials, Compute Sanitizer, full NVBit capture, deterministic replay,
+and five NCU runs with 622,832 matching target warp instructions. Its simulator
+lower is 566204 and NCU median is 586129. Against the fresh split arm (NCU
+median 586107), bank3 differs by only +22 cycles; no completion latency is
+activated. Evidence:
+`docs/sm86_c7_research_probe_fixed_latency_completion_pair_live_v1.json`.
+
+### C7-S33AC — completion-distance held-out distance-2 pair — complete
+
+The `distance=2, warps=4` split/bank3 pair uses one patched 8,192-generation
+cubin per layout across correctness, NVBit, replay, and NCU. Both arms pass
+seven host trials, Compute Sanitizer, full NVBit capture, deterministic replay,
+and five NCU runs with 622,832 matching target warp instructions. The simulator
+lower is 336828 for both arms; split NCU median is 340415 and bank3 median is
+356791. Both lowers are consistent, while the 16,376-cycle bank3 differential
+is retained as mechanism-local evidence and no latency is fitted. Evidence:
+`docs/sm86_c7_research_probe_fixed_latency_completion_distance2_pair_live_v1.json`.
+
+### C7-S33AD — next active milestone
+
+Run one held-out `distance=4, warps=4` split/bank3 pair under the same
+single-cubin contract, with fresh correctness, Compute Sanitizer, NVBit, replay,
+and five NCU captures. Keep the differential observational and retain any
+lower-bound falsifier.

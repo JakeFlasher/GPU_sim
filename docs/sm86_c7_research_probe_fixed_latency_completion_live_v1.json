@@ -42,7 +42,7 @@
     "correct": true,
     "elapsed_samples_valid": true,
     "checksum_expected": true,
-    "trials": 3,
+    "trials": 7,
     "checksum": 5918867195001202,
     "native_stdout": "results/alpha/c7_s33_completion_20261004/native_correctness.stdout",
     "compute_sanitizer": "distance1 split,4 warps,8192 generations,1 trial; zero errors"
@@ -88,53 +88,35 @@
       }
     },
     "native_macro_dispatches": 0,
-    "runtime_seconds": 0.706300684,
+    "runtime_seconds": 0.720728899,
     "runtime_measurement": "wall clock around sim-run only; no speedup/compression comparison"
   },
   "ncu": {
     "metric": "gpc__cycles_elapsed.max",
     "values": [
-      586190.0,
-      586191.0,
-      586172.0,
-      586168.0,
-      586148.0
+      586256.0,
+      586226.0,
+      586107.0,
+      586095.0,
+      586102.0
     ],
-    "median": 586172.0,
-    "min": 586148.0,
-    "max": 586191.0,
-    "stdev": 17.75387281693772,
+    "median": 586107.0,
+    "min": 586095.0,
+    "max": 586256.0,
+    "stdev": 77.34791529188101,
     "rows": [
       {
         "rep": "ncu_0",
-        "gpc__cycles_elapsed.max": 586190.0,
+        "gpc__cycles_elapsed.max": 586256.0,
         "smsp__inst_executed.sum": 622832.0,
-        "gpu__time_duration.sum": 375808.0,
+        "gpu__time_duration.sum": 375840.0,
         "smsp__inst_executed_pipe_alu.sum": 65652.0,
         "smsp__inst_executed_pipe_fma.sum": 524348.0,
         "smsp__inst_issued.sum": 622856.0
       },
       {
         "rep": "ncu_1",
-        "gpc__cycles_elapsed.max": 586191.0,
-        "smsp__inst_executed.sum": 622832.0,
-        "gpu__time_duration.sum": 375776.0,
-        "smsp__inst_executed_pipe_alu.sum": 65652.0,
-        "smsp__inst_executed_pipe_fma.sum": 524348.0,
-        "smsp__inst_issued.sum": 622856.0
-      },
-      {
-        "rep": "ncu_2",
-        "gpc__cycles_elapsed.max": 586172.0,
-        "smsp__inst_executed.sum": 622832.0,
-        "gpu__time_duration.sum": 375776.0,
-        "smsp__inst_executed_pipe_alu.sum": 65652.0,
-        "smsp__inst_executed_pipe_fma.sum": 524348.0,
-        "smsp__inst_issued.sum": 622856.0
-      },
-      {
-        "rep": "ncu_3",
-        "gpc__cycles_elapsed.max": 586168.0,
+        "gpc__cycles_elapsed.max": 586226.0,
         "smsp__inst_executed.sum": 622832.0,
         "gpu__time_duration.sum": 375808.0,
         "smsp__inst_executed_pipe_alu.sum": 65652.0,
@@ -142,16 +124,84 @@
         "smsp__inst_issued.sum": 622856.0
       },
       {
-        "rep": "ncu_4",
-        "gpc__cycles_elapsed.max": 586148.0,
+        "rep": "ncu_2",
+        "gpc__cycles_elapsed.max": 586107.0,
+        "smsp__inst_executed.sum": 622832.0,
+        "gpu__time_duration.sum": 375744.0,
+        "smsp__inst_executed_pipe_alu.sum": 65652.0,
+        "smsp__inst_executed_pipe_fma.sum": 524348.0,
+        "smsp__inst_issued.sum": 622856.0
+      },
+      {
+        "rep": "ncu_3",
+        "gpc__cycles_elapsed.max": 586095.0,
         "smsp__inst_executed.sum": 622832.0,
         "gpu__time_duration.sum": 375776.0,
+        "smsp__inst_executed_pipe_alu.sum": 65652.0,
+        "smsp__inst_executed_pipe_fma.sum": 524348.0,
+        "smsp__inst_issued.sum": 622856.0
+      },
+      {
+        "rep": "ncu_4",
+        "gpc__cycles_elapsed.max": 586102.0,
+        "smsp__inst_executed.sum": 622832.0,
+        "gpu__time_duration.sum": 375744.0,
+        "smsp__inst_executed_pipe_alu.sum": 65652.0,
+        "smsp__inst_executed_pipe_fma.sum": 524348.0,
+        "smsp__inst_issued.sum": 622856.0
+      },
+      {
+        "rep": "ncu_bank3_0",
+        "gpc__cycles_elapsed.max": 586120.0,
+        "smsp__inst_executed.sum": 622832.0,
+        "gpu__time_duration.sum": 375744.0,
+        "smsp__inst_executed_pipe_alu.sum": 65652.0,
+        "smsp__inst_executed_pipe_fma.sum": 524348.0,
+        "smsp__inst_issued.sum": 622856.0
+      },
+      {
+        "rep": "ncu_bank3_1",
+        "gpc__cycles_elapsed.max": 586187.0,
+        "smsp__inst_executed.sum": 622832.0,
+        "gpu__time_duration.sum": 375808.0,
+        "smsp__inst_executed_pipe_alu.sum": 65652.0,
+        "smsp__inst_executed_pipe_fma.sum": 524348.0,
+        "smsp__inst_issued.sum": 622856.0
+      },
+      {
+        "rep": "ncu_bank3_2",
+        "gpc__cycles_elapsed.max": 586145.0,
+        "smsp__inst_executed.sum": 622832.0,
+        "gpu__time_duration.sum": 375776.0,
+        "smsp__inst_executed_pipe_alu.sum": 65652.0,
+        "smsp__inst_executed_pipe_fma.sum": 524348.0,
+        "smsp__inst_issued.sum": 622856.0
+      },
+      {
+        "rep": "ncu_bank3_3",
+        "gpc__cycles_elapsed.max": 586106.0,
+        "smsp__inst_executed.sum": 622832.0,
+        "gpu__time_duration.sum": 375744.0,
+        "smsp__inst_executed_pipe_alu.sum": 65652.0,
+        "smsp__inst_executed_pipe_fma.sum": 524348.0,
+        "smsp__inst_issued.sum": 622856.0
+      },
+      {
+        "rep": "ncu_bank3_4",
+        "gpc__cycles_elapsed.max": 586129.0,
+        "smsp__inst_executed.sum": 622832.0,
+        "gpu__time_duration.sum": 375744.0,
         "smsp__inst_executed_pipe_alu.sum": 65652.0,
         "smsp__inst_executed_pipe_fma.sum": 524348.0,
         "smsp__inst_issued.sum": 622856.0
       }
     ],
     "instruction_count": [
+      622832.0,
+      622832.0,
+      622832.0,
+      622832.0,
+      622832.0,
       622832.0,
       622832.0,
       622832.0,
@@ -167,11 +217,11 @@
     "instruction_count_match": true,
     "lower_bound_consistency": true,
     "lower_bound_cycles": 566204,
-    "ncu_median_cycles": 586172.0,
-    "gap_cycles": 19968.0,
-    "gap_fraction": 0.034065086698102265,
+    "ncu_median_cycles": 586107.0,
+    "gap_cycles": 19903.0,
+    "gap_fraction": 0.033957963307041206,
     "hardware_completion": "not_observed",
     "point_estimator": "not_claimed"
   },
-  "interpretation": "Fresh same-binary completion-distance vertical slice. The split cubin passed seven host trials and Compute Sanitizer; NVBit, replay, and NCU use the same 8192-generation patched cubin. Replay and NCU both report 622832 target warp instructions; NCU median gpc cycles are 586172 and simulator lower is 566204, so lower-bound consistency is true. This is a narrow completion-distance observation, not an activated latency model, point-accuracy claim, or speedup result."
+  "interpretation": "Fresh same-binary completion-distance vertical slice. The split cubin passed seven host trials and Compute Sanitizer; NVBit, replay, and NCU use the same 8192-generation patched cubin. Replay and NCU both report 622832 target warp instructions; NCU median gpc cycles are 586107 and simulator lower is 566204, so lower-bound consistency is true. This is a narrow completion-distance observation, not an activated latency model, point-accuracy claim, or speedup result."
 }

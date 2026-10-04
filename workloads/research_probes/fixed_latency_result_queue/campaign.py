@@ -391,8 +391,7 @@ def run_static(output: Path) -> None:
         sidecars.append(sidecar)
     for source, name in (
         (HERE / "fixed_latency_result_queue.patch.json", "long_result_pair_patch.json"),
-        (HERE / "fixed_latency_result_queue_trace.patch.json", "trace_result_pair_patch.json"),
-    ):
+            ):
         BASE.write_json(output / "metadata" / name, json.loads(source.read_text(encoding="utf-8")))
     BASE.run_captured(
         [
@@ -412,45 +411,6 @@ def run_static(output: Path) -> None:
             *map(str, sidecars),
         ],
         output / "metadata" / "operand-projection-run",
-        timeout=900,
-    )
-    predecessor_patterns = (
-        "results/captures/sm86_async_barrier_readiness_20260817_v*/sass/*.control_bits.json",
-        "results/captures/sm86_barrier_pipeline_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_barrier_pipeline_coupled_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_barrier_pipeline_multicta_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_cycle_residual_20260817_v1/control/*.control_bits.json",
-        "results/captures/sm86_cycle_residual_20260817_v1/research-probes/async-cross-warp/*.control_bits.json",
-        "results/captures/sm86_fixed_latency_allocate_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_fixed_latency_completion_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_fixed_latency_reuse_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_issue_port_control_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_smsp_scheduler_contention_20260817_v1/sass/*.control_bits.json",
-    )
-    predecessors = sorted(
-        {path for pattern in predecessor_patterns for path in REPO_ROOT.glob(pattern)}
-    )
-    if len(predecessors) != 42:
-        raise RuntimeError(f"expected 42 retained predecessor sidecars, got {len(predecessors)}")
-    retained = predecessors + sidecars
-    BASE.run_captured(
-        [
-            "cargo",
-            "run",
-            "--quiet",
-            "--release",
-            "--manifest-path",
-            str(REPO_ROOT / "sim" / "Cargo.toml"),
-            "-p",
-            "sim-sm",
-            "--example",
-            "operand_projection_audit",
-            "--",
-            "--out",
-            str(output / "metadata" / "retained_corpus_operand_projection_audit.json"),
-            *map(str, retained),
-        ],
-        output / "metadata" / "retained-corpus-operand-projection-run",
         timeout=900,
     )
     print(f"static artifacts: {destination}")

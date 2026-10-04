@@ -576,8 +576,26 @@ instructions; NCU median is 586172 and simulator lower is 566204, so lower
 consistency is true. Artifact:
 `docs/sm86_c7_research_probe_fixed_latency_completion_live_v1.json`.
 
-C7-S33AB is active: run the matched `distance=1, bank3, warps=4` treatment
-under the same single-cubin protocol.
+C7-S33AB completed the matched completion-distance bank3 arm. One patched
+8,192-generation cubin serves correctness, NVBit, replay, and NCU. The
+`distance=1, bank3, warps=4` cell passes seven host trials, Compute
+Sanitizer, full NVBit capture, deterministic replay, and five NCU runs with
+622,832 matching target warp instructions. Simulator lower is 566204 and NCU
+median is 586129; the fresh split arm median is 586107, a +22-cycle bank3
+differential. No completion latency is activated. Artifact:
+`docs/sm86_c7_research_probe_fixed_latency_completion_pair_live_v1.json`.
+
+C7-S33AC completed the held-out `distance=2, warps=4` completion pair. One
+patched 8,192-generation cubin per layout serves all stages. Both split and
+bank3 arms pass seven host trials, Compute Sanitizer, full NVBit capture,
+deterministic replay, and five NCU runs with 622,832 matching target warp
+instructions. Simulator lower is 336828 for both; split NCU median is 340415
+and bank3 median 356791. Both lowers are consistent; the 16,376-cycle bank3
+differential is mechanism-local and no latency is fitted. Artifact:
+`docs/sm86_c7_research_probe_fixed_latency_completion_distance2_pair_live_v1.json`.
+
+C7-S33AD is active: run the held-out `distance=4, warps=4` split/bank3 pair
+under the same contract.
 
 ## Retained evidence
 

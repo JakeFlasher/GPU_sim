@@ -24,7 +24,7 @@ DEFAULT_ROOT = (
     / "sm86_fixed_latency_result_queue_20260817_v1"
 )
 LONG_GENERATIONS = 8192
-TRACE_GENERATIONS = 64
+TRACE_GENERATIONS = 8192
 WIDTHS = (4, 8, 12, 16)
 VARIANTS = ("collision", "separated")
 METRICS = (
@@ -117,8 +117,7 @@ def source_summary(path: Path) -> dict[str, Any]:
 
 def validate_static(root: Path) -> dict[str, Any]:
     names = tuple(
-        f"fixed_latency_result_queue{trace}_{variant}"
-        for trace in ("", "_trace")
+        f"fixed_latency_result_queue_{variant}"
         for variant in ("native", "collision", "separated")
     )
     sidecars = {}
@@ -131,8 +130,8 @@ def validate_static(root: Path) -> dict[str, Any]:
         resources = (root / "sass" / f"{name}.resources.txt").read_text(encoding="utf-8")
         require(not re.search(r"STACK:[1-9]|LOCAL:[1-9]", resources), f"{name}: spill/local")
 
-    for label in ("long", "trace"):
-        patch = read_json(root / "metadata" / f"{label}_result_pair_patch.json")
+    for label, patch_name in (("long", "long_result_pair_patch.json"),):
+        patch = read_json(root / "metadata" / patch_name)
         require(patch["architecture"] == "sm_86", f"{label}: architecture")
         require(patch["all_changes_inside_hadd2_control_words"] is True, f"{label}: patch scope")
         for variant, stall in (("collision", 1), ("separated", 3)):
@@ -150,7 +149,7 @@ def validate_static(root: Path) -> dict[str, Any]:
                 f"{label}/{variant}: canonical control",
             )
 
-    for prefix in ("fixed_latency_result_queue", "fixed_latency_result_queue_trace"):
+    for prefix in ("fixed_latency_result_queue",):
         left = sidecars[f"{prefix}_collision"]
         right = sidecars[f"{prefix}_separated"]
         left_rows = next(iter(left["functions"].values()))
@@ -191,10 +190,10 @@ def validate_static(root: Path) -> dict[str, Any]:
     require(adjacent == 3, "direct HADD2/FFMA neighborhood count")
 
     projection = read_json(root / "metadata" / "operand_projection_audit.json")
-    require(projection["files"] == 6, "projection files")
-    require(projection["records"] == 384, "projection records")
-    require(projection["projected"] == 108 and projection["gaps"] == 0, "projection coverage")
-    require(projection["opcodes"]["Hadd2"] == 24, "HADD2 projection")
+    require(projection["files"] == 3, "projection files")
+    require(projection["records"] == 192, "projection records")
+    require(projection["projected"] == 54 and projection["gaps"] == 0, "projection coverage")
+    require(projection["opcodes"]["Hadd2"] == 12, "HADD2 projection")
     corpus = read_json(root / "metadata" / "retained_corpus_operand_projection_audit.json")
     require(
         (corpus["files"], corpus["records"], corpus["projected"], corpus["gaps"])
@@ -202,8 +201,8 @@ def validate_static(root: Path) -> dict[str, Any]:
         "retained corpus projection",
     )
     return {
-        "binaries": 6,
-        "decoded_instructions": 384,
+        "binaries": 3,
+        "decoded_instructions": 192,
         "spill_free": True,
         "pair_changed_pcs": [336, 384, 432, 496],
         "destination_pairs": destination_pairs,

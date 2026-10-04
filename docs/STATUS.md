@@ -474,8 +474,22 @@ agree at 622,832 target warp instructions; NCU median is 586,172 versus lower
 566,204. No latency is activated. Artifact:
 `docs/sm86_c7_research_probe_fixed_latency_completion_live_v1.json`.
 
-The next active plan milestone is C7-S33AB: matched `distance=1, bank3,
-warps=4` treatment under the same single-cubin contract.
+C7-S33AB completed the matched completion-distance bank3 arm. The same patched
+8,192-generation cubin passes seven host trials, Compute Sanitizer, NVBit,
+replay, and five NCU runs at 622,832 target warp instructions. Simulator lower
+is 566,204; bank3 NCU median is 586,129 versus fresh split median 586,107, a
+22-cycle differential. No latency is activated. Artifact:
+`docs/sm86_c7_research_probe_fixed_latency_completion_pair_live_v1.json`.
+
+C7-S33AC completed the held-out distance-2 completion pair. Both same-binary
+arms pass seven host trials, Compute Sanitizer, NVBit, replay, and five NCU
+runs with 622,832 matching target warp instructions. Simulator lower is 336,828
+for both; split median is 340,415 and bank3 median 356,791. The 16,376-cycle
+differential is retained without fitting latency. Artifact:
+`docs/sm86_c7_research_probe_fixed_latency_completion_distance2_pair_live_v1.json`.
+
+The next active plan milestone is C7-S33AD: held-out distance-4, warps-4
+split/bank3 pair under the same single-cubin contract.
 
 ## Retained measurements
 
