@@ -22,7 +22,7 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    `docs/sm86_c7_simbench_dram_streaming_dot_product_direct_live_v1.json`;
    the former tiny `trace_00` run is only a smoke check.
    [Ampere shared memory](https://docs.nvidia.com/cuda/ampere-tuning-guide/#unified-shared-memory-l1-texture-cache)
-3. **C7-S33AK active.** Nine probe families now have live
+3. **C7-S33AL active.** Nine probe families now have live
    evidence: 68 issue-port cells, 36 async-barrier cells, 30 store-ack arms,
    102 memory-retirement cells, 33 barrier-pipeline cells, 100 l1tex-admission
    cells, one l2-queue warmup/target cell, one l1tex-arrival store cell, and
@@ -47,11 +47,12 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    the inventory. C7-S33AG hardened and captured one atomic completion serialization cell;
    C7-S33AH hardened and captured one multi-SM atomic service cell; C7-S33AI
    hardened and captured one observational alias cell without reconstructing a
-   proprietary hash. C7-S33AJ completed a VMM alias diagnostic with explicit
-   simulator-not-applicable scope. C7-S33AK now moves to the next task/
-   completion boundary probe while preserving the eight system-fence crosswalk
-   exclusions and open completion tails; no timing/card parameter is selected
-   from scored NCU targets.
+   proprietary hash. C7-S33AJ completed a VMM alias diagnostic with explicit simulator-not-applicable
+   scope. C7-S33AK completed a nine-launch task-done boundary slice with full
+   multi-kernel replay and per-kernel NCU instruction matches. C7-S33AL now
+   reconciles the expanded inventory and remaining unsupported/blocked rows while
+   preserving the eight system-fence crosswalk exclusions and open completion
+   tails; no timing/card parameter is selected from scored NCU targets.
 
 ## Outcome
 
@@ -1487,9 +1488,21 @@ mappings and physical allocation handles are outside the ordinary trace replay
 contract. No lower bound, hash, or timing model is fabricated. Evidence:
 `docs/sm86_c7_research_probe_atomic_vmm_alias_live_v2.json`.
 
-### C7-S33AK — next active milestone
+### C7-S33AK — task-done multi-kernel boundary slice — complete
 
-Select one bounded task/completion boundary probe (`task_done_boundary` after
-source review). Require strict input/output checks, Compute Sanitizer, same
-binary NVBit, replay when the trace contract supports it, and five NCU runs;
-if the mechanism is outside replay scope, record that boundary explicitly.
+The same `store_device` binary passes seven host correctness trials for a
+16-MiB footprint, 16-MiB thrash, four blocks, and two warmups. NVBit captures
+all nine launches with enhanced metadata enabled; sim-run replays all nine
+launches with full coverage, and five application-replay NCU runs profile the
+same nine-launch application. Per-kernel instruction counts match. Producer,
+thrash, consumer, copy, and host endpoints remain separate; no fixed
+retirement tail or scalar upper is inferred. Evidence:
+`docs/sm86_c7_research_probe_task_done_boundary_live_v1.json`.
+
+### C7-S33AL — next active milestone
+
+Reconcile the expanded 23-stage live inventory with remaining research-probe
+rows and SimBench/SOL blockers. Run focused manifest/build/selection checks,
+remove only demonstrably stale interfaces, and keep unsupported tensor/vendor,
+crosswalk, lower-bound-falsifier, open-tail, and VMM-boundary dispositions
+explicit.

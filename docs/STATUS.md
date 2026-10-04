@@ -545,8 +545,16 @@ are observation only: VMM mappings/physical handles are outside ordinary trace
 replay, so no simulator lower bound or hash/timing model is claimed. Artifact:
 `docs/sm86_c7_research_probe_atomic_vmm_alias_live_v2.json`.
 
-The next active plan milestone is C7-S33AK: inspect one bounded
-`task_done_boundary` probe and record its replay boundary honestly.
+C7-S33AK completed a task-done multi-kernel boundary slice. The same
+`store_device` binary passes seven host correctness trials (16-MiB footprint,
+16-MiB thrash, four blocks, two warmups); NVBit captures all nine launches with
+metadata enabled, sim-run replays all nine, and five NCU runs profile the same
+nine-launch application with per-kernel instruction matches. Endpoints remain
+separate; no fixed retirement upper is inferred. Artifact:
+`docs/sm86_c7_research_probe_task_done_boundary_live_v1.json`.
+
+The next active plan milestone is C7-S33AL: reconcile the expanded 23-stage
+live inventory with remaining blockers and stale interfaces.
 
 ## Retained measurements
 

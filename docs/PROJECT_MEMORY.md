@@ -666,8 +666,17 @@ ordinary native replay contract, so no simulator lower bound, hash, or timing
 model is fabricated. Artifact:
 `docs/sm86_c7_research_probe_atomic_vmm_alias_live_v2.json`.
 
-C7-S33AK is active: inspect and capture one bounded `task_done_boundary` probe
-if its source contract supports meaningful replay.
+C7-S33AK completed a task-done multi-kernel boundary slice. The same
+`store_device` binary passes seven host correctness trials for footprint 16 MiB,
+thrash 16 MiB, four blocks, and two warmups. NVBit captures all nine launches
+with enhanced metadata enabled; sim-run replays all nine with full coverage,
+and five application-replay NCU runs profile the same nine-launch application.
+Per-kernel instruction counts match. Producer, thrash, consumer, copy, and host
+endpoints remain separate; no fixed retirement tail or scalar upper is inferred.
+Artifact: `docs/sm86_c7_research_probe_task_done_boundary_live_v1.json`.
+
+C7-S33AL is active: reconcile the expanded 23-stage inventory with remaining
+probe/workload blockers and stale interfaces.
 
 ## Retained evidence
 
