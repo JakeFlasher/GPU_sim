@@ -649,10 +649,11 @@
           "stdout": "results/alpha/c7_s33_probe_build_20261003/l1tex_admission_backpressure.stdout",
           "stderr": "results/alpha/c7_s33_probe_build_20261003/l1tex_admission_backpressure.stderr"
         },
-        "live_status": "one_vertical_slice_complete",
-        "live_artifact": "docs/sm86_c7_research_probe_l1tex_admission_backpressure_live_v1.json",
+        "live_status": "100_cell_matrix_complete",
+        "live_artifact": "docs/sm86_c7_research_probe_l1tex_admission_backpressure_matrix_live_v1.json",
         "live_cell": "store_line_unique_b1_w4_d4_l32_gap0_all",
-        "disposition": "matched correctness/NVBit/replay/five-NCU complete; lower-bound consistent; matrix expansion pending"
+        "disposition": "matched correctness/NVBit/replay/five-NCU complete; all lower-bound-consistent; open tails",
+        "live_cells": 100
       },
       {
         "name": "l1tex_arrival_replay_service",
@@ -1040,8 +1041,8 @@
     },
     {
       "probe": "l1tex_admission_backpressure",
-      "cell": "store_line_unique_b1_w4_d4_l32_gap0_all",
-      "artifact": "docs/sm86_c7_research_probe_l1tex_admission_backpressure_live_v1.json",
+      "cells": 100,
+      "artifact": "docs/sm86_c7_research_probe_l1tex_admission_backpressure_matrix_live_v1.json",
       "status": "complete"
     }
   ]

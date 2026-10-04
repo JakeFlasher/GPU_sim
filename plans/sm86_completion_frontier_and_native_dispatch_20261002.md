@@ -1205,9 +1205,19 @@ open; native dispatch is zero. Evidence:
 `docs/sm86_c7_research_probe_l1tex_admission_backpressure_live_v1.json` and
 its schema.
 
-### C7-S33Q — next active milestone
+### C7-S33Q — matched l1tex admission 100-cell matrix — complete
 
-Expand `l1tex_admission_backpressure` over its declared campaign matrix, or
-select `l2_queue_frontier` if the matrix contract cannot be made bounded.
-Match each cell's trace binary, host output, NVBit/replay records, five NCU
-repetitions, and instruction crosswalk before reporting lower-bound evidence.
+All 100 configured `l1tex_admission_backpressure` cells pass host correctness,
+fresh NVBit capture, deterministic replay, and five NCU repetitions with
+per-cell instruction crosswalks. Every replay-complete cell is lower-bound
+consistent; the post-burst MEMBAR/ERRBAR/CCTL sequence and writeback/coherence
+uppers remain open, and native dispatch is zero. Evidence:
+`docs/sm86_c7_research_probe_l1tex_admission_backpressure_matrix_live_v1.json`
+and its schema.
+
+### C7-S33R — next active milestone
+
+Select the next bounded family, prioritizing `l2_queue_frontier` or
+`l1tex_arrival_replay_service`. Run one matched correctness/NVBit/replay/
+five-NCU vertical cell, then expand only if its launch and instruction
+crosswalk remain stable.
