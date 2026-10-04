@@ -388,6 +388,25 @@ delta and five fresh NCU medians show 4,070 cycles (26-cycle, 0.64% delta
 error). Absolute endpoints remain 4.91%/3.87% high, so this is narrow
 model-local differential evidence, not a general hardware upper or predictor.
 
+## Current continuation — 2026-10-04
+
+The system-fence crosswalk note was corrected: SourceCounters reports one
+warp execution for each visible fence PC; zero values apply only to the
+separate stall-sampling columns. The aggregate 12-instruction NCU delta is
+still unresolved and remains excluded from scoring.
+
+The L2 queue-frontier probe is hardened against malformed input, arithmetic
+overflow, and OOM-prone allocations, and now validates its output checksum and
+clock bounds independently. The fresh live artifact
+`docs/sm86_c7_research_probe_l2_queue_frontier_live_v2.json` uses one rebuilt
+binary for correctness, NVBit, replay, and five NCU runs. It reports 70,560
+target warp instructions in both replay and NCU, NCU median 7,714 gpc cycles,
+and simulator lower 5,751; dirty-writeback/coherence tails remain open.
+
+The next active plan milestone is C7-S33T: one verified vertical cell for
+`l1tex_arrival_replay_service` (or `atomic_lts_mapping` when the former source
+contract is stale), then only expand after the live crosswalk succeeds.
+
 ## Retained measurements
 
 2026-09-30 RTX 3090 Ti campaigns used driver 615.71.09, 1350/10501 MHz, P0,

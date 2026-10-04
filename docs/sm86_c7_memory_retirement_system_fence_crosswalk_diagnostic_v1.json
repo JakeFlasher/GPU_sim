@@ -145,10 +145,37 @@
       }
     }
   },
-  "interpretation": "The matched system-fence binary adds three visible SASS instructions in NVBit (MEMBAR, ERRBAR, CCTL), and NCU SourceCounters lists those source PCs but reports zero direct source execution for them. NCU smsp__inst_executed.sum nevertheless rises by twelve warp instructions, with pipe/op deltas across branch, ALU, LSU, texture, and global-store categories. This is an unresolved NCU-versus-trace counter/replay semantic mismatch; simulator padding and hidden-instruction synthesis are explicitly rejected, and affected rows remain crosswalk exclusions.",
+  "interpretation": "The matched system-fence binary adds three visible SASS instructions in NVBit (MEMBAR, ERRBAR, CCTL), and NCU SourceCounters reports one warp execution for each of those source PCs, while the source-row stall-sampling columns are zero. NCU smsp__inst_executed.sum nevertheless rises by twelve warp instructions, with pipe/op deltas across branch, ALU, LSU, texture, and global-store categories. This is an unresolved NCU-versus-trace counter/replay semantic mismatch; simulator padding and hidden-instruction synthesis are explicitly rejected, and affected rows remain crosswalk exclusions.",
   "source_counter_check": {
     "control_source_csv": "results/alpha/c7_s33_memret_crosswalk_20261003/control/source.csv",
     "system_fence_source_csv": "results/alpha/c7_s33_memret_crosswalk_20261003/system/source.csv",
-    "observation": "NCU SourceCounters lists MEMBAR.SC.SYS, ERRBAR, and CCTL.IVALL as visible source instructions, but each has zero direct source instruction execution in the exported source rows; the total smsp__inst_executed.sum still rises by 12."
+    "source_metric_definition": "Instructions Executed is the number of times the source instruction executed per warp; Warp Stall Sampling columns are separate sample counts.",
+    "fence_rows": [
+      {
+        "source": "MEMBAR.SC.SYS",
+        "instructions_executed_per_warp": 1,
+        "thread_instructions_executed": 32,
+        "predicated_on_thread_instructions_executed": 32,
+        "warp_stall_sampling_all_samples": 0,
+        "warp_stall_sampling_not_issued_samples": 0
+      },
+      {
+        "source": "ERRBAR",
+        "instructions_executed_per_warp": 1,
+        "thread_instructions_executed": 32,
+        "predicated_on_thread_instructions_executed": 32,
+        "warp_stall_sampling_all_samples": 0,
+        "warp_stall_sampling_not_issued_samples": 0
+      },
+      {
+        "source": "CCTL.IVALL",
+        "instructions_executed_per_warp": 1,
+        "thread_instructions_executed": 32,
+        "predicated_on_thread_instructions_executed": 32,
+        "warp_stall_sampling_all_samples": 0,
+        "warp_stall_sampling_not_issued_samples": 0
+      }
+    ],
+    "observation": "The three fence source rows execute once per warp in SourceCounters; their stall-sampling columns are zero. The full source-row Instructions Executed sum is 1101 for control and 1104 for system-fence, whereas the aggregate smsp__inst_executed.sum is 1101 versus 1113. The twelve-instruction aggregate delta therefore is not explained by a zero-execution reading of the visible fence rows."
   }
 }

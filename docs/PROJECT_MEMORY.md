@@ -461,6 +461,32 @@ instructions, while simulator lower 550,005 exceeds NCU median 419,040 by
 130,965 cycles (31.25%). See
 `docs/sm86_c7_simbench_dram_stream_stride_mix_direct_live_v1.json`.
 
+## Current probe continuation — 2026-10-04
+
+C7-S33M was corrected: the NCU SourceCounters rows for `MEMBAR.SC.SYS`,
+`ERRBAR`, and `CCTL.IVALL` each report one warp execution. Their separate
+warp-stall sample columns are zero. The aggregate NCU instruction delta
+(1113 versus 1101) therefore remains an unresolved counter/trace crosswalk
+issue; the corrected diagnostic is
+`docs/sm86_c7_memory_retirement_system_fence_crosswalk_diagnostic_v1.json`.
+
+C7-S33S hardened `workloads/research_probes/l2_queue_frontier`: malformed or
+overflowing shapes and allocations above half of free device memory are
+rejected before launch, output sentinels are checked, and the host recomputes
+the lane-zero checksum and timestamp bounds. A valid unique and reuse smoke
+plus Compute Sanitizer pass completed. A fresh same-binary capture is recorded
+in `docs/sm86_c7_research_probe_l2_queue_frontier_live_v2.json`: target replay
+and NCU each report 70,560 warp instructions; five NCU gpc-cycle values are
+7714/7784/7729/7666/7663 (median 7714), and the simulator lower is 5751.
+Dirty-writeback/coherence completion remains unknown; simulator runtime is
+recorded as 0.150273283 seconds for this replay, with no speedup claim.
+
+C7-S33T is now active. Its first vertical cell must be a genuinely exercised
+`l1tex_arrival_replay_service` probe (or `atomic_lts_mapping` if the former
+contract is stale), with checked host correctness, fresh same-binary NVBit and
+control extraction, target replay, Compute Sanitizer, and five independent NCU
+repetitions before any matrix expansion.
+
 ## Retained evidence
 
 The 2026-09-30 cold/warm campaigns completed 15/15 workloads on RTX 3090 Ti / SM86,

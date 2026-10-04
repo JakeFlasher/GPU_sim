@@ -22,12 +22,15 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    `docs/sm86_c7_simbench_dram_streaming_dot_product_direct_live_v1.json`;
    the former tiny `trace_00` run is only a smoke check.
    [Ampere shared memory](https://docs.nvidia.com/cuda/ampere-tuning-guide/#unified-shared-memory-l1-texture-cache)
-3. **C7-S33R complete; C7-S33S active.** Seven probe families now have live
+3. **C7-S33T active.** Seven probe families now have live
    evidence: 68 issue-port cells, 36 async-barrier cells, 30 store-ack arms,
    102 memory-retirement cells, 33 barrier-pipeline cells, 100 l1tex-admission
-   cells, and one l2-queue warmup/target cell. Preserve the eight system-fence
-   crosswalk exclusions and open completion tails while extending the remaining
-   families; no timing/card parameter is selected from scored NCU targets.
+   cells, and one l2-queue warmup/target cell. C7-S33S repaired the L2 probe's
+   allocation/checksum/timestamp validation and replaced the stale L2 artifact
+   with a fresh same-binary NVBit/replay/five-NCU capture. C7-S33T now extends
+   the next independent family while preserving the eight system-fence
+   crosswalk exclusions and open completion tails; no timing/card parameter is
+   selected from scored NCU targets.
 
 ## Outcome
 
@@ -1157,15 +1160,15 @@ rejected. Diagnostic evidence:
 its schema. The eight rows remain crosswalk exclusions until an independent
 instruction-identity explanation is found.
 
-### C7-S33M — source-counter crosswalk check — complete
+### C7-S33M — source-counter crosswalk check — corrected
 
 An independent NCU SourceCounters export was compared for matched no-fence and
-system-fence binaries. NCU lists the visible `MEMBAR.SC.SYS`, `ERRBAR`, and
-`CCTL.IVALL` PCs but reports zero direct source execution for them, while
-`smsp__inst_executed.sum` still rises by twelve warp instructions and pipe/op
-counters change across multiple categories. The metric crosswalk remains
+system-fence binaries. The source rows report one warp execution for each
+visible `MEMBAR.SC.SYS`, `ERRBAR`, and `CCTL.IVALL` PC; their separate stall
+sampling columns are zero. The full source-row sum is 1104 versus 1101, while
+`smsp__inst_executed.sum` is 1113 versus 1101. The metric crosswalk remains
 unresolved; no simulator padding or hidden-instruction synthesis is applied.
-Diagnostic evidence is
+The corrected diagnostic is
 `docs/sm86_c7_memory_retirement_system_fence_crosswalk_diagnostic_v1.json`.
 
 ### C7-S33N — barrier-pipeline vertical slice — complete
@@ -1213,22 +1216,34 @@ uppers remain open, and native dispatch is zero. Evidence:
 `docs/sm86_c7_research_probe_l1tex_admission_backpressure_matrix_live_v1.json`
 and its schema.
 
-### C7-S33R — l2 queue-frontier vertical slice — complete
+### C7-S33R — l2 queue-frontier vertical slice — superseded
 
-The matched two-launch `l2_queue_frontier` capture (unique topology, 84
-blocks, four warps/block, eight loads, stride one, one warmup) passes host
-checksum/timestamp checks, fresh NVBit, target-kernel replay with full
-84-block coverage, and five NCU captures using launch-skip 1. Replay and NCU
-both report 70,560 warp instructions; NCU gpc cycles are
-7578,7849,7603,7632,7694 (median 7632), while simulator lower is 5751, so
-lower-bound consistency is true. Cache warmup/target scope is explicit,
-completion/writeback/coherence tails remain open, and native dispatch is zero.
-Evidence: `docs/sm86_c7_research_probe_l2_queue_frontier_live_v1.json` and its
-schema.
+The original two-launch `l2_queue_frontier` capture is retained as historical
+v1 evidence. Its shape and replay observations remain useful, but its host
+binary did not independently validate the checksum and allocation contract.
+The corrected same-binary capture is recorded under C7-S33S.
 
-### C7-S33S — next active milestone
+### C7-S33S — L2 probe safety and evidence repair — complete
 
-Select the next bounded family, prioritizing `l1tex_arrival_replay_service` or
-`atomic_lts_mapping`. Run one matched correctness/NVBit/replay/five-NCU
-vertical cell, preserving explicit warmup/launch scope and all open-tail or
-unsupported dispositions.
+The L2 queue-frontier driver now rejects malformed/overflowing shapes, checks
+the aggregate allocation against available device memory before `cudaMalloc`,
+initializes output sentinels, independently recomputes the lane-zero checksum,
+and fails on invalid timestamp bounds or checksum results. A valid slice and a
+reuse slice pass; an oversized allocation is rejected before launch, and
+Compute Sanitizer reports zero errors. The fresh artifact is
+`docs/sm86_c7_research_probe_l2_queue_frontier_live_v2.json`; it uses the same
+rebuilt binary for correctness, NVBit, replay, and five NCU repetitions. Target
+replay/NCU both report 70,560 warp instructions; NCU gpc cycles are
+7714,7784,7729,7666,7663 (median 7714), while the simulator lower is 5751.
+The lower remains consistent, but dirty-writeback/coherence completion is
+unknown and no point-accuracy or speedup claim is made.
+
+### C7-S33T — next active milestone
+
+Select the next bounded family, beginning with `l1tex_arrival_replay_service`
+unless its source contract is stale; otherwise use `atomic_lts_mapping`. First
+run one vertical cell with checked host output, Compute Sanitizer, fresh
+same-binary NVBit and control extraction, target replay, and five independent
+NCU captures. Before any matrix expansion, verify that the source really
+exercises the named mechanism, that the replay/NVBit/NCU instruction identity
+is matched, and that allocation/launch bounds reject OOM/OOD inputs.

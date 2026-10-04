@@ -35,7 +35,10 @@ dram__sectors_read.sum
 
 The current experiment matrix is intentionally small: `warps ∈ {1,2,4,8}`,
 `loads ∈ {1,4,8,16,32,64}`, `stride_lines ∈ {1,8,32}`, and both `unique` and
-`reuse` modes at 84 blocks.  A point is retained only when correctness,
+`reuse` modes at 84 blocks.  The driver uses strict integer parsing, checked
+size arithmetic, a half-free-memory allocation budget, output sentinels, and a
+host recomputation of the lane-zero checksum/timestamp bounds; invalid values
+fail before a launch.  A point is retained only when that correctness check,
 instruction-count conservation, and launch identity pass.  A candidate L2
 queue is not promoted from this probe alone; it must also replay an NVBit trace
-and preserve the cache/traffic gates on the held-out simulator cohort.
+and preserve the cache/traffic observations on the held-out simulator cohort.
