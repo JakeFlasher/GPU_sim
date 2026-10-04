@@ -1215,9 +1215,22 @@ uppers remain open, and native dispatch is zero. Evidence:
 `docs/sm86_c7_research_probe_l1tex_admission_backpressure_matrix_live_v1.json`
 and its schema.
 
-### C7-S33R — next active milestone
+### C7-S33R — l2 queue-frontier vertical slice — complete
 
-Select the next bounded family, prioritizing `l2_queue_frontier` or
-`l1tex_arrival_replay_service`. Run one matched correctness/NVBit/replay/
-five-NCU vertical cell, then expand only if its launch and instruction
-crosswalk remain stable.
+The matched two-launch `l2_queue_frontier` capture (unique topology, 84
+blocks, four warps/block, eight loads, stride one, one warmup) passes host
+checksum/timestamp checks, fresh NVBit, target-kernel replay with full
+84-block coverage, and five NCU captures using launch-skip 1. Replay and NCU
+both report 70,560 warp instructions; NCU gpc cycles are
+7578,7849,7603,7632,7694 (median 7632), while simulator lower is 5751, so
+lower-bound consistency is true. Cache warmup/target scope is explicit,
+completion/writeback/coherence tails remain open, and native dispatch is zero.
+Evidence: `docs/sm86_c7_research_probe_l2_queue_frontier_live_v1.json` and its
+schema.
+
+### C7-S33S — next active milestone
+
+Select the next bounded family, prioritizing `l1tex_arrival_replay_service` or
+`atomic_lts_mapping`. Run one matched correctness/NVBit/replay/five-NCU
+vertical cell, preserving explicit warmup/launch scope and all open-tail or
+unsupported dispositions.

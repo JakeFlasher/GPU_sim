@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpu-simulator.local/schemas/sm86_c7_research_probe_l2_queue_frontier_live_v1.schema.json",
+  "title": "SM86 L2 queue frontier research-probe live result",
+  "type": "object",
+  "required": [
+    "schema",
+    "status",
+    "host_identity",
+    "identity",
+    "correctness",
+    "trace",
+    "simulator",
+    "tail_facts",
+    "ncu",
+    "comparison",
+    "interpretation"
+  ],
+  "properties": {
+    "schema": {
+      "const": "sm86_c7_research_probe_l2_queue_frontier_live_v1"
+    },
+    "status": {
+      "const": "correctness_trace_replay_ncu_complete_native_dispatch_refused"
+    },
+    "host_identity": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "correctness": {
+      "type": "object",
+      "required": [
+        "status",
+        "correct"
+      ],
+      "properties": {
+        "status": {
+          "const": "passed"
+        },
+        "correct": {
+          "const": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "trace": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "simulator": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "tail_facts": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "ncu": {
+      "type": "object",
+      "required": [
+        "metric",
+        "values",
+        "median"
+      ],
+      "properties": {
+        "metric": {
+          "const": "gpc__cycles_elapsed.max"
+        },
+        "values": {
+          "type": "array",
+          "minItems": 5,
+          "items": {
+            "type": "number"
+          }
+        },
+        "median": {
+          "type": "number"
+        }
+      },
+      "additionalProperties": true
+    },
+    "comparison": {
+      "type": "object",
+      "required": [
+        "native_macro_dispatches",
+        "hardware_completion",
+        "point_estimator",
+        "lower_bound_consistency"
+      ],
+      "properties": {
+        "native_macro_dispatches": {
+          "const": 0
+        },
+        "hardware_completion": {
+          "const": "not_observed"
+        },
+        "point_estimator": {
+          "const": "not_claimed"
+        },
+        "lower_bound_consistency": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    },
+    "interpretation": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "additionalProperties": false
+}
