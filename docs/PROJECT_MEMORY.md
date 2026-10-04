@@ -611,16 +611,15 @@ and bank3 median 414112. Both lowers are consistent; the 57,315-cycle bank3
 differential is mechanism-local and no latency is fitted. Artifact:
 `docs/sm86_c7_research_probe_fixed_latency_completion_distance8_pair_live_v1.json`.
 
-C7-S33AF closed the completion-distance vertical family and reconciled the
-probe inventory. Current completion/result-queue/L1TEX campaign manifests use
-one rebuilt binary per treatment and the 8,192-generation contract; focused
-correctness selection runs pass, current static projection generation no longer
-requires the old predecessor-sidecar population, and active analyzers no longer
-assume trace-twin binaries. The inventory now records 18 live probe stages
-(including L2, L1TEX arrival, SFU, result-queue width pairs, and completion
-distances 1/2/4/8), retaining all falsifiers, crosswalk exclusions, open tails,
-and unsupported rows. Evidence:
-`docs/sm86_c7_research_probe_inventory_v1.json`.
+C7-S33AL closed the completion-distance vertical family and reconciled the
+probe inventory. All 23 live probe stages have schema-validated artifacts;
+current manifests and focused selection runs pass; active paired-binary
+campaigns no longer require stale trace twins or predecessor-sidecar
+populations. Population entries now link live status/artifacts for completed
+families, while 26 current research-probe entries remain uncaptured or
+analysis-only and are not counted complete. Falsifiers, crosswalk exclusions,
+open tails, unsupported rows, and VMM physical-identity limits remain explicit.
+Evidence: `docs/sm86_c7_research_probe_inventory_v1.json`.
 
 C7-S33AG completed one atomic completion serialization vertical slice. The
 atomic campaign now uses one rebuilt 1,024-generation cubin per variant across
@@ -675,8 +674,8 @@ Per-kernel instruction counts match. Producer, thrash, consumer, copy, and host
 endpoints remain separate; no fixed retirement tail or scalar upper is inferred.
 Artifact: `docs/sm86_c7_research_probe_task_done_boundary_live_v1.json`.
 
-C7-S33AL is active: reconcile the expanded 23-stage inventory with remaining
-probe/workload blockers and stale interfaces.
+C7-S33AM is active: select the next uncaptured probe after bounded source
+review, prioritizing `smsp_scheduler_contention` or `fixed_latency_result_bypass`.
 
 ## Retained evidence
 

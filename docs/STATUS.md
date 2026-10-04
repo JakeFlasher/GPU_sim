@@ -503,12 +503,13 @@ without fitting latency. Artifact:
 `docs/sm86_c7_research_probe_fixed_latency_completion_distance8_pair_live_v1.json`.
 
 C7-S33AF closed the completion-distance vertical family and reconciled the
-probe inventory. Current manifests use one rebuilt binary per treatment and the
-8,192-generation contract; focused correctness selections and static projection
-generation pass without the old predecessor-sidecar dependency. Active analyzers
-no longer assume trace twins. The inventory now records 18 live probe stages
-with falsifiers, crosswalk exclusions, open tails, and unsupported rows kept
-explicit. Evidence: `docs/sm86_c7_research_probe_inventory_v1.json`.
+probe inventory. All 23 live probe stages have schema-validated artifacts;
+current manifests and focused selections pass; paired-binary campaigns no
+longer require stale trace twins or predecessor-sidecar populations. Population
+entries now link completed live families, while 26 current probe entries remain
+uncaptured or analysis-only. Falsifiers, crosswalk exclusions, open tails,
+unsupported rows, and VMM physical-identity limits remain explicit. Evidence:
+`docs/sm86_c7_research_probe_inventory_v1.json`.
 
 C7-S33AG completed an atomic completion serialization vertical slice. One
 rebuilt 1,024-generation cubin per variant now serves correctness, NVBit,
@@ -553,8 +554,9 @@ nine-launch application with per-kernel instruction matches. Endpoints remain
 separate; no fixed retirement upper is inferred. Artifact:
 `docs/sm86_c7_research_probe_task_done_boundary_live_v1.json`.
 
-The next active plan milestone is C7-S33AL: reconcile the expanded 23-stage
-live inventory with remaining blockers and stale interfaces.
+The next active plan milestone is C7-S33AM: select the next uncaptured probe
+after source review, prioritizing `smsp_scheduler_contention` or
+`fixed_latency_result_bypass`.
 
 ## Retained measurements
 

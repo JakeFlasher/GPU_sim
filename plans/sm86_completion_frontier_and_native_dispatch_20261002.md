@@ -22,7 +22,7 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    `docs/sm86_c7_simbench_dram_streaming_dot_product_direct_live_v1.json`;
    the former tiny `trace_00` run is only a smoke check.
    [Ampere shared memory](https://docs.nvidia.com/cuda/ampere-tuning-guide/#unified-shared-memory-l1-texture-cache)
-3. **C7-S33AL active.** Nine probe families now have live
+3. **C7-S33AM active.** Nine probe families now have live
    evidence: 68 issue-port cells, 36 async-barrier cells, 30 store-ack arms,
    102 memory-retirement cells, 33 barrier-pipeline cells, 100 l1tex-admission
    cells, one l2-queue warmup/target cell, one l1tex-arrival store cell, and
@@ -49,10 +49,10 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    hardened and captured one observational alias cell without reconstructing a
    proprietary hash. C7-S33AJ completed a VMM alias diagnostic with explicit simulator-not-applicable
    scope. C7-S33AK completed a nine-launch task-done boundary slice with full
-   multi-kernel replay and per-kernel NCU instruction matches. C7-S33AL now
-   reconciles the expanded inventory and remaining unsupported/blocked rows while
-   preserving the eight system-fence crosswalk exclusions and open completion
-   tails; no timing/card parameter is selected from scored NCU targets.
+   multi-kernel replay and per-kernel NCU instruction matches. C7-S33AL reconciled the expanded inventory and remaining unsupported/blocked
+   rows. C7-S33AM now selects the next uncaptured probe while preserving the
+   eight system-fence crosswalk exclusions and open completion tails; no
+   timing/card parameter is selected from scored NCU targets.
 
 ## Outcome
 
@@ -1499,10 +1499,21 @@ thrash, consumer, copy, and host endpoints remain separate; no fixed
 retirement tail or scalar upper is inferred. Evidence:
 `docs/sm86_c7_research_probe_task_done_boundary_live_v1.json`.
 
-### C7-S33AL — next active milestone
+### C7-S33AL — live inventory reconciliation and stale-interface closure — complete
 
-Reconcile the expanded 23-stage live inventory with remaining research-probe
-rows and SimBench/SOL blockers. Run focused manifest/build/selection checks,
-remove only demonstrably stale interfaces, and keep unsupported tensor/vendor,
-crosswalk, lower-bound-falsifier, open-tail, and VMM-boundary dispositions
-explicit.
+All 23 live probe stages have schema-validated artifacts, and the eight current
+campaign manifests plus focused selection runs pass. Active paired-binary
+campaigns no longer require stale trace twins or predecessor-sidecar
+populations. Population entries now carry explicit live status/artifact links
+for the completed probe families; 26 current research-probe entries remain
+uncaptured or analysis-only and are not counted as complete. Unsupported
+SimBench tensor/vendor rows, system-fence crosswalk exclusions,
+lower-bound falsifiers, open semantic tails, and VMM physical-identity limits
+remain explicit. Evidence: `docs/sm86_c7_research_probe_inventory_v1.json`.
+
+### C7-S33AM — next active milestone
+
+Select the next uncaptured probe only after a bounded source review; prioritize
+`smsp_scheduler_contention` or `fixed_latency_result_bypass`. Run a fresh
+same-binary correctness/NVBit/replay/five-NCU vertical cell and update the
+population disposition, without expanding a matrix from a stale interface.

@@ -1,7 +1,7 @@
 {
   "schema": "sm86_c7_research_probe_inventory_v1",
   "architecture": "sm_86",
-  "status": "inventory_build_matrix_and_twenty_three_live_probe_stages_complete",
+  "status": "inventory_build_matrix_and_population_dispositions_reconciled_v1",
   "root": "workloads/research_probes",
   "population": {
     "directory_count": 42,
@@ -99,7 +99,10 @@
         "build_logs": {
           "stdout": "results/alpha/c7_s33_probe_build_20261003/atomic_alias_adversarial.stdout",
           "stderr": "results/alpha/c7_s33_probe_build_20261003/atomic_alias_adversarial.stderr"
-        }
+        },
+        "live_status": "live_observational_complete",
+        "live_artifact": "docs/sm86_c7_research_probe_atomic_alias_adversarial_live_v1.json",
+        "disposition": "current live evidence retained; semantic tails or mechanism limits remain explicit"
       },
       {
         "name": "atomic_completion_serialization",
@@ -124,7 +127,10 @@
         "build_logs": {
           "stdout": "results/alpha/c7_s33_probe_build_20261003/atomic_completion_serialization.stdout",
           "stderr": "results/alpha/c7_s33_probe_build_20261003/atomic_completion_serialization.stderr"
-        }
+        },
+        "live_status": "live_vertical_complete",
+        "live_artifact": "docs/sm86_c7_research_probe_atomic_completion_serialization_live_v1.json",
+        "disposition": "current live evidence retained; semantic tails or mechanism limits remain explicit"
       },
       {
         "name": "atomic_lts_mapping",
@@ -187,7 +193,10 @@
         "build_logs": {
           "stdout": "results/alpha/c7_s33_probe_build_20261003/atomic_multism_service.stdout",
           "stderr": "results/alpha/c7_s33_probe_build_20261003/atomic_multism_service.stderr"
-        }
+        },
+        "live_status": "live_vertical_complete",
+        "live_artifact": "docs/sm86_c7_research_probe_atomic_multism_service_live_v1.json",
+        "disposition": "current live evidence retained; semantic tails or mechanism limits remain explicit"
       },
       {
         "name": "atomic_vmm_alias",
@@ -217,7 +226,10 @@
         "build_logs": {
           "stdout": "results/alpha/c7_s33_probe_build_20261003/atomic_vmm_alias.stdout",
           "stderr": "results/alpha/c7_s33_probe_build_20261003/atomic_vmm_alias.stderr"
-        }
+        },
+        "live_status": "live_diagnostic_simulator_boundary",
+        "live_artifact": "docs/sm86_c7_research_probe_atomic_vmm_alias_live_v2.json",
+        "disposition": "current live evidence retained; semantic tails or mechanism limits remain explicit"
       },
       {
         "name": "barrier_pipeline",
@@ -318,7 +330,10 @@
         "build_logs": {
           "stdout": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_completion.stdout",
           "stderr": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_completion.stderr"
-        }
+        },
+        "live_status": "live_distance_pairs_complete",
+        "live_artifact": "docs/sm86_c7_research_probe_fixed_latency_completion_distance8_pair_live_v1.json",
+        "disposition": "current live evidence retained; semantic tails or mechanism limits remain explicit"
       },
       {
         "name": "fixed_latency_front_end_footprint",
@@ -493,7 +508,10 @@
         "build_logs": {
           "stdout": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_result_queue.stdout",
           "stderr": "results/alpha/c7_s33_probe_build_20261003/fixed_latency_result_queue.stderr"
-        }
+        },
+        "live_status": "live_width_pairs_complete_differentials",
+        "live_artifact": "docs/sm86_c7_research_probe_fixed_latency_result_queue_width16_pair_live_v1.json",
+        "disposition": "current live evidence retained; semantic tails or mechanism limits remain explicit"
       },
       {
         "name": "fixed_latency_result_same_bank",
@@ -677,7 +695,10 @@
         "build_logs": {
           "stdout": "results/alpha/c7_s33_probe_build_20261003/l1tex_arrival_replay_service.stdout",
           "stderr": "results/alpha/c7_s33_probe_build_20261003/l1tex_arrival_replay_service.stderr"
-        }
+        },
+        "live_status": "live_vertical_complete",
+        "live_artifact": "docs/sm86_c7_research_probe_l1tex_arrival_replay_service_live_v1.json",
+        "disposition": "current live evidence retained; semantic tails or mechanism limits remain explicit"
       },
       {
         "name": "l2_queue_frontier",
@@ -813,7 +834,10 @@
         "build_logs": {
           "stdout": "results/alpha/c7_s33_probe_build_20261003/sfu_frontier.stdout",
           "stderr": "results/alpha/c7_s33_probe_build_20261003/sfu_frontier.stderr"
-        }
+        },
+        "live_status": "live_vertical_falsifier",
+        "live_artifact": "docs/sm86_c7_research_probe_sfu_frontier_live_v1.json",
+        "disposition": "current live evidence retained; semantic tails or mechanism limits remain explicit"
       },
       {
         "name": "simulator_event_throughput",
@@ -990,7 +1014,10 @@
         "build_logs": {
           "stdout": "results/alpha/c7_s33_probe_build_20261003/task_done_boundary.stdout",
           "stderr": "results/alpha/c7_s33_probe_build_20261003/task_done_boundary.stderr"
-        }
+        },
+        "live_status": "live_multikernel_boundary_complete",
+        "live_artifact": "docs/sm86_c7_research_probe_task_done_boundary_live_v1.json",
+        "disposition": "current live evidence retained; semantic tails or mechanism limits remain explicit"
       }
     ]
   },
@@ -1004,7 +1031,8 @@
     "The prior C7 inventory declared 34 directories; the current tree contains 42 after eight additional source/analysis directories were added.",
     "Existing executables are candidates only; they are not treated as current builds until rebuilt or explicitly marked source-only.",
     "This inventory is ordinary research bookkeeping and is not an execution or approval gate.",
-    "Current live vertical artifacts include hardened L1TEX/SFU/result-queue/completion probes; their lower-bound mismatches and open tails remain negative or partial evidence, not timing activation."
+    "Current live vertical artifacts include hardened L1TEX/SFU/result-queue/completion probes; their lower-bound mismatches and open tails remain negative or partial evidence, not timing activation.",
+    "Population entries with live stages now carry explicit live_status/live_artifact; entries without these fields remain uncaptured or analysis-only and are not counted as complete."
   ],
   "build_matrix": {
     "artifact": "docs/sm86_c7_research_probe_build_matrix_v1.json",
