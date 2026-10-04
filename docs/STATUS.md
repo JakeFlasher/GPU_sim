@@ -412,10 +412,17 @@ NCU each report 809,088 warp instructions; NCU median gpc cycles are 31,748
 and simulator lower is 8,486. Dirty-writeback/coherence tails remain open.
 Artifact: `docs/sm86_c7_research_probe_l1tex_arrival_replay_service_live_v1.json`.
 
-The next active plan milestone is C7-S33U: harden and run one dependent
-`sfu_frontier` MUFU cell (strict parser, bounded allocation, checksum,
-Compute Sanitizer, NVBit, replay, and five NCU runs) before considering a
-matrix.
+C7-S33U completed a live dependent-MUFU SFU slice after hardening its driver
+with strict parsing, bounded iterations/allocation, sentinel output checks, and
+timestamp validation. The same binary passed seven host trials, reduced Compute
+Sanitizer, four-launch NVBit, target replay, and five NCU captures. Replay and
+NCU agree at 1,389,024 target warp instructions; NCU median gpc cycles are
+34,282, while simulator lower is 38,099. The lower-bound falsifier is retained
+explicitly; no SFU timing is fitted or claimed accurate. Artifact:
+`docs/sm86_c7_research_probe_sfu_frontier_live_v1.json`.
+
+The next active plan milestone is C7-S33V: reconcile and harden one
+`fixed_latency_result_queue` producer/consumer cell before live validation.
 
 ## Retained measurements
 

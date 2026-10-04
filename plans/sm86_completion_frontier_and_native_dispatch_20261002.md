@@ -22,16 +22,19 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    `docs/sm86_c7_simbench_dram_streaming_dot_product_direct_live_v1.json`;
    the former tiny `trace_00` run is only a smoke check.
    [Ampere shared memory](https://docs.nvidia.com/cuda/ampere-tuning-guide/#unified-shared-memory-l1-texture-cache)
-3. **C7-S33U active.** Eight probe families now have live
+3. **C7-S33V active.** Nine probe families now have live
    evidence: 68 issue-port cells, 36 async-barrier cells, 30 store-ack arms,
    102 memory-retirement cells, 33 barrier-pipeline cells, 100 l1tex-admission
-   cells, one l2-queue warmup/target cell, and one l1tex-arrival store cell.
+   cells, one l2-queue warmup/target cell, one l1tex-arrival store cell, and
+   one dependent-SFU cell.
    C7-S33S repaired the L2 probe's allocation/checksum/timestamp validation;
    C7-S33T hardened the L1TEX driver, removed its stale trace-twin interface,
    and completed a same-binary NVBit/replay/five-NCU vertical slice. C7-S33U
-   now extends the next independent SFU family while preserving the eight
-   system-fence crosswalk exclusions and open completion tails; no timing/card
-   parameter is selected from scored NCU targets.
+   C7-S33U hardened and captured the SFU probe; its lower-bound falsifier is
+   retained rather than tuned away. C7-S33V now extends the next independent
+   family while preserving the eight system-fence crosswalk exclusions and
+   open completion tails; no timing/card parameter is selected from scored NCU
+   targets.
 
 ## Outcome
 
@@ -1255,12 +1258,26 @@ simulator inputs. Dirty-writeback/coherence completion remains unknown and no
 point-accuracy or speedup claim is made. Evidence:
 `docs/sm86_c7_research_probe_l1tex_arrival_replay_service_live_v1.json`.
 
-### C7-S33U — next active milestone
+### C7-S33U — SFU dependent-chain vertical slice — complete with falsifier
 
-Use the bounded `sfu_frontier` probe for the next vertical cell, beginning with
-one dependent MUFU chain at a fixed SM86 shape. First harden its parser,
-allocation/output checks, and explicit checksum validation; then run one
-same-binary correctness/Compute-Sanitizer/NVBit/replay/five-NCU slice. Keep
-the result architecture-probe evidence only: no SFU latency is fitted into a
-scored workload until a mechanism-local differential and a held-out workload
-validation both exist.
+The `sfu_frontier` driver now uses strict integer parsing, a 262,144-iteration
+bound, checked allocation arithmetic, a 64-MiB/half-free-memory budget, output
+sentinels, and timestamp/checksum-presence checks. The dependent cell
+`84,4,1024,dependent` passes seven host trials, reduced Compute Sanitizer,
+four-launch NVBit capture, target-4 replay, and five launch-3-skipped NCU
+captures. Replay and NCU both report 1,389,024 target warp instructions; NCU
+gpc cycles are 34274,34282,34292,34297,34274 (median 34282), but the
+simulator lower is 38099. This is a real lower-bound falsifier, not a tuning
+opportunity; the cell is retained as negative evidence. No SFU latency is
+fitted into a scored workload, and dirty-writeback/coherence completion
+remains unknown. Evidence:
+`docs/sm86_c7_research_probe_sfu_frontier_live_v1.json`.
+
+### C7-S33V — next active milestone
+
+Use the bounded `fixed_latency_result_queue` probe for one carefully checked
+producer/consumer cell. First reconcile its collision/separated binary and
+control-sidecar identities, then add strict argument/allocation/sink checks,
+run a same-binary correctness/Compute-Sanitizer/NVBit/replay/five-NCU slice,
+and retain any lower-bound falsifier. Do not activate a result-queue latency
+model from this probe alone.

@@ -19,3 +19,10 @@ For a locked reference point, use the project protocol (`1350 MHz` SM and
 `10501 MHz` memory) before running the probe, and record the GPU UUID, driver,
 clock state, command, compiler, and SASS. No scored simulator target is read
 by this probe.
+
+The bounded driver accepts signed-decimal arguments only, caps the chain at
+262,144 iterations, rejects allocations above 64 MiB or half of free device
+memory, initializes output sentinels, and reports timestamp/checksum presence.
+The checksum is a device-produced MUFU result (not a bit-exact host
+reimplementation); treat it as an output-write invariant, not a numerical
+reference oracle.

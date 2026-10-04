@@ -494,10 +494,22 @@ lower is 8486. Dirty-writeback/coherence completion remains unknown and no
 point-accuracy or speedup claim is made. Evidence:
 `docs/sm86_c7_research_probe_l1tex_arrival_replay_service_live_v1.json`.
 
-C7-S33U is active on the bounded `sfu_frontier` probe. Its dependent MUFU
-vertical cell must first gain strict parsing, allocation/output checks, and a
-host checksum comparison, then receive the same correctness/Compute
-Sanitizer/NVBit/replay/five-NCU treatment.
+C7-S33U completed the hardened `sfu_frontier` dependent-MUFU vertical slice.
+The driver now uses strict parsing, a 262,144-iteration bound, checked
+allocation arithmetic, a 64-MiB/half-free-memory budget, output sentinels, and
+timestamp/checksum-presence checks. The `84,4,1024,dependent` cell passed seven
+host trials, reduced Compute Sanitizer, four-launch NVBit capture, target-4
+replay, and five launch-3-skipped NCU captures. Replay and NCU both report
+1,389,024 target warp instructions; NCU gpc cycles are
+34274/34282/34292/34297/34274 (median 34282), but the simulator lower is
+38099. This is a retained lower-bound falsifier, not a tuning opportunity; no
+SFU latency is fitted into a scored workload. Evidence:
+`docs/sm86_c7_research_probe_sfu_frontier_live_v1.json`.
+
+C7-S33V is active on `fixed_latency_result_queue`. Its first task is to
+reconcile collision/separated binary and control identities, harden its input,
+allocation, and sink validation, then run one same-binary correctness,
+Compute Sanitizer, NVBit, replay, and five-NCU vertical slice.
 
 ## Retained evidence
 
