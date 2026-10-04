@@ -1,12 +1,16 @@
 #include <cuda_profiler_api.h>
 #include <cuda_runtime.h>
 
+#include <array>
+#include <cerrno>
+#include <climits>
 #include <cstddef>
 #include <cstdint>
-#include <array>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
+#include <new>
 #include <vector>
 
 #define CUDA_CHECK(call)                                                        \
@@ -23,6 +27,30 @@ constexpr int kWarpSize = 32;
 constexpr int kMaxWarps = 8;
 constexpr int kWorkIterations = 256;
 constexpr int kMaxDepth = 128;
+constexpr std::size_t kMaxAllocationBytes = 512ull * 1024ull * 1024ull;
+
+bool parse_int(const char* text, int* value) {
+    if (text == nullptr || *text == '\0' || value == nullptr) return false;
+    errno = 0;
+    char* end = nullptr;
+    const long parsed = std::strtol(text, &end, 10);
+    if (errno == ERANGE || end == text || *end != '\0' ||
+        parsed < std::numeric_limits<int>::min() ||
+        parsed > std::numeric_limits<int>::max()) {
+        return false;
+    }
+    *value = static_cast<int>(parsed);
+    return true;
+}
+
+bool checked_mul(std::size_t lhs, std::size_t rhs, std::size_t* result) {
+    if (result == nullptr ||
+        (lhs != 0 && rhs > std::numeric_limits<std::size_t>::max() / lhs)) {
+        return false;
+    }
+    *result = lhs * rhs;
+    return true;
+}
 
 enum TailKind : int {
     kControl = 0,
@@ -173,12 +201,17 @@ void launch_tail(int tail, int blocks, int warps, std::uint32_t* words,
     }
 }
 
-std::size_t allocation_words(int layout, int blocks, int warps, int depth,
-                             int active_lanes) {
-    const std::size_t warp_operations =
-        static_cast<std::size_t>(blocks) * warps * depth;
-    return layout == kLine ? warp_operations * active_lanes * kWarpSize
-                           : warp_operations * kWarpSize;
+bool allocation_words(int layout, int blocks, int warps, int depth,
+                      int active_lanes, std::size_t* result) {
+    std::size_t warp_operations = 0;
+    std::size_t line_words = layout == kLine
+        ? static_cast<std::size_t>(active_lanes) * kWarpSize
+        : static_cast<std::size_t>(kWarpSize);
+    return checked_mul(static_cast<std::size_t>(blocks),
+                       static_cast<std::size_t>(warps), &warp_operations) &&
+           checked_mul(warp_operations, static_cast<std::size_t>(depth),
+                       &warp_operations) &&
+           checked_mul(warp_operations, line_words, result);
 }
 
 std::uint32_t initial_value(std::size_t word) {
@@ -199,34 +232,68 @@ int main(int argc, char** argv) {
     }
     int tail = -1;
     int layout = -1;
-    const int blocks = std::atoi(argv[3]);
-    const int warps = std::atoi(argv[4]);
-    const int depth = std::atoi(argv[5]);
-    const int active_lanes = std::atoi(argv[6]);
-    const int gap_steps = std::atoi(argv[7]);
-    const int trials = std::atoi(argv[8]);
+    int blocks = 0;
+    int warps = 0;
+    int depth = 0;
+    int active_lanes = 0;
+    int gap_steps = 0;
+    int trials = 0;
+    if (!parse_int(argv[3], &blocks) || !parse_int(argv[4], &warps) ||
+        !parse_int(argv[5], &depth) || !parse_int(argv[6], &active_lanes) ||
+        !parse_int(argv[7], &gap_steps) || !parse_int(argv[8], &trials)) {
+        std::fprintf(stderr, "all numeric arguments must be signed decimal integers\n");
+        return 2;
+    }
     if (!parse_named(argv[1], kControl, kReduction, tail_name, &tail) ||
         !parse_named(argv[2], kLine, kWord, layout_name, &layout) ||
         blocks < 1 || blocks > 336 || warps < 1 || warps > kMaxWarps ||
         depth < 1 || depth > kMaxDepth || active_lanes < 1 ||
         active_lanes > kWarpSize || gap_steps < 0 || gap_steps > 256 ||
         trials < 1 || trials > 32) {
+        std::fprintf(stderr, "arguments exceed the bounded probe contract\n");
         return 2;
     }
 
-    const std::size_t word_count =
-        allocation_words(layout, blocks, warps, depth, active_lanes);
-    std::vector<std::uint32_t> initial(word_count);
+    std::size_t word_count = 0;
+    if (!allocation_words(layout, blocks, warps, depth, active_lanes,
+                         &word_count)) {
+        std::fprintf(stderr, "word-count arithmetic overflows size_t\n");
+        return 2;
+    }
+    std::size_t allocation_bytes = 0;
+    if (!checked_mul(word_count, sizeof(std::uint32_t), &allocation_bytes)) {
+        std::fprintf(stderr, "allocation size overflows size_t\n");
+        return 2;
+    }
+    std::size_t free_bytes = 0;
+    std::size_t device_bytes = 0;
+    CUDA_CHECK(cudaMemGetInfo(&free_bytes, &device_bytes));
+    // Leave room for the CUDA context, profiler, and allocator metadata.
+    if (allocation_bytes > kMaxAllocationBytes || allocation_bytes > free_bytes / 2) {
+        std::fprintf(stderr,
+                     "requested %zu bytes exceeds the bounded allocation budget "
+                     "(%zu bytes, %zu free)\n",
+                     allocation_bytes, kMaxAllocationBytes, free_bytes);
+        return 3;
+    }
+
+    std::vector<std::uint32_t> initial;
+    try {
+        initial.resize(word_count);
+    } catch (const std::bad_alloc&) {
+        std::fprintf(stderr, "host allocation of %zu bytes failed\n", allocation_bytes);
+        return 3;
+    }
     for (std::size_t word = 0; word < word_count; ++word) {
         initial[word] = initial_value(word);
     }
     std::uint32_t* words = nullptr;
-    CUDA_CHECK(cudaMalloc(&words, word_count * sizeof(*words)));
+    CUDA_CHECK(cudaMalloc(&words, allocation_bytes));
 
     bool correct = true;
     std::uint64_t checksum = 0;
     for (int trial = 0; trial < trials; ++trial) {
-        CUDA_CHECK(cudaMemcpy(words, initial.data(), word_count * sizeof(*words),
+        CUDA_CHECK(cudaMemcpy(words, initial.data(), allocation_bytes,
                               cudaMemcpyHostToDevice));
         CUDA_CHECK(cudaDeviceSynchronize());
         CUDA_CHECK(cudaProfilerStart());
@@ -237,8 +304,7 @@ int main(int argc, char** argv) {
         CUDA_CHECK(cudaProfilerStop());
 
         std::vector<std::uint32_t> observed(word_count);
-        CUDA_CHECK(cudaMemcpy(observed.data(), words,
-                              word_count * sizeof(*words),
+        CUDA_CHECK(cudaMemcpy(observed.data(), words, allocation_bytes,
                               cudaMemcpyDeviceToHost));
         for (int block = 0; block < blocks; ++block) {
             for (int warp = 0; warp < warps; ++warp) {
@@ -289,12 +355,14 @@ int main(int argc, char** argv) {
         "\"warps\":%d,\"depth\":%d,\"active_lanes\":%d,"
         "\"gap_steps_per_warp\":%d,\"work_iterations\":%d,"
         "\"ideal_wavefronts\":%llu,\"trials\":%d,"
-        "\"allocation_bytes\":%zu,\"checksum\":%llu,\"correct\":%s}\n",
+        "\"allocation_bytes\":%zu,\"checksum\":%llu,\"correct\":%s,"
+        "\"dependent_work_observed\":%s}\n",
         tail_name(tail), layout_name(layout), blocks, warps, depth,
         active_lanes, gap_steps, kWorkIterations,
         static_cast<unsigned long long>(ideal_wavefronts), trials,
-        word_count * sizeof(std::uint32_t),
-        static_cast<unsigned long long>(checksum), correct ? "true" : "false");
+        allocation_bytes,
+        static_cast<unsigned long long>(checksum), correct ? "true" : "false",
+        tail == kControl ? "false" : "true");
 
     CUDA_CHECK(cudaFree(words));
     return correct ? 0 : 1;

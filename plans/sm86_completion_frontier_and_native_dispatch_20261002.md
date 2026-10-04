@@ -22,15 +22,16 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    `docs/sm86_c7_simbench_dram_streaming_dot_product_direct_live_v1.json`;
    the former tiny `trace_00` run is only a smoke check.
    [Ampere shared memory](https://docs.nvidia.com/cuda/ampere-tuning-guide/#unified-shared-memory-l1-texture-cache)
-3. **C7-S33T active.** Seven probe families now have live
+3. **C7-S33U active.** Eight probe families now have live
    evidence: 68 issue-port cells, 36 async-barrier cells, 30 store-ack arms,
    102 memory-retirement cells, 33 barrier-pipeline cells, 100 l1tex-admission
-   cells, and one l2-queue warmup/target cell. C7-S33S repaired the L2 probe's
-   allocation/checksum/timestamp validation and replaced the stale L2 artifact
-   with a fresh same-binary NVBit/replay/five-NCU capture. C7-S33T now extends
-   the next independent family while preserving the eight system-fence
-   crosswalk exclusions and open completion tails; no timing/card parameter is
-   selected from scored NCU targets.
+   cells, one l2-queue warmup/target cell, and one l1tex-arrival store cell.
+   C7-S33S repaired the L2 probe's allocation/checksum/timestamp validation;
+   C7-S33T hardened the L1TEX driver, removed its stale trace-twin interface,
+   and completed a same-binary NVBit/replay/five-NCU vertical slice. C7-S33U
+   now extends the next independent SFU family while preserving the eight
+   system-fence crosswalk exclusions and open completion tails; no timing/card
+   parameter is selected from scored NCU targets.
 
 ## Outcome
 
@@ -1238,12 +1239,28 @@ replay/NCU both report 70,560 warp instructions; NCU gpc cycles are
 The lower remains consistent, but dirty-writeback/coherence completion is
 unknown and no point-accuracy or speedup claim is made.
 
-### C7-S33T — next active milestone
+### C7-S33T — L1TEX arrival/replay vertical slice — complete
 
-Select the next bounded family, beginning with `l1tex_arrival_replay_service`
-unless its source contract is stale; otherwise use `atomic_lts_mapping`. First
-run one vertical cell with checked host output, Compute Sanitizer, fresh
-same-binary NVBit and control extraction, target replay, and five independent
-NCU captures. Before any matrix expansion, verify that the source really
-exercises the named mechanism, that the replay/NVBit/NCU instruction identity
-is matched, and that allocation/launch bounds reject OOM/OOD inputs.
+The driver now uses strict integer parsing, checked allocation arithmetic, a
+512-MiB/half-free-memory budget, and explicit dependent-work observability.
+The stale separate trace binary was removed from the campaign interface;
+correctness, NVBit, replay, and NCU all bind to the rebuilt executable. The
+`store,line,84,8,8,32,0,1` cell passes seven host trials, a reduced
+Compute-Sanitizer run, fresh 84-block NVBit capture, deterministic replay, and
+five application-replay NCU captures. Replay and NCU both report 809,088 warp
+instructions; NCU gpc cycles are 32085,31590,32333,31748,31518 (median
+31748), while the simulator lower is 8486. Output-wavefront, request, L2,
+DRAM-write, and issue counters are retained as independent observations, not
+simulator inputs. Dirty-writeback/coherence completion remains unknown and no
+point-accuracy or speedup claim is made. Evidence:
+`docs/sm86_c7_research_probe_l1tex_arrival_replay_service_live_v1.json`.
+
+### C7-S33U — next active milestone
+
+Use the bounded `sfu_frontier` probe for the next vertical cell, beginning with
+one dependent MUFU chain at a fixed SM86 shape. First harden its parser,
+allocation/output checks, and explicit checksum validation; then run one
+same-binary correctness/Compute-Sanitizer/NVBit/replay/five-NCU slice. Keep
+the result architecture-probe evidence only: no SFU latency is fitted into a
+scored workload until a mechanism-local differential and a held-out workload
+validation both exist.

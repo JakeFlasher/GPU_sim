@@ -403,9 +403,19 @@ binary for correctness, NVBit, replay, and five NCU runs. It reports 70,560
 target warp instructions in both replay and NCU, NCU median 7,714 gpc cycles,
 and simulator lower 5,751; dirty-writeback/coherence tails remain open.
 
-The next active plan milestone is C7-S33T: one verified vertical cell for
-`l1tex_arrival_replay_service` (or `atomic_lts_mapping` when the former source
-contract is stale), then only expand after the live crosswalk succeeds.
+The current C7 continuation has completed the L1TEX arrival/replay vertical
+slice. Its checked `store,line,84,8,8,32,0,1` driver uses one rebuilt binary
+across correctness, NVBit, replay, and NCU; the former separate trace-twin
+interface is gone. Seven host trials, reduced Compute Sanitizer, full 84-block
+trace, target replay, and five NCU captures pass the live contract. Replay and
+NCU each report 809,088 warp instructions; NCU median gpc cycles are 31,748
+and simulator lower is 8,486. Dirty-writeback/coherence tails remain open.
+Artifact: `docs/sm86_c7_research_probe_l1tex_arrival_replay_service_live_v1.json`.
+
+The next active plan milestone is C7-S33U: harden and run one dependent
+`sfu_frontier` MUFU cell (strict parser, bounded allocation, checksum,
+Compute Sanitizer, NVBit, replay, and five NCU runs) before considering a
+matrix.
 
 ## Retained measurements
 

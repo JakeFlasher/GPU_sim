@@ -481,11 +481,23 @@ and NCU each report 70,560 warp instructions; five NCU gpc-cycle values are
 Dirty-writeback/coherence completion remains unknown; simulator runtime is
 recorded as 0.150273283 seconds for this replay, with no speedup claim.
 
-C7-S33T is now active. Its first vertical cell must be a genuinely exercised
-`l1tex_arrival_replay_service` probe (or `atomic_lts_mapping` if the former
-contract is stale), with checked host correctness, fresh same-binary NVBit and
-control extraction, target replay, Compute Sanitizer, and five independent NCU
-repetitions before any matrix expansion.
+C7-S33T completed a hardened L1TEX arrival/replay vertical slice. The driver
+now rejects malformed or oversized shapes, checks allocation arithmetic and a
+512-MiB/half-free-memory budget, and reports whether dependent work is
+externally observed. The stale separate trace-twin interface was removed from
+the campaign; one rebuilt executable served correctness, NVBit, replay, and
+NCU. The `store,line,84,8,8,32,0,1` cell passed seven host trials, a reduced
+Compute Sanitizer run, 84-block NVBit capture, target replay, and five NCU
+repetitions. Replay and NCU both report 809,088 warp instructions; NCU gpc
+cycles are 32085/31590/32333/31748/31518 (median 31748), while the simulator
+lower is 8486. Dirty-writeback/coherence completion remains unknown and no
+point-accuracy or speedup claim is made. Evidence:
+`docs/sm86_c7_research_probe_l1tex_arrival_replay_service_live_v1.json`.
+
+C7-S33U is active on the bounded `sfu_frontier` probe. Its dependent MUFU
+vertical cell must first gain strict parsing, allocation/output checks, and a
+host checksum comparison, then receive the same correctness/Compute
+Sanitizer/NVBit/replay/five-NCU treatment.
 
 ## Retained evidence
 

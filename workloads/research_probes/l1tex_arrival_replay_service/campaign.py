@@ -20,7 +20,9 @@ DEFAULT_OUTPUT = (
     REPO_ROOT / "results/captures/sm86_l1tex_arrival_replay_service_20260818_v1"
 )
 LONG_BINARY = HERE / "l1tex_arrival_replay_service"
-TRACE_BINARY = HERE / "l1tex_arrival_replay_service_trace"
+# Correctness, tracing, replay, and NCU must bind to one executable. The old
+# trace twin was rebuilt from the same source but could silently drift.
+TRACE_BINARY = LONG_BINARY
 CANDIDATE_FILE = HERE / "memory_service_candidates.json"
 TAILS = ("control", "load", "store", "red")
 
@@ -229,7 +231,7 @@ def selected_cells(selector: str | None) -> list[Cell]:
 
 
 def require_binaries() -> None:
-    for path in (LONG_BINARY, TRACE_BINARY):
+    for path in dict.fromkeys((LONG_BINARY, TRACE_BINARY)):
         if not path.is_file() or path.stat().st_size == 0:
             raise RuntimeError(f"required binary missing: {path}")
 
@@ -533,7 +535,7 @@ def run_nvbit(output: Path, cells: Sequence[Cell], force: bool) -> None:
 def run_static(output: Path) -> None:
     destination = output / "sass"
     destination.mkdir(parents=True, exist_ok=True)
-    for binary in (LONG_BINARY, TRACE_BINARY):
+    for binary in dict.fromkeys((LONG_BINARY, TRACE_BINARY)):
         for suffix, option in (("sass", "--dump-sass"), ("resources", "--dump-resource-usage")):
             completed = subprocess.run(
                 ["/usr/local/cuda-13.2/bin/cuobjdump", option, str(binary)],
