@@ -529,8 +529,21 @@ cycles while the simulator lower-bound delta is 65536; this is mechanism-local
 evidence, not a fixed latency. Artifact:
 `docs/sm86_c7_research_probe_fixed_latency_result_queue_pair_live_v1.json`.
 
-C7-S33X is active: run one held-out width-8 collision/separated pair under the
-same 8,192-generation single-cubin protocol before expanding further.
+C7-S33X completed the held-out width-8 result-queue collision/separated pair.
+The live trace exposed a finite simulator preflight ceiling: each block has
+1,048,832 decoded instructions, so the wire-preflight limit was raised from
+1,000,000 to 2,000,000 and the compact route index widened by one bit. The
+same captures then replayed successfully. Both arms passed seven host trials,
+Compute Sanitizer, full NVBit capture, deterministic replay, and five NCU runs
+with matching 1,048,832 target warp instructions. Collision NCU median is
+447092 with simulator lower 320466; separated median is 438935 with lower
+369618. Both lowers are individually consistent, but hardware separated is
+8157 cycles below collision while the simulator lower delta is +49152;
+separated repeats are high-dispersion. No result-queue latency is activated.
+Artifact: `docs/sm86_c7_research_probe_fixed_latency_result_queue_width8_pair_live_v1.json`.
+
+C7-S33Y is active: run one width-12 collision/separated pair under the same
+single-cubin contract and finite decoder limits.
 
 ## Retained evidence
 

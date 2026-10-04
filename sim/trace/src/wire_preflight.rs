@@ -50,7 +50,11 @@ struct ThreadblockLimits {
 
 const THREADBLOCK_LIMITS: ThreadblockLimits = ThreadblockLimits {
     warps: 65_536,
-    instructions: 1_000_000,
+    // A single SM86 CTA can legitimately exceed one million dynamic warp
+    // records (for example, an eight-warp fixed-latency probe). Keep a finite
+    // decoded-resource ceiling, but do not reject a live bounded trace merely
+    // because it crosses the old arbitrary 1M boundary.
+    instructions: 2_000_000,
     addresses: 1_000_000,
     lane_values: 8_000_000,
     lane_values_per_address: 32,

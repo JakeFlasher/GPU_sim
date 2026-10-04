@@ -22,7 +22,7 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    `docs/sm86_c7_simbench_dram_streaming_dot_product_direct_live_v1.json`;
    the former tiny `trace_00` run is only a smoke check.
    [Ampere shared memory](https://docs.nvidia.com/cuda/ampere-tuning-guide/#unified-shared-memory-l1-texture-cache)
-3. **C7-S33X active.** Nine probe families now have live
+3. **C7-S33Y active.** Nine probe families now have live
    evidence: 68 issue-port cells, 36 async-barrier cells, 30 store-ack arms,
    102 memory-retirement cells, 33 barrier-pipeline cells, 100 l1tex-admission
    cells, one l2-queue warmup/target cell, one l1tex-arrival store cell, and
@@ -31,9 +31,12 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    driver and removed its stale trace-twin interface; C7-S33U retained a real
    SFU lower-bound falsifier; C7-S33V unified the result-queue binaries and
    captured collision; C7-S33W retained the separated-arm falsifier. C7-S33X
-   now tests one held-out width pair while preserving the eight system-fence
-   crosswalk exclusions and open completion tails; no timing/card parameter is
-   selected from scored NCU targets.
+   completed the held-out width-8 pair after raising the finite trace decoder
+   ceiling to admit its 1,048,832-record block; its hardware differential is
+   non-monotonic and high-dispersion. C7-S33Y now tests one width-12 pair
+   while preserving the eight system-fence crosswalk exclusions and open
+   completion tails; no timing/card parameter is selected from scored NCU
+   targets.
 
 ## Outcome
 
@@ -1300,10 +1303,26 @@ simulator lower-bound delta is 65536; this differential is mechanism-local
 evidence, not a fixed latency. Evidence:
 `docs/sm86_c7_research_probe_fixed_latency_result_queue_pair_live_v1.json`.
 
-### C7-S33X — next active milestone
+### C7-S33X — result-queue held-out width-8 pair — complete
 
-Run one held-out width-8 collision/separated pair with the same 8,192-generation
-single-cubin contract. Require fresh correctness, Compute Sanitizer, NVBit,
-replay, and five NCU captures for both arms; compare the differential without
-using NCU values to tune the model. If the held-out pair remains a falsifier,
-retain it and move to the next mechanism rather than widening a latency term.
+The held-out `warps=8, generations=8192` collision/separated pair uses the
+same one-cubin-per-treatment protocol. The live trace exposed a simulator
+preflight ceiling rather than a workload failure: each block has 1,048,832
+decoded instructions, so the finite wire-preflight limit was raised from
+1,000,000 to 2,000,000 and the compact route index widened by one bit. The
+same captured traces then replay successfully. Both arms pass seven host
+trials, Compute Sanitizer, full NVBit capture, deterministic replay, and five
+NCU runs with 1,048,832 matching target warp instructions. Collision NCU median
+is 447092 with simulator lower 320466; separated median is 438935 with lower
+369618. Both lowers are individually consistent, but hardware separated is
+8157 cycles below collision while the simulator lower delta is +49152; the
+separated repeats are high-dispersion. No result-queue latency is activated.
+Evidence: `docs/sm86_c7_research_probe_fixed_latency_result_queue_width8_pair_live_v1.json`.
+
+### C7-S33Y — next active milestone
+
+Run one width-12 collision/separated pair with the same 8,192-generation
+single-cubin contract. Confirm that the finite decoder/resource limits admit
+the captured block without silent truncation; require fresh correctness,
+Compute Sanitizer, NVBit, replay, and five NCU captures for both arms. Keep
+the width differential observational and do not fit a latency constant.

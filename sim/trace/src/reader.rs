@@ -1994,15 +1994,15 @@ impl CompactMemoryRoute {
 }
 
 /// Packed memory-route and protobuf-enum metadata. The wire preflight limits one
-/// threadblock to 1,000,000 instructions, so a route-error arena index plus the
-/// four ready-route discriminants fits in 20 bits. Packing the two small closed
+/// threadblock to 2,000,000 instructions, so a route-error arena index plus the
+/// four ready-route discriminants fits in 21 bits. Packing the two small closed
 /// enums into the remaining bits keeps each compact memory record within 24
 /// bytes; exact u64 async payloads live in the sparse owning-warp arena.
 #[derive(Debug, Clone, Copy)]
 struct CompactMemoryMeta(u32);
 
 impl CompactMemoryMeta {
-    const ROUTE_BITS: u32 = 20;
+    const ROUTE_BITS: u32 = 21;
     const ROUTE_MASK: u32 = (1 << Self::ROUTE_BITS) - 1;
     const CLASS_SHIFT: u32 = Self::ROUTE_BITS;
     const CLASS_MASK: u32 = 0xf;

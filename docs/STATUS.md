@@ -436,8 +436,18 @@ retained lower-bound falsifier. The NCU delta is 32,778 cycles while the
 simulator lower-bound delta is 65,536; no latency is fitted. Artifact:
 `docs/sm86_c7_research_probe_fixed_latency_result_queue_pair_live_v1.json`.
 
-The next active plan milestone is C7-S33X: held-out width-8 collision/separated
-pair under the same single-cubin protocol.
+C7-S33X completed the held-out width-8 result-queue collision/separated pair.
+The live trace exceeded the old one-million-instruction preflight ceiling at
+1,048,832 decoded instructions per block; the finite limit was raised to two
+million and the compact route index widened by one bit, after which both exact
+captures replayed. Both arms pass seven host trials, Compute Sanitizer, NVBit,
+replay, and five NCU runs. Collision median is 447,092 versus lower 320,466;
+separated median is 438,935 versus lower 369,618. Hardware separated is 8,157
+cycles below collision while simulator lower delta is +49,152; no latency is
+fitted. Artifact: `docs/sm86_c7_research_probe_fixed_latency_result_queue_width8_pair_live_v1.json`.
+
+The next active plan milestone is C7-S33Y: width-12 collision/separated pair
+under the same single-cubin and finite-decoder contract.
 
 ## Retained measurements
 
