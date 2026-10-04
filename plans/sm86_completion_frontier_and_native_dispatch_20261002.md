@@ -22,14 +22,12 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    `docs/sm86_c7_simbench_dram_streaming_dot_product_direct_live_v1.json`;
    the former tiny `trace_00` run is only a smoke check.
    [Ampere shared memory](https://docs.nvidia.com/cuda/ampere-tuning-guide/#unified-shared-memory-l1-texture-cache)
-3. **C7-S33M diagnostic complete; C7-S33N active.** All four probe families sampled so
-   far have live evidence: 68 issue-port cells, 36 async-barrier cells, 30
-   store-ack arms, and 102 memory-retirement cells. CCTL pending-fill replay
-   blockers are repaired; eight system-fence instruction crosswalk mismatches
-   remain and are now characterized as an NCU-versus-trace counter mismatch;
-   source-level NCU counters do not resolve it. Preserve those exclusions while
-   moving to the next probe family; no timing/card parameter is selected from
-   scored NCU targets.
+3. **C7-S33R complete; C7-S33S active.** Seven probe families now have live
+   evidence: 68 issue-port cells, 36 async-barrier cells, 30 store-ack arms,
+   102 memory-retirement cells, 33 barrier-pipeline cells, 100 l1tex-admission
+   cells, and one l2-queue warmup/target cell. Preserve the eight system-fence
+   crosswalk exclusions and open completion tails while extending the remaining
+   families; no timing/card parameter is selected from scored NCU targets.
 
 ## Outcome
 
