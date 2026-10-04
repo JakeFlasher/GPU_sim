@@ -421,8 +421,16 @@ NCU agree at 1,389,024 target warp instructions; NCU median gpc cycles are
 explicitly; no SFU timing is fitted or claimed accurate. Artifact:
 `docs/sm86_c7_research_probe_sfu_frontier_live_v1.json`.
 
-The next active plan milestone is C7-S33V: reconcile and harden one
-`fixed_latency_result_queue` producer/consumer cell before live validation.
+C7-S33V completed a same-binary result-queue collision slice. The stale
+64-generation trace twin was removed; one patched 8,192-generation cubin now
+serves correctness, NVBit, replay, and NCU. The hardened driver passed seven
+host trials, Compute Sanitizer, full replay, and five NCU captures. Replay and
+NCU agree at 524,416 warp instructions; NCU median gpc cycles are 307,646 and
+simulator lower is 287,635. No result-queue latency is activated or fitted.
+Artifact: `docs/sm86_c7_research_probe_fixed_latency_result_queue_live_v1.json`.
+
+The next active plan milestone is C7-S33W: matched separated-treatment
+differential at the same width and generation count, with no NCU-driven tuning.
 
 ## Retained measurements
 

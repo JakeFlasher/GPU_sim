@@ -18,7 +18,7 @@ otherwise unchanged, and both treatments have identical reuse flags.
 Destination-bank treatments remain deferred until a safe non-coalesced output
 allocation is generated.
 
-The completed pilot campaign is under
+The completed historical pilot campaign is under
 `results/captures/sm86_fixed_latency_result_queue_20260817_v1`. It contains
 eight W4/W8/W12/W16 cells, seven correctness trials and seven base-clock NCU
 profiles per cell, four SourceCounters profiles, eight NVBit traces, exact
@@ -27,6 +27,12 @@ static sidecars, and deterministic replay. Reduce it with:
 ```bash
 ../../../.venv/bin/python analyze.py
 ```
+
+Correctness, NVBit, replay, and NCU must use the same patched collision or
+separated cubin and the same 8,192-generation launch; a shorter trace cubin
+would not be an identity-preserving comparison. The driver now rejects
+malformed numeric arguments, validates allocation bounds, sentinel outputs,
+elapsed samples, and the deterministic sink oracle before reporting `correct`.
 
 The reduction rejects active result-queue timing: every current HADD2/FFMA
 destination pair is opposite-bank, and the multiwarp treatment crosses over

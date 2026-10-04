@@ -506,10 +506,22 @@ replay, and five launch-3-skipped NCU captures. Replay and NCU both report
 SFU latency is fitted into a scored workload. Evidence:
 `docs/sm86_c7_research_probe_sfu_frontier_live_v1.json`.
 
-C7-S33V is active on `fixed_latency_result_queue`. Its first task is to
-reconcile collision/separated binary and control identities, harden its input,
-allocation, and sink validation, then run one same-binary correctness,
-Compute Sanitizer, NVBit, replay, and five-NCU vertical slice.
+C7-S33V completed a same-binary fixed-latency result-queue collision slice.
+The campaign no longer mixes 64-generation trace cubins with 8,192-generation
+NCU cubins; one patched collision/separated cubin is used across stages. The
+CUDA-driver harness now has strict parsing, bounded allocations, sentinel output
+checks, elapsed-sample checks, and a deterministic sink oracle. The collision
+cell (`warps=4, generations=8192`) passed seven host trials, Compute
+Sanitizer, full NVBit coverage, deterministic replay, and five NCU runs. Replay
+and NCU both report 524,416 warp instructions; NCU gpc cycles are
+307642/307646/307655/307628/307679 (median 307646), while simulator lower is
+287635. No result-queue latency is activated or fitted; dirty-writeback/
+coherence completion remains unknown. Evidence:
+`docs/sm86_c7_research_probe_fixed_latency_result_queue_live_v1.json`.
+
+C7-S33W is active: run the matched separated treatment at the identical width,
+generation count, driver, and NCU contract, then retain the differential as
+observation only.
 
 ## Retained evidence
 

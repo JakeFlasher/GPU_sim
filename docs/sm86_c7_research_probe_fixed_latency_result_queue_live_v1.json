@@ -1,0 +1,212 @@
+{
+  "schema": "sm86_c7_research_probe_fixed_latency_result_queue_live_v1",
+  "status": "correctness_trace_replay_ncu_complete_native_dispatch_refused",
+  "host_identity": {
+    "device_index": 0,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "compute_capability": "8.6",
+    "driver": "615.71.09",
+    "pstate": "P0",
+    "graphics_clock_mhz": 1350,
+    "memory_clock_mhz": 10501
+  },
+  "identity": {
+    "source": "workloads/research_probes/fixed_latency_result_queue",
+    "driver": "workloads/research_probes/fixed_latency_result_queue/fixed_latency_result_queue_driver",
+    "binary": "workloads/research_probes/fixed_latency_result_queue/fixed_latency_result_queue_collision.cubin",
+    "binary_used_for_correctness_trace_replay_ncu": "same patched collision cubin",
+    "control": "results/alpha/c7_s33_result_queue_20261004/collision.control.json",
+    "trace": "results/alpha/c7_s33_result_queue_20261004/trace_collision",
+    "arch_card": "arch_profiles/cards/sm_86.json",
+    "args": [
+      "collision",
+      "4",
+      "8192",
+      "1"
+    ],
+    "variant": "collision",
+    "generations": 8192,
+    "ncu_launch_skip": 0,
+    "ncu_launch_count": 1,
+    "ncu_metric": "gpc__cycles_elapsed.max",
+    "ncu_repeats": 5,
+    "ncu_replay_mode": "application",
+    "ncu_clock_control": "base",
+    "ncu_cache_control": "all"
+  },
+  "correctness": {
+    "status": "passed",
+    "correct": true,
+    "elapsed_samples_valid": true,
+    "checksum_expected": true,
+    "trials": 7,
+    "warps": 4,
+    "generations": 8192,
+    "checksum": 4030213046440946,
+    "native_stdout": "results/alpha/c7_s33_result_queue_20261004/native_correctness_collision.stdout",
+    "compute_sanitizer": "collision,4 warps,8192 generations,1 trial; zero errors"
+  },
+  "trace": {
+    "launches": 1,
+    "target_kernel_id": 1,
+    "target_grid": [
+      1,
+      1,
+      1
+    ],
+    "target_block": [
+      128,
+      1,
+      1
+    ],
+    "tracer_stats_rows": [
+      {
+        "kernel_id": 1,
+        "kernel_name": "_Z18result_queue_pilotPyPjPKjPKf",
+        "tracer_total_insts": 1933632,
+        "tracer_total_reported_insts": 1933632
+      }
+    ],
+    "target_records_replayed": 524416,
+    "target_coverage": {
+      "kind": "full",
+      "blocks_observed": 1,
+      "population_blocks": 1
+    },
+    "target_tail_facts": {
+      "blocks_observed": 1,
+      "coverage_complete": true,
+      "cross_sm_line_topology": 0,
+      "device_id": 0,
+      "function_unique_id": 1,
+      "grid": [
+        1,
+        1,
+        1
+      ],
+      "instrumentation_order_duplicate_records": 0,
+      "instrumentation_order_records": 0,
+      "instrumentation_order_strictly_unique": null,
+      "instrumentation_order_unique": 0,
+      "kernel_id": 1,
+      "kernel_name": "_Z18result_queue_pilotPyPjPKjPKf___0",
+      "memory_records": 40,
+      "population_blocks": 1,
+      "records": 524416,
+      "same_warp_program_order_edges": 524412,
+      "sm_ids": [
+        0
+      ],
+      "static_opcode_ambiguity_records": 0,
+      "static_opcode_records": 524416,
+      "stream_id": 7,
+      "warps": 4
+    },
+    "independent_tail_facts": "results/alpha/c7_s33_result_queue_20261004/tail_collision.json",
+    "static_control_functions": 1,
+    "static_control_decoded_instructions": 64,
+    "static_control_unknown_encodings": 0
+  },
+  "simulator": {
+    "records": 524416,
+    "instructions_issued": 524416,
+    "completion_frontier": {
+      "status": "incomplete_unmodeled_retirement_tails",
+      "lower_bound_cycles": 287635,
+      "unmodeled_tails": {
+        "reduction_read_modify_write": false,
+        "dirty_writeback": true,
+        "coherence": true,
+        "async_copy_shared_visibility": false
+      }
+    },
+    "native_macro_dispatches": 0,
+    "runtime_seconds": 0.515481892,
+    "runtime_measurement": "wall clock around sim-run only; no speedup/compression comparison"
+  },
+  "ncu": {
+    "metric": "gpc__cycles_elapsed.max",
+    "values": [
+      307642.0,
+      307646.0,
+      307655.0,
+      307628.0,
+      307679.0
+    ],
+    "median": 307646.0,
+    "min": 307628.0,
+    "max": 307679.0,
+    "stdev": 18.907670401189037,
+    "rows": [
+      {
+        "rep": "ncu_collision_0",
+        "gpc__cycles_elapsed.max": 307642.0,
+        "smsp__inst_executed.sum": 524416.0,
+        "gpu__time_duration.sum": 197248.0,
+        "smsp__inst_executed_pipe_alu.sum": 229404.0,
+        "smsp__inst_executed_pipe_fma.sum": 262180.0,
+        "smsp__inst_issued.sum": 524444.0
+      },
+      {
+        "rep": "ncu_collision_1",
+        "gpc__cycles_elapsed.max": 307646.0,
+        "smsp__inst_executed.sum": 524416.0,
+        "gpu__time_duration.sum": 197248.0,
+        "smsp__inst_executed_pipe_alu.sum": 229404.0,
+        "smsp__inst_executed_pipe_fma.sum": 262180.0,
+        "smsp__inst_issued.sum": 524444.0
+      },
+      {
+        "rep": "ncu_collision_2",
+        "gpc__cycles_elapsed.max": 307655.0,
+        "smsp__inst_executed.sum": 524416.0,
+        "gpu__time_duration.sum": 197248.0,
+        "smsp__inst_executed_pipe_alu.sum": 229404.0,
+        "smsp__inst_executed_pipe_fma.sum": 262180.0,
+        "smsp__inst_issued.sum": 524444.0
+      },
+      {
+        "rep": "ncu_collision_3",
+        "gpc__cycles_elapsed.max": 307628.0,
+        "smsp__inst_executed.sum": 524416.0,
+        "gpu__time_duration.sum": 197248.0,
+        "smsp__inst_executed_pipe_alu.sum": 229404.0,
+        "smsp__inst_executed_pipe_fma.sum": 262180.0,
+        "smsp__inst_issued.sum": 524444.0
+      },
+      {
+        "rep": "ncu_collision_4",
+        "gpc__cycles_elapsed.max": 307679.0,
+        "smsp__inst_executed.sum": 524416.0,
+        "gpu__time_duration.sum": 197248.0,
+        "smsp__inst_executed_pipe_alu.sum": 229404.0,
+        "smsp__inst_executed_pipe_fma.sum": 262180.0,
+        "smsp__inst_issued.sum": 524444.0
+      }
+    ],
+    "instruction_count": [
+      524416.0,
+      524416.0,
+      524416.0,
+      524416.0,
+      524416.0
+    ],
+    "kernel": "result_queue_pilot(unsigned long long *, unsigned int *, const unsigned int *, const float *)",
+    "clock_control": "base",
+    "cache_control": "all",
+    "launch_skip": 0
+  },
+  "comparison": {
+    "instruction_count_match": true,
+    "lower_bound_consistency": true,
+    "lower_bound_cycles": 287635,
+    "ncu_median_cycles": 307646.0,
+    "gap_cycles": 20011.0,
+    "gap_fraction": 0.06504553935367273,
+    "variant_identity": "collision controls were patched once, and the same cubin was used in correctness, NVBit, replay, and NCU",
+    "hardware_completion": "not_observed",
+    "point_estimator": "not_claimed"
+  },
+  "interpretation": "Fresh same-binary collision vertical slice. The driver oracle passed seven trials and Compute Sanitizer; NVBit captured the patched collision cubin, replay covered the one CTA, and five NCU runs profiled that same 8192-generation cubin. Replay and NCU both report 524416 target warp instructions, and simulator lower 287635 remains below NCU median 307646. The result-queue hypothesis remains exploratory; no latency is activated or fitted, dirty-writeback/coherence completion is unknown, and no point-accuracy or speedup claim is made."
+}

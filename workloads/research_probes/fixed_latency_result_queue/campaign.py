@@ -26,9 +26,6 @@ DRIVER = HERE / "fixed_latency_result_queue_driver"
 LONG_NATIVE = HERE / "fixed_latency_result_queue.cubin"
 LONG_COLLISION = HERE / "fixed_latency_result_queue_collision.cubin"
 LONG_SEPARATED = HERE / "fixed_latency_result_queue_separated.cubin"
-TRACE_NATIVE = HERE / "fixed_latency_result_queue_trace.cubin"
-TRACE_COLLISION = HERE / "fixed_latency_result_queue_trace_collision.cubin"
-TRACE_SEPARATED = HERE / "fixed_latency_result_queue_trace_separated.cubin"
 
 
 def load_base_campaign():
@@ -80,9 +77,12 @@ class Cell:
         return f"w{self.warps}_{self.variant}"
 
     def cubin(self, trace: bool) -> Path:
+        # One patched cubin per treatment is used for correctness, NVBit,
+        # replay, and NCU. The former 64-generation trace cubins made the
+        # campaign compare different programs.
         if self.variant == "collision":
-            return TRACE_COLLISION if trace else LONG_COLLISION
-        return TRACE_SEPARATED if trace else LONG_SEPARATED
+            return LONG_COLLISION
+        return LONG_SEPARATED
 
     def target(self, *, trace: bool, trials: int) -> list[str]:
         return [
@@ -90,7 +90,7 @@ class Cell:
             str(self.cubin(trace)),
             self.variant,
             str(self.warps),
-            str(64 if trace else 8192),
+            str(8192),
             str(trials),
         ]
 
@@ -124,9 +124,6 @@ def require_binaries() -> None:
         LONG_NATIVE,
         LONG_COLLISION,
         LONG_SEPARATED,
-        TRACE_NATIVE,
-        TRACE_COLLISION,
-        TRACE_SEPARATED,
     ):
         if not path.is_file() or path.stat().st_size == 0:
             raise RuntimeError(f"required binary is missing: {path}")
@@ -141,7 +138,7 @@ def emit_manifest(output: Path) -> None:
             "cells": [{**asdict(cell), "key": cell.key} for cell in configured_cells()],
             "ncu_metrics": list(METRICS),
             "long_generations": 8192,
-            "trace_generations": 64,
+            "generations": 8192,
             "identification_widths": [4, 8],
             "held_out_widths": [12, 16],
             "pair_invariants": [
@@ -359,9 +356,6 @@ def run_static(output: Path) -> None:
         "fixed_latency_result_queue_native": LONG_NATIVE,
         "fixed_latency_result_queue_collision": LONG_COLLISION,
         "fixed_latency_result_queue_separated": LONG_SEPARATED,
-        "fixed_latency_result_queue_trace_native": TRACE_NATIVE,
-        "fixed_latency_result_queue_trace_collision": TRACE_COLLISION,
-        "fixed_latency_result_queue_trace_separated": TRACE_SEPARATED,
     }
     sidecars = []
     for name, binary in binaries.items():
@@ -485,7 +479,7 @@ def run_simulator(
             str(
                 output
                 / "sass"
-                / f"fixed_latency_result_queue_trace_{cell.variant}.control_bits.json"
+                / f"fixed_latency_result_queue_{cell.variant}.control_bits.json"
             ),
             "--arch-card",
             str(REPO_ROOT / "arch_profiles" / "cards" / "sm_86.json"),

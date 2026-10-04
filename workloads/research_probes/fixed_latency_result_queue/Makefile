@@ -6,33 +6,21 @@ CONTROL_TOOL = ../../../tools/sass_control/emit_control_bits_sidecar.py
 
 .PHONY: all clean
 
-all: fixed_latency_result_queue fixed_latency_result_queue_trace \
-	fixed_latency_result_queue.cubin fixed_latency_result_queue_trace.cubin \
+all: fixed_latency_result_queue fixed_latency_result_queue.cubin \
 	fixed_latency_result_queue_driver \
 	fixed_latency_result_queue_collision.cubin \
-	fixed_latency_result_queue_separated.cubin \
-	fixed_latency_result_queue_trace_collision.cubin \
-	fixed_latency_result_queue_trace_separated.cubin
+	fixed_latency_result_queue_separated.cubin
 
 fixed_latency_result_queue: fixed_latency_result_queue.cu
 	$(NVCC) $(NVCC_FLAGS) -o $@ $<
 
-fixed_latency_result_queue_trace: fixed_latency_result_queue.cu
-	$(NVCC) $(NVCC_FLAGS) -DFIXED_RESULT_GENERATIONS=64 -o $@ $<
-
 fixed_latency_result_queue.cubin: fixed_latency_result_queue.cu
 	$(NVCC) $(NVCC_FLAGS) -cubin -o $@ $<
-
-fixed_latency_result_queue_trace.cubin: fixed_latency_result_queue.cu
-	$(NVCC) $(NVCC_FLAGS) -DFIXED_RESULT_GENERATIONS=64 -cubin -o $@ $<
 
 fixed_latency_result_queue_driver: fixed_latency_result_queue_driver.cpp
 	$(NVCC) -std=c++17 -O3 -o $@ $< -lcuda
 
 fixed_latency_result_queue.control_bits.json: fixed_latency_result_queue.cubin
-	$(PYTHON) $(CONTROL_TOOL) --binary $< --arch sm_86 --out $@ --toolkit-bindir $(CUDA_BIN)
-
-fixed_latency_result_queue_trace.control_bits.json: fixed_latency_result_queue_trace.cubin
 	$(PYTHON) $(CONTROL_TOOL) --binary $< --arch sm_86 --out $@ --toolkit-bindir $(CUDA_BIN)
 
 fixed_latency_result_queue_collision.cubin \
@@ -43,18 +31,9 @@ fixed_latency_result_queue_separated.cubin &: \
 		fixed_latency_result_queue.control_bits.json --prefix fixed_latency_result_queue \
 		--report fixed_latency_result_queue.patch.json
 
-fixed_latency_result_queue_trace_collision.cubin \
-fixed_latency_result_queue_trace_separated.cubin &: \
-		fixed_latency_result_queue_trace.cubin fixed_latency_result_queue_trace.control_bits.json \
-		patch_sm86_result_pairs.py
-	$(PYTHON) patch_sm86_result_pairs.py fixed_latency_result_queue_trace.cubin \
-		fixed_latency_result_queue_trace.control_bits.json --prefix fixed_latency_result_queue_trace \
-		--report fixed_latency_result_queue_trace.patch.json
-
 clean:
-	rm -f fixed_latency_result_queue fixed_latency_result_queue_trace \
-		fixed_latency_result_queue.cubin fixed_latency_result_queue_trace.cubin \
+	rm -f fixed_latency_result_queue \
+		fixed_latency_result_queue.cubin \
 		fixed_latency_result_queue_driver fixed_latency_result_queue_*collision.cubin \
 		fixed_latency_result_queue_*separated.cubin \
-		fixed_latency_result_queue_*collision_*.cubin \
-		fixed_latency_result_queue_*separated_*.cubin *.control_bits.json *.patch.json
+		*.control_bits.json *.patch.json
