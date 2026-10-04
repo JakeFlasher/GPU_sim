@@ -429,8 +429,15 @@ NCU agree at 524,416 warp instructions; NCU median gpc cycles are 307,646 and
 simulator lower is 287,635. No result-queue latency is activated or fitted.
 Artifact: `docs/sm86_c7_research_probe_fixed_latency_result_queue_live_v1.json`.
 
-The next active plan milestone is C7-S33W: matched separated-treatment
-differential at the same width and generation count, with no NCU-driven tuning.
+C7-S33W completed the matched result-queue collision/separated differential at
+width 4 and 8,192 generations. Collision NCU median is 307,646 versus
+simulator lower 287,635; separated median is 340,424 versus lower 353,171, a
+retained lower-bound falsifier. The NCU delta is 32,778 cycles while the
+simulator lower-bound delta is 65,536; no latency is fitted. Artifact:
+`docs/sm86_c7_research_probe_fixed_latency_result_queue_pair_live_v1.json`.
+
+The next active plan milestone is C7-S33X: held-out width-8 collision/separated
+pair under the same single-cubin protocol.
 
 ## Retained measurements
 

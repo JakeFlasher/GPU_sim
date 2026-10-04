@@ -22,18 +22,16 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    `docs/sm86_c7_simbench_dram_streaming_dot_product_direct_live_v1.json`;
    the former tiny `trace_00` run is only a smoke check.
    [Ampere shared memory](https://docs.nvidia.com/cuda/ampere-tuning-guide/#unified-shared-memory-l1-texture-cache)
-3. **C7-S33W active.** Nine probe families now have live
+3. **C7-S33X active.** Nine probe families now have live
    evidence: 68 issue-port cells, 36 async-barrier cells, 30 store-ack arms,
    102 memory-retirement cells, 33 barrier-pipeline cells, 100 l1tex-admission
    cells, one l2-queue warmup/target cell, one l1tex-arrival store cell, and
-   one dependent-SFU cell.
-   C7-S33S repaired the L2 probe's allocation/checksum/timestamp validation;
-   C7-S33T hardened the L1TEX driver, removed its stale trace-twin interface,
-   and completed a same-binary NVBit/replay/five-NCU vertical slice. C7-S33U
-   C7-S33U hardened and captured the SFU probe; its lower-bound falsifier is
-   retained rather than tuned away. C7-S33V reconciled the result-queue paired
-   binaries and captured one collision arm. C7-S33W now performs the matched
-   separated-arm differential while preserving the eight system-fence
+   one dependent-SFU cell. C7-S33S repaired the L2 probe's
+   allocation/checksum/timestamp validation; C7-S33T hardened the L1TEX
+   driver and removed its stale trace-twin interface; C7-S33U retained a real
+   SFU lower-bound falsifier; C7-S33V unified the result-queue binaries and
+   captured collision; C7-S33W retained the separated-arm falsifier. C7-S33X
+   now tests one held-out width pair while preserving the eight system-fence
    crosswalk exclusions and open completion tails; no timing/card parameter is
    selected from scored NCU targets.
 
@@ -1289,10 +1287,23 @@ is 287635. The result-queue hypothesis remains exploratory; no latency is
 activated or fitted and dirty-writeback/coherence completion remains unknown.
 Evidence: `docs/sm86_c7_research_probe_fixed_latency_result_queue_live_v1.json`.
 
-### C7-S33W — next active milestone
+### C7-S33W — result-queue matched collision/separated differential — complete with falsifier
 
-Run the matched separated treatment at the identical width, generation count,
-driver, and NCU contract. Reuse the same validation/capture path, compare the
-collision/separated differential as an observation only, and retain either
-lower-bound falsifier. Do not convert the differential into a fixed latency
-constant or modify the simulator from the NCU result.
+The separated treatment was captured at the identical width and generation
+count with the same driver, patched-cubin contract, replay, clocks, cache
+policy, and five-NCU protocol. Both arms pass the host sink oracle, Compute
+Sanitizer, full one-CTA NVBit/replay coverage, and instruction-count
+crosswalks. Collision NCU median is 307646 with simulator lower 287635;
+separated median is 340424 with simulator lower 353171, so separated is a real
+lower-bound falsifier. The NCU treatment delta is 32778 cycles while the
+simulator lower-bound delta is 65536; this differential is mechanism-local
+evidence, not a fixed latency. Evidence:
+`docs/sm86_c7_research_probe_fixed_latency_result_queue_pair_live_v1.json`.
+
+### C7-S33X — next active milestone
+
+Run one held-out width-8 collision/separated pair with the same 8,192-generation
+single-cubin contract. Require fresh correctness, Compute Sanitizer, NVBit,
+replay, and five NCU captures for both arms; compare the differential without
+using NCU values to tune the model. If the held-out pair remains a falsifier,
+retain it and move to the next mechanism rather than widening a latency term.

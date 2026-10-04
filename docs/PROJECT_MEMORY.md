@@ -519,9 +519,18 @@ and NCU both report 524,416 warp instructions; NCU gpc cycles are
 coherence completion remains unknown. Evidence:
 `docs/sm86_c7_research_probe_fixed_latency_result_queue_live_v1.json`.
 
-C7-S33W is active: run the matched separated treatment at the identical width,
-generation count, driver, and NCU contract, then retain the differential as
-observation only.
+C7-S33W completed the matched result-queue collision/separated differential at
+`warps=4, generations=8192`. Both treatments use one patched cubin each across
+correctness, NVBit, replay, and NCU, with identical driver, clocks, cache
+policy, and five-repeat protocol. Collision NCU median is 307646 with
+simulator lower 287635; separated median is 340424 with simulator lower 353171,
+so separated is a real lower-bound falsifier. The NCU treatment delta is 32778
+cycles while the simulator lower-bound delta is 65536; this is mechanism-local
+evidence, not a fixed latency. Artifact:
+`docs/sm86_c7_research_probe_fixed_latency_result_queue_pair_live_v1.json`.
+
+C7-S33X is active: run one held-out width-8 collision/separated pair under the
+same 8,192-generation single-cubin protocol before expanding further.
 
 ## Retained evidence
 
