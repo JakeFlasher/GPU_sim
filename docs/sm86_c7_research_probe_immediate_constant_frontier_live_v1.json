@@ -1,0 +1,84 @@
+{
+  "schema": "sm86_c7_research_probe_immediate_constant_frontier_live_v1",
+  "status": "correctness_trace_replay_ncu_complete_observational",
+  "host_identity": {
+    "device_index": 0,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "compute_capability": "8.6",
+    "driver": "615.71.09",
+    "pstate": "P0",
+    "graphics_clock_mhz": 1350,
+    "memory_clock_mhz": 10501
+  },
+  "identity": {
+    "source": "workloads/research_probes/immediate_constant_frontier",
+    "binary": "workloads/research_probes/immediate_constant_frontier/imc_kernel.cubin",
+    "driver": "workloads/research_probes/immediate_constant_frontier/imc_valid_driver",
+    "binary_used_for_correctness_trace_replay_ncu": "same hand-authored PTX cubin",
+    "trace": "results/alpha/c7_s33ap_immediate_constant_20261004/nvbit",
+    "control": "results/alpha/c7_s33ap_immediate_constant_20261004/control/control_bits.json",
+    "args": [
+      "84",
+      "256"
+    ],
+    "blocks": 84,
+    "iterations": 256
+  },
+  "correctness": {
+    "status": "passed",
+    "min_cycles": 7218,
+    "max_cycles": 7266,
+    "oracle": "driver completed and returned 2688 warp records"
+  },
+  "trace": {
+    "launches": 1,
+    "target_kernel": "imc_kernel",
+    "target_records_replayed": 151872,
+    "target_coverage": {
+      "kind": "full",
+      "blocks_observed": 84,
+      "population_blocks": 84
+    },
+    "enhanced_metadata": "SASS parse emitted 32 decoded instructions; driver ELF is not a cubin and was correctly skipped"
+  },
+  "simulator": {
+    "records": 151872,
+    "instructions_issued": 151872,
+    "completion_frontier": {
+      "status": "incomplete_unmodeled_retirement_tails",
+      "lower_bound_cycles": 6037,
+      "unmodeled_tails": {
+        "reduction_read_modify_write": false,
+        "dirty_writeback": true,
+        "coherence": true,
+        "async_copy_shared_visibility": false
+      }
+    },
+    "native_macro_dispatches": 0
+  },
+  "ncu": {
+    "metric": "gpc__cycles_elapsed.max",
+    "values": [
+      10709.0
+    ],
+    "median": 10709.0,
+    "instruction_count": [
+      151872.0
+    ],
+    "gpu_time_us": [
+      6.912
+    ],
+    "clock_control": "base",
+    "cache_control": "none",
+    "launch_skip": 0
+  },
+  "comparison": {
+    "instruction_count_match": true,
+    "lower_bound_consistency": true,
+    "lower_bound_cycles": 6037,
+    "ncu_median_cycles": 10709.0,
+    "gap_cycles": 4672.0
+  },
+  "interpretation": "The hand-authored PTX cubin produces a valid native NVBit trace and simulator replay. This is an observational IMC anchor, not a latency fit: one profile cannot separate cache miss, issue, and instrumentation effects, and no IMC timing model is activated."
+}

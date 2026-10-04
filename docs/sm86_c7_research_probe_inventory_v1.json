@@ -1,7 +1,7 @@
 {
   "schema": "sm86_c7_research_probe_inventory_v1",
   "architecture": "sm_86",
-  "status": "25_live_probe_stages_reconciled_plus_result_capacity",
+  "status": "26_live_probe_stages_reconciled",
   "root": "workloads/research_probes",
   "population": {
     "directory_count": 42,
@@ -1197,6 +1197,12 @@
       "cell": "w8_b9_g8192",
       "artifact": "docs/sm86_c7_research_probe_fixed_latency_result_capacity_live_v1.json",
       "status": "complete_lower_bound_consistent_capacity_unidentified"
+    },
+    {
+      "probe": "immediate_constant_frontier",
+      "cell": "blocks84_iterations256",
+      "artifact": "docs/sm86_c7_research_probe_immediate_constant_frontier_live_v1.json",
+      "status": "complete_observational_lower_bound_consistent"
     }
   ]
 }

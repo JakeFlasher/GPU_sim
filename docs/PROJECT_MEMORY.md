@@ -720,3 +720,12 @@ capacity and pop width remain unidentified and no timing model is enabled.
 Artifact: `docs/sm86_c7_research_probe_fixed_latency_result_capacity_live_v1.json`.
 
 C7-S33AP is active: review `immediate_constant_frontier` next.
+
+C7-S33AP completed an immediate-constant live anchor. The hand-authored PTX
+cubin passed direct correctness, NVBit capture, control-sidecar generation,
+sim-run replay, and an independent NCU profile. At blocks84/iterations256,
+replay and NCU match at 151,872 instructions; simulator lower is 6,037 cycles
+and NCU is 10,709 GPC cycles. This remains observational; no IMC timing model
+is activated. Artifact: `docs/sm86_c7_research_probe_immediate_constant_frontier_live_v1.json`.
+
+C7-S33AQ is active: review constant-load and L1TEX admission seams next.

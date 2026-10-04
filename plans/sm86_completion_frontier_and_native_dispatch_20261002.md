@@ -1562,3 +1562,21 @@ width, so no capacity timing model is enabled. Evidence:
 Review and refresh `immediate_constant_frontier` as the next uncaptured
 non-memory probe. Preserve its functional-only boundary unless a native
 NVBit→sim-run trace and independent NCU anchor can be produced.
+
+### C7-S33AP — immediate-constant frontier live anchor — complete
+
+The hand-authored PTX cubin was run from its correct module directory. The
+same cubin passed the direct-clock correctness run, metadata-enabled NVBit
+capture, control-sidecar generation, deterministic sim-run replay, and an
+independent base-clock NCU profile. The 84-block/256-iteration arm produced
+2688 warp records; replay/NCU agree at 151,872 instructions, simulator lower is
+6,037 cycles, and NCU reports 10,709 GPC cycles. The driver ELF was correctly
+excluded from cubin parsing; the kernel SASS still yielded 32 decoded
+instructions. This remains observational and does not activate an IMC latency
+model. Evidence: `docs/sm86_c7_research_probe_immediate_constant_frontier_live_v1.json`.
+
+### C7-S33AQ — next active milestone
+
+Review `constant_load_path` and `l1tex_admission_backpressure` for stale
+functional-only interfaces; select only a probe that can preserve independent
+NCU anchoring and native replay without inventing a cache-latency model.
