@@ -528,8 +528,18 @@ trials, Compute Sanitizer, NVBit, replay, and five NCU runs. Replay/NCU agree at
 355,107, simulator lower 268,019. No routing/timing model is fitted. Artifact:
 `docs/sm86_c7_research_probe_atomic_multism_service_live_v1.json`.
 
-The next active plan milestone is C7-S33AI: one hardened
-`atomic_alias_adversarial` cell, observational only.
+C7-S33AI completed an observational atomic alias-adversarial slice. One rebuilt
+1,024-generation cubin per operation/width replaces trace twins; the driver
+checks generation/pattern/alias/width, bounds memory, validates elapsed/data/
+returned outputs, and cleans up. Ret32 dense alias-32, warps 4, passes seven
+host trials, Compute Sanitizer, NVBit, replay, and five NCU runs. Replay/NCU
+agree at 24,684 instructions; atomic requests 4,096, LTS requests 131,072,
+NCU median 382,651, simulator lower 267,996. No proprietary hash or timing
+model is claimed. Artifact:
+`docs/sm86_c7_research_probe_atomic_alias_adversarial_live_v1.json`.
+
+The next active plan milestone is C7-S33AJ: one virtual/physical alias control
+cell with routing kept black-box.
 
 ## Retained measurements
 

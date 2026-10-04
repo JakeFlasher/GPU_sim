@@ -1,0 +1,209 @@
+{
+  "schema": "sm86_c7_research_probe_atomic_alias_adversarial_live_v1",
+  "status": "correctness_trace_replay_ncu_complete_native_dispatch_refused",
+  "host_identity": {
+    "device_index": 0,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "compute_capability": "8.6",
+    "driver": "615.71.09",
+    "pstate": "P0",
+    "graphics_clock_mhz": 1350,
+    "memory_clock_mhz": 10501
+  },
+  "identity": {
+    "source": "workloads/research_probes/atomic_alias_adversarial",
+    "driver": "workloads/research_probes/atomic_alias_adversarial/atomic_alias_adversarial_driver",
+    "binary": "workloads/research_probes/atomic_alias_adversarial/atomic_alias_adversarial_ret32.cubin",
+    "binary_used_for_correctness_trace_replay_ncu": "same rebuilt 1024-generation cubin",
+    "control": "results/alpha/c7_s33_alias_20261004/control.json",
+    "trace": "results/alpha/c7_s33_alias_20261004/trace",
+    "arch_card": "arch_profiles/cards/sm_86.json",
+    "pchase_card": "data/pchase/sm_86_static_card.json",
+    "args": [
+      "4",
+      "1024",
+      "1",
+      "ret32",
+      "32",
+      "1",
+      "0",
+      "32",
+      "4",
+      "0"
+    ],
+    "variant": "ret32",
+    "warps": 4,
+    "generations": 1024,
+    "width": 32,
+    "pattern": "dense",
+    "alias": 32,
+    "stride_bytes": 4,
+    "scattered": false,
+    "ncu_launch_skip": 0,
+    "ncu_launch_count": 1,
+    "ncu_metric": "gpc__cycles_elapsed.max",
+    "ncu_repeats": 5,
+    "ncu_replay_mode": "application",
+    "ncu_clock_control": "base",
+    "ncu_cache_control": "all"
+  },
+  "correctness": {
+    "status": "passed",
+    "correct": true,
+    "elapsed_samples_valid": true,
+    "returned_output_present": true,
+    "trials": 7,
+    "operations": 131072,
+    "data_sum": 131072,
+    "returned_sum": 2147418112,
+    "expected_returned_sum": 2147418112,
+    "unique_words": 4,
+    "native_stdout": "results/alpha/c7_s33_alias_20261004/native_correctness.stdout",
+    "compute_sanitizer": "ret32 dense alias32,4 warps,1024 generations,1 trial; zero errors"
+  },
+  "trace": {
+    "launches": 1,
+    "target_kernel_id": 1,
+    "target_kernel": "atomic_alias_probe",
+    "target_grid": [
+      1,
+      1,
+      1
+    ],
+    "target_block": [
+      128,
+      1,
+      1
+    ],
+    "tracer_total_insts": 90388,
+    "tracer_total_reported_insts": 90388,
+    "target_records_replayed": 24684,
+    "target_coverage": {
+      "kind": "full",
+      "blocks_observed": 1,
+      "population_blocks": 1
+    },
+    "target_tail_facts": "results/alpha/c7_s33_alias_20261004/tail_facts.json",
+    "static_control_functions": 1,
+    "static_control_decoded_instructions": 48,
+    "static_control_unknown_encodings": 0
+  },
+  "simulator": {
+    "records": 24684,
+    "instructions_issued": 24684,
+    "completion_frontier": {
+      "status": "incomplete_unmodeled_retirement_tails",
+      "lower_bound_cycles": 267996,
+      "unmodeled_tails": {
+        "reduction_read_modify_write": false,
+        "dirty_writeback": true,
+        "coherence": true,
+        "async_copy_shared_visibility": false
+      }
+    },
+    "native_macro_dispatches": 0,
+    "runtime_seconds": 0.146536456,
+    "runtime_measurement": "wall clock around sim-run only; no speedup/compression comparison"
+  },
+  "ncu": {
+    "metric": "gpc__cycles_elapsed.max",
+    "values": [
+      382651.0,
+      382600.0,
+      386777.0,
+      382573.0,
+      386805.0
+    ],
+    "median": 382651.0,
+    "min": 382573.0,
+    "max": 386805.0,
+    "stdev": 2291.316041055882,
+    "rows": [
+      {
+        "rep": "ncu_0",
+        "gpc__cycles_elapsed.max": 382651.0,
+        "smsp__inst_executed.sum": 24684.0,
+        "gpu__time_duration.sum": 245312.0,
+        "smsp__inst_executed_pipe_lsu.sum": 4112.0,
+        "smsp__inst_executed_op_generic_atom_dot_alu.sum": 4096.0,
+        "sm__sass_inst_executed_op_global_atom.sum": 4096.0,
+        "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum": 4096.0,
+        "lts__t_requests_srcunit_tex_op_atom_dot_alu.sum": 131072.0,
+        "dram__sectors_read.sum": 120.0
+      },
+      {
+        "rep": "ncu_1",
+        "gpc__cycles_elapsed.max": 382600.0,
+        "smsp__inst_executed.sum": 24684.0,
+        "gpu__time_duration.sum": 245312.0,
+        "smsp__inst_executed_pipe_lsu.sum": 4112.0,
+        "smsp__inst_executed_op_generic_atom_dot_alu.sum": 4096.0,
+        "sm__sass_inst_executed_op_global_atom.sum": 4096.0,
+        "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum": 4096.0,
+        "lts__t_requests_srcunit_tex_op_atom_dot_alu.sum": 131072.0,
+        "dram__sectors_read.sum": 124.0
+      },
+      {
+        "rep": "ncu_2",
+        "gpc__cycles_elapsed.max": 386777.0,
+        "smsp__inst_executed.sum": 24684.0,
+        "gpu__time_duration.sum": 247968.0,
+        "smsp__inst_executed_pipe_lsu.sum": 4112.0,
+        "smsp__inst_executed_op_generic_atom_dot_alu.sum": 4096.0,
+        "sm__sass_inst_executed_op_global_atom.sum": 4096.0,
+        "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum": 4096.0,
+        "lts__t_requests_srcunit_tex_op_atom_dot_alu.sum": 131072.0,
+        "dram__sectors_read.sum": 120.0
+      },
+      {
+        "rep": "ncu_3",
+        "gpc__cycles_elapsed.max": 382573.0,
+        "smsp__inst_executed.sum": 24684.0,
+        "gpu__time_duration.sum": 245280.0,
+        "smsp__inst_executed_pipe_lsu.sum": 4112.0,
+        "smsp__inst_executed_op_generic_atom_dot_alu.sum": 4096.0,
+        "sm__sass_inst_executed_op_global_atom.sum": 4096.0,
+        "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum": 4096.0,
+        "lts__t_requests_srcunit_tex_op_atom_dot_alu.sum": 131072.0,
+        "dram__sectors_read.sum": 120.0
+      },
+      {
+        "rep": "ncu_4",
+        "gpc__cycles_elapsed.max": 386805.0,
+        "smsp__inst_executed.sum": 24684.0,
+        "gpu__time_duration.sum": 248000.0,
+        "smsp__inst_executed_pipe_lsu.sum": 4112.0,
+        "smsp__inst_executed_op_generic_atom_dot_alu.sum": 4096.0,
+        "sm__sass_inst_executed_op_global_atom.sum": 4096.0,
+        "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum": 4096.0,
+        "lts__t_requests_srcunit_tex_op_atom_dot_alu.sum": 131072.0,
+        "dram__sectors_read.sum": 116.0
+      }
+    ],
+    "instruction_count": [
+      24684.0,
+      24684.0,
+      24684.0,
+      24684.0,
+      24684.0
+    ],
+    "kernel": "atomic_alias_probe(unsigned long long *, unsigned long long *, unsigned int *, const unsigned int *)",
+    "clock_control": "base",
+    "cache_control": "all",
+    "launch_skip": 0
+  },
+  "comparison": {
+    "instruction_count_match": true,
+    "lower_bound_consistency": true,
+    "lower_bound_cycles": 267996,
+    "ncu_median_cycles": 382651.0,
+    "gap_cycles": 114655.0,
+    "gap_fraction": 0.2996333473582978,
+    "hardware_completion": "not_observed",
+    "point_estimator": "not_claimed",
+    "ncu_atomic_request_counts_observed": 4096,
+    "ncu_lts_request_count_observed": 131072
+  },
+  "interpretation": "Fresh same-binary dense alias adversarial vertical slice. The returning atomic data/returned-sum oracle passes seven trials and Compute Sanitizer; NVBit, replay, and NCU use the same 1024-generation cubin. Replay/NCU report 24684 target warp instructions, atomic requests 4096, LTS requests 131072, NCU median 382651, and simulator lower 267996. This is an observational alias experiment only; no proprietary routing/hash is reconstructed and no timing model or speedup claim is made."
+}

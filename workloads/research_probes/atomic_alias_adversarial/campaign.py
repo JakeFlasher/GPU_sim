@@ -103,8 +103,7 @@ def binary_variant(width: int, returning: bool) -> str:
 
 
 def cubin(width: int, returning: bool, *, trace: bool) -> Path:
-    infix = "_trace" if trace else ""
-    return HERE / f"atomic_alias_adversarial{infix}_{binary_variant(width, returning)}.cubin"
+    return HERE / f"atomic_alias_adversarial_{binary_variant(width, returning)}.cubin"
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,7 +142,7 @@ class Cell:
             str(DRIVER),
             str(cubin(self.width, self.returning, trace=trace)),
             str(self.warps),
-            str(64 if trace else 1024),
+            str(1024),
             str(trials),
             self.key,
             str(self.width),
@@ -287,7 +286,7 @@ def require_binaries() -> None:
         cubin(width, returning, trace=trace)
         for width in (32, 64)
         for returning in (True, False)
-        for trace in (False, True)
+        for trace in (False,)
     )
     for path in paths:
         if not path.is_file() or path.stat().st_size == 0:
@@ -305,7 +304,7 @@ def emit_manifest(output: Path) -> None:
             "ncu_metrics": list(METRICS),
             "return_path_ncu_metrics": list(RETURN_METRICS),
             "long_generations": 1024,
-            "trace_generations": 64,
+            "generations": 1024,
             "ncu_repeats": {"all_cells": 1, "w16_cells": 3},
             "source_counter_cells": [entry.key for entry in source_cells(cells)],
             "research_basis": [
@@ -521,7 +520,7 @@ def run_static(output: Path) -> None:
         cubin(width, returning, trace=trace)
         for width in (32, 64)
         for returning in (True, False)
-        for trace in (False, True)
+        for trace in (False,)
     ]
     sidecars = []
     for binary in binaries:
@@ -571,12 +570,6 @@ def run_static(output: Path) -> None:
 
     audit(sidecars, "operand_projection_audit.json", "operand-projection-run")
     output_sass = destination.resolve()
-    retained = sorted(
-        path
-        for path in REPO_ROOT.glob("results/captures/**/*.control_bits.json")
-        if path.parent.resolve() != output_sass
-    )
-    audit(retained + sidecars, "retained_corpus_operand_projection_audit.json", "retained-corpus-operand-projection-run")
     print(destination)
 
 
@@ -592,7 +585,7 @@ def run_simulator(output: Path, cells: Sequence[Cell], force: bool) -> None:
             "--trace",
             str(output / "nvbit" / entry.key),
             "--control",
-            str(output / "sass" / f"atomic_alias_adversarial_trace_{entry.variant}.control_bits.json"),
+            str(output / "sass" / f"atomic_alias_adversarial_{entry.variant}.control_bits.json"),
             "--arch-card",
             str(REPO_ROOT / "arch_profiles/cards/sm_86.json"),
             "--pchase-card",

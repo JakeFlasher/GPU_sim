@@ -646,8 +646,19 @@ Routing/completion tails remain black-box and no timing model is activated.
 Artifact:
 `docs/sm86_c7_research_probe_atomic_multism_service_live_v1.json`.
 
-C7-S33AI is active: inspect and harden one `atomic_alias_adversarial` cell
-without attempting proprietary hash reconstruction.
+C7-S33AI completed an observational atomic alias-adversarial vertical slice.
+One rebuilt 1,024-generation cubin per operation/width replaces stale trace
+twins; the driver validates generation/pattern/alias/width, bounded memory,
+elapsed samples, data/returned sums, and cleanup. The ret32 dense alias-32
+`warps=4, stride=4` cell passes seven host trials, Compute Sanitizer, full
+NVBit capture, deterministic replay, and five NCU runs. Replay/NCU report
+24,684 instructions; atomic requests are 4,096, LTS requests 131,072, NCU
+median 382651, simulator lower 267996. No proprietary hash is reconstructed
+and no timing model is activated. Artifact:
+`docs/sm86_c7_research_probe_atomic_alias_adversarial_live_v1.json`.
+
+C7-S33AJ is active: inspect one virtual/physical alias control cell with
+routing kept black-box.
 
 ## Retained evidence
 

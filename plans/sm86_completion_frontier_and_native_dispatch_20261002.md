@@ -22,7 +22,7 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    `docs/sm86_c7_simbench_dram_streaming_dot_product_direct_live_v1.json`;
    the former tiny `trace_00` run is only a smoke check.
    [Ampere shared memory](https://docs.nvidia.com/cuda/ampere-tuning-guide/#unified-shared-memory-l1-texture-cache)
-3. **C7-S33AI active.** Nine probe families now have live
+3. **C7-S33AJ active.** Nine probe families now have live
    evidence: 68 issue-port cells, 36 async-barrier cells, 30 store-ack arms,
    102 memory-retirement cells, 33 barrier-pipeline cells, 100 l1tex-admission
    cells, one l2-queue warmup/target cell, one l1tex-arrival store cell, and
@@ -46,9 +46,11 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    paired-binary campaign interfaces, and reconciled 18 live probe stages in
    the inventory. C7-S33AG hardened and captured one atomic completion serialization cell;
    C7-S33AH hardened and captured one multi-SM atomic service cell; C7-S33AI
-   now moves to the next atomic alias/control probe while preserving the eight
-   system-fence crosswalk exclusions and open completion tails; no timing/card
-   parameter is selected from scored NCU targets.
+   hardened and captured one observational alias cell without reconstructing a
+   proprietary hash. C7-S33AJ now moves to the next virtual/physical alias
+   control probe while preserving the eight system-fence crosswalk exclusions
+   and open completion tails; no timing/card parameter is selected from scored
+   NCU targets.
 
 ## Outcome
 
@@ -1459,9 +1461,23 @@ lower is 268019. Routing/completion tails remain black-box; no timing model is
 activated. Evidence:
 `docs/sm86_c7_research_probe_atomic_multism_service_live_v1.json`.
 
-### C7-S33AI — next active milestone
+### C7-S33AI — atomic alias adversarial vertical slice — complete
 
-Inspect and harden one `atomic_alias_adversarial` vertical cell. Keep the
-physical/virtual alias experiment observational, not a proprietary hash
-reconstruction; require checked output, Compute Sanitizer, same-binary NVBit,
-replay, and five NCU captures, retaining every falsifier.
+The alias-adversarial campaign now uses one rebuilt 1,024-generation cubin per
+width/operation; stale 64-generation trace twins are removed. The driver
+rejects stale generations, validates the pattern/alias/width contract, bounds
+allocation size, checks elapsed samples, data/returned sums, and cleans up.
+The ret32 dense alias-32 cell (`warps=4, stride=4`) passes seven host trials,
+Compute Sanitizer, full NVBit capture, deterministic replay, and five NCU runs.
+Replay/NCU report 24,684 target warp instructions; atomic requests are 4,096,
+LTS requests 131,072, NCU median 382651, and simulator lower 267996. This
+remains observational; no proprietary hash is reconstructed and no timing model
+is activated. Evidence:
+`docs/sm86_c7_research_probe_atomic_alias_adversarial_live_v1.json`.
+
+### C7-S33AJ — next active milestone
+
+Inspect one `atomic_vmm_alias` or equivalent virtual/physical alias cell. Keep
+address identity and routing black-box; require strict allocation/alias safety,
+output correctness, Compute Sanitizer, same-binary NVBit, replay, and five NCU
+captures before any interpretation.
