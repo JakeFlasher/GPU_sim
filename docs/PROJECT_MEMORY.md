@@ -553,8 +553,20 @@ while simulator lower delta is +5939; repeats remain dispersed and no latency
 is fitted. Artifact:
 `docs/sm86_c7_research_probe_fixed_latency_result_queue_width12_pair_live_v1.json`.
 
-C7-S33Z is active: run the declared width-16 pair, raising the finite decoder
-ceiling once if the exact 2,097,664-record block requires it.
+C7-S33Z completed the declared width-16 result-queue collision/separated
+pair. Each block has 2,097,664 decoded instructions; the prior two-million
+instruction/decoded-node ceilings rejected the exact trace, so they were raised
+once to 3,000,000 instructions and 4,000,000 nodes, with a 22-bit compact
+route index. Both arms then passed seven host trials, Compute Sanitizer, full
+NVBit capture, deterministic replay, and five NCU runs with matching target
+instructions. Collision NCU median is 708805 with lower 579430; separated median
+is 693935 with lower 654998. Both lowers are individually consistent, but
+hardware separated is 14870 cycles below collision while simulator lower delta
+is +75568; no result-queue latency is fitted. Artifact:
+`docs/sm86_c7_research_probe_fixed_latency_result_queue_width16_pair_live_v1.json`.
+
+C7-S33AA is active on the completion-oriented `fixed_latency_completion`
+probe.
 
 ## Retained evidence
 

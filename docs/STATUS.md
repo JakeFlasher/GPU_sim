@@ -455,8 +455,18 @@ is 27,634 cycles below collision while simulator lower delta is +5,939; no
 latency is fitted. Artifact:
 `docs/sm86_c7_research_probe_fixed_latency_result_queue_width12_pair_live_v1.json`.
 
-The next active plan milestone is C7-S33Z: declared width-16 collision/
-separated pair, with one finite decoder-limit increase if needed.
+C7-S33Z completed the declared width-16 result-queue pair. Each block has
+2,097,664 decoded instructions; the finite preflight ceilings were raised once
+to 3,000,000 instructions and 4,000,000 decoded nodes with a 22-bit compact
+route index, then both exact traces replayed. Both arms pass seven host trials,
+Compute Sanitizer, NVBit, replay, and five NCU runs. Collision median is
+708,805 versus lower 579,430; separated median is 693,935 versus lower
+654,998. Hardware separated is 14,870 cycles below collision while simulator
+lower delta is +75,568; no latency is fitted. Artifact:
+`docs/sm86_c7_research_probe_fixed_latency_result_queue_width16_pair_live_v1.json`.
+
+The next active plan milestone is C7-S33AA: one hardened
+`fixed_latency_completion` vertical cell.
 
 ## Retained measurements
 

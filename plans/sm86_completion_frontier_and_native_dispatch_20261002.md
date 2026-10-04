@@ -22,7 +22,7 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    `docs/sm86_c7_simbench_dram_streaming_dot_product_direct_live_v1.json`;
    the former tiny `trace_00` run is only a smoke check.
    [Ampere shared memory](https://docs.nvidia.com/cuda/ampere-tuning-guide/#unified-shared-memory-l1-texture-cache)
-3. **C7-S33Z active.** Nine probe families now have live
+3. **C7-S33AA active.** Nine probe families now have live
    evidence: 68 issue-port cells, 36 async-barrier cells, 30 store-ack arms,
    102 memory-retirement cells, 33 barrier-pipeline cells, 100 l1tex-admission
    cells, one l2-queue warmup/target cell, one l1tex-arrival store cell, and
@@ -35,10 +35,12 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    ceiling to admit its 1,048,832-record block; its hardware differential is
    non-monotonic and high-dispersion. C7-S33Y completed the width-12 pair;
    both lowers are consistent but the hardware differential is again
-   non-monotonic/high-dispersion. C7-S33Z now tests the declared width-16 pair
-   while preserving the eight system-fence crosswalk exclusions and open
-   completion tails; no timing/card parameter is selected from scored NCU
-   targets.
+   non-monotonic/high-dispersion. C7-S33Z completed the declared width-16 pair after one finite decoder
+   increase to 3M instructions/4M decoded nodes; its hardware differential is
+   again non-monotonic. C7-S33AA now moves to the completion-oriented
+   `fixed_latency_completion` probe while preserving the eight system-fence
+   crosswalk exclusions and open completion tails; no timing/card parameter is
+   selected from scored NCU targets.
 
 ## Outcome
 
@@ -1335,11 +1337,25 @@ simulator lower delta is +5939; repeats remain dispersed and no latency is
 fitted. Evidence:
 `docs/sm86_c7_research_probe_fixed_latency_result_queue_width12_pair_live_v1.json`.
 
-### C7-S33Z — next active milestone
+### C7-S33Z — result-queue width-16 pair — complete
 
-Run the declared width-16 collision/separated pair with the same 8,192-
-generation single-cubin contract. If the 2,000,000-instruction ceiling is
-insufficient for the exact 2,097,664-record block, raise it once to the next
-finite bounded capacity with a matching compact-index update, focused tests,
-and replay of the exact captured traces. Keep the pair observational and do
-not fit a result-queue latency constant.
+The declared width-16 collision/separated pair contains 2,097,664 decoded
+instructions per block. The prior two-million instruction/decoded-node
+ceilings rejected the exact trace before replay, so the finite limits were
+raised once to 3,000,000 instructions and 4,000,000 decoded nodes, with the
+compact route index widened to 22 bits. Both arms then passed seven host
+trials, Compute Sanitizer, full NVBit capture, deterministic replay, and five
+NCU runs with matching 2,097,664 target warp instructions. Collision NCU
+median is 708805 with simulator lower 579430; separated median is 693935 with
+lower 654998. Both lowers are individually consistent, but hardware separated
+is 14870 cycles below collision while the simulator lower delta is +75568; no
+result-queue latency is fitted. Evidence:
+`docs/sm86_c7_research_probe_fixed_latency_result_queue_width16_pair_live_v1.json`.
+
+### C7-S33AA — next active milestone
+
+Select one bounded `fixed_latency_completion` cell. First inspect and harden
+its argument, allocation, and output contract; then run same-binary
+correctness, Compute Sanitizer, NVBit, replay, and five NCU repetitions. Keep
+completion observations separate from result-queue differentials and retain
+any lower-bound falsifier.

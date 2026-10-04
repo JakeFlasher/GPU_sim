@@ -1,0 +1,334 @@
+{
+  "schema": "sm86_c7_research_probe_fixed_latency_result_queue_width16_pair_live_v1",
+  "status": "matched_pair_complete_decoder_limit_repaired",
+  "host_identity": {
+    "device_index": 0,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "compute_capability": "8.6",
+    "driver": "615.71.09",
+    "pstate": "P0",
+    "graphics_clock_mhz": 1350,
+    "memory_clock_mhz": 10501
+  },
+  "protocol": {
+    "driver": "workloads/research_probes/fixed_latency_result_queue/fixed_latency_result_queue_driver",
+    "warps": 16,
+    "generations": 8192,
+    "trials": 7,
+    "ncu_repeats": 5,
+    "ncu_replay_mode": "application",
+    "ncu_clock_control": "base",
+    "ncu_cache_control": "all",
+    "same_binary_contract": "one patched cubin per treatment is used for correctness, NVBit, replay, and NCU"
+  },
+  "decoder_limit_repair": {
+    "old_threadblock_instruction_limit": 2000000,
+    "new_threadblock_instruction_limit": 3000000,
+    "old_threadblock_decoded_node_limit": 2000000,
+    "new_threadblock_decoded_node_limit": 4000000,
+    "reason": "width-16 trace contains 2097664 decoded instructions and exceeds the old two-million decoded-node ceiling; the exact bounded trace was rejected before replay",
+    "focused_wire_preflight_tests": 18
+  },
+  "arms": {
+    "collision": {
+      "variant": "collision",
+      "binary": "workloads/research_probes/fixed_latency_result_queue/fixed_latency_result_queue_collision.cubin",
+      "control": "results/alpha/c7_s33_result_queue_20261004/collision.control.json",
+      "trace": "results/alpha/c7_s33_result_queue_20261004/trace_collision_w16",
+      "args": [
+        "collision",
+        "16",
+        "8192",
+        "1"
+      ],
+      "correctness": {
+        "correct": true,
+        "elapsed_samples_valid": true,
+        "checksum_expected": true,
+        "trials": 7,
+        "checksum": 14884100251986327144,
+        "stdout": "results/alpha/c7_s33_result_queue_20261004/native_correctness_collision_w16.stdout",
+        "compute_sanitizer": "collision,16 warps,8192 generations,1 trial; zero errors"
+      },
+      "trace_facts": {
+        "launches": 1,
+        "target_kernel_id": 1,
+        "target_grid": [
+          1,
+          1,
+          1
+        ],
+        "target_block": [
+          512,
+          1,
+          1
+        ],
+        "tracer_total_insts": 7734528,
+        "tracer_total_reported_insts": 7734528,
+        "target_records_replayed": 2097664,
+        "target_coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "tail_facts": "results/alpha/c7_s33_result_queue_20261004/tail_collision_w16.json",
+        "static_control_functions": 1,
+        "static_control_decoded_instructions": 64,
+        "static_control_unknown_encodings": 0
+      },
+      "simulator": {
+        "records": 2097664,
+        "instructions_issued": 2097664,
+        "completion_frontier": {
+          "status": "incomplete_unmodeled_retirement_tails",
+          "lower_bound_cycles": 579430,
+          "unmodeled_tails": {
+            "reduction_read_modify_write": false,
+            "dirty_writeback": true,
+            "coherence": true,
+            "async_copy_shared_visibility": false
+          }
+        },
+        "native_macro_dispatches": 0,
+        "runtime_seconds": 1.953965906
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          706268.0,
+          708685.0,
+          708818.0,
+          708857.0,
+          708805.0
+        ],
+        "median": 708805.0,
+        "min": 706268.0,
+        "max": 708857.0,
+        "stdev": 1130.2598373825374,
+        "rows": [
+          {
+            "rep": "ncu_collision_w16_0",
+            "gpc__cycles_elapsed.max": 706268.0,
+            "smsp__inst_executed.sum": 2097664.0,
+            "gpu__time_duration.sum": 452768.0,
+            "smsp__inst_executed_pipe_alu.sum": 917616.0,
+            "smsp__inst_executed_pipe_fma.sum": 1048720.0,
+            "smsp__inst_issued.sum": 2097776.0
+          },
+          {
+            "rep": "ncu_collision_w16_1",
+            "gpc__cycles_elapsed.max": 708685.0,
+            "smsp__inst_executed.sum": 2097664.0,
+            "gpu__time_duration.sum": 454304.0,
+            "smsp__inst_executed_pipe_alu.sum": 917616.0,
+            "smsp__inst_executed_pipe_fma.sum": 1048720.0,
+            "smsp__inst_issued.sum": 2097776.0
+          },
+          {
+            "rep": "ncu_collision_w16_2",
+            "gpc__cycles_elapsed.max": 708818.0,
+            "smsp__inst_executed.sum": 2097664.0,
+            "gpu__time_duration.sum": 454400.0,
+            "smsp__inst_executed_pipe_alu.sum": 917616.0,
+            "smsp__inst_executed_pipe_fma.sum": 1048720.0,
+            "smsp__inst_issued.sum": 2097776.0
+          },
+          {
+            "rep": "ncu_collision_w16_3",
+            "gpc__cycles_elapsed.max": 708857.0,
+            "smsp__inst_executed.sum": 2097664.0,
+            "gpu__time_duration.sum": 454464.0,
+            "smsp__inst_executed_pipe_alu.sum": 917616.0,
+            "smsp__inst_executed_pipe_fma.sum": 1048720.0,
+            "smsp__inst_issued.sum": 2097776.0
+          },
+          {
+            "rep": "ncu_collision_w16_4",
+            "gpc__cycles_elapsed.max": 708805.0,
+            "smsp__inst_executed.sum": 2097664.0,
+            "gpu__time_duration.sum": 454400.0,
+            "smsp__inst_executed_pipe_alu.sum": 917616.0,
+            "smsp__inst_executed_pipe_fma.sum": 1048720.0,
+            "smsp__inst_issued.sum": 2097776.0
+          }
+        ],
+        "instruction_count": [
+          2097664.0,
+          2097664.0,
+          2097664.0,
+          2097664.0,
+          2097664.0
+        ],
+        "kernel": "result_queue_pilot(unsigned long long *, unsigned int *, const unsigned int *, const float *)",
+        "clock_control": "base",
+        "cache_control": "all",
+        "launch_skip": 0
+      },
+      "comparison": {
+        "instruction_count_match": true,
+        "lower_bound_consistency": true,
+        "lower_bound_cycles": 579430,
+        "ncu_median_cycles": 708805.0,
+        "gap_cycles": 129375.0,
+        "gap_fraction": 0.18252551830193073,
+        "hardware_completion": "not_observed",
+        "point_estimator": "not_claimed"
+      }
+    },
+    "separated": {
+      "variant": "separated",
+      "binary": "workloads/research_probes/fixed_latency_result_queue/fixed_latency_result_queue_separated.cubin",
+      "control": "results/alpha/c7_s33_result_queue_20261004/separated.control.json",
+      "trace": "results/alpha/c7_s33_result_queue_20261004/trace_separated_w16",
+      "args": [
+        "separated",
+        "16",
+        "8192",
+        "1"
+      ],
+      "correctness": {
+        "correct": true,
+        "elapsed_samples_valid": true,
+        "checksum_expected": true,
+        "trials": 7,
+        "checksum": 14884100251986327144,
+        "stdout": "results/alpha/c7_s33_result_queue_20261004/native_correctness_separated_w16.stdout",
+        "compute_sanitizer": "separated,16 warps,8192 generations,1 trial; zero errors"
+      },
+      "trace_facts": {
+        "launches": 1,
+        "target_kernel_id": 1,
+        "target_grid": [
+          1,
+          1,
+          1
+        ],
+        "target_block": [
+          512,
+          1,
+          1
+        ],
+        "tracer_total_insts": 7734528,
+        "tracer_total_reported_insts": 7734528,
+        "target_records_replayed": 2097664,
+        "target_coverage": {
+          "kind": "full",
+          "blocks_observed": 1,
+          "population_blocks": 1
+        },
+        "tail_facts": "results/alpha/c7_s33_result_queue_20261004/tail_separated_w16.json",
+        "static_control_functions": 1,
+        "static_control_decoded_instructions": 64,
+        "static_control_unknown_encodings": 0
+      },
+      "simulator": {
+        "records": 2097664,
+        "instructions_issued": 2097664,
+        "completion_frontier": {
+          "status": "incomplete_unmodeled_retirement_tails",
+          "lower_bound_cycles": 654998,
+          "unmodeled_tails": {
+            "reduction_read_modify_write": false,
+            "dirty_writeback": true,
+            "coherence": true,
+            "async_copy_shared_visibility": false
+          }
+        },
+        "native_macro_dispatches": 0,
+        "runtime_seconds": 1.992910828
+      },
+      "ncu": {
+        "metric": "gpc__cycles_elapsed.max",
+        "values": [
+          693840.0,
+          693833.0,
+          693952.0,
+          693935.0,
+          693940.0
+        ],
+        "median": 693935.0,
+        "min": 693833.0,
+        "max": 693952.0,
+        "stdev": 58.348093370734915,
+        "rows": [
+          {
+            "rep": "ncu_separated_w16_0",
+            "gpc__cycles_elapsed.max": 693840.0,
+            "smsp__inst_executed.sum": 2097664.0,
+            "gpu__time_duration.sum": 444800.0,
+            "smsp__inst_executed_pipe_alu.sum": 917616.0,
+            "smsp__inst_executed_pipe_fma.sum": 1048720.0,
+            "smsp__inst_issued.sum": 2097776.0
+          },
+          {
+            "rep": "ncu_separated_w16_1",
+            "gpc__cycles_elapsed.max": 693833.0,
+            "smsp__inst_executed.sum": 2097664.0,
+            "gpu__time_duration.sum": 444800.0,
+            "smsp__inst_executed_pipe_alu.sum": 917616.0,
+            "smsp__inst_executed_pipe_fma.sum": 1048720.0,
+            "smsp__inst_issued.sum": 2097776.0
+          },
+          {
+            "rep": "ncu_separated_w16_2",
+            "gpc__cycles_elapsed.max": 693952.0,
+            "smsp__inst_executed.sum": 2097664.0,
+            "gpu__time_duration.sum": 444864.0,
+            "smsp__inst_executed_pipe_alu.sum": 917616.0,
+            "smsp__inst_executed_pipe_fma.sum": 1048720.0,
+            "smsp__inst_issued.sum": 2097776.0
+          },
+          {
+            "rep": "ncu_separated_w16_3",
+            "gpc__cycles_elapsed.max": 693935.0,
+            "smsp__inst_executed.sum": 2097664.0,
+            "gpu__time_duration.sum": 444864.0,
+            "smsp__inst_executed_pipe_alu.sum": 917616.0,
+            "smsp__inst_executed_pipe_fma.sum": 1048720.0,
+            "smsp__inst_issued.sum": 2097776.0
+          },
+          {
+            "rep": "ncu_separated_w16_4",
+            "gpc__cycles_elapsed.max": 693940.0,
+            "smsp__inst_executed.sum": 2097664.0,
+            "gpu__time_duration.sum": 444896.0,
+            "smsp__inst_executed_pipe_alu.sum": 917616.0,
+            "smsp__inst_executed_pipe_fma.sum": 1048720.0,
+            "smsp__inst_issued.sum": 2097776.0
+          }
+        ],
+        "instruction_count": [
+          2097664.0,
+          2097664.0,
+          2097664.0,
+          2097664.0,
+          2097664.0
+        ],
+        "kernel": "result_queue_pilot(unsigned long long *, unsigned int *, const unsigned int *, const float *)",
+        "clock_control": "base",
+        "cache_control": "all",
+        "launch_skip": 0
+      },
+      "comparison": {
+        "instruction_count_match": true,
+        "lower_bound_consistency": true,
+        "lower_bound_cycles": 654998,
+        "ncu_median_cycles": 693935.0,
+        "gap_cycles": 38937.0,
+        "gap_fraction": 0.05611044262070655,
+        "hardware_completion": "not_observed",
+        "point_estimator": "not_claimed"
+      }
+    }
+  },
+  "differential": {
+    "ncu_median_delta_cycles": -14870.0,
+    "simulator_lower_delta_cycles": 75568,
+    "delta_residual_cycles": -90438.0,
+    "instruction_count_delta": 0.0,
+    "ncu_dispersion_note": "separated repeats are bimodal/high-dispersion (stdev 1130 cycles); the median is retained as the declared summary and no point differential is claimed",
+    "interpretation": "The held-out width-16 NCU medians do not follow the simulator treatment delta: hardware separated is 14870 cycles below collision while the simulator lower delta is +75568. Both semantic lowers remain below their NCU medians, but the differential is not a transferable latency observation."
+  },
+  "interpretation": "Fresh held-out width-16 collision/separated pair. The old two-million-instruction/decoded-node ceilings were raised to three million instructions and four million nodes after the live capture exposed a 2,097,664-instruction block; the same captured traces then replay successfully. Both arms pass seven host trials, Compute Sanitizer, full NVBit capture, deterministic replay, and five NCU runs with 2,097,664 matching target warp instructions. Both lower bounds are consistent individually, but the hardware differential is non-monotonic/high-dispersion and cannot justify a result-queue latency model."
+}
