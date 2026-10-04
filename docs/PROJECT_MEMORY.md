@@ -634,8 +634,20 @@ run, NCU median 316109, simulator lower 267561. No atomic timing model is
 activated. Artifact:
 `docs/sm86_c7_research_probe_atomic_completion_serialization_live_v1.json`.
 
-C7-S33AH is active: select and harden the next bounded atomic/control family,
-preferably `atomic_multism_service` after source-contract review.
+C7-S33AH completed one multi-SM atomic service vertical slice. One rebuilt
+1,024-generation cubin per operation now serves correctness, NVBit, replay, and
+NCU; stale 64-generation twins are removed. The driver rejects other generation
+counts, bounds allocation size, validates elapsed samples and data/returned sums,
+and cleans up CUDA resources. `ret32, blocks=4, spacing=0` passes seven host
+trials, Compute Sanitizer, full NVBit capture, deterministic replay, and five
+NCU runs. Replay/NCU report 24,692 target warp instructions; NCU observes 4,096
+atomic and 131,072 LTS requests, median 355107, simulator lower 268019.
+Routing/completion tails remain black-box and no timing model is activated.
+Artifact:
+`docs/sm86_c7_research_probe_atomic_multism_service_live_v1.json`.
+
+C7-S33AI is active: inspect and harden one `atomic_alias_adversarial` cell
+without attempting proprietary hash reconstruction.
 
 ## Retained evidence
 

@@ -1,6 +1,7 @@
 #include <cuda.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -35,6 +36,18 @@ constexpr int kMaxBlocks = 168;
 constexpr int kMaxThreads = kThreads * kMaxBlocks;
 constexpr const char* kFunction = "_Z20atomic_multism_probePyS_PjPKj";
 
+bool parse_int(const char* text, int* value) {
+    if (text == nullptr || *text == '\0' || value == nullptr) return false;
+    errno = 0;
+    char* end = nullptr;
+    const long parsed = std::strtol(text, &end, 10);
+    if (errno == ERANGE || end == text || *end != '\0' ||
+        parsed < std::numeric_limits<int>::min() ||
+        parsed > std::numeric_limits<int>::max()) return false;
+    *value = static_cast<int>(parsed);
+    return true;
+}
+
 bool parse_u32_csv(const std::string& text, std::vector<std::uint32_t>* values) {
     std::stringstream stream(text);
     std::string token;
@@ -66,10 +79,15 @@ int main(int argc, char** argv) {
             argv[0]);
         return 2;
     }
-    const int blocks = std::atoi(argv[2]);
-    const int generations = std::atoi(argv[3]);
-    const int trials = std::atoi(argv[4]);
-    const bool returning = std::atoi(argv[6]) != 0;
+    int blocks = 0;
+    int generations = 0;
+    int trials = 0;
+    int returning_int = 0;
+    if (!parse_int(argv[2], &blocks) || !parse_int(argv[3], &generations) ||
+        !parse_int(argv[4], &trials) || !parse_int(argv[6], &returning_int)) {
+        return 2;
+    }
+    const bool returning = returning_int != 0;
     const std::uint32_t spacing_bytes =
         static_cast<std::uint32_t>(std::strtoul(argv[7], nullptr, 10));
     const bool permuted = std::atoi(argv[8]) != 0;
@@ -131,7 +149,8 @@ int main(int argc, char** argv) {
         : std::accumulate(group_block_counts.begin(), group_block_counts.end(),
                           std::uint64_t{0});
     if (blocks < 1 || blocks > kMaxBlocks ||
-        (generations != 64 && generations != 1024) || trials < 1 ||
+        generations != 1024 || trials < 1 ||
+        (returning_int != 0 && returning_int != 1) ||
         (batch_region_ids.empty() ? trials > 32 : trials > 65535) ||
         spacing_bytes % sizeof(std::uint32_t) != 0 ||
         base_bytes % sizeof(std::uint32_t) != 0 || address_groups < 1 ||
@@ -234,6 +253,7 @@ int main(int argc, char** argv) {
         required_words * sizeof(std::uint32_t);
     const std::size_t data_bytes =
         std::max(required_data_bytes, fixed_data_bytes);
+    if (data_bytes > (std::size_t{512} << 20)) return 3;
     const std::size_t words = data_bytes / sizeof(std::uint32_t);
     std::vector<unsigned long long> elapsed(blocks);
     std::vector<std::vector<unsigned long long>> samples(
@@ -277,7 +297,12 @@ int main(int argc, char** argv) {
     }
     void* arguments[] = {
         &elapsed_device, &returned_device, &data_device, &indices_device};
+    bool elapsed_valid = true;
     for (int trial = 0; trial < trials; ++trial) {
+        DRIVER_CHECK(cuMemsetD8(elapsed_device, 0xff,
+                                kMaxBlocks * sizeof(unsigned long long)));
+        DRIVER_CHECK(cuMemsetD8(returned_device, 0xa5,
+                                kMaxThreads * sizeof(unsigned long long)));
         if (batch_region_ids.empty()) {
             DRIVER_CHECK(cuMemcpyHtoD(data_device, zeros.data(), data_bytes));
         } else {
@@ -291,6 +316,10 @@ int main(int argc, char** argv) {
         DRIVER_CHECK(cuCtxSynchronize());
         DRIVER_CHECK(cuMemcpyDtoH(samples[trial].data(), elapsed_device,
                                   blocks * sizeof(unsigned long long)));
+        for (int block = 0; block < blocks; ++block) {
+            elapsed_valid = elapsed_valid && samples[trial][block] != UINT64_MAX &&
+                            samples[trial][block] > 0;
+        }
     }
     DRIVER_CHECK(cuMemcpyDtoH(returned.data(), returned_device,
                               threads * sizeof(unsigned long long)));
@@ -319,8 +348,12 @@ int main(int argc, char** argv) {
                 group_operations * (group_operations - 1) / 2;
         }
     }
-    const bool correct =
-        data_sum == operations && returned_total == expected_returned;
+    const bool returned_present = !returning ||
+        std::all_of(returned.begin(), returned.end(), [](unsigned long long value) {
+            return value != 0xa5a5a5a5a5a5a5a5ull;
+        });
+    const bool correct = data_sum == operations && returned_total == expected_returned &&
+                         elapsed_valid && returned_present;
 
     std::printf(
         "{\"variant\":\"%s\",\"blocks\":%d,\"warps\":%d,"
@@ -398,11 +431,21 @@ int main(int argc, char** argv) {
     std::printf(
         ",\"operations\":%llu,\"data_sum\":%llu,"
         "\"returned_sum\":%llu,\"expected_returned_sum\":%llu,"
-        "\"unique_words\":%zu,\"correct\":%s}\n",
+        "\"unique_words\":%zu,\"correct\":%s,\"elapsed_samples_valid\":%s,"
+        "\"returned_output_present\":%s,\"allocation_bytes\":%zu}\n",
         static_cast<unsigned long long>(operations),
         static_cast<unsigned long long>(data_sum),
         static_cast<unsigned long long>(returned_total),
         static_cast<unsigned long long>(expected_returned),
-        threads_per_word.size(), correct ? "true" : "false");
+        threads_per_word.size(), correct ? "true" : "false",
+        elapsed_valid ? "true" : "false", returned_present ? "true" : "false",
+        data_bytes);
+    DRIVER_CHECK(cuMemFree(indices_device));
+    DRIVER_CHECK(cuMemFree(data_device));
+    DRIVER_CHECK(cuMemFree(returned_device));
+    DRIVER_CHECK(cuMemFree(elapsed_device));
+    if (allocation_prefix_device != 0) DRIVER_CHECK(cuMemFree(allocation_prefix_device));
+    DRIVER_CHECK(cuModuleUnload(module));
+    DRIVER_CHECK(cuCtxDestroy(context));
     return correct ? 0 : 1;
 }

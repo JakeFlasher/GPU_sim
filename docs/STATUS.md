@@ -519,8 +519,17 @@ instructions; atomic requests are 4,096, NCU median 316,109, simulator lower
 267,561. No atomic timing is fitted. Artifact:
 `docs/sm86_c7_research_probe_atomic_completion_serialization_live_v1.json`.
 
-The next active plan milestone is C7-S33AH: inspect and harden the next bounded
-atomic/control family, preferably `atomic_multism_service`.
+C7-S33AH completed a multi-SM atomic service vertical slice. One rebuilt
+1,024-generation cubin per operation serves all stages; the driver rejects
+stale generation counts, bounds memory, validates data/returned sums and elapsed
+samples, and cleans up resources. `ret32, blocks=4, spacing=0` passes seven host
+trials, Compute Sanitizer, NVBit, replay, and five NCU runs. Replay/NCU agree at
+24,692 instructions; NCU observes 4,096 atomic and 131,072 LTS requests, median
+355,107, simulator lower 268,019. No routing/timing model is fitted. Artifact:
+`docs/sm86_c7_research_probe_atomic_multism_service_live_v1.json`.
+
+The next active plan milestone is C7-S33AI: one hardened
+`atomic_alias_adversarial` cell, observational only.
 
 ## Retained measurements
 

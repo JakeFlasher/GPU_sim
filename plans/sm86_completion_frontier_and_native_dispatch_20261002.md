@@ -22,7 +22,7 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    `docs/sm86_c7_simbench_dram_streaming_dot_product_direct_live_v1.json`;
    the former tiny `trace_00` run is only a smoke check.
    [Ampere shared memory](https://docs.nvidia.com/cuda/ampere-tuning-guide/#unified-shared-memory-l1-texture-cache)
-3. **C7-S33AH active.** Nine probe families now have live
+3. **C7-S33AI active.** Nine probe families now have live
    evidence: 68 issue-port cells, 36 async-barrier cells, 30 store-ack arms,
    102 memory-retirement cells, 33 barrier-pipeline cells, 100 l1tex-admission
    cells, one l2-queue warmup/target cell, one l1tex-arrival store cell, and
@@ -44,11 +44,11 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    retained without tuning. C7-S33AE completed distance 8; its 57,315-cycle bank3 differential is also
    retained without tuning. C7-S33AF closed the completion-distance vertical family, removed stale
    paired-binary campaign interfaces, and reconciled 18 live probe stages in
-   the inventory. C7-S33AG hardened and captured one atomic completion
-   serialization cell; C7-S33AH now moves to the next atomic/control probe
-   while preserving the eight system-fence crosswalk exclusions and open
-   completion tails; no timing/card parameter is selected from scored NCU
-   targets.
+   the inventory. C7-S33AG hardened and captured one atomic completion serialization cell;
+   C7-S33AH hardened and captured one multi-SM atomic service cell; C7-S33AI
+   now moves to the next atomic alias/control probe while preserving the eight
+   system-fence crosswalk exclusions and open completion tails; no timing/card
+   parameter is selected from scored NCU targets.
 
 ## Outcome
 
@@ -1445,10 +1445,23 @@ and simulator lower is 267561. Atomic serialization/coherence tails remain
 unknown; no atomic timing model is activated. Evidence:
 `docs/sm86_c7_research_probe_atomic_completion_serialization_live_v1.json`.
 
-### C7-S33AH — next active milestone
+### C7-S33AH — multi-SM atomic service vertical slice — complete
 
-Select the next bounded atomic/control family (prefer `atomic_multism_service`
-after its source contract is checked). Harden its arguments and output oracle,
-then run one same-binary correctness, Compute Sanitizer, NVBit, replay, and
-five-NCU vertical cell. Keep proprietary routing/hash behavior out of the
-model and retain every falsifier.
+The multi-SM atomic campaign now uses one rebuilt 1,024-generation cubin per
+operation for correctness, NVBit, replay, and NCU; stale 64-generation trace
+cubins are removed. The driver rejects non-1024 generation requests, bounds
+allocation size, checks elapsed samples, validates data/returned sums, and
+cleans up CUDA resources. The `ret32, blocks=4, spacing=0` cell passes seven
+host trials, Compute Sanitizer, full NVBit capture, deterministic replay, and
+five NCU runs. Replay/NCU report 24,692 target warp instructions; NCU observes
+4,096 atomic requests and 131,072 LTS requests, median 355107, while simulator
+lower is 268019. Routing/completion tails remain black-box; no timing model is
+activated. Evidence:
+`docs/sm86_c7_research_probe_atomic_multism_service_live_v1.json`.
+
+### C7-S33AI — next active milestone
+
+Inspect and harden one `atomic_alias_adversarial` vertical cell. Keep the
+physical/virtual alias experiment observational, not a proprietary hash
+reconstruction; require checked output, Compute Sanitizer, same-binary NVBit,
+replay, and five NCU captures, retaining every falsifier.

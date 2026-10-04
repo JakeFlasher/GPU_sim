@@ -44,9 +44,8 @@ METRICS = ALIAS.METRICS
 
 
 def cubin(returning: bool, *, trace: bool) -> Path:
-    infix = "_trace" if trace else ""
     variant = "ret32" if returning else "red32"
-    return HERE / f"atomic_multism_service{infix}_{variant}.cubin"
+    return HERE / f"atomic_multism_service_{variant}.cubin"
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,7 +78,7 @@ class Cell:
             str(DRIVER),
             str(cubin(self.returning, trace=trace)),
             str(self.blocks),
-            str(64 if trace else 1024),
+            str(1024),
             str(trials),
             self.key,
             "1" if self.returning else "0",
@@ -149,7 +148,7 @@ def source_cells(cells: Sequence[Cell]) -> list[Cell]:
 
 def require_binaries() -> None:
     paths = [DRIVER]
-    paths.extend(cubin(returning, trace=trace) for returning in (True, False) for trace in (False, True))
+    paths.extend(cubin(returning, trace=False) for returning in (True, False))
     for path in paths:
         if not path.is_file() or path.stat().st_size == 0:
             raise RuntimeError(f"required binary missing: {path}")
@@ -165,7 +164,7 @@ def emit_manifest(output: Path) -> None:
             "cells": [{**asdict(entry), "warps": entry.warps, "operation": entry.operation, "variant": entry.variant, "key": entry.key} for entry in cells],
             "ncu_metrics": list(METRICS),
             "long_generations": 1024,
-            "trace_generations": 64,
+            "generations": 1024,
             "sm_count": 84,
             "ncu_repeats": {"all_cells": 1, "coarse_blocks_84_or_168": 3},
             "fine_spacing_bytes": list(FINE_SPACINGS),
@@ -263,8 +262,7 @@ def run_static(output: Path) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     sidecars = []
     for returning in (True, False):
-        for trace in (False, True):
-            binary = cubin(returning, trace=trace)
+            binary = cubin(returning, trace=False)
             name = binary.stem
             for suffix, option in (("sass", "--dump-sass"), ("resources", "--dump-resource-usage")):
                 completed = subprocess.run(["/usr/local/cuda-13.2/bin/cuobjdump", option, str(binary)], cwd=REPO_ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
@@ -287,9 +285,6 @@ def run_static(output: Path) -> None:
         )
 
     audit(sidecars, "operand_projection_audit.json", "operand-projection-run")
-    output_sass = destination.resolve()
-    retained = sorted(path for path in REPO_ROOT.glob("results/captures/**/*.control_bits.json") if path.parent.resolve() != output_sass)
-    audit(retained + sidecars, "retained_corpus_operand_projection_audit.json", "retained-corpus-operand-projection-run")
     print(destination)
 
 
@@ -298,7 +293,7 @@ def run_simulator(output: Path, cells: Sequence[Cell], force: bool) -> None:
     for index, entry in enumerate(cells, 1):
         destination = output / "simulator" / entry.key
         destination.mkdir(parents=True, exist_ok=True)
-        command = [str(binary), "--trace", str(output / "nvbit" / entry.key), "--control", str(output / "sass" / f"atomic_multism_service_trace_{entry.variant}.control_bits.json"), "--arch-card", str(REPO_ROOT / "arch_profiles/cards/sm_86.json"), "--pchase-card", str(REPO_ROOT / "data/pchase/sm_86_static_card.json"), "--mode", "l1"]
+        command = [str(binary), "--trace", str(output / "nvbit" / entry.key), "--control", str(output / "sass" / f"atomic_multism_service_{entry.variant}.control_bits.json"), "--arch-card", str(REPO_ROOT / "arch_profiles/cards/sm_86.json"), "--pchase-card", str(REPO_ROOT / "data/pchase/sm_86_static_card.json"), "--mode", "l1"]
         outputs = []
         for repeat in (1, 2):
             path = destination / f"replay-{repeat}.json"
