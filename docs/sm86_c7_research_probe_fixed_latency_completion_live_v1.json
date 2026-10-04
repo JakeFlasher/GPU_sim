@@ -1,0 +1,177 @@
+{
+  "schema": "sm86_c7_research_probe_fixed_latency_completion_live_v1",
+  "status": "correctness_trace_replay_ncu_complete_native_dispatch_refused",
+  "host_identity": {
+    "device_index": 0,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "compute_capability": "8.6",
+    "driver": "615.71.09",
+    "pstate": "P0",
+    "graphics_clock_mhz": 1350,
+    "memory_clock_mhz": 10501
+  },
+  "identity": {
+    "source": "workloads/research_probes/fixed_latency_completion",
+    "driver": "workloads/research_probes/fixed_latency_completion/fixed_latency_completion_driver",
+    "binary": "workloads/research_probes/fixed_latency_completion/fixed_latency_completion_split.cubin",
+    "binary_used_for_correctness_trace_replay_ncu": "same patched split cubin",
+    "control": "results/alpha/c7_s33_completion_20261004/split.control.json",
+    "trace": "results/alpha/c7_s33_completion_20261004/trace",
+    "arch_card": "arch_profiles/cards/sm_86.json",
+    "args": [
+      "1",
+      "split",
+      "4",
+      "8192",
+      "1"
+    ],
+    "distance": 1,
+    "warps": 4,
+    "generations": 8192,
+    "ncu_launch_skip": 0,
+    "ncu_launch_count": 1,
+    "ncu_metric": "gpc__cycles_elapsed.max",
+    "ncu_repeats": 5,
+    "ncu_replay_mode": "application",
+    "ncu_clock_control": "base",
+    "ncu_cache_control": "all"
+  },
+  "correctness": {
+    "status": "passed",
+    "correct": true,
+    "elapsed_samples_valid": true,
+    "checksum_expected": true,
+    "trials": 3,
+    "checksum": 5918867195001202,
+    "native_stdout": "results/alpha/c7_s33_completion_20261004/native_correctness.stdout",
+    "compute_sanitizer": "distance1 split,4 warps,8192 generations,1 trial; zero errors"
+  },
+  "trace": {
+    "launches": 1,
+    "target_kernel_id": 1,
+    "target_kernel": "completion_d1",
+    "target_grid": [
+      1,
+      1,
+      1
+    ],
+    "target_block": [
+      128,
+      1,
+      1
+    ],
+    "tracer_total_insts": 2360044,
+    "tracer_total_reported_insts": 2360044,
+    "target_records_replayed": 622832,
+    "target_coverage": {
+      "kind": "full",
+      "blocks_observed": 1,
+      "population_blocks": 1
+    },
+    "target_tail_facts": "results/alpha/c7_s33_completion_20261004/tail_facts.json",
+    "static_control_functions": 5,
+    "static_control_decoded_instructions": 424,
+    "static_control_unknown_encodings": 0
+  },
+  "simulator": {
+    "records": 622832,
+    "instructions_issued": 622832,
+    "completion_frontier": {
+      "status": "incomplete_unmodeled_retirement_tails",
+      "lower_bound_cycles": 566204,
+      "unmodeled_tails": {
+        "reduction_read_modify_write": false,
+        "dirty_writeback": true,
+        "coherence": true,
+        "async_copy_shared_visibility": false
+      }
+    },
+    "native_macro_dispatches": 0,
+    "runtime_seconds": 0.706300684,
+    "runtime_measurement": "wall clock around sim-run only; no speedup/compression comparison"
+  },
+  "ncu": {
+    "metric": "gpc__cycles_elapsed.max",
+    "values": [
+      586190.0,
+      586191.0,
+      586172.0,
+      586168.0,
+      586148.0
+    ],
+    "median": 586172.0,
+    "min": 586148.0,
+    "max": 586191.0,
+    "stdev": 17.75387281693772,
+    "rows": [
+      {
+        "rep": "ncu_0",
+        "gpc__cycles_elapsed.max": 586190.0,
+        "smsp__inst_executed.sum": 622832.0,
+        "gpu__time_duration.sum": 375808.0,
+        "smsp__inst_executed_pipe_alu.sum": 65652.0,
+        "smsp__inst_executed_pipe_fma.sum": 524348.0,
+        "smsp__inst_issued.sum": 622856.0
+      },
+      {
+        "rep": "ncu_1",
+        "gpc__cycles_elapsed.max": 586191.0,
+        "smsp__inst_executed.sum": 622832.0,
+        "gpu__time_duration.sum": 375776.0,
+        "smsp__inst_executed_pipe_alu.sum": 65652.0,
+        "smsp__inst_executed_pipe_fma.sum": 524348.0,
+        "smsp__inst_issued.sum": 622856.0
+      },
+      {
+        "rep": "ncu_2",
+        "gpc__cycles_elapsed.max": 586172.0,
+        "smsp__inst_executed.sum": 622832.0,
+        "gpu__time_duration.sum": 375776.0,
+        "smsp__inst_executed_pipe_alu.sum": 65652.0,
+        "smsp__inst_executed_pipe_fma.sum": 524348.0,
+        "smsp__inst_issued.sum": 622856.0
+      },
+      {
+        "rep": "ncu_3",
+        "gpc__cycles_elapsed.max": 586168.0,
+        "smsp__inst_executed.sum": 622832.0,
+        "gpu__time_duration.sum": 375808.0,
+        "smsp__inst_executed_pipe_alu.sum": 65652.0,
+        "smsp__inst_executed_pipe_fma.sum": 524348.0,
+        "smsp__inst_issued.sum": 622856.0
+      },
+      {
+        "rep": "ncu_4",
+        "gpc__cycles_elapsed.max": 586148.0,
+        "smsp__inst_executed.sum": 622832.0,
+        "gpu__time_duration.sum": 375776.0,
+        "smsp__inst_executed_pipe_alu.sum": 65652.0,
+        "smsp__inst_executed_pipe_fma.sum": 524348.0,
+        "smsp__inst_issued.sum": 622856.0
+      }
+    ],
+    "instruction_count": [
+      622832.0,
+      622832.0,
+      622832.0,
+      622832.0,
+      622832.0
+    ],
+    "kernel": "completion_d1",
+    "clock_control": "base",
+    "cache_control": "all",
+    "launch_skip": 0
+  },
+  "comparison": {
+    "instruction_count_match": true,
+    "lower_bound_consistency": true,
+    "lower_bound_cycles": 566204,
+    "ncu_median_cycles": 586172.0,
+    "gap_cycles": 19968.0,
+    "gap_fraction": 0.034065086698102265,
+    "hardware_completion": "not_observed",
+    "point_estimator": "not_claimed"
+  },
+  "interpretation": "Fresh same-binary completion-distance vertical slice. The split cubin passed seven host trials and Compute Sanitizer; NVBit, replay, and NCU use the same 8192-generation patched cubin. Replay and NCU both report 622832 target warp instructions; NCU median gpc cycles are 586172 and simulator lower is 566204, so lower-bound consistency is true. This is a narrow completion-distance observation, not an activated latency model, point-accuracy claim, or speedup result."
+}

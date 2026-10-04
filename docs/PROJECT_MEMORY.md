@@ -565,8 +565,19 @@ hardware separated is 14870 cycles below collision while simulator lower delta
 is +75568; no result-queue latency is fitted. Artifact:
 `docs/sm86_c7_research_probe_fixed_latency_result_queue_width16_pair_live_v1.json`.
 
-C7-S33AA is active on the completion-oriented `fixed_latency_completion`
-probe.
+C7-S33AA completed a hardened completion-distance split vertical slice. The
+stale 64-generation trace pair was removed; one patched 8,192-generation split
+cubin serves correctness, NVBit, replay, and NCU. The driver uses strict
+parsing, bounded allocations, sentinel output checks, elapsed-sample checks,
+and the deterministic sink oracle. The `distance=1, split, warps=4` cell passed
+seven host trials, Compute Sanitizer, full NVBit capture, deterministic replay,
+and five NCU runs. Replay and NCU both report 622,832 target warp
+instructions; NCU median is 586172 and simulator lower is 566204, so lower
+consistency is true. Artifact:
+`docs/sm86_c7_research_probe_fixed_latency_completion_live_v1.json`.
+
+C7-S33AB is active: run the matched `distance=1, bank3, warps=4` treatment
+under the same single-cubin protocol.
 
 ## Retained evidence
 

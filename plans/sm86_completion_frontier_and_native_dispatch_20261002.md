@@ -22,7 +22,7 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    `docs/sm86_c7_simbench_dram_streaming_dot_product_direct_live_v1.json`;
    the former tiny `trace_00` run is only a smoke check.
    [Ampere shared memory](https://docs.nvidia.com/cuda/ampere-tuning-guide/#unified-shared-memory-l1-texture-cache)
-3. **C7-S33AA active.** Nine probe families now have live
+3. **C7-S33AB active.** Nine probe families now have live
    evidence: 68 issue-port cells, 36 async-barrier cells, 30 store-ack arms,
    102 memory-retirement cells, 33 barrier-pipeline cells, 100 l1tex-admission
    cells, one l2-queue warmup/target cell, one l1tex-arrival store cell, and
@@ -37,10 +37,11 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    both lowers are consistent but the hardware differential is again
    non-monotonic/high-dispersion. C7-S33Z completed the declared width-16 pair after one finite decoder
    increase to 3M instructions/4M decoded nodes; its hardware differential is
-   again non-monotonic. C7-S33AA now moves to the completion-oriented
-   `fixed_latency_completion` probe while preserving the eight system-fence
-   crosswalk exclusions and open completion tails; no timing/card parameter is
-   selected from scored NCU targets.
+   again non-monotonic. C7-S33AA completed one completion-distance split cell with a matched
+   lower-bound-consistent NCU slice. C7-S33AB now runs the matched bank3
+   treatment while preserving the eight system-fence crosswalk exclusions and
+   open completion tails; no timing/card parameter is selected from scored NCU
+   targets.
 
 ## Outcome
 
@@ -1352,10 +1353,23 @@ is 14870 cycles below collision while the simulator lower delta is +75568; no
 result-queue latency is fitted. Evidence:
 `docs/sm86_c7_research_probe_fixed_latency_result_queue_width16_pair_live_v1.json`.
 
-### C7-S33AA — next active milestone
+### C7-S33AA — completion-distance split vertical slice — complete
 
-Select one bounded `fixed_latency_completion` cell. First inspect and harden
-its argument, allocation, and output contract; then run same-binary
-correctness, Compute Sanitizer, NVBit, replay, and five NCU repetitions. Keep
-completion observations separate from result-queue differentials and retain
-any lower-bound falsifier.
+The completion-distance campaign now uses one patched 8,192-generation cubin
+for correctness, NVBit, replay, and NCU; the stale 64-generation trace pair
+was removed. The CUDA-driver harness has strict parsing, bounded allocations,
+sentinel output checks, elapsed-sample checks, and the deterministic sink
+oracle. The `distance=1, variant=split, warps=4` cell passes seven host trials,
+Compute Sanitizer, full NVBit capture, deterministic replay, and five NCU runs.
+Replay and NCU both report 622,832 target warp instructions; NCU median is
+586172 and simulator lower is 566204, so lower-bound consistency is true.
+Completion tails remain open; this is a narrow mechanism observation, not an
+activated latency or point-accuracy result. Evidence:
+`docs/sm86_c7_research_probe_fixed_latency_completion_live_v1.json`.
+
+### C7-S33AB — next active milestone
+
+Run the matched `distance=1, variant=bank3, warps=4` treatment with the same
+8,192-generation single-cubin contract. Require fresh correctness, Compute
+Sanitizer, NVBit, replay, and five NCU captures; compare split/bank3 only as a
+mechanism-local differential and retain any lower-bound falsifier.

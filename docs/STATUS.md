@@ -465,8 +465,17 @@ Compute Sanitizer, NVBit, replay, and five NCU runs. Collision median is
 lower delta is +75,568; no latency is fitted. Artifact:
 `docs/sm86_c7_research_probe_fixed_latency_result_queue_width16_pair_live_v1.json`.
 
-The next active plan milestone is C7-S33AA: one hardened
-`fixed_latency_completion` vertical cell.
+C7-S33AA completed a hardened completion-distance split slice. One patched
+8,192-generation cubin serves correctness, NVBit, replay, and NCU; the driver
+now has strict parsing, bounded allocations, sentinel output and elapsed-sample
+checks, and a sink oracle. The `distance=1, split, warps=4` cell passes seven
+host trials, Compute Sanitizer, NVBit, replay, and five NCU runs. Replay and NCU
+agree at 622,832 target warp instructions; NCU median is 586,172 versus lower
+566,204. No latency is activated. Artifact:
+`docs/sm86_c7_research_probe_fixed_latency_completion_live_v1.json`.
+
+The next active plan milestone is C7-S33AB: matched `distance=1, bank3,
+warps=4` treatment under the same single-cubin contract.
 
 ## Retained measurements
 

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpu-simulator.local/schemas/sm86_c7_research_probe_fixed_latency_completion_live_v1.schema.json",
+  "title": "SM86 fixed-latency completion-distance live probe",
+  "type": "object",
+  "required": ["schema", "status", "host_identity", "identity", "correctness", "trace", "simulator", "ncu", "comparison", "interpretation"],
+  "properties": {
+    "schema": {"const": "sm86_c7_research_probe_fixed_latency_completion_live_v1"},
+    "status": {"type": "string", "minLength": 1},
+    "host_identity": {"type": "object", "required": ["device_index", "name", "compute_capability", "driver"], "additionalProperties": true},
+    "identity": {"type": "object", "required": ["binary", "control", "trace", "args", "ncu_repeats"], "additionalProperties": true},
+    "correctness": {"type": "object", "required": ["correct", "elapsed_samples_valid", "checksum_expected"], "additionalProperties": true},
+    "trace": {"type": "object", "required": ["target_kernel_id", "target_records_replayed", "target_coverage"], "additionalProperties": true},
+    "simulator": {"type": "object", "required": ["records", "instructions_issued", "completion_frontier", "runtime_seconds"], "additionalProperties": true},
+    "ncu": {"type": "object", "required": ["metric", "values", "median", "instruction_count"], "additionalProperties": true},
+    "comparison": {"type": "object", "required": ["instruction_count_match", "lower_bound_consistency"], "additionalProperties": true},
+    "interpretation": {"type": "string", "minLength": 1}
+  },
+  "additionalProperties": false
+}

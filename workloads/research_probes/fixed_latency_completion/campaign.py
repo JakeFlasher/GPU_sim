@@ -26,9 +26,6 @@ DRIVER = HERE / "fixed_latency_completion_driver"
 LONG_NATIVE = HERE / "fixed_latency_completion_native.cubin"
 LONG_SPLIT = HERE / "fixed_latency_completion_split.cubin"
 LONG_BANK3 = HERE / "fixed_latency_completion_bank3.cubin"
-TRACE_NATIVE = HERE / "fixed_latency_completion_trace_native.cubin"
-TRACE_SPLIT = HERE / "fixed_latency_completion_trace_split.cubin"
-TRACE_BANK3 = HERE / "fixed_latency_completion_trace_bank3.cubin"
 
 
 def load_base_campaign():
@@ -84,8 +81,8 @@ class Cell:
 
     def cubin(self, trace: bool) -> Path:
         if self.variant == "split":
-            return TRACE_SPLIT if trace else LONG_SPLIT
-        return TRACE_BANK3 if trace else LONG_BANK3
+            return LONG_SPLIT
+        return LONG_BANK3
 
     def target(self, *, trace: bool, trials: int) -> list[str]:
         return [
@@ -94,7 +91,7 @@ class Cell:
             str(self.distance),
             self.variant,
             str(self.warps),
-            str(64 if trace else 8192),
+            str(8192),
             str(trials),
         ]
 
@@ -134,9 +131,6 @@ def require_binaries() -> None:
         LONG_NATIVE,
         LONG_SPLIT,
         LONG_BANK3,
-        TRACE_NATIVE,
-        TRACE_SPLIT,
-        TRACE_BANK3,
     ):
         if not path.is_file() or path.stat().st_size == 0:
             raise RuntimeError(f"required binary is missing: {path}")
@@ -151,7 +145,7 @@ def emit_manifest(output: Path) -> None:
             "cells": [{**asdict(cell), "key": cell.key} for cell in configured_cells()],
             "ncu_metrics": list(METRICS),
             "long_generations": 8192,
-            "trace_generations": 64,
+            "generations": 8192,
             "identification_distances": [1, 4],
             "held_out_distances": [2, 8],
             "identification_widths": [4, 8],
@@ -381,9 +375,6 @@ def run_static(output: Path) -> None:
         "fixed_latency_completion_native": LONG_NATIVE,
         "fixed_latency_completion_split": LONG_SPLIT,
         "fixed_latency_completion_bank3": LONG_BANK3,
-        "fixed_latency_completion_trace_native": TRACE_NATIVE,
-        "fixed_latency_completion_trace_split": TRACE_SPLIT,
-        "fixed_latency_completion_trace_bank3": TRACE_BANK3,
     }
     sidecars = []
     for name, binary in binaries.items():
