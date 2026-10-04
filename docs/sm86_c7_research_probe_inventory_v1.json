@@ -1,7 +1,7 @@
 {
   "schema": "sm86_c7_research_probe_inventory_v1",
   "architecture": "sm_86",
-  "status": "inventory_build_matrix_and_twenty_five_live_probe_stages_complete",
+  "status": "25_live_probe_stages_reconciled_plus_result_capacity",
   "root": "workloads/research_probes",
   "population": {
     "directory_count": 42,
@@ -1191,6 +1191,12 @@
       "cell": "fixed_retired_w4_g1025_safe_arm",
       "artifact": "docs/sm86_c7_research_probe_fixed_latency_result_bypass_live_v1.json",
       "status": "complete_safe_arm_global_canary_excluded"
+    },
+    {
+      "probe": "fixed_latency_result_capacity",
+      "cell": "w8_b9_g8192",
+      "artifact": "docs/sm86_c7_research_probe_fixed_latency_result_capacity_live_v1.json",
+      "status": "complete_lower_bound_consistent_capacity_unidentified"
     }
   ]
 }

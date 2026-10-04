@@ -21,7 +21,6 @@ DEFAULT_OUTPUT = (
 )
 DRIVER = HERE / "fixed_latency_result_capacity_driver"
 LONG_NATIVE = HERE / "fixed_latency_result_capacity_native.cubin"
-TRACE_NATIVE = HERE / "fixed_latency_result_capacity_trace_native.cubin"
 
 
 def load_order_campaign():
@@ -46,8 +45,9 @@ DEPTHS = (7, 8, 9)
 
 
 def cubin(depth: int, trace: bool) -> Path:
-    prefix = "fixed_latency_result_capacity_trace" if trace else "fixed_latency_result_capacity"
-    return HERE / f"{prefix}_b{depth}.cubin"
+    # One patched program is used for every stage; trace/non-trace is only an
+    # execution mode, never a different workload.
+    return HERE / f"fixed_latency_result_capacity_b{depth}.cubin"
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,8 +62,8 @@ class Cell:
 
     def target(self, *, trace: bool, trials: int) -> list[str]:
         return [
-            str(DRIVER), str(cubin(self.depth, trace)), str(self.depth), str(self.warps),
-            str(64 if trace else 8192), str(trials),
+            str(DRIVER), str(cubin(self.depth, False)), str(self.depth), str(self.warps),
+            str(8192), str(trials),
         ]
 
 
@@ -90,7 +90,7 @@ def selected_cells(selector: str | None) -> list[Cell]:
 
 
 def require_binaries() -> None:
-    paths = [DRIVER, LONG_NATIVE, TRACE_NATIVE]
+    paths = [DRIVER, LONG_NATIVE]
     paths.extend(cubin(depth, trace) for depth in DEPTHS for trace in (False, True))
     for path in paths:
         if not path.is_file() or path.stat().st_size == 0:
@@ -106,7 +106,7 @@ def emit_manifest(output: Path) -> None:
             "cells": [{**asdict(cell), "key": cell.key} for cell in configured_cells()],
             "ncu_metrics": list(METRICS),
             "long_generations": 8192,
-            "trace_generations": 64,
+            "trace_generations": 8192,
             "capacity_signature": "b9 slower than b8 while b8 equals b7",
             "reference_hypothesis": {"issue_reservation_slots": 8, "maximum_pops_per_cycle": 1},
             "pair_invariants": [
@@ -162,13 +162,9 @@ def run_source(output: Path, cells: Sequence[Cell], force: bool) -> None:
 def run_static(output: Path) -> None:
     destination = output / "sass"
     destination.mkdir(parents=True, exist_ok=True)
-    binaries = {
-        "fixed_latency_result_capacity_native": LONG_NATIVE,
-        "fixed_latency_result_capacity_trace_native": TRACE_NATIVE,
-    }
+    binaries = {"fixed_latency_result_capacity_native": LONG_NATIVE}
     for depth in DEPTHS:
         binaries[f"fixed_latency_result_capacity_b{depth}"] = cubin(depth, False)
-        binaries[f"fixed_latency_result_capacity_trace_b{depth}"] = cubin(depth, True)
     sidecars = []
     for name, binary in binaries.items():
         for suffix, option in (("sass", "--dump-sass"), ("resources", "--dump-resource-usage")):
@@ -185,10 +181,7 @@ def run_static(output: Path) -> None:
             destination / f"{name}.control-extraction",
         )
         sidecars.append(sidecar)
-    for source, name in (
-        (HERE / "fixed_latency_result_capacity.patch.json", "long_capacity_patch.json"),
-        (HERE / "fixed_latency_result_capacity_trace.patch.json", "trace_capacity_patch.json"),
-    ):
+    for source, name in ((HERE / "fixed_latency_result_capacity.patch.json", "long_capacity_patch.json"),):
         BASE.write_json(output / "metadata" / name, json.loads(source.read_text(encoding="utf-8")))
 
     def audit(paths: list[Path], out_name: str, run_name: str) -> None:
@@ -199,26 +192,6 @@ def run_static(output: Path) -> None:
             output / "metadata" / run_name, timeout=900,
         )
     audit(sidecars, "operand_projection_audit.json", "operand-projection-run")
-    predecessor_patterns = (
-        "results/captures/sm86_async_barrier_readiness_20260817_v*/sass/*.control_bits.json",
-        "results/captures/sm86_barrier_pipeline_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_barrier_pipeline_coupled_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_barrier_pipeline_multicta_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_cycle_residual_20260817_v1/control/*.control_bits.json",
-        "results/captures/sm86_cycle_residual_20260817_v1/research-probes/async-cross-warp/*.control_bits.json",
-        "results/captures/sm86_fixed_latency_allocate_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_fixed_latency_completion_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_fixed_latency_reuse_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_issue_port_control_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_smsp_scheduler_contention_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_fixed_latency_result_queue_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_fixed_latency_result_order_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_fixed_latency_result_same_bank_20260817_v1/sass/*.control_bits.json",
-    )
-    predecessors = sorted({path for pattern in predecessor_patterns for path in REPO_ROOT.glob(pattern)})
-    if len(predecessors) != 56:
-        raise RuntimeError(f"expected 56 retained predecessor sidecars, got {len(predecessors)}")
-    audit(predecessors + sidecars, "retained_corpus_operand_projection_audit.json", "retained-corpus-operand-projection-run")
     print(f"static artifacts: {destination}")
 
 
@@ -238,7 +211,7 @@ def run_simulator(
         destination = output / directory_name / cell.key
         destination.mkdir(parents=True, exist_ok=True)
         command = [str(binary), "--trace", str(output / "nvbit" / cell.key), "--control",
-                   str(output / "sass" / f"fixed_latency_result_capacity_trace_b{cell.depth}.control_bits.json"),
+                   str(output / "sass" / f"fixed_latency_result_capacity_b{cell.depth}.control_bits.json"),
                    "--arch-card", str(REPO_ROOT / "arch_profiles/cards/sm_86.json"), "--mode", "flat"]
         outputs = []
         for repeat in (1, 2):

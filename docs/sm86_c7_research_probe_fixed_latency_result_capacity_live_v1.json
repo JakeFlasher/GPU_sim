@@ -1,0 +1,138 @@
+{
+  "schema": "sm86_c7_research_probe_fixed_latency_result_capacity_live_v1",
+  "status": "correctness_trace_replay_ncu_complete_capacity_unidentified",
+  "host_identity": {
+    "device_index": 0,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "compute_capability": "8.6",
+    "driver": "615.71.09",
+    "pstate": "P0",
+    "graphics_clock_mhz": 1350,
+    "memory_clock_mhz": 10501
+  },
+  "identity": {
+    "source": "workloads/research_probes/fixed_latency_result_capacity",
+    "driver": "workloads/research_probes/fixed_latency_result_capacity/fixed_latency_result_capacity_driver",
+    "binary": "workloads/research_probes/fixed_latency_result_capacity/fixed_latency_result_capacity_b9.cubin",
+    "binary_used_for_correctness_trace_replay_ncu": "same rebuilt 8192-generation cubin",
+    "trace": "results/alpha/c7_s33ao_capacity_20261004/nvbit/w8_b9/dynamic_trace.pb",
+    "arch_card": "arch_profiles/cards/sm_86.json",
+    "args": [
+      "9",
+      "8",
+      "8192",
+      "7"
+    ],
+    "depth": 9,
+    "warps": 8,
+    "generations": 8192,
+    "ncu_repeats": 5,
+    "ncu_metric": "gpc__cycles_elapsed.max"
+  },
+  "correctness": {
+    "status": "passed",
+    "correct": true,
+    "elapsed_samples_valid": true,
+    "sink_valid": true,
+    "trials": 7
+  },
+  "trace": {
+    "launches": 1,
+    "target_kernel": "result_capacity_search",
+    "target_records_replayed": 1573144,
+    "target_coverage": {
+      "kind": "full",
+      "blocks_observed": 1,
+      "population_blocks": 1
+    },
+    "tracer_total_insts": 1573144,
+    "tracer_total_reported_insts": 1573144
+  },
+  "simulator": {
+    "records": 1573144,
+    "instructions_issued": 1573144,
+    "completion_frontier": {
+      "status": "incomplete_unmodeled_retirement_tails",
+      "lower_bound_cycles": 590830,
+      "unmodeled_tails": {
+        "reduction_read_modify_write": false,
+        "dirty_writeback": true,
+        "coherence": true,
+        "async_copy_shared_visibility": false
+      }
+    },
+    "native_macro_dispatches": 0
+  },
+  "ncu": {
+    "metric": "gpc__cycles_elapsed.max",
+    "values": [
+      851553.0,
+      851499.0,
+      842304.0,
+      851475.0,
+      851431.0
+    ],
+    "median": 851475.0,
+    "min": 842304.0,
+    "max": 851553.0,
+    "stdev": 4108.116454045577,
+    "rows": [
+      {
+        "rep": "ncu_0",
+        "gpc__cycles_elapsed.max": 851553.0,
+        "smsp__inst_executed.sum": 1573144.0,
+        "gpu__time_duration.sum": 545.92,
+        "smsp__inst_issued.sum": 1573192.0
+      },
+      {
+        "rep": "ncu_1",
+        "gpc__cycles_elapsed.max": 851499.0,
+        "smsp__inst_executed.sum": 1573144.0,
+        "gpu__time_duration.sum": 545.856,
+        "smsp__inst_issued.sum": 1573192.0
+      },
+      {
+        "rep": "ncu_2",
+        "gpc__cycles_elapsed.max": 842304.0,
+        "smsp__inst_executed.sum": 1573144.0,
+        "gpu__time_duration.sum": 539.968,
+        "smsp__inst_issued.sum": 1573192.0
+      },
+      {
+        "rep": "ncu_3",
+        "gpc__cycles_elapsed.max": 851475.0,
+        "smsp__inst_executed.sum": 1573144.0,
+        "gpu__time_duration.sum": 545.824,
+        "smsp__inst_issued.sum": 1573192.0
+      },
+      {
+        "rep": "ncu_4",
+        "gpc__cycles_elapsed.max": 851431.0,
+        "smsp__inst_executed.sum": 1573144.0,
+        "gpu__time_duration.sum": 545.824,
+        "smsp__inst_issued.sum": 1573192.0
+      }
+    ],
+    "instruction_count": [
+      1573144.0,
+      1573144.0,
+      1573144.0,
+      1573144.0,
+      1573144.0
+    ],
+    "kernel": "result_capacity_search(unsigned long long *, unsigned int *, const unsigned int *)",
+    "clock_control": "base",
+    "cache_control": "none",
+    "launch_skip": 0
+  },
+  "comparison": {
+    "instruction_count_match": true,
+    "lower_bound_consistency": true,
+    "lower_bound_cycles": 590830,
+    "ncu_median_cycles": 851475.0,
+    "gap_cycles": 260645.0,
+    "capacity_signature": "single W8 b9 live arm; no capacity/pop-width inference from one cell"
+  },
+  "interpretation": "The same 8192-generation b9 cubin was used for correctness, NVBit, replay, and NCU. The live W8 b9 arm is below NCU at the simulator lower bound; it is a canary only. A single arm cannot identify physical result capacity or pop width, and no timing model is activated."
+}

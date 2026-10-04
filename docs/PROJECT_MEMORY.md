@@ -709,3 +709,14 @@ UUID `GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c`, driver 615.71.09,
 Raw records: `results/alpha/full_3090ti_20260930_rm_cache_{cold,warm}_live/`.
 Preserve datasets, source, tests, and scientific limitations; do not recreate
 removed policy text or workflow machinery.
+
+C7-S33AO completed a fixed-result capacity live refresh. The stale 64-generation
+trace twin was removed from the active Makefile/campaign/driver interface; one
+8,192-generation b7/b8/b9 family now serves correctness, NVBit, replay, and
+NCU. W8/b9 passed seven correctness trials, full NVBit capture, deterministic
+replay, and five NCU runs. Replay/NCU match at 1,573,144 instructions; NCU
+median is 851,475 cycles and simulator lower is 590,830. This is a canary only:
+capacity and pop width remain unidentified and no timing model is enabled.
+Artifact: `docs/sm86_c7_research_probe_fixed_latency_result_capacity_live_v1.json`.
+
+C7-S33AP is active: review `immediate_constant_frontier` next.

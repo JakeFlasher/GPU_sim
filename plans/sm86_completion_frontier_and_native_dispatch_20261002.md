@@ -1544,3 +1544,21 @@ was not run. No bypass latency model is activated. Evidence:
 Select the next uncaptured non-memory probe after source review, prioritizing
 `fixed_latency_result_capacity` or `immediate_constant_frontier`. Preserve all
 replay blockers and lower-bound falsifiers.
+
+### C7-S33AO — fixed-result capacity live refresh — complete
+
+The capacity campaign no longer builds or invokes a 64-generation trace twin.
+Its driver requires 8,192 generations, and the same patched b7/b8/b9 cubins are
+used for correctness, NVBit, replay, and NCU. The W8/b9 arm passed seven live
+correctness trials, one complete NVBit capture, deterministic replay, and five
+independent NCU profiles. Replay and NCU agree at 1,573,144 target
+instructions; simulator lower is 590,830 cycles and NCU median is 851,475.
+This is a canary only: one arm cannot identify physical result capacity or pop
+width, so no capacity timing model is enabled. Evidence:
+`docs/sm86_c7_research_probe_fixed_latency_result_capacity_live_v1.json`.
+
+### C7-S33AP — next active milestone
+
+Review and refresh `immediate_constant_frontier` as the next uncaptured
+non-memory probe. Preserve its functional-only boundary unless a native
+NVBit→sim-run trace and independent NCU anchor can be produced.

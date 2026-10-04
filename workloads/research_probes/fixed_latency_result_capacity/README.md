@@ -26,3 +26,14 @@ candidate changed none of 18 outputs and was removed. Physical capacity and
 pop width remain unidentified; the W8 b9 cell is retained as a canary. The
 campaign contains nine cells, 63 correctness executions, 63 NCU profiles, six
 SourceCounters profiles, nine NVBit captures, and 61,269 replay records.
+
+## C7-S33AO live refresh (2026-10-04)
+
+The stale 64-generation trace twin was removed from the active interface. One
+rebuilt 8,192-generation b7/b8/b9 family now serves correctness, NVBit, replay,
+and NCU. The W8/b9 arm was rerun live: seven correctness trials, one complete
+NVBit trace, deterministic replay, and five independent NCU profiles. Replay
+and NCU both report 1,573,144 target instructions; the simulator lower bound is
+590,830 cycles and the NCU median is 851,475 cycles. This arm remains a canary:
+one cell cannot identify physical result capacity or pop width, so no capacity
+timing model is enabled.

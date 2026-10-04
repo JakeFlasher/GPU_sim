@@ -28,7 +28,7 @@ int main(int argc, char** argv) {
     if (argc < 6 || argc > 7) {
         std::fprintf(stderr,
                      "usage: %s CUBIN DEPTH_7_8_9 WARPS_1_4_8 "
-                     "GENERATIONS_64_8192 TRIALS [reserved]\n",
+                     "GENERATIONS_8192 TRIALS [reserved]\n",
                      argv[0]);
         return 2;
     }
@@ -37,7 +37,7 @@ int main(int argc, char** argv) {
     const int generations = std::atoi(argv[4]);
     const int trials = std::atoi(argv[5]);
     if ((depth < 7 || depth > 9) || (warps != 1 && warps != 4 && warps != 8) ||
-        (generations != 64 && generations != 8192) || trials < 1 || trials > 32) {
+        (generations != 8192) || trials < 1 || trials > 32) {
         return 2;
     }
 

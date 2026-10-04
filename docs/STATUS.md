@@ -591,3 +591,12 @@ These are measurements, not prediction-error results; campaign raw outputs remai
 
 [Model contract](PREDICTIVE_CLOSURE.md) · [Configuration](archprofile.md) ·
 [Runbook](runbook_host.md) · [Checks](testing.md).
+
+C7-S33AO completed a fixed-result capacity live refresh. The active interface
+now uses only 8,192-generation binaries; the W8/b9 arm passed seven correctness
+trials, NVBit, deterministic replay, and five NCU runs. Replay/NCU match at
+1,573,144 instructions; NCU median 851,475 cycles versus simulator lower
+590,830. Capacity/pop width remain unidentified; no timing model is enabled.
+Artifact: `docs/sm86_c7_research_probe_fixed_latency_result_capacity_live_v1.json`.
+
+C7-S33AP is active: review `immediate_constant_frontier` next.
