@@ -8,11 +8,10 @@ VARIANTS = \
 	ret_lane_line ret_lane_word ret_warp_word ret_global_word \
 	red_lane_line red_lane_word red_warp_word red_global_word
 LONG_CUBINS = $(foreach v,$(VARIANTS),atomic_completion_serialization_$(v).cubin)
-TRACE_CUBINS = $(foreach v,$(VARIANTS),atomic_completion_serialization_trace_$(v).cubin)
 
 .PHONY: all clean
 
-all: atomic_completion_serialization_driver $(LONG_CUBINS) $(TRACE_CUBINS)
+all: atomic_completion_serialization_driver $(LONG_CUBINS)
 
 atomic_completion_serialization_driver: atomic_completion_serialization_driver.cpp
 	$(NVCC) -std=c++17 -O3 -o $@ $< -lcuda
@@ -20,12 +19,6 @@ atomic_completion_serialization_driver: atomic_completion_serialization_driver.c
 define LONG_RULE
 atomic_completion_serialization_$(2).cubin: atomic_completion_serialization.cu
 	$$(NVCC) $$(NVCC_FLAGS) -DATOMIC_VARIANT=$(1) -cubin -o $$@ $$<
-endef
-
-define TRACE_RULE
-atomic_completion_serialization_trace_$(2).cubin: atomic_completion_serialization.cu
-	$$(NVCC) $$(NVCC_FLAGS) -DATOMIC_VARIANT=$(1) -DATOMIC_GENERATIONS=64 \
-		-cubin -o $$@ $$<
 endef
 
 $(eval $(call LONG_RULE,0,ret_lane_line))
@@ -36,15 +29,6 @@ $(eval $(call LONG_RULE,4,red_lane_line))
 $(eval $(call LONG_RULE,5,red_lane_word))
 $(eval $(call LONG_RULE,6,red_warp_word))
 $(eval $(call LONG_RULE,7,red_global_word))
-$(eval $(call TRACE_RULE,0,ret_lane_line))
-$(eval $(call TRACE_RULE,1,ret_lane_word))
-$(eval $(call TRACE_RULE,2,ret_warp_word))
-$(eval $(call TRACE_RULE,3,ret_global_word))
-$(eval $(call TRACE_RULE,4,red_lane_line))
-$(eval $(call TRACE_RULE,5,red_lane_word))
-$(eval $(call TRACE_RULE,6,red_warp_word))
-$(eval $(call TRACE_RULE,7,red_global_word))
-
 clean:
-	rm -f atomic_completion_serialization_driver $(LONG_CUBINS) $(TRACE_CUBINS) \
+	rm -f atomic_completion_serialization_driver $(LONG_CUBINS) \
 		*.control_bits.json

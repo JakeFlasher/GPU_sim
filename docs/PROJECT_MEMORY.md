@@ -622,8 +622,20 @@ distances 1/2/4/8), retaining all falsifiers, crosswalk exclusions, open tails,
 and unsupported rows. Evidence:
 `docs/sm86_c7_research_probe_inventory_v1.json`.
 
-C7-S33AG is active: inspect and harden one `atomic_completion_serialization`
-vertical cell before capture.
+C7-S33AG completed one atomic completion serialization vertical slice. The
+atomic campaign now uses one rebuilt 1,024-generation cubin per variant across
+correctness, NVBit, replay, and NCU; stale 64-generation trace cubins were
+removed. The driver enforces strict parsing, variant/layout consistency, bounded
+allocations, output sentinels, elapsed-sample checks, returned-sum/data-sum
+oracles, and cleanup. `ret_lane_word, warps=4` passed seven host trials,
+Compute Sanitizer, full NVBit capture, deterministic replay, and five NCU runs.
+Replay and NCU report 24,660 warp instructions; atomic requests are 4,096 per
+run, NCU median 316109, simulator lower 267561. No atomic timing model is
+activated. Artifact:
+`docs/sm86_c7_research_probe_atomic_completion_serialization_live_v1.json`.
+
+C7-S33AH is active: select and harden the next bounded atomic/control family,
+preferably `atomic_multism_service` after source-contract review.
 
 ## Retained evidence
 

@@ -96,8 +96,10 @@ BASE = ORDER.BASE
 
 
 def cubin(variant: str, *, trace: bool) -> Path:
-    infix = "_trace" if trace else ""
-    return HERE / f"atomic_completion_serialization{infix}_{variant}.cubin"
+    # One 1024-generation cubin per variant is used for correctness, NVBit,
+    # replay, and NCU. The former 64-generation trace twins were not the same
+    # workload and made the campaign's identity contract false.
+    return HERE / f"atomic_completion_serialization_{variant}.cubin"
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,7 +121,7 @@ class Cell:
             str(DRIVER),
             str(cubin(self.variant, trace=trace)),
             str(self.warps),
-            str(64 if trace else 1024),
+            str(1024),
             str(trials),
             self.variant,
             str(self.layout_index),
@@ -171,7 +173,7 @@ def require_binaries() -> None:
     paths.extend(
         cubin(variant, trace=trace)
         for variant in VARIANTS
-        for trace in (False, True)
+        for trace in (False,)
     )
     for path in paths:
         if not path.is_file() or path.stat().st_size == 0:
@@ -187,7 +189,7 @@ def emit_manifest(output: Path) -> None:
             "cells": [{**asdict(entry), "key": entry.key} for entry in configured_cells()],
             "ncu_metrics": list(METRICS),
             "long_generations": 1024,
-            "trace_generations": 64,
+            "generations": 1024,
             "widths": list(WIDTHS),
             "function": FUNCTION,
             "pair_invariants": [
@@ -374,11 +376,7 @@ def run_source(output: Path, cells: Sequence[Cell], force: bool) -> None:
 def run_static(output: Path) -> None:
     destination = output / "sass"
     destination.mkdir(parents=True, exist_ok=True)
-    binaries = [
-        cubin(variant, trace=trace)
-        for variant in VARIANTS
-        for trace in (False, True)
-    ]
+    binaries = [cubin(variant, trace=False) for variant in VARIANTS]
     sidecars = []
     for binary in binaries:
         name = binary.stem
@@ -443,17 +441,6 @@ def run_static(output: Path) -> None:
         )
 
     audit(sidecars, "operand_projection_audit.json", "operand-projection-run")
-    output_sass = destination.resolve()
-    retained = sorted(
-        path
-        for path in REPO_ROOT.glob("results/captures/**/*.control_bits.json")
-        if path.parent.resolve() != output_sass
-    )
-    audit(
-        retained + sidecars,
-        "retained_corpus_operand_projection_audit.json",
-        "retained-corpus-operand-projection-run",
-    )
     print(destination)
 
 
@@ -472,7 +459,7 @@ def run_simulator(output: Path, cells: Sequence[Cell], force: bool) -> None:
             str(
                 output
                 / "sass"
-                / f"atomic_completion_serialization_trace_{entry.variant}.control_bits.json"
+                / f"atomic_completion_serialization_{entry.variant}.control_bits.json"
             ),
             "--arch-card",
             str(REPO_ROOT / "arch_profiles/cards/sm_86.json"),

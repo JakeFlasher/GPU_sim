@@ -510,8 +510,17 @@ no longer assume trace twins. The inventory now records 18 live probe stages
 with falsifiers, crosswalk exclusions, open tails, and unsupported rows kept
 explicit. Evidence: `docs/sm86_c7_research_probe_inventory_v1.json`.
 
-The next active plan milestone is C7-S33AG: one hardened
-`atomic_completion_serialization` vertical cell.
+C7-S33AG completed an atomic completion serialization vertical slice. One
+rebuilt 1,024-generation cubin per variant now serves correctness, NVBit,
+replay, and NCU; stale 64-generation trace cubins are gone. The hardened
+driver passes seven host trials, Compute Sanitizer, NVBit, replay, and five NCU
+runs for `ret_lane_word, warps=4`. Replay/NCU agree at 24,660 warp
+instructions; atomic requests are 4,096, NCU median 316,109, simulator lower
+267,561. No atomic timing is fitted. Artifact:
+`docs/sm86_c7_research_probe_atomic_completion_serialization_live_v1.json`.
+
+The next active plan milestone is C7-S33AH: inspect and harden the next bounded
+atomic/control family, preferably `atomic_multism_service`.
 
 ## Retained measurements
 

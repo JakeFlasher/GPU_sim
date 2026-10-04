@@ -1,7 +1,7 @@
 {
   "schema": "sm86_c7_research_probe_inventory_v1",
   "architecture": "sm_86",
-  "status": "inventory_build_matrix_and_eighteen_live_probe_stages_complete",
+  "status": "inventory_build_matrix_and_nineteen_live_probe_stages_complete",
   "root": "workloads/research_probes",
   "population": {
     "directory_count": 42,
@@ -1120,6 +1120,12 @@
       "probe": "fixed_latency_completion",
       "cell": "distance8_split_bank3_w4_g8192",
       "artifact": "docs/sm86_c7_research_probe_fixed_latency_completion_distance8_pair_live_v1.json",
+      "status": "complete_lower_bound_consistent"
+    },
+    {
+      "probe": "atomic_completion_serialization",
+      "cell": "ret_lane_word_w4_g1024",
+      "artifact": "docs/sm86_c7_research_probe_atomic_completion_serialization_live_v1.json",
       "status": "complete_lower_bound_consistent"
     }
   ]
