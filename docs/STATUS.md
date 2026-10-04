@@ -554,9 +554,17 @@ nine-launch application with per-kernel instruction matches. Endpoints remain
 separate; no fixed retirement upper is inferred. Artifact:
 `docs/sm86_c7_research_probe_task_done_boundary_live_v1.json`.
 
-The next active plan milestone is C7-S33AM: select the next uncaptured probe
-after source review, prioritizing `smsp_scheduler_contention` or
-`fixed_latency_result_bypass`.
+C7-S33AM completed an SMSP scheduler-contention vertical slice. One rebuilt
+8,192-generation binary serves all stages; `q20, phase=0, warps=8` passes seven
+host trials, Compute Sanitizer, NVBit, replay, and five NCU runs. The 69-MiB
+block payload required a finite anchored-reader increase from 64 to 128 MiB;
+focused anchored tests pass. Replay/NCU match at 2,556,096 instructions; NCU
+median is 1,271,033 versus lower 1,123,534. Phase labels are controls, not
+physical scheduler-slot truth. Artifact:
+`docs/sm86_c7_research_probe_smsp_scheduler_contention_live_v1.json`.
+
+The next active plan milestone is C7-S33AN: select the next uncaptured probe
+after source review, with fixed-latency bypass safety checked first.
 
 ## Retained measurements
 

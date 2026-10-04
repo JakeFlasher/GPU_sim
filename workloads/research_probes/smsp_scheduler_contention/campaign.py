@@ -23,7 +23,7 @@ DEFAULT_OUTPUT = (
     / "sm86_smsp_scheduler_contention_20260817_v1"
 )
 LONG_BINARY = HERE / "smsp_scheduler_contention"
-TRACE_BINARY = HERE / "smsp_scheduler_contention_trace"
+TRACE_BINARY = LONG_BINARY
 
 
 def load_base_campaign():
@@ -138,7 +138,7 @@ def emit_manifest(output: Path) -> None:
             "cells": [{**asdict(cell), "key": cell.key} for cell in configured_cells()],
             "ncu_metrics": list(METRICS),
             "long_generations": 8192,
-            "trace_generations": 64,
+            "generations": 8192,
             "modeled_smsps_per_sm": 4,
             "identification": {
                 "warps": [4, 8],
@@ -267,7 +267,7 @@ def run_simulator(
     if not directory_name or "/" in directory_name or directory_name in {".", ".."}:
         raise RuntimeError("simulator directory must be one safe path component")
     binary = simulator_binary.resolve()
-    control = output / "sass" / "smsp_scheduler_contention_trace.control_bits.json"
+    control = output / "sass" / "smsp_scheduler_contention.control_bits.json"
     if not binary.is_file() or not control.is_file():
         raise RuntimeError("build sim-run --release and run static first")
     for index, cell in enumerate(cells, 1):

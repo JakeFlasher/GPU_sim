@@ -674,8 +674,19 @@ Per-kernel instruction counts match. Producer, thrash, consumer, copy, and host
 endpoints remain separate; no fixed retirement tail or scalar upper is inferred.
 Artifact: `docs/sm86_c7_research_probe_task_done_boundary_live_v1.json`.
 
-C7-S33AM is active: select the next uncaptured probe after bounded source
-review, prioritizing `smsp_scheduler_contention` or `fixed_latency_result_bypass`.
+C7-S33AM completed an SMSP scheduler-contention vertical slice. One rebuilt
+8,192-generation binary replaces the stale trace twin. The `q20, phase=0,
+warps=8` cell passes seven host trials, Compute Sanitizer, full NVBit capture,
+deterministic replay, and five NCU runs. Its 69-MiB block payload required the
+finite anchored-reader limit to rise from 64 MiB to 128 MiB; focused anchored
+tests pass. Replay/NCU match at 2,556,096 instructions; simulator lower is
+1,123,534 and NCU median 1,271,033. Phase labels are experimental controls,
+not physical scheduler-slot truth; no scheduler timing model is activated.
+Artifact:
+`docs/sm86_c7_research_probe_smsp_scheduler_contention_live_v1.json`.
+
+C7-S33AN is active: select the next uncaptured probe after source review, with
+fixed-latency bypass canary safety checked first.
 
 ## Retained evidence
 

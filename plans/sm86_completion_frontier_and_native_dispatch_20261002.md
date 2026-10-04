@@ -22,7 +22,7 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    `docs/sm86_c7_simbench_dram_streaming_dot_product_direct_live_v1.json`;
    the former tiny `trace_00` run is only a smoke check.
    [Ampere shared memory](https://docs.nvidia.com/cuda/ampere-tuning-guide/#unified-shared-memory-l1-texture-cache)
-3. **C7-S33AM active.** Nine probe families now have live
+3. **C7-S33AN active.** Nine probe families now have live
    evidence: 68 issue-port cells, 36 async-barrier cells, 30 store-ack arms,
    102 memory-retirement cells, 33 barrier-pipeline cells, 100 l1tex-admission
    cells, one l2-queue warmup/target cell, one l1tex-arrival store cell, and
@@ -50,9 +50,11 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    proprietary hash. C7-S33AJ completed a VMM alias diagnostic with explicit simulator-not-applicable
    scope. C7-S33AK completed a nine-launch task-done boundary slice with full
    multi-kernel replay and per-kernel NCU instruction matches. C7-S33AL reconciled the expanded inventory and remaining unsupported/blocked
-   rows. C7-S33AM now selects the next uncaptured probe while preserving the
-   eight system-fence crosswalk exclusions and open completion tails; no
-   timing/card parameter is selected from scored NCU targets.
+   rows. C7-S33AM hardened and captured one SMSP scheduler-contention cell after
+   admitting its bounded 69-MiB payload. C7-S33AN now selects the next
+   uncaptured probe while preserving the eight system-fence crosswalk
+   exclusions and open completion tails; no timing/card parameter is selected
+   from scored NCU targets.
 
 ## Outcome
 
@@ -1511,9 +1513,22 @@ SimBench tensor/vendor rows, system-fence crosswalk exclusions,
 lower-bound falsifiers, open semantic tails, and VMM physical-identity limits
 remain explicit. Evidence: `docs/sm86_c7_research_probe_inventory_v1.json`.
 
-### C7-S33AM — next active milestone
+### C7-S33AM — SMSP scheduler-contention vertical slice — complete
 
-Select the next uncaptured probe only after a bounded source review; prioritize
-`smsp_scheduler_contention` or `fixed_latency_result_bypass`. Run a fresh
-same-binary correctness/NVBit/replay/five-NCU vertical cell and update the
-population disposition, without expanding a matrix from a stale interface.
+The scheduler campaign now uses one rebuilt 8,192-generation binary for
+correctness, NVBit, replay, and NCU; its stale trace twin is removed. The
+`q20, phase=0, warps=8` cell passes seven host trials, Compute Sanitizer, full
+NVBit capture, deterministic replay, and five NCU runs. Its 69-MiB block
+payload required the finite anchored-reader limit to rise from 64 MiB to 128
+MiB; focused anchored tests pass. Replay and NCU match at 2,556,096
+instructions; simulator lower is 1,123,534 and NCU median 1,271,033. Phase
+labels remain experimental controls, not physical scheduler-slot truth; no
+scheduler timing model is activated. Evidence:
+`docs/sm86_c7_research_probe_smsp_scheduler_contention_live_v1.json`.
+
+### C7-S33AN — next active milestone
+
+Select the next uncaptured probe after source review, prioritizing
+`fixed_latency_result_bypass` only after its illegal-address canary and
+long/trace identity are made safe, or another bounded non-memory family.
+Preserve every replay blocker and lower-bound falsifier.

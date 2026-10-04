@@ -1,10 +1,12 @@
 #include <cuda_profiler_api.h>
 #include <cuda_runtime.h>
 
+#include <cerrno>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <vector>
 
 #define CUDA_CHECK(call)                                                        \
@@ -25,6 +27,18 @@ constexpr std::uint32_t kMul = 1664525u;
 constexpr std::uint32_t kMadAdd = 1013904223u;
 constexpr std::uint32_t kLogicA = 0xa5a5a5a5u;
 constexpr std::uint32_t kLogicB = 0x3c3c3c3cu;
+
+bool parse_int(const char* text, int* value) {
+    if (text == nullptr || *text == '\0' || value == nullptr) return false;
+    errno = 0;
+    char* end = nullptr;
+    const long parsed = std::strtol(text, &end, 10);
+    if (errno == ERANGE || end == text || *end != '\0' ||
+        parsed < std::numeric_limits<int>::min() ||
+        parsed > std::numeric_limits<int>::max()) return false;
+    *value = static_cast<int>(parsed);
+    return true;
+}
 
 #ifndef SMSP_SCHEDULER_GENERATIONS
 constexpr int kGenerations = 8192;
@@ -519,9 +533,9 @@ int main(int argc, char** argv) {
         return 2;
     }
     int protocol = -1;
-    const int phase = std::atoi(argv[2]);
-    const int warps = std::atoi(argv[3]);
-    const int trials = argc == 5 ? std::atoi(argv[4]) : 7;
+    int phase = 0, warps = 0, trials = 7;
+    if (!parse_int(argv[2], &phase) || !parse_int(argv[3], &warps) ||
+        (argc == 5 && !parse_int(argv[4], &trials))) return 2;
     if (!parse_protocol(argv[1], &protocol) ||
         (phase != 0 && phase != 4 && phase != 8 && phase != 16) ||
         (warps != 4 && warps != 8 && warps != 12 && warps != 16) ||
@@ -536,7 +550,10 @@ int main(int argc, char** argv) {
 
     std::vector<std::vector<unsigned long long>> samples(
         trials, std::vector<unsigned long long>(warps));
+    bool elapsed_valid = true;
     for (int trial = 0; trial < trials; ++trial) {
+        CUDA_CHECK(cudaMemset(elapsed, 0xff, kMaxWarps * sizeof(*elapsed)));
+        CUDA_CHECK(cudaMemset(sink, 0xa5, kMaxWarps * sizeof(*sink)));
         CUDA_CHECK(cudaProfilerStart());
         launch_protocol(protocol, phase, warps, elapsed, sink);
         CUDA_CHECK(cudaGetLastError());
@@ -545,17 +562,22 @@ int main(int argc, char** argv) {
         CUDA_CHECK(cudaMemcpy(samples[trial].data(), elapsed,
                               warps * sizeof(*elapsed),
                               cudaMemcpyDeviceToHost));
+        for (int warp = 0; warp < warps; ++warp)
+            elapsed_valid = elapsed_valid && samples[trial][warp] != UINT64_MAX && samples[trial][warp] > 0;
     }
 
     std::vector<std::uint32_t> values(warps);
     CUDA_CHECK(cudaMemcpy(values.data(), sink, warps * sizeof(*sink),
                           cudaMemcpyDeviceToHost));
     bool correct = true;
+    bool sink_valid = true;
     std::uint64_t checksum = 0;
     for (int warp = 0; warp < warps; ++warp) {
         correct = correct && values[warp] == expected(protocol, phase, warp, 0);
+        sink_valid = sink_valid && values[warp] != 0xa5a5a5a5u;
         checksum = checksum * 131u + values[warp];
     }
+    correct = correct && elapsed_valid && sink_valid;
 
     const int hot_ops =
         protocol == kControl ? 0
@@ -578,8 +600,10 @@ int main(int argc, char** argv) {
         std::printf("]");
     }
     std::printf(
-        "],\"checksum\":%llu,\"correct\":%s}\n",
-        static_cast<unsigned long long>(checksum), correct ? "true" : "false");
+        "],\"checksum\":%llu,\"correct\":%s,\"elapsed_samples_valid\":%s,"
+        "\"sink_valid\":%s}\n",
+        static_cast<unsigned long long>(checksum), correct ? "true" : "false",
+        elapsed_valid ? "true" : "false", sink_valid ? "true" : "false");
 
     CUDA_CHECK(cudaFree(sink));
     CUDA_CHECK(cudaFree(elapsed));

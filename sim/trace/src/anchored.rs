@@ -26,7 +26,10 @@ const FILE_FLAGS: OFlags = OFlags::RDONLY
 const MAX_TREE_DEPTH: usize = 16;
 const MIN_TREE_ENTRY_BUDGET: u64 = 1_024;
 const TREE_ENTRIES_PER_PAYLOAD: u64 = 8;
-const MAX_TREE_FILE_BYTES: u64 = 64 * 1024 * 1024;
+// A bounded SM86 scheduler trace can contain a single ~70 MiB block payload.
+// Keep a finite per-file guard, but admit that valid live shape without
+// requiring a trace-sampling or workload reduction.
+const MAX_TREE_FILE_BYTES: u64 = 128 * 1024 * 1024;
 
 /// Stable filesystem identity used to reject hard-link aliases during loading.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

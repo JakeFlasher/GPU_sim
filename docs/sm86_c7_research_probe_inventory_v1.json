@@ -1,7 +1,7 @@
 {
   "schema": "sm86_c7_research_probe_inventory_v1",
   "architecture": "sm_86",
-  "status": "inventory_build_matrix_and_population_dispositions_reconciled_v1",
+  "status": "inventory_build_matrix_and_twenty_four_live_probe_stages_complete",
   "root": "workloads/research_probes",
   "population": {
     "directory_count": 42,
@@ -1179,6 +1179,12 @@
       "cell": "store_device_f16_t16_b4",
       "artifact": "docs/sm86_c7_research_probe_task_done_boundary_live_v1.json",
       "status": "complete_multikernel_replay_boundary_explicit"
+    },
+    {
+      "probe": "smsp_scheduler_contention",
+      "cell": "q20_f0_w8_g8192",
+      "artifact": "docs/sm86_c7_research_probe_smsp_scheduler_contention_live_v1.json",
+      "status": "complete_lower_bound_consistent"
     }
   ]
 }
