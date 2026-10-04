@@ -1,0 +1,259 @@
+{
+  "schema": "sm86_c7_research_probe_atomic_vmm_alias_live_v1",
+  "status": "vmm_correctness_ncu_nvbit_complete_simulator_not_applicable",
+  "host_identity": {
+    "device_index": 0,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "compute_capability": "8.6",
+    "driver": "615.71.09",
+    "pstate": "P0",
+    "graphics_clock_mhz": 1350,
+    "memory_clock_mhz": 10501
+  },
+  "identity": {
+    "source": "workloads/research_probes/atomic_vmm_alias",
+    "driver": "workloads/research_probes/atomic_vmm_alias/vmm_alias_driver",
+    "binary": "workloads/research_probes/atomic_vmm_alias/vmm_alias_read.cubin",
+    "args": [
+      "7",
+      "alias_same_offset_o0000000",
+      "alias_same_offset",
+      "0"
+    ],
+    "mode": "alias_same_offset",
+    "physical_offset_bytes": 0,
+    "generations": 64,
+    "ncu_metric": "lts__t_sectors_op_read.sum",
+    "ncu_repeats": 5,
+    "ncu_replay_mode": "application",
+    "ncu_clock_control": "base",
+    "ncu_cache_control": "all"
+  },
+  "correctness": {
+    "alias_addresses": [
+      1099859755008,
+      1099861852160,
+      1099863949312,
+      1099866046464,
+      1099868143616,
+      1099870240768,
+      1099872337920
+    ],
+    "allocation_granularity_bytes": 2097152,
+    "blocks": 168,
+    "correct": true,
+    "generations": 64,
+    "group_addresses": [
+      1099859755008,
+      1099861852160,
+      1099863949312,
+      1099866046464,
+      1099868143616,
+      1099870240768,
+      1099872337920
+    ],
+    "group_block_counts": [
+      105,
+      1,
+      2,
+      4,
+      8,
+      16,
+      32
+    ],
+    "mode": "alias_same_offset",
+    "physical_allocation_bytes": 2097152,
+    "physical_offset_bytes": 0,
+    "reservation_address": 1099859755008,
+    "reservation_bytes": 14680064,
+    "returned_value_per_thread": 1077952576,
+    "samples_max_cycles": [
+      2375,
+      2283,
+      2270,
+      2255,
+      2274,
+      2269,
+      2268
+    ],
+    "trials": 7,
+    "variant": "alias_same_offset_o0000000",
+    "vmm_supported": true
+  },
+  "trace": {
+    "launches": 7,
+    "target_kernel": "vmm_alias_read_probe",
+    "target_records_sum": 1440600,
+    "stats_rows": [
+      {
+        "device_id": "0",
+        "stream_id": "7",
+        "kernel id": "kernel-1.trace",
+        "kernel mangled name": "vmm_alias_read_probe",
+        "grid_dimX": "168",
+        "grid_dimY": "1",
+        "grid_dimZ": "1",
+        "#blocks": "168",
+        "block_dimX": "32",
+        "block_dimY": "1",
+        "block_dimZ": "1",
+        "#threads": "32",
+        "total_insts": "205800",
+        "total_reported_insts": "205800"
+      },
+      {
+        "device_id": "0",
+        "stream_id": "7",
+        "kernel id": "kernel-2.trace",
+        "kernel mangled name": "vmm_alias_read_probe",
+        "grid_dimX": "168",
+        "grid_dimY": "1",
+        "grid_dimZ": "1",
+        "#blocks": "168",
+        "block_dimX": "32",
+        "block_dimY": "1",
+        "block_dimZ": "1",
+        "#threads": "32",
+        "total_insts": "205800",
+        "total_reported_insts": "205800"
+      },
+      {
+        "device_id": "0",
+        "stream_id": "7",
+        "kernel id": "kernel-3.trace",
+        "kernel mangled name": "vmm_alias_read_probe",
+        "grid_dimX": "168",
+        "grid_dimY": "1",
+        "grid_dimZ": "1",
+        "#blocks": "168",
+        "block_dimX": "32",
+        "block_dimY": "1",
+        "block_dimZ": "1",
+        "#threads": "32",
+        "total_insts": "205800",
+        "total_reported_insts": "205800"
+      },
+      {
+        "device_id": "0",
+        "stream_id": "7",
+        "kernel id": "kernel-4.trace",
+        "kernel mangled name": "vmm_alias_read_probe",
+        "grid_dimX": "168",
+        "grid_dimY": "1",
+        "grid_dimZ": "1",
+        "#blocks": "168",
+        "block_dimX": "32",
+        "block_dimY": "1",
+        "block_dimZ": "1",
+        "#threads": "32",
+        "total_insts": "205800",
+        "total_reported_insts": "205800"
+      },
+      {
+        "device_id": "0",
+        "stream_id": "7",
+        "kernel id": "kernel-5.trace",
+        "kernel mangled name": "vmm_alias_read_probe",
+        "grid_dimX": "168",
+        "grid_dimY": "1",
+        "grid_dimZ": "1",
+        "#blocks": "168",
+        "block_dimX": "32",
+        "block_dimY": "1",
+        "block_dimZ": "1",
+        "#threads": "32",
+        "total_insts": "205800",
+        "total_reported_insts": "205800"
+      },
+      {
+        "device_id": "0",
+        "stream_id": "7",
+        "kernel id": "kernel-6.trace",
+        "kernel mangled name": "vmm_alias_read_probe",
+        "grid_dimX": "168",
+        "grid_dimY": "1",
+        "grid_dimZ": "1",
+        "#blocks": "168",
+        "block_dimX": "32",
+        "block_dimY": "1",
+        "block_dimZ": "1",
+        "#threads": "32",
+        "total_insts": "205800",
+        "total_reported_insts": "205800"
+      },
+      {
+        "device_id": "0",
+        "stream_id": "7",
+        "kernel id": "kernel-7.trace",
+        "kernel mangled name": "vmm_alias_read_probe",
+        "grid_dimX": "168",
+        "grid_dimY": "1",
+        "grid_dimZ": "1",
+        "#blocks": "168",
+        "block_dimX": "32",
+        "block_dimY": "1",
+        "block_dimZ": "1",
+        "#threads": "32",
+        "total_insts": "205800",
+        "total_reported_insts": "205800"
+      }
+    ],
+    "trace": "results/alpha/c7_s33_vmm_20261004/trace",
+    "nvbit_status": "captured all seven launches; VMM pointer mappings are not an ordinary simulator replay input"
+  },
+  "ncu": {
+    "metric": "lts__t_sectors_op_read.sum",
+    "values": [
+      2319.0,
+      2319.0,
+      2290.0,
+      2298.0,
+      2296.0
+    ],
+    "median": 2298.0,
+    "stdev": 13.649175799292792,
+    "gpu_time_ns": [
+      4064.0,
+      4096.0,
+      4096.0,
+      4064.0,
+      4064.0
+    ],
+    "rows": [
+      {
+        "rep": "ncu_0",
+        "lts_read_sectors": 2319.0,
+        "gpu_time_ns": 4064.0
+      },
+      {
+        "rep": "ncu_1",
+        "lts_read_sectors": 2319.0,
+        "gpu_time_ns": 4096.0
+      },
+      {
+        "rep": "ncu_2",
+        "lts_read_sectors": 2290.0,
+        "gpu_time_ns": 4096.0
+      },
+      {
+        "rep": "ncu_3",
+        "lts_read_sectors": 2298.0,
+        "gpu_time_ns": 4064.0
+      },
+      {
+        "rep": "ncu_4",
+        "lts_read_sectors": 2296.0,
+        "gpu_time_ns": 4064.0
+      }
+    ]
+  },
+  "comparison": {
+    "simulator_applicable": false,
+    "simulator_reason": "CUDA VMM virtual-address mappings and physical allocation handles are not represented by the native trace replay contract; no simulator lower bound is fabricated",
+    "point_estimator": "not_claimed",
+    "hardware_completion": "not_observed",
+    "ncu_target_is_observation_only": true
+  },
+  "interpretation": "Fresh VMM alias diagnostic. The exact CUDA VMM correctness oracle passes seven trials, five NCU profiles observe the read-sector metric, and NVBit captures seven launches. This is intentionally not a sim-run timing row: VMM mapping/physical-allocation identity is outside the ordinary native replay contract, so no simulator lower bound, hash, or timing model is claimed."
+}

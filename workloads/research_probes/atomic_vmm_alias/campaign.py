@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import importlib
 import importlib.util
 import json
 import os
 import subprocess
+import statistics
 import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -35,6 +37,110 @@ CONTROL_MODES = (
     "single_alias_distinct_offsets",
 )
 GROUP_BLOCK_COUNTS = (105, 1, 2, 4, 8, 16, 32)
+
+
+def run_native(output: Path, selector: str | None) -> None:
+    """Run the ordinary NVBit -> sim-run -> NCU path, without historical prerequisites."""
+    sys.path.insert(0, str(REPO_ROOT))
+    from tools.run_sm86_workload import run_workload
+
+    selected = cells()
+    if selector is not None:
+        wanted = set(selector.split(","))
+        selected = [cell for cell in selected if cell.key in wanted]
+        missing = wanted - {cell.key for cell in selected}
+        if missing:
+            raise ValueError(f"unknown cell(s): {sorted(missing)}")
+    # Do not overwrite another experiment or silently reuse stale outputs.
+    output.mkdir(parents=True, exist_ok=False)
+    gpu_command = ["nvidia-smi", "--query-gpu=index,name,uuid,compute_cap,driver_version,pstate,clocks.current.graphics,clocks.current.memory", "--format=csv"]
+    gpu = subprocess.run(gpu_command, text=True, capture_output=True, timeout=10, check=True)
+    (output / "gpu.csv").write_text(gpu.stdout)
+
+    def run(command, directory, environment=None, timeout=300):
+        result = run_workload(command, workload_id=directory.name, output_dir=directory,
+                              timeout_seconds=timeout, environment=environment,
+                              skip_gpu_preflight=True, cwd=REPO_ROOT)
+        if result["status"] != "passed":
+            raise RuntimeError(f"{directory}: {result['status']}; see run.json/stderr.txt")
+        return result
+
+    def measurement(path):
+        matches = [json.loads(line) for line in path.read_text().splitlines()
+                   if line.startswith("{") and '"correct"' in line]
+        if len(matches) != 1 or matches[0].get("correct") is not True:
+            raise ValueError(f"{path}: workload correctness failed or result missing")
+        return matches[0]
+
+    control = output / "control.json"
+    run([sys.executable, str(REPO_ROOT / "tools/sass_control/emit_control_bits_sidecar.py"),
+         "--binary", str(CUBIN), "--arch", "sm_86", "--out", str(control)], output / "static")
+    rows = []
+    for cell in selected:
+        row = {"cell": cell.key, "mode": cell.mode, "offset_bytes": cell.offset_bytes,
+               "target": cell.target(1), "status": "incomplete"}
+        rows.append(row)
+        root = output / cell.key
+        try:
+            run(cell.target(7), root / "correctness")
+            row["correctness"] = measurement(root / "correctness/stdout.txt")
+            run(["compute-sanitizer", "--tool", "memcheck", "--leak-check", "full",
+                 "--error-exitcode", "99", *cell.target(1)], root / "memcheck")
+            trace = root / "trace"
+            run(cell.target(1), root / "nvbit", {
+                "CUDA_INJECTION64_PATH": str(REPO_ROOT / "tools/nvbit_tracer/tracer_tool/tracer_tool.so"),
+                "USER_DEFINED_FOLDERS": "1", "TRACES_FOLDER": str(trace),
+                "ACTIVE_FROM_START": "1", "TRACE_SAMPLING_MODE": "0",
+                "SKIP_ENHANCED_TRACER": "0",
+            })
+            row["traced_correctness"] = measurement(root / "nvbit/stdout.txt")
+            command = [str(REPO_ROOT / "sim/target/release/sim-run"), "--trace", str(trace),
+                       "--control", str(control), "--arch-card", str(REPO_ROOT / "arch_profiles/cards/sm_86.json"),
+                       "--pchase-card", str(REPO_ROOT / "data/pchase/sm_86_static_card.json"),
+                       "--mode", "l1-l2", "--cache-scope", "launch", "--kernel-id", "1"]
+            row["replay_command"] = command
+            runtimes = []
+            for repeat in (1, 2):
+                result = run(command, root / f"replay-{repeat}")
+                runtimes.append(result["elapsed_seconds"])
+            row["simulator_runtime_seconds"] = runtimes
+            first = (root / "replay-1/stdout.txt").read_bytes()
+            row["replays_equal"] = first == (root / "replay-2/stdout.txt").read_bytes()
+            launch, = json.loads(first)["launches"]
+            row["coverage"] = launch["coverage"]
+            row["records"] = launch["counters"]["records_seen"]
+            row["issued"] = launch["counters"]["instructions_issued"]
+            row["completion_frontier"] = launch["timing"]["completion_frontier"]
+            # Profile only after saving both predictions. This reduction never
+            # passes NCU results or VMM mode labels into the replay command.
+            values, counts = [], []
+            for repeat in range(5):
+                ncu = root / f"ncu-{repeat}"
+                run([sys.executable, str(REPO_ROOT / "tools/local_labels/collect_ncu.py"),
+                     "--output", str(ncu), "--launch-skip", "0", "--launch-count", "1",
+                     "--replay-mode", "application", "--clock-control", "base",
+                     "--cache-control", "all", "--metrics",
+                     "gpc__cycles_elapsed.max,smsp__inst_executed.sum,gpu__time_duration.sum,lts__t_sectors_op_read.sum",
+                     "--timeout", "300", "--", *cell.target(1)], ncu / "collection", timeout=330)
+                with (ncu / "ncu.csv").open(newline="") as stream:
+                    observed, = [r for r in csv.DictReader(stream) if r.get("ID", "").strip()]
+                if observed["Kernel Name"] != "vmm_alias_read_probe":
+                    raise ValueError("profiled wrong kernel")
+                values.append(float(observed["gpc__cycles_elapsed.max"].replace(",", "")))
+                counts.append(int(float(observed["smsp__inst_executed.sum"].replace(",", ""))))
+            row["ncu_cycles"] = values
+            row["ncu_instruction_counts"] = counts
+            row["ncu_median_cycles"] = statistics.median(values)
+            row["instruction_count_match"] = all(n == row["records"] for n in counts)
+            frontier = row["completion_frontier"]
+            lower = frontier.get("lower_bound_cycles", frontier.get("cycles"))
+            row["lower_le_ncu_median"] = lower <= row["ncu_median_cycles"] if lower is not None else None
+            row["status"] = "captured_and_replayed"
+            row["limitation"] = "Replay currently treats virtual aliases as distinct cache addresses; physical backing relationships are not yet modeled. Numerical comparisons are provisional."
+        except (RuntimeError, ValueError, OSError, KeyError) as error:
+            row["error"] = str(error)
+        (output / "summary.json").write_text(json.dumps({"population": len(selected), "rows": rows}, indent=2) + "\n")
+        print(f"{cell.key}: {row['status']} {row.get('error', '')}", flush=True)
 
 
 def load_mapping_campaign():
@@ -611,6 +717,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument(
         "action",
         choices=(
+            "native",
             "manifest",
             "correctness",
             "ncu",
@@ -623,6 +730,7 @@ def parser() -> argparse.ArgumentParser:
     )
     result.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT)
     result.add_argument("--force", action="store_true")
+    result.add_argument("--cells", help="comma-separated read-probe keys for the native action")
     return result
 
 
@@ -630,6 +738,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser().parse_args(argv)
     output = args.output_root.resolve()
     try:
+        if args.action == "native":
+            run_native(output, args.cells)
+            return 0
         emit_manifest(output)
         if args.action == "manifest":
             print(output / "metadata/matrix.json")
@@ -645,7 +756,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             run_relative_extended(output, args.force)
         if args.action in {"cross-allocation", "all"}:
             run_cross_allocation(output, args.force)
-    except (OSError, RuntimeError, subprocess.TimeoutExpired, json.JSONDecodeError) as error:
+    except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired, json.JSONDecodeError) as error:
         print(f"VMM alias campaign: {error}", file=sys.stderr)
         return 1
     return 0

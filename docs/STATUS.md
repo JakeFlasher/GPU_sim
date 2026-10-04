@@ -538,8 +538,15 @@ NCU median 382,651, simulator lower 267,996. No proprietary hash or timing
 model is claimed. Artifact:
 `docs/sm86_c7_research_probe_atomic_alias_adversarial_live_v1.json`.
 
-The next active plan milestone is C7-S33AJ: one virtual/physical alias control
-cell with routing kept black-box.
+C7-S33AJ completed a CUDA VMM alias diagnostic. The rebuilt correctness
+campaign passes 19/19 cells; the selected offset-0 alias cell has five NCU
+profiles and an NVBit capture covering seven launches. NCU read-sector values
+are observation only: VMM mappings/physical handles are outside ordinary trace
+replay, so no simulator lower bound or hash/timing model is claimed. Artifact:
+`docs/sm86_c7_research_probe_atomic_vmm_alias_live_v2.json`.
+
+The next active plan milestone is C7-S33AK: inspect one bounded
+`task_done_boundary` probe and record its replay boundary honestly.
 
 ## Retained measurements
 

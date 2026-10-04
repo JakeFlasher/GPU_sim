@@ -657,8 +657,17 @@ median 382651, simulator lower 267996. No proprietary hash is reconstructed
 and no timing model is activated. Artifact:
 `docs/sm86_c7_research_probe_atomic_alias_adversarial_live_v1.json`.
 
-C7-S33AJ is active: inspect one virtual/physical alias control cell with
-routing kept black-box.
+C7-S33AJ completed a CUDA VMM alias diagnostic. The rebuilt VMM correctness
+campaign passes 19/19 cells, including seven-trial exact alias/data oracles.
+The selected offset-0 alias cell has five fresh NCU profiles and an NVBit
+capture covering seven VMM launches. NCU read-sector medians are observations
+only; VMM virtual mappings and physical allocation handles are outside the
+ordinary native replay contract, so no simulator lower bound, hash, or timing
+model is fabricated. Artifact:
+`docs/sm86_c7_research_probe_atomic_vmm_alias_live_v2.json`.
+
+C7-S33AK is active: inspect and capture one bounded `task_done_boundary` probe
+if its source contract supports meaningful replay.
 
 ## Retained evidence
 

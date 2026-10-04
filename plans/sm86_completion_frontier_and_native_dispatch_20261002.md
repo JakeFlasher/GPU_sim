@@ -22,7 +22,7 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    `docs/sm86_c7_simbench_dram_streaming_dot_product_direct_live_v1.json`;
    the former tiny `trace_00` run is only a smoke check.
    [Ampere shared memory](https://docs.nvidia.com/cuda/ampere-tuning-guide/#unified-shared-memory-l1-texture-cache)
-3. **C7-S33AJ active.** Nine probe families now have live
+3. **C7-S33AK active.** Nine probe families now have live
    evidence: 68 issue-port cells, 36 async-barrier cells, 30 store-ack arms,
    102 memory-retirement cells, 33 barrier-pipeline cells, 100 l1tex-admission
    cells, one l2-queue warmup/target cell, one l1tex-arrival store cell, and
@@ -47,10 +47,11 @@ an approval workflow. No `/goals`, reviewers, receipts, or execution gates.
    the inventory. C7-S33AG hardened and captured one atomic completion serialization cell;
    C7-S33AH hardened and captured one multi-SM atomic service cell; C7-S33AI
    hardened and captured one observational alias cell without reconstructing a
-   proprietary hash. C7-S33AJ now moves to the next virtual/physical alias
-   control probe while preserving the eight system-fence crosswalk exclusions
-   and open completion tails; no timing/card parameter is selected from scored
-   NCU targets.
+   proprietary hash. C7-S33AJ completed a VMM alias diagnostic with explicit
+   simulator-not-applicable scope. C7-S33AK now moves to the next task/
+   completion boundary probe while preserving the eight system-fence crosswalk
+   exclusions and open completion tails; no timing/card parameter is selected
+   from scored NCU targets.
 
 ## Outcome
 
@@ -1475,9 +1476,20 @@ remains observational; no proprietary hash is reconstructed and no timing model
 is activated. Evidence:
 `docs/sm86_c7_research_probe_atomic_alias_adversarial_live_v1.json`.
 
-### C7-S33AJ — next active milestone
+### C7-S33AJ — CUDA VMM alias diagnostic — complete, simulator not applicable
 
-Inspect one `atomic_vmm_alias` or equivalent virtual/physical alias cell. Keep
-address identity and routing black-box; require strict allocation/alias safety,
-output correctness, Compute Sanitizer, same-binary NVBit, replay, and five NCU
-captures before any interpretation.
+The current VMM driver was rebuilt and its bounded correctness campaign passes
+19/19 cells, including seven-trial exact VMM alias/data oracles. The selected
+`alias_same_offset` offset-0 cell has five fresh NCU profiles and an NVBit
+capture covering all seven VMM launches. NCU read-sector medians are retained,
+but this probe is explicitly not a native sim-run timing row: VMM virtual
+mappings and physical allocation handles are outside the ordinary trace replay
+contract. No lower bound, hash, or timing model is fabricated. Evidence:
+`docs/sm86_c7_research_probe_atomic_vmm_alias_live_v2.json`.
+
+### C7-S33AK — next active milestone
+
+Select one bounded task/completion boundary probe (`task_done_boundary` after
+source review). Require strict input/output checks, Compute Sanitizer, same
+binary NVBit, replay when the trace contract supports it, and five NCU runs;
+if the mechanism is outside replay scope, record that boundary explicitly.

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpu-simulator.local/schemas/sm86_c7_research_probe_atomic_vmm_alias_live_v1.schema.json",
+  "title": "SM86 CUDA VMM alias diagnostic",
+  "type": "object",
+  "required": ["schema", "status", "host_identity", "identity", "correctness", "trace", "ncu", "comparison", "interpretation"],
+  "properties": {
+    "schema": {"const": "sm86_c7_research_probe_atomic_vmm_alias_live_v1"},
+    "status": {"type": "string", "minLength": 1},
+    "host_identity": {"type": "object", "required": ["device_index", "name", "compute_capability", "driver"], "additionalProperties": true},
+    "identity": {"type": "object", "required": ["driver", "binary", "args", "ncu_repeats"], "additionalProperties": true},
+    "correctness": {"type": "object", "required": ["correct", "trials", "allocation_granularity_bytes"], "additionalProperties": true},
+    "trace": {"type": "object", "required": ["launches", "target_kernel"], "additionalProperties": true},
+    "ncu": {"type": "object", "required": ["metric", "values", "median"], "additionalProperties": true},
+    "comparison": {"type": "object", "required": ["simulator_applicable", "simulator_reason"], "additionalProperties": true},
+    "interpretation": {"type": "string", "minLength": 1}
+  },
+  "additionalProperties": false
+}
