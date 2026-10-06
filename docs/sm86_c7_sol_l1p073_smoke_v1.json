@@ -1,0 +1,53 @@
+{
+  "schema": "sm86_c7_sol_l1p073_smoke_v1",
+  "phase": "C7-S34BA2",
+  "status": "complete_sm86_build_correctness_memcheck",
+  "candidate": "L1/problem_073_fused_encoder_final_norm_to_decoder_cross_attention_kv_projection/cuda_cpp",
+  "identity": {
+    "arch": "sm_86",
+    "cuda_toolkit": "13.2",
+    "torch": "2.12.0+cu130",
+    "environment": "tools/sol_execbench/.venv",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "capability": "8.6",
+    "source": "workloads/sol_execbench_baselines/L1/problem_073_fused_encoder_final_norm_to_decoder_cross_attention_kv_projection/cuda_cpp",
+    "extension": "results/alpha/c7_s34ba_sol_l1p073_20261005/build/sol_l1p073_sm86.so",
+    "nvcc": "/usr/local/cuda-13.2/bin/nvcc",
+    "input_generator": "sol_execbench.core.bench.io.gen_inputs",
+    "criterion": "compute_error_stats required_matched_ratio=0.99"
+  },
+  "build": {
+    "compiler": "/usr/bin/g++-14",
+    "cuda_arch": "sm_86",
+    "status": "passed",
+    "stdout": "results/alpha/c7_s34ba_sol_l1p073_20261005/build.stdout",
+    "stderr": "results/alpha/c7_s34ba_sol_l1p073_20261005/build.stderr",
+    "build_dir": "results/alpha/c7_s34ba_sol_l1p073_20261005/build"
+  },
+  "correctness": {
+    "declared_rows": 16,
+    "seeds": [
+      223,
+      224,
+      225
+    ],
+    "screened_rows": 48,
+    "official_passed": true,
+    "strict_all_elements_passed": false,
+    "minimum_matched_ratio_keys": 0.9999542057444314,
+    "minimum_matched_ratio_values": 0.9999403625954199,
+    "max_abs_error_keys": 0.001953125,
+    "max_abs_error_values": 0.001953125,
+    "rows_record": "results/alpha/c7_s34ba_sol_l1p073_20261005/correctness.json",
+    "note": "All 48 rows satisfy the unchanged official 0.99 matched-ratio rule; some exceed per-element tolerance. Worst observed matched ratio 0.99994036. No exact/all-elements claim."
+  },
+  "sanitizer": {
+    "tool": "compute-sanitizer memcheck",
+    "status": "passed",
+    "errors": 0,
+    "representative_row": 13,
+    "stdout": "results/alpha/c7_s34ba_sol_l1p073_20261005/sanitizer.stdout",
+    "stderr": "results/alpha/c7_s34ba_sol_l1p073_20261005/sanitizer.stderr"
+  }
+}

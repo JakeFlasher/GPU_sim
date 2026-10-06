@@ -1,0 +1,37 @@
+{
+  "build": {
+    "compiler": "/usr/bin/g++-14",
+    "cuda_arch": "sm_86",
+    "status": "passed",
+    "stdout": "results/alpha/c7_s34w_sol_l1p019_20261005/build_and_smoke.stdout",
+    "stderr": "results/alpha/c7_s34w_sol_l1p019_20261005/build_and_smoke.stderr"
+  },
+  "candidate": "L1/problem_019_vision_3d_rotary_embedding_with_spatial_merge_indexing_backward/cuda_cpp",
+  "correctness": {
+    "seq_lengths": [128,449],
+    "max_abs_errors": {"grad_q": [0.0000017285346984863281,0.0000019073486328125], "grad_k": [0.000001430511474609375,0.0000016689300537109375], "grad_embeddings": [0.00000667572021484375,0.0000095367431640625]},
+    "finite": true,
+    "status": "passed",
+    "oracle": "independent definition.json Vision 3D RoPE backward reference; FP32 tolerance 1e-4"
+  },
+  "identity": {
+    "arch": "sm_86",
+    "cuda_toolkit": "13.2",
+    "torch": "2.12.0+cu130",
+    "environment": "tools/sol_execbench/.venv",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "capability": "8.6",
+    "source": "workloads/sol_execbench_baselines/L1/problem_019_vision_3d_rotary_embedding_with_spatial_merge_indexing_backward/cuda_cpp",
+    "extension": "results/alpha/c7_s34w_sol_l1p019_20261005/build/sol_l1p019_sm86.so"
+  },
+  "phase": "C7-S34W2",
+  "sanitizer": {
+    "tool": "compute-sanitizer memcheck",
+    "errors": 0,
+    "status": "passed",
+    "stdout": "results/alpha/c7_s34w_sol_l1p019_20261005/compute_sanitizer.stdout",
+    "stderr": "results/alpha/c7_s34w_sol_l1p019_20261005/compute_sanitizer.stderr"
+  },
+  "schema": "sm86_c7_sol_l1p019_smoke_v1",
+  "status": "complete_sm86_build_correctness_memcheck"
+}

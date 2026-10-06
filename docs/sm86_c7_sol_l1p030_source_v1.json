@@ -1,0 +1,119 @@
+{
+  "candidate": "L1/problem_030_attention_output_projection_with_residual/cuda_cpp",
+  "environment": {
+    "cuda_available": true,
+    "torch": "2.12.0+cu130",
+    "torch_cuda_runtime": "13.0",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "capability": "8.6",
+    "permitted_environment": "tools/sol_execbench/.venv",
+    "host_compiler": "/usr/bin/g++-14",
+    "nvcc_expected": "CUDA 13.2",
+    "cutlass_include": "third_party/cutlass/include"
+  },
+  "phase": "C7-S34CP1",
+  "schema": "sm86_c7_sol_l1p030_source_v1",
+  "source_contract": {
+    "source": "workloads/sol_execbench_baselines/L1/problem_030_attention_output_projection_with_residual/cuda_cpp",
+    "entry_point": "main.cpp::run",
+    "class": "cutlass_cuda",
+    "sm86_marker": true,
+    "packaged_target": "-gencode arch=compute_86,code=sm_86",
+    "custom_kernels": [],
+    "vendor_kernel": "CUTLASS device::Gemm Sm80 BF16 TensorOp with residual epilogue",
+    "constants": {
+      "hidden_size": 2560,
+      "dtype": "BF16 inputs/output with FP32 accumulator",
+      "threadblock": [
+        128,
+        128,
+        32
+      ],
+      "warp": [
+        64,
+        64,
+        32
+      ],
+      "instruction": [
+        16,
+        8,
+        16
+      ],
+      "stages": 3
+    },
+    "inputs": "BF16 attn_output/residual [B,S,2560], BF16 square o_proj_weight [2560,2560]",
+    "outputs": "BF16 destination output [B,S,2560]",
+    "math": "attn_output @ o_proj_weight.T + residual via alpha=1,beta=1 epilogue",
+    "oracle": "independent L1/030_attention_output_projection_with_residual/reference.py",
+    "workload_rows": 16,
+    "declared_shapes": [
+      {
+        "batch_size": 16,
+        "seq_len": 512
+      },
+      {
+        "batch_size": 4,
+        "seq_len": 128
+      },
+      {
+        "batch_size": 8,
+        "seq_len": 1024
+      },
+      {
+        "batch_size": 1,
+        "seq_len": 1571
+      },
+      {
+        "batch_size": 4,
+        "seq_len": 1024
+      },
+      {
+        "batch_size": 2,
+        "seq_len": 2053
+      },
+      {
+        "batch_size": 8,
+        "seq_len": 997
+      },
+      {
+        "batch_size": 16,
+        "seq_len": 256
+      },
+      {
+        "batch_size": 64,
+        "seq_len": 128
+      },
+      {
+        "batch_size": 32,
+        "seq_len": 256
+      },
+      {
+        "batch_size": 8,
+        "seq_len": 512
+      },
+      {
+        "batch_size": 1,
+        "seq_len": 1024
+      },
+      {
+        "batch_size": 16,
+        "seq_len": 128
+      },
+      {
+        "batch_size": 2,
+        "seq_len": 293
+      },
+      {
+        "batch_size": 1,
+        "seq_len": 2048
+      },
+      {
+        "batch_size": 1,
+        "seq_len": 256
+      }
+    ],
+    "resource_risk": "square 2560 weight and large flattened M rows"
+  },
+  "selection_basis": "Next CUTLASS-backed L1 row after problem022 replay blocker; no timing or NCU values transferred",
+  "status": "complete_source_contract_and_sm86_environment_review"
+}

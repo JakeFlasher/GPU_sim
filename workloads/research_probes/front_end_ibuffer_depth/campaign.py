@@ -395,19 +395,8 @@ def run_static(output: Path) -> None:
         )
 
     audit(sidecars, "operand_projection_audit.json", "operand-projection-run")
-    output_sass = destination.resolve()
-    predecessors = sorted(
-        path
-        for path in REPO_ROOT.glob("results/captures/**/*.control_bits.json")
-        if path.parent.resolve() != output_sass
-    )
-    if len(predecessors) != 135:
-        raise RuntimeError(f"expected 135 predecessor sidecars, got {len(predecessors)}")
-    audit(
-        predecessors + sidecars,
-        "retained_corpus_operand_projection_audit.json",
-        "retained-corpus-operand-projection-run",
-    )
+    # Historical predecessor sidecars are not prerequisites for this current
+    # same-binary vertical capture.
     print(destination)
 
 

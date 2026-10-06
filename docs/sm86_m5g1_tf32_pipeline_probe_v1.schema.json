@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpu-simulator.local/schemas/sm86_m5g1_tf32_pipeline_probe_v1.schema.json",
+  "title": "SM86 M5-G1 TF32 pipeline probe",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "phase", "status", "host_identity", "source_basis", "identity", "probe", "model_decision", "next"],
+  "properties": {
+    "schema": {"const": "sm86_m5g1_tf32_pipeline_probe_v1"},
+    "phase": {"const": "M5-G1"},
+    "status": {"const": "complete_public_shape_independent_probe_model_basis"},
+    "host_identity": {"type": "object"},
+    "source_basis": {"type": "object"},
+    "identity": {"type": "object"},
+    "probe": {"type": "object"},
+    "model_decision": {"type": "object", "required": ["arch", "opcode", "pipeline_class", "initiation_interval_cycles", "ncu_values_used_for_blocked_SOL_target_selection"], "properties": {"arch": {"const": "sm_86"}, "opcode": {"const": "HMMA.1688.F32.TF32"}, "pipeline_class": {"const": "Tensor"}, "initiation_interval_cycles": {"const": 32}, "ncu_values_used_for_blocked_SOL_target_selection": {"const": false}}, "additionalProperties": true},
+    "next": {"type": "object"}
+  }
+}

@@ -1,0 +1,153 @@
+{
+  "comparison": {
+    "gap_cycles": -4730.0,
+    "gap_fraction": -0.07223028174391082,
+    "hardware_completion": "not_observed",
+    "instruction_count_match": true,
+    "lower_bound_consistency": false,
+    "lower_bound_cycles": 70215,
+    "ncu_median_cycles": 65485.0,
+    "point_estimator": "not_claimed"
+  },
+  "correctness": {
+    "all_trials_checked": true,
+    "correct": true,
+    "oracle": "half-precision accumulator and load checksum; elapsed/sink sentinel checked on every trial",
+    "status": "passed",
+    "stdout": "results/alpha/c7_s33bb_load_priority_20261004/native_correctness.stdout",
+    "trials": 7
+  },
+  "host_identity": {
+    "compute_capability": "8.6",
+    "device_index": 0,
+    "driver": "615.71.09",
+    "graphics_clock_mhz": 1350,
+    "memory_clock_mhz": 10501,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "pstate": "P0",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c"
+  },
+  "identity": {
+    "args": [
+      "same_collision",
+      "8",
+      "1024",
+      "7"
+    ],
+    "binary": "workloads/research_probes/fixed_latency_result_load_priority/fixed_latency_result_load_priority_driver + fixed_latency_result_load_priority_same_collision.cubin",
+    "binary_used_for_correctness_trace_replay_ncu": "same rebuilt vertical input (loaded cubin sidecar recorded separately when applicable)",
+    "control": "results/alpha/c7_s33bb_load_priority_20261004/control.json",
+    "ncu_cache_control": "all",
+    "ncu_clock_control": "base",
+    "ncu_launch_count": 1,
+    "ncu_launch_skip": 0,
+    "ncu_metric": "gpc__cycles_elapsed.max",
+    "ncu_repeats": 5,
+    "ncu_replay_mode": "application",
+    "source": "workloads/research_probes/fixed_latency_result_load_priority",
+    "target_block": [
+      256,
+      1,
+      1
+    ],
+    "target_grid": [
+      1,
+      1,
+      1
+    ],
+    "target_kernel": "_Z27result_load_priority_searchPyPjPKj",
+    "target_kernel_id": 1,
+    "trace": "results/alpha/c7_s33bb_load_priority_20261004/trace"
+  },
+  "interpretation": "Same rebuilt 1024-generation collision cubin passed seven correctness trials, Compute Sanitizer, NVBit, deterministic replay, and five NCU captures. Replay/NCU instruction counts match; simulator lower bound exceeds the independent NCU median, so this is a lower-bound falsifier and no load-priority timing model is activated.",
+  "ncu": {
+    "instruction_count": [
+      65752.0,
+      65752.0,
+      65752.0,
+      65752.0,
+      65752.0
+    ],
+    "max": 65507.0,
+    "median": 65485.0,
+    "metric": "gpc__cycles_elapsed.max",
+    "min": 65053.0,
+    "rows": [
+      {
+        "gpc__cycles_elapsed.max": 65498.0,
+        "sm__cycles_active.max": 63355.0,
+        "smsp__inst_executed.sum": 65752.0,
+        "smsp__inst_executed_pipe_lsu.sum": 8232.0,
+        "smsp__inst_issued.sum": 65808.0
+      },
+      {
+        "gpc__cycles_elapsed.max": 65053.0,
+        "sm__cycles_active.max": 62916.0,
+        "smsp__inst_executed.sum": 65752.0,
+        "smsp__inst_executed_pipe_lsu.sum": 8232.0,
+        "smsp__inst_issued.sum": 65808.0
+      },
+      {
+        "gpc__cycles_elapsed.max": 65090.0,
+        "sm__cycles_active.max": 62951.0,
+        "smsp__inst_executed.sum": 65752.0,
+        "smsp__inst_executed_pipe_lsu.sum": 8232.0,
+        "smsp__inst_issued.sum": 65808.0
+      },
+      {
+        "gpc__cycles_elapsed.max": 65485.0,
+        "sm__cycles_active.max": 63352.0,
+        "smsp__inst_executed.sum": 65752.0,
+        "smsp__inst_executed_pipe_lsu.sum": 8232.0,
+        "smsp__inst_issued.sum": 65808.0
+      },
+      {
+        "gpc__cycles_elapsed.max": 65507.0,
+        "sm__cycles_active.max": 63354.0,
+        "smsp__inst_executed.sum": 65752.0,
+        "smsp__inst_executed_pipe_lsu.sum": 8232.0,
+        "smsp__inst_issued.sum": 65808.0
+      }
+    ],
+    "stdev": 208.73389758254407,
+    "values": [
+      65498.0,
+      65053.0,
+      65090.0,
+      65485.0,
+      65507.0
+    ]
+  },
+  "schema": "sm86_c7_research_probe_fixed_latency_result_load_priority_live_v1",
+  "simulator": {
+    "completion_frontier": {
+      "lower_bound_cycles": 70215,
+      "status": "incomplete_unmodeled_retirement_tails",
+      "unmodeled_tails": {
+        "async_copy_shared_visibility": false,
+        "coherence": true,
+        "dirty_writeback": true,
+        "reduction_read_modify_write": false
+      }
+    },
+    "instructions_issued": 65752,
+    "native_macro_dispatches": 0,
+    "records": 65752,
+    "runtime_measurement": "sim-run output retained; no speedup/compression comparison"
+  },
+  "status": "correctness_trace_replay_ncu_complete_lower_bound_falsifier",
+  "trace": {
+    "launches": 1,
+    "static_control_decoded_instructions": 48,
+    "static_control_functions": 1,
+    "static_control_unknown_encodings": 0,
+    "target_coverage": {
+      "blocks_observed": 1,
+      "kind": "full",
+      "population_blocks": 1
+    },
+    "target_records_replayed": 65752,
+    "tracer_total_insts": 197216,
+    "tracer_total_reported_insts": 197216
+  }
+}

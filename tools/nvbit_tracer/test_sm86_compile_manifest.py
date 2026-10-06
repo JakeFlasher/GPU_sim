@@ -48,6 +48,7 @@ class Sm86CompileManifestTests(unittest.TestCase):
                 ptxas=ptxas,
                 nvdisasm=nvdisasm,
                 cuobjdump=cuobjdump,
+                alpha=False,
             )
             self.assertEqual(result["schema"], "sm86_static_sass_artifact_v1")
             self.assertTrue(result["claims"]["static_sm86_sass_generation"])

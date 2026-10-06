@@ -1,0 +1,9 @@
+{
+  "candidate": "L1/problem_036_flux_output_norm_projection_chain/cuda_cpp",
+  "environment": {"cuda_available": true,"torch":"2.12.0+cu130","torch_cuda_runtime":"13.0","gpu":"NVIDIA GeForce RTX 3090 Ti","capability":"8.6","permitted_environment":"tools/sol_execbench/.venv","host_compiler":"/usr/bin/g++-14","nvcc_expected":"CUDA 13.2"},
+  "phase":"C7-S34AE1","schema":"sm86_c7_sol_l1p036_source_v1",
+  "source_contract": {
+    "source":"workloads/sol_execbench_baselines/L1/problem_036_flux_output_norm_projection_chain/cuda_cpp","entry_point":"main.cpp::run","class":"custom_cuda","sm86_marker":"solution.json compile option arch=compute_86,code=sm_86","custom_kernels":["k_silu","k_small_m_linear","k_layernorm_with_modulation","at::linear_out"],"constants":{"inner_dim":3072,"modulation_dim":6144,"output_dim":64},"inputs":"hidden_states [B,S,3072] FP32; temb [B,3072] FP32; modulation/projection weights+bias FP32; eps scalar","output":"output [B,S,64] FP32 destination","math":"SiLU/linear modulation, row LayerNorm, shift-scale modulation, small-N output projection","oracle":"independent definition.json LayerNorm/modulation/projection reference","workload_shapes":[[2,293],[32,256],[1,2053],[1,128],[32,128]]
+  },
+  "selection_basis":"Next executable L1 custom-CUDA row after AdaLN modulation; no timing or NCU values transferred","status":"complete_source_contract_and_sm86_environment_review"
+}

@@ -1,0 +1,52 @@
+{
+  "schema": "sm86_m5l_frontier_reconciliation_v1",
+  "phase": "M5-L",
+  "status": "complete_scoped_frontier_reconciliation_next_candidate_selected",
+  "inputs": [
+    "docs/sm86_m5e_completion_continuation_reconciliation_v1.json",
+    "docs/sm86_m5f1_async_dram_prediction_pre_ncu_v1.json",
+    "docs/sm86_m5g1_tf32_pipeline_probe_v1.json",
+    "docs/sm86_m5g_tf32_pipeline_replay_v1.json",
+    "docs/sm86_m5h_store_tail_differential_v1.json",
+    "docs/sm86_m5i_async_visibility_ownership_boundary_v1.json",
+    "docs/sm86_m5j_multiwarp_continuation_boundary_v1.json",
+    "docs/sm86_m5k_fibp005_m80_prediction_pre_ncu_v1.json",
+    "docs/sm86_m5k_fibp005_m80_holdout_v1.json"
+  ],
+  "frontiers": {
+    "native_issue_and_replay": "real SASS traces replay with exact instruction counts where admitted; M5-G added exact SM86 TF32 HMMA.1688 capability",
+    "model_completion": "lower-only wherever dirty-writeback/coherence/async visibility flags remain; no finite physical upper",
+    "gpc_observation": "architecture-scoped observation envelope, never a profiler crosswalk",
+    "observer_accuracy": {
+      "M5-F_async_dram": "5/5 within-family target coverage, point APE 0.0634%, empirical only",
+      "M5-K_fib005_m80": "0/5 coverage, point APE 0.155%, negative retained without refit",
+      "broad_accuracy": "open"
+    },
+    "typed_continuation": {
+      "C6_scalar_one_warp": "one narrow positive reference dispatch with typed witness",
+      "M5-E_embedding": "10032 exact fallback boundaries, zero dispatch",
+      "M5-J_two_warp": "typed entry complete but refusal before mutation, zero dispatch",
+      "broad_native_continuation": "open"
+    },
+    "physical_tail": {
+      "M5-H_store": "sim lower delta 2886 vs NCU median delta 6080, not fitted",
+      "M5-I_async": "logical 256-copy/8192-lane/2048-group wait prefix, owner/read-from/generation/completion absent",
+      "hardware_completion": "not observed"
+    },
+    "population": "C7-S34CS 14 CUTLASS rows: 11 live/replayable, 3 explicit blockers; M4 research-probe population remains closed"
+  },
+  "claim_constraints": {
+    "ncu_target_values_used_for_model_selection": false,
+    "unfinished_mechanisms_relabelled_complete": false,
+    "synthetic_witness_used": false,
+    "native_hardware_scheduling_claimed": false,
+    "physical_completion_claimed": false
+  },
+  "selection": {
+    "next_phase": "M5-L2",
+    "candidate": "C7-S34CQ / L1 problem037 declared representative capture retry after exact SM86 TF32 capability repair",
+    "why": "source/build/correctness/memcheck are complete; previous blocker is bounded NVBit execution timeout before trace emission; one bounded retry can falsify whether the newly repaired TF32 replay seam changes capture viability, without substituting a vendor timing row",
+    "fallback": "if the same timeout repeats, retain it as the strongest current capture blocker and return to broad accuracy/typed-candidate selection; no third retry without new evidence"
+  },
+  "interpretation": "M5-L1 keeps observer accuracy, issue/replay, modeled completion, typed continuation, population, and physical-tail frontiers separate. The scoped positives and negatives do not support a single accuracy or completion score. The next evidence-supported seam is one bounded post-TF32 capture retry of C7-S34CQ; a repeated timeout is a diagnosis, not completion."
+}

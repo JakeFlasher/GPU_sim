@@ -1,0 +1,101 @@
+{
+  "schema": "sm86_m5m_blocker_consolidation_v1",
+  "phase": "M5-M",
+  "status": "complete_scoped_remaining_blocker_consolidation",
+  "host_identity": {
+    "device_index": 0,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "compute_capability": "8.6",
+    "driver": "615.71.09",
+    "pstate": "P0",
+    "graphics_clock_mhz": 1350,
+    "memory_clock_mhz": 10501
+  },
+  "blockers": [
+    {
+      "id": "physical_completion_ownership",
+      "status": "open",
+      "evidence": [
+        "docs/sm86_m5h_store_tail_differential_v1.json",
+        "docs/sm86_m5i_async_visibility_ownership_boundary_v1.json",
+        "docs/sm86_c3c_store_fence_tail_facts_v1.json"
+      ],
+      "fact": "dirty_writeback/coherence/async visibility and owner/read-from/generation/fence scope/hardware completion remain unobserved",
+      "local_resolution": "none supported without inventing hardware facts",
+      "next_external_or_new_evidence": "independent ownership/completion instrumentation or hardware-visible contract"
+    },
+    {
+      "id": "broad_accuracy",
+      "status": "open",
+      "evidence": [
+        "docs/sm86_m5f1_async_dram_prediction_pre_ncu_v1.json",
+        "docs/sm86_m5k_fibp005_m80_holdout_v1.json"
+      ],
+      "fact": "one within-family positive observer holdout and one within-family negative holdout do not establish broad accuracy",
+      "local_resolution": "retain exact measurements; no refit/widening from scored targets",
+      "next_external_or_new_evidence": "predeclared disjoint families and independent target repetitions"
+    },
+    {
+      "id": "native_continuation_domain",
+      "status": "open",
+      "evidence": [
+        "docs/sm86_c6d_positive_default_frontend_dispatch_v1.json",
+        "docs/sm86_m5e_completion_continuation_reconciliation_v1.json",
+        "docs/sm86_m5j_multiwarp_continuation_boundary_v1.json"
+      ],
+      "fact": "one narrow one-warp scalar reference dispatch is positive; embedding and multiwarp real traces preserve exact fallback",
+      "local_resolution": "no second typed macro candidate is currently admissible; do not synthesize witness",
+      "next_external_or_new_evidence": "new real trace with complete typed effect/ownership/front-end state"
+    },
+    {
+      "id": "l1_problem003_capture",
+      "status": "open",
+      "evidence": [
+        "docs/sm86_c7_sol_l1p003_capture_blocked_v1.json"
+      ],
+      "fact": "declared instrumented captures time out before dynamic trace",
+      "local_resolution": "source/smoke complete; no trace substitution",
+      "next_external_or_new_evidence": "new tracer/execution mechanism or different bounded workload"
+    },
+    {
+      "id": "l1_problem037_capture",
+      "status": "open",
+      "evidence": [
+        "docs/sm86_c7_sol_l1p037_capture_blocked_v1.json",
+        "docs/sm86_m5l_c7_s34cq_retry_v1.json"
+      ],
+      "fact": "420-second original and 450-second post-TF32 retry both time out before dynamic_trace.pb",
+      "local_resolution": "do not repeat duplicate timeout",
+      "next_external_or_new_evidence": "new tracer/execution mechanism"
+    },
+    {
+      "id": "quant_problem020_architecture",
+      "status": "open",
+      "evidence": [
+        "docs/sm86_c7_sol_quantp020_architecture_blocked_v1.json"
+      ],
+      "fact": "SM120/Blackwell-only NVFP4 source cannot be executed on SM86 host",
+      "local_resolution": "no translated/software substitute",
+      "next_external_or_new_evidence": "SM120 hardware"
+    }
+  ],
+  "local_checks": {
+    "sim_sm_tests": 495,
+    "sim_semantics_tests": 134,
+    "cargo_fmt_check": true,
+    "git_diff_check": true,
+    "new_tf32_oracle_trials": 32,
+    "new_tf32_malformed_input_rejections": 7,
+    "new_tf32_memcheck_arms": 2,
+    "new_tf32_ncu_arms": 10
+  },
+  "claim_boundary": {
+    "physical_completion_claimed": false,
+    "broad_accuracy_claimed": false,
+    "native_hardware_scheduling_claimed": false,
+    "unfinished_mechanisms_relabelled_complete": false,
+    "duplicate_timeout_retries_as_progress": false
+  },
+  "interpretation": "M5-M consolidates the strongest current blockers after the executable M5-F through M5-L slices. No local code/test seam can falsifiably provide hardware ownership/completion, broad accuracy, multiwarp continuation, a new tracer path, or SM120 execution. The repository remains scientifically bounded: exact replay and negative dispositions are retained, while the goal stays open for genuinely new evidence or external hardware/execution capability."
+}

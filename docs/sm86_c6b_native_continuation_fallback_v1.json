@@ -1,0 +1,30 @@
+{
+  "schema": "sm86_c6b_native_continuation_fallback_v1",
+  "status": "complete_negative_footer_exact_fallback_preserved",
+  "phase": "C6-B",
+  "evidence": {
+    "reference_trace": "results/alpha/c3e_async_reference_continuation_20261004/reference_full.jsonl",
+    "reference_summary": "results/alpha/c3e_async_reference_continuation_20261004/reference_full_summary.json",
+    "replay": "results/alpha/c3e_async_reference_continuation_20261004/replay_full.json",
+    "source_artifact": "docs/sm86_c3e_async_reference_continuation_v1.json"
+  },
+  "reference": {
+    "footer_complete": true,
+    "native_boundary_records": 33290,
+    "complete_boundary_records": 0,
+    "exact_fallback_boundary_records": 33290,
+    "transition_boundary_pairs": 16645,
+    "complete_transition_pairs": 0,
+    "dominant_unknown_reason": "native_reification:summary_structure:model_macro_typed_region_contract_missing"
+  },
+  "decision": {
+    "positive_real_native_continuation_witness": false,
+    "synthetic_witness_used": false,
+    "native_macro_dispatches": 0,
+    "exact_fallback_preserved": true,
+    "physical_completion": "unknown",
+    "semantic_upper": "open",
+    "hardware_completion": "not_observed"
+  },
+  "interpretation": "C6-B closes the permitted negative branch with a footer-terminated real SM86 reference trace: every typed boundary requires exact fallback, no complete transition exists, and native macro dispatch remains zero. This is not a positive native witness, hardware completion, or semantic upper; C6-C/C6-D now close narrow real scalar reference transitions; broader state remains open."
+}

@@ -1,0 +1,10 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://gpu-simulator.local/schemas/sm86_m5m_blocker_consolidation_v1.schema.json",
+  "title":"SM86 M5-M remaining blocker consolidation",
+  "type":"object","additionalProperties":false,
+  "required":["schema","phase","status","host_identity","blockers","local_checks","claim_boundary","interpretation"],
+  "properties":{
+    "schema":{"const":"sm86_m5m_blocker_consolidation_v1"},"phase":{"const":"M5-M"},"status":{"const":"complete_scoped_remaining_blocker_consolidation"},"host_identity":{"type":"object"},"blockers":{"type":"array","minItems":1},"local_checks":{"type":"object"},"claim_boundary":{"type":"object","properties":{"physical_completion_claimed":{"const":false},"broad_accuracy_claimed":{"const":false},"native_hardware_scheduling_claimed":{"const":false},"unfinished_mechanisms_relabelled_complete":{"const":false}},"required":["physical_completion_claimed","broad_accuracy_claimed","native_hardware_scheduling_claimed","unfinished_mechanisms_relabelled_complete"],"additionalProperties":true},"interpretation":{"type":"string","minLength":1}
+  }
+}

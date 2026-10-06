@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "const": "sm86_c7_sol_l2p031_smoke_v1"
+    },
+    "phase": {
+      "const": "C7-S34CC2"
+    },
+    "status": {
+      "type": "string"
+    },
+    "candidate": {
+      "type": "string"
+    },
+    "identity": {
+      "type": "object"
+    },
+    "build": {
+      "type": "object"
+    },
+    "correctness": {
+      "type": "object"
+    },
+    "sanitizer": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema",
+    "phase",
+    "status",
+    "candidate",
+    "identity",
+    "build",
+    "correctness",
+    "sanitizer"
+  ]
+}

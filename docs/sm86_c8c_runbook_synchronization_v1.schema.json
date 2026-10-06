@@ -1,0 +1,62 @@
+{
+  "$id": "https://gpu-simulator.local/schemas/sm86_c8c_runbook_synchronization_v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "checks": {
+      "additionalProperties": true,
+      "required": [
+        "missing_documents",
+        "all_linked_documents_present",
+        "required_claim_markers_present",
+        "readme_m5_links",
+        "readme_c8_links",
+        "unfinished_mechanisms_relabelled_complete",
+        "native_macro_dispatch_claimed_positive",
+        "semantic_tails_cleared_by_documentation"
+      ],
+      "type": "object"
+    },
+    "documents": {
+      "additionalProperties": true,
+      "required": [
+        "readme",
+        "status",
+        "memory",
+        "plan"
+      ],
+      "type": "object"
+    },
+    "interpretation": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "linked_artifacts": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 6,
+      "type": "array"
+    },
+    "phase": {
+      "const": "C8-C"
+    },
+    "schema": {
+      "const": "sm86_c8c_runbook_synchronization_v1"
+    },
+    "status": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "status",
+    "phase",
+    "documents",
+    "linked_artifacts",
+    "checks",
+    "interpretation"
+  ],
+  "title": "sm86_c8c_runbook_synchronization_v1",
+  "type": "object"
+}

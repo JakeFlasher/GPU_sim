@@ -1,0 +1,139 @@
+{
+  "candidate": "L1/problem_087_embedding_with_initial_layernorm_backward/cuda_cpp",
+  "correctness_and_sanitizer": {
+    "build_smoke": "docs/sm86_c7_sol_l1p087_smoke_v1.json",
+    "max_abs_error_by_output": {
+      "grad_embed_weight": 0.0625,
+      "grad_norm_weight": 2.0
+    },
+    "min_matched_ratio_by_output": {
+      "grad_embed_weight": 1.0,
+      "grad_norm_weight": 0.999755859375
+    },
+    "official_passed": true,
+    "official_rows": 48,
+    "representative_case": {
+      "batch_size": 2,
+      "seq_len": 512,
+      "workload_index": 1
+    },
+    "representative_memcheck_errors": 0
+  },
+  "identity": {
+    "arch": "sm_86",
+    "capability": "8.6",
+    "cuda_toolkit": "13.2",
+    "device_index": 0,
+    "environment": "tools/sol_execbench/.venv",
+    "extension": "results/alpha/c7_s34bj_sol_l1p087_20261005/pinned/official_build/sol_l1p087_sm86.so",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "host_compiler": "/usr/bin/g++-14",
+    "nvcc": "/usr/local/cuda-13.2/bin/nvcc",
+    "source": "workloads/sol_execbench_baselines/L1/problem_087_embedding_with_initial_layernorm_backward/cuda_cpp",
+    "torch": "2.12.0+cu130",
+    "torch_cuda_runtime": "13.0"
+  },
+  "interpretation": "Problem087 has an official-correctness and memcheck pass, but the full native trace/replay vertical is blocked by concrete trace-volume/serialization cost, not by silently excluding the row. The attempt emitted allocator fills, the fused custom kernel, and the beginning of the first million-block BF16 cast, then timed out before dynamic_trace.pb/control/replay. Five NCU application-replay observations of only the fused custom kernel are retained as independent context and must not be treated as a full-chain vertical or used to fit the simulator. No native timing, completion, or scheduling claim is made.",
+  "ncu": {
+    "cache_control": "all",
+    "clock_control": "none",
+    "instructions_match_across_repeats": true,
+    "kernel_filter": "regex:.*problem_087_embedding_layernorm_backward_kernel.*",
+    "medians": {
+      "gpc_cycles": 106236.0,
+      "sm_active_cycles": 104677.0,
+      "warp_instructions": 5490688.0
+    },
+    "observations": [
+      {
+        "gpc_cycles": 105424.0,
+        "sm_active_cycles": 103820.0,
+        "warp_instructions": 5490688.0
+      },
+      {
+        "gpc_cycles": 106236.0,
+        "sm_active_cycles": 104677.0,
+        "warp_instructions": 5490688.0
+      },
+      {
+        "gpc_cycles": 107305.0,
+        "sm_active_cycles": 105628.0,
+        "warp_instructions": 5490688.0
+      },
+      {
+        "gpc_cycles": 102148.0,
+        "sm_active_cycles": 100568.0,
+        "warp_instructions": 5490688.0
+      },
+      {
+        "gpc_cycles": 107978.0,
+        "sm_active_cycles": 106229.0,
+        "warp_instructions": 5490688.0
+      }
+    ],
+    "paths": "results/alpha/c7_s34bj_sol_l1p087_20261005/pinned/ncu/repeat-*/ncu.csv",
+    "repetitions": 5,
+    "replay_mode": "application",
+    "status": "independent_custom_kernel_observation_only"
+  },
+  "nvbit_attempt": {
+    "active_from_start": false,
+    "command_runner": "results/alpha/c7_s34bj_sol_l1p087_20261005_run.py --capture --row 1 --output pinned/trace_correctness.json",
+    "control_sidecar_present": false,
+    "dynamic_trace_present": false,
+    "exit_code": 124,
+    "failure_mechanism": "NVBit per-thread/block trace serialization did not finish within 420 seconds. The fixed 65536x4096 embedding destination forces a million-block cast launch, while the fused row kernel is already a large trace. A stats-only or sampled trace would not satisfy native replay and is not substituted.",
+    "incomplete_launch": "kernel-4 cast_fp32_to_bf16_kernel began with a 1048576-block grid; its stats total is blank when the bounded process was terminated",
+    "replay_admitted": false,
+    "runtime_library_path": ".toolchain/pb/lib:/usr/local/cuda-13.2/lib64",
+    "skip_enhanced_tracer": true,
+    "stats": [
+      {
+        "block_threads": 128,
+        "blocks": 262144,
+        "grid": 262144,
+        "kernel_id": "kernel-1.trace",
+        "kernel_name": "_ZN2at6native29vectorized_elementwise_kernelILi4ENS0_11FillFunctorIfEESt5arrayIPcLm1EEEEviT0_T1_",
+        "reported_insts": 47185920,
+        "total_insts": 47185920
+      },
+      {
+        "block_threads": 128,
+        "blocks": 4,
+        "grid": 4,
+        "kernel_id": "kernel-2.trace",
+        "kernel_name": "_ZN2at6native29vectorized_elementwise_kernelILi4ENS0_11FillFunctorIfEESt5arrayIPcLm1EEEEviT0_T1_",
+        "reported_insts": 720,
+        "total_insts": 720
+      },
+      {
+        "block_threads": 256,
+        "blocks": 1024,
+        "grid": 1024,
+        "kernel_id": "kernel-3.trace",
+        "kernel_name": "_ZN41_GLOBAL__N__40c4e7d8_9_kernel_cu_02f1e72047problem_087_embedding_layernorm_backward_kernelEPK13__nv_bfloat16PKlPKfS6_S2_PfS7_ii",
+        "reported_insts": 17459200,
+        "total_insts": 17459200
+      },
+      {
+        "block_threads": 256,
+        "blocks": 1048576,
+        "grid": 1048576,
+        "kernel_id": "kernel-4.trace",
+        "kernel_name": "_ZN41_GLOBAL__N__40c4e7d8_9_kernel_cu_02f1e72024cast_fp32_to_bf16_kernelEPKfP13__nv_bfloat16l",
+        "reported_insts": null,
+        "total_insts": null
+      }
+    ],
+    "stats_completed_instruction_sum": 64645840,
+    "stats_path": "results/alpha/c7_s34bj_sol_l1p087_20261005/pinned/trace_full/stats.csv",
+    "threadblock_files_emitted": 263172,
+    "timeout_seconds": 420,
+    "trace_complete": false,
+    "trace_root": "results/alpha/c7_s34bj_sol_l1p087_20261005/pinned/trace_full"
+  },
+  "phase": "C7-S34BJ3",
+  "schema": "sm86_c7_sol_l1p087_capture_blocked_v1",
+  "status": "capture_blocked_nvbit_timeout_before_complete_trace"
+}

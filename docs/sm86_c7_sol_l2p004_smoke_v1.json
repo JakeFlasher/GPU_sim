@@ -1,0 +1,81 @@
+{
+  "schema": "sm86_c7_sol_l2p004_smoke_v1",
+  "phase": "C7-S34BX2",
+  "status": "partial_representative_smoke_resource_risk_open",
+  "candidate": "L2/problem_004_fused_residual_rms_mlp/cuda_cpp",
+  "identity": {
+    "arch": "sm_86",
+    "capability": "8.6",
+    "cuda_toolkit": "13.2",
+    "torch": "2.12.0+cu130",
+    "torch_cuda_runtime": "13.0",
+    "environment": "tools/sol_execbench/.venv",
+    "source": "workloads/sol_execbench_baselines/L2/problem_004_fused_residual_rms_mlp/cuda_cpp",
+    "extension": "results/alpha/c7_s34bx_sol_l2p004_20261005/pinned/official_build/sol_l2p004_sm86.so",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "device_index": 0,
+    "nvcc": "/usr/local/cuda-13.2/bin/nvcc",
+    "host_compiler": "/usr/bin/g++-14"
+  },
+  "build": {
+    "status": "passed",
+    "compiler": "/usr/bin/g++-14",
+    "cuda_arch": "sm_86",
+    "build_dir": "results/alpha/c7_s34bx_sol_l2p004_20261005/pinned/official_build"
+  },
+  "correctness": {
+    "representative_row": {
+      "workload_index": 1,
+      "uuid": "690c33ec-6b08-51ba-a98a-8b3bbc01ae5d",
+      "axes": {
+        "batch_size": 1,
+        "seq_len": 256
+      },
+      "seed": 223,
+      "tolerance": {
+        "max_atol": 0.0022,
+        "max_rtol": 0.05,
+        "required_matched_ratio": 0.99,
+        "max_error_cap": null,
+        "allow_negative_inf": false
+      },
+      "outputs": {
+        "output": {
+          "error_stats": {
+            "max_relative_error": 0.0,
+            "max_absolute_error": 0.0,
+            "has_nan": false,
+            "has_inf": false,
+            "extra": null
+          },
+          "elements": 4194304,
+          "elements_outside_tolerance": 0,
+          "matched_ratio": 1.0,
+          "finite": true,
+          "official_passed": true,
+          "strict_all_elements_passed": true,
+          "bit_equal": true
+        }
+      },
+      "inputs_unchanged": true,
+      "passed": true
+    },
+    "declared_rows": 16,
+    "official_full_screen": "not attempted; large weight/activation rows require bounded capacity screening",
+    "status": "row1_passed"
+  },
+  "sanitizer": {
+    "tool": "compute-sanitizer memcheck",
+    "representative_case": {
+      "workload_index": 1,
+      "batch_size": 1,
+      "seq_len": 256
+    },
+    "errors": 0,
+    "status": "passed",
+    "stdout": "results/alpha/c7_s34bx_sol_l2p004_20261005/pinned/memcheck.stdout",
+    "stderr": "results/alpha/c7_s34bx_sol_l2p004_20261005/pinned/memcheck.stderr",
+    "log": "results/alpha/c7_s34bx_sol_l2p004_20261005/pinned/memcheck.log"
+  }
+}

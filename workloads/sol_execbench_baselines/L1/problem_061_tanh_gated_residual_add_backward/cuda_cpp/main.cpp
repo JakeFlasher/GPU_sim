@@ -73,17 +73,16 @@ void run(
     check_bf16_contiguous_cuda(grad_hidden_states, "grad_hidden_states");
     check_bf16_contiguous_cuda(grad_gate, "grad_gate");
 
-    // grad_residual = grad_output identity (DPS contract requires
-    // writing the destination buffer; copy_ matches the reference's
-    // `grad_output.clone()` semantics).
-    grad_residual.copy_(grad_output);
-
     // Host-side scalar evaluation of tanh(gate) and sech²(gate).
     // Gate is a zero-dim BF16 tensor; read its single element to
     // the host as fp32, evaluate the two constants once per
     // kernel invocation, and pass them as float kernel arguments.
-    const float gate_f32 =
-        gate.to(torch::kFloat32).item<float>();
+    // `item<float>()` performs the scalar device-to-host read directly.  The
+    // previous `gate.to(kFloat32).item<float>()` materialized a one-element
+    // ATen CUDA conversion kernel inside the profiler gate, which made the
+    // native vertical depend on a libtorch control sidecar for no semantic
+    // benefit.
+    const float gate_f32 = gate.item<float>();
     const float tanh_g = std::tanh(gate_f32);
     const float sech2 = 1.0f - tanh_g * tanh_g;
 
@@ -97,7 +96,7 @@ void run(
     // Kernel A: per-row grad_hidden_states + row partial sums.
     problem_061_grad_hidden_launcher(
         grad_output, hidden_states, mask,
-        tanh_g, grad_hidden_states, row_partials, stream);
+        tanh_g, grad_residual, grad_hidden_states, row_partials, stream);
 
     // Kernel B: single-CTA reduction of row_partials -> grad_gate.
     problem_061_grad_gate_reduce_launcher(

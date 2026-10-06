@@ -1,0 +1,40 @@
+{
+  "schema": "sm86_c4e_sfu_quad_occupancy_reconciliation_v1",
+  "status": "complete_negative_occupancy_intervention_miss_semantic_upper_open",
+  "phase": "C4-E",
+  "checks": {
+    "prediction_precedes_target_ncu": true,
+    "prior_misses_excluded": true,
+    "target_ncu_not_simulator_input": true,
+    "instruction_crosswalk": true,
+    "occupancy_miss_retained": true,
+    "completion_open": true,
+    "referenced_files_present": true
+  },
+  "evidence": {
+    "prediction": "docs/sm86_c4e_sfu_quad_occupancy_prediction_pre_ncu_v1.json",
+    "holdout": "docs/sm86_c4e_sfu_quad_occupancy_holdout_v1.json",
+    "target_trace": "results/alpha/c4e_sfu_quad_occupancy_20261004/target_trace",
+    "target_simulator": "results/alpha/c4e_sfu_quad_occupancy_20261004/target_sim.json",
+    "target_ncu_root": "results/alpha/c4e_sfu_quad_occupancy_20261004/ncu"
+  },
+  "result": {
+    "predicted_interval_cycles": [
+      80236.03846153845,
+      90313.76153846153
+    ],
+    "target_values": [
+      68904.0,
+      68914.0,
+      68893.0,
+      68904.0,
+      68903.0
+    ],
+    "target_median_cycles": 68904.0,
+    "interval_coverage": 0.0,
+    "point_ape": 0.23758998026239397,
+    "simulator_lower_bound_cycles": 36881,
+    "native_macro_dispatches": 0
+  },
+  "interpretation": "C4-E records a negative mechanism-local block-count intervention. In the fixed warp-8 quad family, calibration at blocks 42/63/126 did not extrapolate to an untouched 168-block target; all five target values missed the frozen interval. The miss is retained without refit or interval widening. It does not establish a physical scheduler mechanism, completion upper, or native dispatch."
+}

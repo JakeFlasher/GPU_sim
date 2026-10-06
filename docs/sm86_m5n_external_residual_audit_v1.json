@@ -1,0 +1,86 @@
+{
+  "schema": "sm86_m5n_external_residual_audit_v1",
+  "phase": "M5-N",
+  "status": "complete_scoped_pre_m5o_residual_audit",
+  "host_identity": {
+    "device_index": 0,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "compute_capability": "8.6",
+    "driver": "615.71.09",
+    "pstate": "P0",
+    "graphics_clock_mhz": 1350,
+    "memory_clock_mhz": 10501
+  },
+  "local_audit": {
+    "arch_tensor_classifier_forms": [
+      "HMMA.16816.F32",
+      "HMMA.16816.F32.BF16",
+      "HMMA.1688.F32.TF32",
+      "HMMA.SP.16832.F32.BF16",
+      "IMMA.16816.S8.S8",
+      "IMMA.16832.S8.S8"
+    ],
+    "sm86_exact_capability_tests": "sim-arch tensor interval tests and sim-sm classifier/negative tests pass",
+    "sparse_imma_roster_gate": "workloads/simbench_bw/l1/sparse_2to4_int8_gemm declares arch_gate sm_90a/sm_120; not SM86-admissible",
+    "sm120_qmma_forms": "SM120/SM120A roster only; no local SM86 execution claim",
+    "vendor_rows": "cuBLAS/JIT rows lack stable static control identities; no simulator substitute admitted",
+    "capture_timeouts": [
+      "C7-S34CN L1/problem003",
+      "C7-S34CQ L1/problem037; post-TF32 retry reproduced timeout"
+    ],
+    "post_audit_resolution": "M5-O subsequently resolved the exact SM86 IMMA.16832 seam; sparse IMMA remains externally gated."
+  },
+  "remaining_external_dependencies": [
+    {
+      "id": "physical_completion",
+      "evidence": [
+        "docs/sm86_m5h_store_tail_differential_v1.json",
+        "docs/sm86_m5i_async_visibility_ownership_boundary_v1.json"
+      ],
+      "needed": "owner/read-from, line generation, fence scope, hardware completion observation"
+    },
+    {
+      "id": "broad_accuracy",
+      "evidence": [
+        "docs/sm86_m5f1_async_dram_prediction_pre_ncu_v1.json",
+        "docs/sm86_m5k_fibp005_m80_holdout_v1.json"
+      ],
+      "needed": "new disjoint families and independent pre-target holdouts"
+    },
+    {
+      "id": "native_continuation",
+      "evidence": [
+        "docs/sm86_c6d_positive_default_frontend_dispatch_v1.json",
+        "docs/sm86_m5j_multiwarp_continuation_boundary_v1.json"
+      ],
+      "needed": "second real complete typed multiwarp/front-end witness"
+    },
+    {
+      "id": "capture_execution",
+      "evidence": [
+        "docs/sm86_m5l_c7_s34cq_retry_v1.json",
+        "docs/sm86_c7_sol_l1p003_capture_blocked_v1.json"
+      ],
+      "needed": "new tracer/execution mechanism"
+    },
+    {
+      "id": "sm120_execution",
+      "evidence": [
+        "docs/sm86_c7_sol_quantp020_architecture_blocked_v1.json"
+      ],
+      "needed": "SM120 hardware"
+    }
+  ],
+  "claim_boundary": {
+    "no_additional_local_sm86_seam_found": false,
+    "physical_completion_claimed": false,
+    "broad_accuracy_claimed": false,
+    "native_hardware_scheduling_claimed": false,
+    "objective_complete": false,
+    "audit_result": "No additional seam beyond the later-resolved IMMA.16832 gap was found at the cutoff."
+  },
+  "interpretation": "This historical M5-N audit covered the local surfaces before M5-O. It found no seam beyond the exact IMMA.16832 gap that was subsequently resolved by M5-O; sparse IMMA, vendor rows, capture timeouts, physical ownership/completion, broad accuracy, and SM120 execution remain external residuals.",
+  "audit_scope_cutoff": "before M5-O exact IMMA.16832 capability repair",
+  "superseded_by": "docs/sm86_m5o_imma16832_pipeline_replay_v1.json"
+}

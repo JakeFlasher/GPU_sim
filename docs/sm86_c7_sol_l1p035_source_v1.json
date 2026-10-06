@@ -1,0 +1,30 @@
+{
+  "candidate": "L1/problem_035_flux_ada_layer_norm_zero_modulation_extraction/cuda_cpp",
+  "environment": {
+    "cuda_available": true,
+    "torch": "2.12.0+cu130",
+    "torch_cuda_runtime": "13.0",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "capability": "8.6",
+    "permitted_environment": "tools/sol_execbench/.venv",
+    "host_compiler": "/usr/bin/g++-14",
+    "nvcc_expected": "CUDA 13.2"
+  },
+  "phase": "C7-S34AD1",
+  "schema": "sm86_c7_sol_l1p035_source_v1",
+  "source_contract": {
+    "source": "workloads/sol_execbench_baselines/L1/problem_035_flux_ada_layer_norm_zero_modulation_extraction/cuda_cpp",
+    "entry_point": "main.cpp::run",
+    "class": "custom_cuda",
+    "sm86_marker": "solution.json compile option arch=compute_86,code=sm_86",
+    "custom_kernel": "k_ada_modulation_extract",
+    "constants": {"inner_dim": 3072, "output_dim": 18432, "chunks": 6, "block_threads": 256, "warps_per_cta": 8},
+    "inputs": "emb [B,3072] FP32; weight [18432,3072] FP32; bias [18432] FP32",
+    "outputs": "six [B,3072] FP32 destination chunks",
+    "math": "linear emb @ weight.T + bias, chunk six modulation tensors",
+    "oracle": "independent definition.json matmul/bias/chunk reference",
+    "workload_batch_sizes": [512,211,449,373,16]
+  },
+  "selection_basis": "Next executable L1 custom-CUDA row after Flux multi-axis RoPE; no timing or NCU values transferred",
+  "status": "complete_source_contract_and_sm86_environment_review"
+}

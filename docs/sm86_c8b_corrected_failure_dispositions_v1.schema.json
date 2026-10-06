@@ -1,0 +1,60 @@
+{
+  "$id": "https://gpu-simulator.local/schemas/sm86_c8b_corrected_failure_dispositions_v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "interpretation": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "phase": {
+      "const": "C8-B"
+    },
+    "rows": {
+      "items": {
+        "additionalProperties": true,
+        "required": [
+          "artifact",
+          "status",
+          "blocker_class",
+          "source",
+          "trace_status",
+          "replay_status",
+          "substitute_used"
+        ],
+        "type": "object"
+      },
+      "minItems": 6,
+      "type": "array"
+    },
+    "schema": {
+      "const": "sm86_c8b_corrected_failure_dispositions_v1"
+    },
+    "status": {
+      "type": "string"
+    },
+    "summary": {
+      "additionalProperties": true,
+      "required": [
+        "rows",
+        "external_tracer_contract_blockers",
+        "unsupported_tensor_pipeline_blockers",
+        "vendor_static_module_blockers",
+        "rerun_required",
+        "dispositions_are_concrete",
+        "silent_shape_substitution"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema",
+    "status",
+    "phase",
+    "rows",
+    "summary",
+    "interpretation"
+  ],
+  "title": "sm86_c8b_corrected_failure_dispositions_v1",
+  "type": "object"
+}

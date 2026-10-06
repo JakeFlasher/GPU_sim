@@ -1,0 +1,54 @@
+{
+  "candidate": "L1/problem_085_geglu_activation/cuda_cpp",
+  "environment": {
+    "cuda_available": true,
+    "torch": "2.12.0+cu130",
+    "torch_cuda_runtime": "13.0",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "capability": "8.6",
+    "permitted_environment": "tools/sol_execbench/.venv",
+    "host_compiler": "/usr/bin/g++-14",
+    "nvcc_expected": "CUDA 13.2"
+  },
+  "phase": "C7-S34BI1",
+  "schema": "sm86_c7_sol_l1p085_source_v1",
+  "source_contract": {
+    "source": "workloads/sol_execbench_baselines/L1/problem_085_geglu_activation/cuda_cpp",
+    "entry_point": "main.cpp::run",
+    "class": "custom_cuda",
+    "sm86_marker": "solution.json compile option arch=compute_86,code=sm_86",
+    "custom_kernel": "problem_085_geglu_vec4_kernel",
+    "constants": {
+      "inner_dim": 5120,
+      "input_dim": 10240,
+      "inner_dim_vec4": 1280,
+      "block_threads": 256,
+      "one_launch": true
+    },
+    "inputs": "x [batch_size, seq_len, 10240] contiguous FP32; the last dimension is gate||linear",
+    "outputs": "output [batch_size, seq_len, 5120] contiguous FP32 destination tensor",
+    "math": "GELU_tanh(gate) * linear using sqrt(2/pi), coefficient 0.044715, tanhf; one float4 per output thread",
+    "oracle": "independent definition.json/reference.py torch.nn.functional.gelu(approximate='tanh')",
+    "workload_shapes": [
+      [1, 2048],
+      [4, 541],
+      [8, 256],
+      [16, 256],
+      [4, 1024],
+      [1, 128],
+      [8, 1024],
+      [1, 512],
+      [32, 128],
+      [2, 211],
+      [8, 613],
+      [1, 1024],
+      [1, 131],
+      [16, 449],
+      [4, 128],
+      [2, 512]
+    ],
+    "numerical_risk": "tanhf compiled with --use_fast_math is not presumed equivalent to the official FP32 GELU-tanh reference; correctness must use the declared 1e-5 absolute/relative tolerance"
+  },
+  "selection_basis": "Next genuine L1 custom-CUDA row after problem084; no timing or NCU values transferred",
+  "status": "complete_source_contract_and_sm86_environment_review"
+}

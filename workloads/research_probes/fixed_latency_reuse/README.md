@@ -27,3 +27,12 @@ workloads/research_probes/fixed_latency_reuse/fixed_latency_reuse_driver \
   u11 a 4 8192 7
 ```
 
+## C7-S33AY live same-binary refresh (2026-10-04)
+
+The active Makefile/campaign interface now uses one 8,192-generation cubin
+per reuse variant for correctness, NVBit, replay, and NCU; historical
+64-generation trace twins are not active inputs. The driver now parses numeric
+arguments strictly, initializes elapsed/sink buffers with sentinels, and
+reports elapsed/sink validity separately from the functional oracle. The
+selected W8/U11-A cell is the current live vertical target; no register-reuse
+or scoreboard timing is fitted from one cell.

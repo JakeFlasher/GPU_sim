@@ -1,0 +1,58 @@
+{
+  "candidate": "FIB/problem_001_fused_add_rmsnorm_h2048/cuda_cpp",
+  "environment": {
+    "cuda_available": true,
+    "torch": "2.12.0+cu130",
+    "torch_cuda_runtime": "13.0",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "capability": "8.6",
+    "permitted_environment": "tools/sol_execbench/.venv",
+    "host_compiler": "/usr/bin/g++-14",
+    "nvcc_expected": "CUDA 13.2",
+    "metadata_note": "Raw run candidate label incorrectly says L1; actual SOURCE and PROBLEM paths are FIB and FlashInfer-Bench. FIB001 also already had a prior C7-S34B capture; BT is an official-row refresh, not a new population entry."
+  },
+  "phase": "C7-S34BT1",
+  "schema": "sm86_c7_sol_fibp001_source_v1",
+  "source_contract": {
+    "source": "workloads/sol_execbench_baselines/FIB/problem_001_fused_add_rmsnorm_h2048/cuda_cpp",
+    "entry_point": "main.cpp::run",
+    "class": "custom_cuda",
+    "sm86_marker": "solution.json compile option arch=compute_86,code=sm_86",
+    "custom_kernel": "fused_add_rmsnorm_h2048_kernel",
+    "constants": {
+      "hidden_size": 2048,
+      "block_threads": 1024,
+      "bf16x2_vector_access": true,
+      "one_cta_per_row": true
+    },
+    "inputs": "hidden_states/residual [batch_size,2048] contiguous BF16; weight [2048] BF16",
+    "outputs": "output [batch_size,2048] contiguous BF16 destination tensor",
+    "math": "FP32 residual addition, FP32 row RMS reduction/rsqrt(eps=1e-6), FP32 weight multiply, BF16 output",
+    "oracle": "independent FlashInfer-Bench/001 definition.json/reference.py",
+    "workload_shapes": [
+      [
+        6
+      ],
+      [
+        1
+      ],
+      [
+        34
+      ],
+      [
+        79
+      ],
+      [
+        16254
+      ],
+      [
+        12383
+      ],
+      [
+        64
+      ]
+    ]
+  },
+  "selection_basis": "Next remaining FIB custom-CUDA row after the L1 population pass; no timing or NCU values transferred",
+  "status": "complete_source_contract_and_sm86_environment_review"
+}

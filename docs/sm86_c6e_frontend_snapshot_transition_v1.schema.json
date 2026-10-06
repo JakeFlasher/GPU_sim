@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpu-simulator.local/schemas/sm86_c6e_frontend_snapshot_transition_v1.schema.json",
+  "title": "SM86 C6-E front-end snapshot transition",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "status",
+    "phase",
+    "evidence",
+    "transition",
+    "open_surfaces",
+    "interpretation"
+  ],
+  "properties": {
+    "schema": {
+      "const": "sm86_c6e_frontend_snapshot_transition_v1"
+    },
+    "status": {
+      "type": "string"
+    },
+    "phase": {
+      "const": "C6-E"
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 2
+    },
+    "transition": {
+      "type": "object"
+    },
+    "open_surfaces": {
+      "type": "object"
+    },
+    "interpretation": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

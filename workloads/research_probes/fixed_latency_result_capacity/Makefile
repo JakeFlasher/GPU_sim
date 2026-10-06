@@ -32,5 +32,5 @@ fixed_latency_result_capacity_b9.cubin &: \
 
 clean:
 	rm -f fixed_latency_result_capacity_driver fixed_latency_result_capacity_native.cubin \
-		fixed_latency_result_capacity_b*.cubin \ *.control_bits.json *.patch.json
+		fixed_latency_result_capacity_b*.cubin *.control_bits.json *.patch.json
 

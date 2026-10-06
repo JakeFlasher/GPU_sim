@@ -1,0 +1,124 @@
+{
+  "host_identity": {
+    "compute_capability": "8.6",
+    "device_index": 0,
+    "driver": "615.71.09",
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c"
+  },
+  "identity": {
+    "arch_card": "arch_profiles/cards/sm_86.json",
+    "binary": "workloads/research_probes/constant_load_path/constant_load_path",
+    "calibration_blocks": [
+      8,
+      16,
+      32
+    ],
+    "calibration_replays": "results/alpha/c4h_constant_load_20261004/simulator",
+    "calibration_traces": "results/alpha/c4h_constant_load_20261004/nvbit",
+    "control": "results/alpha/c4h_constant_load_20261004/static/constant_load_path.control_bits.json",
+    "environment": "results/alpha/c4h_constant_load_20261004/metadata/environment.json",
+    "iterations": 128,
+    "mode": 0,
+    "pchase_card": "data/pchase/sm_86_static_card.json",
+    "target_blocks": 64,
+    "target_replay": "results/alpha/c4h_constant_load_20261004/simulator/b64_m0_t256_i128/replay-1.json",
+    "target_trace": "results/alpha/c4h_constant_load_20261004/nvbit/b64_m0_t256_i128",
+    "threads": 256,
+    "warmups": 0
+  },
+  "interpretation": "This document materializes a calibration-only observer prediction for the untouched 64-block target. The observer interval is independent of simulator execution and is not a physical completion upper; simulator frontiers remain lower-only with dirty-writeback/coherence tails open.",
+  "observer": {
+    "calibration_fitted_values": [
+      13828.714285714286,
+      13828.42857142857,
+      13827.857142857143
+    ],
+    "calibration_residuals": [
+      14.285714285714,
+      -21.428571428571,
+      7.142857142857
+    ],
+    "calibration_rows": [
+      {
+        "blocks": 8,
+        "median": 13843.0,
+        "ncu_values": [
+          13839.0,
+          13873.0,
+          13817.0,
+          13843.0,
+          13857.0
+        ],
+        "path": "results/alpha/c4h_constant_load_20261004/ncu/b8_m0_t256_i128"
+      },
+      {
+        "blocks": 16,
+        "median": 13807.0,
+        "ncu_values": [
+          13853.0,
+          13782.0,
+          13807.0,
+          13832.0,
+          13783.0
+        ],
+        "path": "results/alpha/c4h_constant_load_20261004/ncu/b16_m0_t256_i128"
+      },
+      {
+        "blocks": 32,
+        "median": 13835.0,
+        "ncu_values": [
+          13863.0,
+          13810.0,
+          13835.0,
+          13897.0,
+          13779.0
+        ],
+        "path": "results/alpha/c4h_constant_load_20261004/ncu/b32_m0_t256_i128"
+      }
+    ],
+    "family": "LDG.E.CONSTANT dependent-chain mode 0",
+    "feature": "grid blocks",
+    "fit": "ordinary least-squares affine y = intercept + slope * blocks",
+    "intercept": 13829.0,
+    "interval_rule": "point prediction plus/minus maximum absolute calibration residual; designed extrapolation, no coverage guarantee",
+    "ncu_values_used_in_simulator": false,
+    "slope_cycles_per_block": -0.0357142857142857,
+    "target_interval": [
+      13805.285714285716,
+      13848.142857142857
+    ],
+    "target_metric": "gpc__cycles_elapsed.max",
+    "target_ncu_collected": false,
+    "target_point_prediction": 13826.714285714286
+  },
+  "phase": "C4-H",
+  "schema": "sm86_c4h_constant_load_prediction_pre_ncu_v1",
+  "simulator_frontier_separation": {
+    "calibration_lower_bounds": {
+      "16": 62287,
+      "32": 62287,
+      "8": 62287
+    },
+    "native_macro_dispatches": 0,
+    "observer_not_a_completion_upper": true,
+    "target_completion_status": "incomplete_unmodeled_retirement_tails",
+    "target_lower_bound": 62287,
+    "target_unmodeled_tails": {
+      "async_copy_shared_visibility": false,
+      "coherence": true,
+      "dirty_writeback": true,
+      "reduction_read_modify_write": false
+    }
+  },
+  "status": "complete_prediction_materialized_before_target_ncu",
+  "target_gate": {
+    "next": "collect five application-replay target NCU repetitions for blocks=64; do not refit after observation",
+    "required_before_collection": [
+      "prediction artifact written",
+      "same binary/arguments",
+      "target remains disjoint from calibration",
+      "NCU target values absent from this document"
+    ]
+  }
+}

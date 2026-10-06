@@ -1,0 +1,157 @@
+{
+  "schema": "sm86_c7_sol_candidate_fib004_l1_l2_vertical_v2",
+  "phase": "C7-S34H3",
+  "status": "complete_l1_l2_vertical_zero_fill_topology_fix_physical_tails_open",
+  "candidate": "FIB/problem_004_gemm_n128_k2048/cutlass",
+  "identity": {
+    "arch": "sm_86",
+    "capability": "8.6",
+    "cuda_toolkit": "13.2",
+    "environment": "tools/sol_execbench/.venv",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "source": "workloads/sol_execbench_baselines/FIB/problem_004_gemm_n128_k2048/cutlass",
+    "extension": "results/alpha/c7_s34h_sol_fib004_20261005/build/sol_fib004_sm86.so",
+    "representative_shape": {
+      "M": 2,
+      "N": 128,
+      "K": 2048
+    }
+  },
+  "correctness_and_sanitizer": {
+    "smoke": "results/alpha/c7_s34h_sol_fib004_20261005/smoke.json",
+    "sanitizer_errors": 0
+  },
+  "nvbit": {
+    "trace": "results/alpha/c7_s34h_sol_fib004_20261005/nvbit",
+    "control_sidecar": "results/alpha/c7_s34h_sol_fib004_20261005/control_bits.json",
+    "raw_stats_total_insts": 106724,
+    "decoded_static_instructions": 1160,
+    "unknown_control_encodings": 0
+  },
+  "simulator": {
+    "binary": "sim/target/release/sim-run",
+    "mode": "l1-l2",
+    "replay": "results/alpha/c7_s34h_sol_fib004_20261005/after_zero_fill_fix/replay-1.json",
+    "repeat_replay": "results/alpha/c7_s34h_sol_fib004_20261005/after_zero_fill_fix/replay-2.json",
+    "replays_byte_equal": true,
+    "instructions_issued": 31816,
+    "records_seen": 31816,
+    "grid": [
+      1,
+      1,
+      1
+    ],
+    "block": [
+      128,
+      1,
+      1
+    ],
+    "frontiers": {
+      "diagnostic_last_issue_cycles": 71194,
+      "sm_active_terminal_frontier": {
+        "cycles": 71194,
+        "role": "causal_sm_active_terminal_lower_bound_excludes_write_ack_and_service_only_events"
+      },
+      "gpc_observation_frontier": {
+        "lower_bound_cycles": 71194,
+        "envelope_cycles": 1776,
+        "grid_blocks": 1,
+        "grid_log2": 0,
+        "cycles": 72970,
+        "role": "architecture_scoped_gpc_observation_boundary_not_timing_crosswalk"
+      },
+      "completion_frontier": {
+        "status": "incomplete_unmodeled_retirement_tails",
+        "lower_bound_cycles": 71194,
+        "unmodeled_tails": {
+          "reduction_read_modify_write": false,
+          "dirty_writeback": true,
+          "coherence": true,
+          "async_copy_shared_visibility": true
+        }
+      }
+    },
+    "native_macro_dispatches": 0
+  },
+  "ncu": {
+    "executable": "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
+    "profile_from_start": "off",
+    "launch_skip": 0,
+    "replay_mode": "application",
+    "repetitions": 5,
+    "paths": "results/alpha/c7_s34h_sol_fib004_20261005/ncu_after_fix/repeat-*.csv",
+    "observations": [
+      {
+        "csv": "results/alpha/c7_s34h_sol_fib004_20261005/ncu_after_fix/repeat-1.csv",
+        "kernel": "void Kernel<Gemm<MmaMultistage<GemmShape<64, 128, 32>, PredicatedTileAccessIterator<MatrixShape<64, 32>, half_t, RowMajor, 1, PitchLinearWarpRakedThreadMap<PitchLinearShape<32, 64>, 128, PitchLinearShape<4, 8>, 8>, Array<half_t, 8, 0>, 0, NoPermute>, RegularTileAccessIterator<MatrixShape<64, 32>, half_t, RowMajorTensorOpMultiplicandCrosswise<16, 32>, 0, PitchLinearWarpRakedThreadMap<PitchLinearShape<32, 64>, 128, PitchLinearShape<4, 8>, 8>, 16>, 1, PredicatedTileAccessIterator<MatrixShape<32, 128>, half_t, ColumnMajor, 0, PitchLinearWarpRakedThreadMap<PitchLinearShape<32, 128>, 128, PitchLinearShape<4, 8>, 8>, Array<half_t, 8, 0>, 0, NoPermute>, RegularTileAccessIterator<MatrixShape<32, 128>, half_t, ColumnMajorTensorOpMultiplicandCrosswise<16, 32>, 1, PitchLinearWarpRakedThreadMap<PitchLinearShape<32, 128>, 128, PitchLinearShape<4, 8>, 8>, 16>, 1, float, RowMajor, MmaPolicy<MmaTensorOp<GemmShape<32, 64, 32>, half_t, RowMajorTensorOpMultiplicandCrosswise<16, 32>, half_t, ColumnMajorTensorOpMultiplicandCrosswise<16, 32>, float, RowMajor, MmaTensorOpPolicy<Mma<GemmShape<16, 8, 16>, 32, half_t, RowMajor, half_t, ColumnMajor, float, RowMajor, OpMultiplyAdd>, MatrixShape<1, 1>>, 1, 0, bool>, MatrixShape<0, 0>, MatrixShape<0, 0>, 1>, 3, 0, bool>, Epilogue<GemmShape<64, 128, 32>, MmaTensorOp<GemmShape<32, 64, 32>, half_t, RowMajorTensorOpMultiplicandCrosswise<16, 32>, half_t, ColumnMajorTensorOpMultiplicandCrosswise<16, 32>, float, RowMajor, MmaTensorOpPolicy<Mma<GemmShape<16, 8, 16>, 32, half_t, RowMajor, half_t, ColumnMajor, float, RowMajor, OpMultiplyAdd>, MatrixShape<1, 1>>, 1, 0, bool>, 1, PredicatedTileIterator<OutputTileOptimalThreadMap<OutputTileShape<128, 8, 2, 1, 1>, OutputTileShape<1, 4, 1, 1, 4>, 128, 8, 16>, half_t, 0, NoPermute, 0>, FragmentIteratorTensorOp<GemmShape<32, 64, 32>, GemmShape<16, 8, 16>, float, Array<float, 4, 1>, RowMajor>, TileIteratorTensorOpMixed<GemmShape<32, 64, 32>, GemmShape<16, 8, 16>, float, 32, 16, 8, 8, 0>, SharedLoadIteratorMixed<OutputTileOptimalThreadMap<OutputTileShape<128, 8, 2, 1, 1>, OutputTileShape<1, 4, 1, 1, 4>, 128, 8, 16>::CompactedThreadMap, float, 32, 16, 8, 8, 0>, LinearCombination<half_t, 8, float, float, 0, 2, half_t>, MatrixShape<0, 8>, 2, 1>, GemmIdentityThreadblockSwizzle<1>, 0>>(Params)",
+        "gpc_cycles": 73791.0,
+        "sm_active_cycles": 72149.0,
+        "warp_instructions": 31812.0,
+        "grid": "(1, 1, 1)",
+        "block": "(128, 1, 1)",
+        "profile_from_start": "off",
+        "launch_skip": 0
+      },
+      {
+        "csv": "results/alpha/c7_s34h_sol_fib004_20261005/ncu_after_fix/repeat-2.csv",
+        "kernel": "void Kernel<Gemm<MmaMultistage<GemmShape<64, 128, 32>, PredicatedTileAccessIterator<MatrixShape<64, 32>, half_t, RowMajor, 1, PitchLinearWarpRakedThreadMap<PitchLinearShape<32, 64>, 128, PitchLinearShape<4, 8>, 8>, Array<half_t, 8, 0>, 0, NoPermute>, RegularTileAccessIterator<MatrixShape<64, 32>, half_t, RowMajorTensorOpMultiplicandCrosswise<16, 32>, 0, PitchLinearWarpRakedThreadMap<PitchLinearShape<32, 64>, 128, PitchLinearShape<4, 8>, 8>, 16>, 1, PredicatedTileAccessIterator<MatrixShape<32, 128>, half_t, ColumnMajor, 0, PitchLinearWarpRakedThreadMap<PitchLinearShape<32, 128>, 128, PitchLinearShape<4, 8>, 8>, Array<half_t, 8, 0>, 0, NoPermute>, RegularTileAccessIterator<MatrixShape<32, 128>, half_t, ColumnMajorTensorOpMultiplicandCrosswise<16, 32>, 1, PitchLinearWarpRakedThreadMap<PitchLinearShape<32, 128>, 128, PitchLinearShape<4, 8>, 8>, 16>, 1, float, RowMajor, MmaPolicy<MmaTensorOp<GemmShape<32, 64, 32>, half_t, RowMajorTensorOpMultiplicandCrosswise<16, 32>, half_t, ColumnMajorTensorOpMultiplicandCrosswise<16, 32>, float, RowMajor, MmaTensorOpPolicy<Mma<GemmShape<16, 8, 16>, 32, half_t, RowMajor, half_t, ColumnMajor, float, RowMajor, OpMultiplyAdd>, MatrixShape<1, 1>>, 1, 0, bool>, MatrixShape<0, 0>, MatrixShape<0, 0>, 1>, 3, 0, bool>, Epilogue<GemmShape<64, 128, 32>, MmaTensorOp<GemmShape<32, 64, 32>, half_t, RowMajorTensorOpMultiplicandCrosswise<16, 32>, half_t, ColumnMajorTensorOpMultiplicandCrosswise<16, 32>, float, RowMajor, MmaTensorOpPolicy<Mma<GemmShape<16, 8, 16>, 32, half_t, RowMajor, half_t, ColumnMajor, float, RowMajor, OpMultiplyAdd>, MatrixShape<1, 1>>, 1, 0, bool>, 1, PredicatedTileIterator<OutputTileOptimalThreadMap<OutputTileShape<128, 8, 2, 1, 1>, OutputTileShape<1, 4, 1, 1, 4>, 128, 8, 16>, half_t, 0, NoPermute, 0>, FragmentIteratorTensorOp<GemmShape<32, 64, 32>, GemmShape<16, 8, 16>, float, Array<float, 4, 1>, RowMajor>, TileIteratorTensorOpMixed<GemmShape<32, 64, 32>, GemmShape<16, 8, 16>, float, 32, 16, 8, 8, 0>, SharedLoadIteratorMixed<OutputTileOptimalThreadMap<OutputTileShape<128, 8, 2, 1, 1>, OutputTileShape<1, 4, 1, 1, 4>, 128, 8, 16>::CompactedThreadMap, float, 32, 16, 8, 8, 0>, LinearCombination<half_t, 8, float, float, 0, 2, half_t>, MatrixShape<0, 8>, 2, 1>, GemmIdentityThreadblockSwizzle<1>, 0>>(Params)",
+        "gpc_cycles": 73863.0,
+        "sm_active_cycles": 72222.0,
+        "warp_instructions": 31812.0,
+        "grid": "(1, 1, 1)",
+        "block": "(128, 1, 1)",
+        "profile_from_start": "off",
+        "launch_skip": 0
+      },
+      {
+        "csv": "results/alpha/c7_s34h_sol_fib004_20261005/ncu_after_fix/repeat-3.csv",
+        "kernel": "void Kernel<Gemm<MmaMultistage<GemmShape<64, 128, 32>, PredicatedTileAccessIterator<MatrixShape<64, 32>, half_t, RowMajor, 1, PitchLinearWarpRakedThreadMap<PitchLinearShape<32, 64>, 128, PitchLinearShape<4, 8>, 8>, Array<half_t, 8, 0>, 0, NoPermute>, RegularTileAccessIterator<MatrixShape<64, 32>, half_t, RowMajorTensorOpMultiplicandCrosswise<16, 32>, 0, PitchLinearWarpRakedThreadMap<PitchLinearShape<32, 64>, 128, PitchLinearShape<4, 8>, 8>, 16>, 1, PredicatedTileAccessIterator<MatrixShape<32, 128>, half_t, ColumnMajor, 0, PitchLinearWarpRakedThreadMap<PitchLinearShape<32, 128>, 128, PitchLinearShape<4, 8>, 8>, Array<half_t, 8, 0>, 0, NoPermute>, RegularTileAccessIterator<MatrixShape<32, 128>, half_t, ColumnMajorTensorOpMultiplicandCrosswise<16, 32>, 1, PitchLinearWarpRakedThreadMap<PitchLinearShape<32, 128>, 128, PitchLinearShape<4, 8>, 8>, 16>, 1, float, RowMajor, MmaPolicy<MmaTensorOp<GemmShape<32, 64, 32>, half_t, RowMajorTensorOpMultiplicandCrosswise<16, 32>, half_t, ColumnMajorTensorOpMultiplicandCrosswise<16, 32>, float, RowMajor, MmaTensorOpPolicy<Mma<GemmShape<16, 8, 16>, 32, half_t, RowMajor, half_t, ColumnMajor, float, RowMajor, OpMultiplyAdd>, MatrixShape<1, 1>>, 1, 0, bool>, MatrixShape<0, 0>, MatrixShape<0, 0>, 1>, 3, 0, bool>, Epilogue<GemmShape<64, 128, 32>, MmaTensorOp<GemmShape<32, 64, 32>, half_t, RowMajorTensorOpMultiplicandCrosswise<16, 32>, half_t, ColumnMajorTensorOpMultiplicandCrosswise<16, 32>, float, RowMajor, MmaTensorOpPolicy<Mma<GemmShape<16, 8, 16>, 32, half_t, RowMajor, half_t, ColumnMajor, float, RowMajor, OpMultiplyAdd>, MatrixShape<1, 1>>, 1, 0, bool>, 1, PredicatedTileIterator<OutputTileOptimalThreadMap<OutputTileShape<128, 8, 2, 1, 1>, OutputTileShape<1, 4, 1, 1, 4>, 128, 8, 16>, half_t, 0, NoPermute, 0>, FragmentIteratorTensorOp<GemmShape<32, 64, 32>, GemmShape<16, 8, 16>, float, Array<float, 4, 1>, RowMajor>, TileIteratorTensorOpMixed<GemmShape<32, 64, 32>, GemmShape<16, 8, 16>, float, 32, 16, 8, 8, 0>, SharedLoadIteratorMixed<OutputTileOptimalThreadMap<OutputTileShape<128, 8, 2, 1, 1>, OutputTileShape<1, 4, 1, 1, 4>, 128, 8, 16>::CompactedThreadMap, float, 32, 16, 8, 8, 0>, LinearCombination<half_t, 8, float, float, 0, 2, half_t>, MatrixShape<0, 8>, 2, 1>, GemmIdentityThreadblockSwizzle<1>, 0>>(Params)",
+        "gpc_cycles": 73790.0,
+        "sm_active_cycles": 72151.0,
+        "warp_instructions": 31812.0,
+        "grid": "(1, 1, 1)",
+        "block": "(128, 1, 1)",
+        "profile_from_start": "off",
+        "launch_skip": 0
+      },
+      {
+        "csv": "results/alpha/c7_s34h_sol_fib004_20261005/ncu_after_fix/repeat-4.csv",
+        "kernel": "void Kernel<Gemm<MmaMultistage<GemmShape<64, 128, 32>, PredicatedTileAccessIterator<MatrixShape<64, 32>, half_t, RowMajor, 1, PitchLinearWarpRakedThreadMap<PitchLinearShape<32, 64>, 128, PitchLinearShape<4, 8>, 8>, Array<half_t, 8, 0>, 0, NoPermute>, RegularTileAccessIterator<MatrixShape<64, 32>, half_t, RowMajorTensorOpMultiplicandCrosswise<16, 32>, 0, PitchLinearWarpRakedThreadMap<PitchLinearShape<32, 64>, 128, PitchLinearShape<4, 8>, 8>, 16>, 1, PredicatedTileAccessIterator<MatrixShape<32, 128>, half_t, ColumnMajor, 0, PitchLinearWarpRakedThreadMap<PitchLinearShape<32, 128>, 128, PitchLinearShape<4, 8>, 8>, Array<half_t, 8, 0>, 0, NoPermute>, RegularTileAccessIterator<MatrixShape<32, 128>, half_t, ColumnMajorTensorOpMultiplicandCrosswise<16, 32>, 1, PitchLinearWarpRakedThreadMap<PitchLinearShape<32, 128>, 128, PitchLinearShape<4, 8>, 8>, 16>, 1, float, RowMajor, MmaPolicy<MmaTensorOp<GemmShape<32, 64, 32>, half_t, RowMajorTensorOpMultiplicandCrosswise<16, 32>, half_t, ColumnMajorTensorOpMultiplicandCrosswise<16, 32>, float, RowMajor, MmaTensorOpPolicy<Mma<GemmShape<16, 8, 16>, 32, half_t, RowMajor, half_t, ColumnMajor, float, RowMajor, OpMultiplyAdd>, MatrixShape<1, 1>>, 1, 0, bool>, MatrixShape<0, 0>, MatrixShape<0, 0>, 1>, 3, 0, bool>, Epilogue<GemmShape<64, 128, 32>, MmaTensorOp<GemmShape<32, 64, 32>, half_t, RowMajorTensorOpMultiplicandCrosswise<16, 32>, half_t, ColumnMajorTensorOpMultiplicandCrosswise<16, 32>, float, RowMajor, MmaTensorOpPolicy<Mma<GemmShape<16, 8, 16>, 32, half_t, RowMajor, half_t, ColumnMajor, float, RowMajor, OpMultiplyAdd>, MatrixShape<1, 1>>, 1, 0, bool>, 1, PredicatedTileIterator<OutputTileOptimalThreadMap<OutputTileShape<128, 8, 2, 1, 1>, OutputTileShape<1, 4, 1, 1, 4>, 128, 8, 16>, half_t, 0, NoPermute, 0>, FragmentIteratorTensorOp<GemmShape<32, 64, 32>, GemmShape<16, 8, 16>, float, Array<float, 4, 1>, RowMajor>, TileIteratorTensorOpMixed<GemmShape<32, 64, 32>, GemmShape<16, 8, 16>, float, 32, 16, 8, 8, 0>, SharedLoadIteratorMixed<OutputTileOptimalThreadMap<OutputTileShape<128, 8, 2, 1, 1>, OutputTileShape<1, 4, 1, 1, 4>, 128, 8, 16>::CompactedThreadMap, float, 32, 16, 8, 8, 0>, LinearCombination<half_t, 8, float, float, 0, 2, half_t>, MatrixShape<0, 8>, 2, 1>, GemmIdentityThreadblockSwizzle<1>, 0>>(Params)",
+        "gpc_cycles": 73774.0,
+        "sm_active_cycles": 72137.0,
+        "warp_instructions": 31812.0,
+        "grid": "(1, 1, 1)",
+        "block": "(128, 1, 1)",
+        "profile_from_start": "off",
+        "launch_skip": 0
+      },
+      {
+        "csv": "results/alpha/c7_s34h_sol_fib004_20261005/ncu_after_fix/repeat-5.csv",
+        "kernel": "void Kernel<Gemm<MmaMultistage<GemmShape<64, 128, 32>, PredicatedTileAccessIterator<MatrixShape<64, 32>, half_t, RowMajor, 1, PitchLinearWarpRakedThreadMap<PitchLinearShape<32, 64>, 128, PitchLinearShape<4, 8>, 8>, Array<half_t, 8, 0>, 0, NoPermute>, RegularTileAccessIterator<MatrixShape<64, 32>, half_t, RowMajorTensorOpMultiplicandCrosswise<16, 32>, 0, PitchLinearWarpRakedThreadMap<PitchLinearShape<32, 64>, 128, PitchLinearShape<4, 8>, 8>, 16>, 1, PredicatedTileAccessIterator<MatrixShape<32, 128>, half_t, ColumnMajor, 0, PitchLinearWarpRakedThreadMap<PitchLinearShape<32, 128>, 128, PitchLinearShape<4, 8>, 8>, Array<half_t, 8, 0>, 0, NoPermute>, RegularTileAccessIterator<MatrixShape<32, 128>, half_t, ColumnMajorTensorOpMultiplicandCrosswise<16, 32>, 1, PitchLinearWarpRakedThreadMap<PitchLinearShape<32, 128>, 128, PitchLinearShape<4, 8>, 8>, 16>, 1, float, RowMajor, MmaPolicy<MmaTensorOp<GemmShape<32, 64, 32>, half_t, RowMajorTensorOpMultiplicandCrosswise<16, 32>, half_t, ColumnMajorTensorOpMultiplicandCrosswise<16, 32>, float, RowMajor, MmaTensorOpPolicy<Mma<GemmShape<16, 8, 16>, 32, half_t, RowMajor, half_t, ColumnMajor, float, RowMajor, OpMultiplyAdd>, MatrixShape<1, 1>>, 1, 0, bool>, MatrixShape<0, 0>, MatrixShape<0, 0>, 1>, 3, 0, bool>, Epilogue<GemmShape<64, 128, 32>, MmaTensorOp<GemmShape<32, 64, 32>, half_t, RowMajorTensorOpMultiplicandCrosswise<16, 32>, half_t, ColumnMajorTensorOpMultiplicandCrosswise<16, 32>, float, RowMajor, MmaTensorOpPolicy<Mma<GemmShape<16, 8, 16>, 32, half_t, RowMajor, half_t, ColumnMajor, float, RowMajor, OpMultiplyAdd>, MatrixShape<1, 1>>, 1, 0, bool>, 1, PredicatedTileIterator<OutputTileOptimalThreadMap<OutputTileShape<128, 8, 2, 1, 1>, OutputTileShape<1, 4, 1, 1, 4>, 128, 8, 16>, half_t, 0, NoPermute, 0>, FragmentIteratorTensorOp<GemmShape<32, 64, 32>, GemmShape<16, 8, 16>, float, Array<float, 4, 1>, RowMajor>, TileIteratorTensorOpMixed<GemmShape<32, 64, 32>, GemmShape<16, 8, 16>, float, 32, 16, 8, 8, 0>, SharedLoadIteratorMixed<OutputTileOptimalThreadMap<OutputTileShape<128, 8, 2, 1, 1>, OutputTileShape<1, 4, 1, 1, 4>, 128, 8, 16>::CompactedThreadMap, float, 32, 16, 8, 8, 0>, LinearCombination<half_t, 8, float, float, 0, 2, half_t>, MatrixShape<0, 8>, 2, 1>, GemmIdentityThreadblockSwizzle<1>, 0>>(Params)",
+        "gpc_cycles": 73778.0,
+        "sm_active_cycles": 72136.0,
+        "warp_instructions": 31812.0,
+        "grid": "(1, 1, 1)",
+        "block": "(128, 1, 1)",
+        "profile_from_start": "off",
+        "launch_skip": 0
+      }
+    ],
+    "medians": {
+      "gpc_cycles": 73790.0,
+      "sm_active_cycles": 72149.0,
+      "warp_instructions": 31812.0
+    }
+  },
+  "crosswalk": {
+    "l1_l2_per_kernel_instruction_counts_equal": false,
+    "simulator_instructions": 31816,
+    "ncu_instructions": 31812.0,
+    "raw_tracer_stats_are_separate": true,
+    "zero_fill_topology_fix_retested": true,
+    "physical_completion_upper_closed": false,
+    "hardware_scheduling_claimed": false
+  },
+  "interpretation": "The previously blocked shared-L2 replay now succeeds twice after the zero-fill topology validator fix. NCU matches the measured launch geometry and remains independent observation context; its 31812 warp instructions differ from simulator records by four, so exact instruction crosswalk is not claimed. Dirty-writeback/coherence tails remain open."
+}

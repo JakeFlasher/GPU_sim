@@ -44,3 +44,17 @@ The rule is intentionally conservative and remains an architecture hypothesis
 until a broader independent constant-stream sweep is added. The scored
 campaign records the resulting raw frontiers and retains all lower-bound and
 GPC-domain diagnostics separately.
+
+## C7-S33AQ live vertical slice (2026-10-04)
+
+The source was rebuilt with a strict argument parser, bounded input sizing,
+sentinel-initialized result buffers, and a separate functional-result output.
+The same rebuilt executable (`mode=0, blocks=84, threads=256, iterations=256,
+warmups=0`) passed seven full-shape correctness runs, an independent output
+oracle, reduced Compute Sanitizer, NVBit tracing, deterministic replay, and
+five application-replay NCU captures. Replay and NCU agree at 1,909,824 target
+warp instructions. The simulator lower bound is 123,727 cycles while the NCU
+median is 24,016, so this cell is a lower-bound falsifier. It is retained as
+mechanism-local evidence; no constant-load latency or cache parameter is fit,
+and dirty-writeback/coherence tails remain open. The live record is
+`docs/sm86_c7_research_probe_constant_load_path_live_v1.json`.

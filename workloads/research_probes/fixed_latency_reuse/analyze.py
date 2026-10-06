@@ -21,7 +21,7 @@ DEFAULT_ROOT = (
     REPO_ROOT / "results" / "captures" / "sm86_fixed_latency_reuse_20260817_v1"
 )
 LONG_GENERATIONS = 8192
-TRACE_GENERATIONS = 64
+TRACE_GENERATIONS = 8192
 PROTOCOLS = ("u10", "u11", "u12", "u20", "u22")
 WIDTHS = (4, 8, 12, 16)
 METRICS = (
@@ -139,11 +139,7 @@ def steady_hits(rows: list[dict[str, Any]], variant: str) -> int:
 
 
 def validate_static(root: Path) -> dict[str, Any]:
-    names = tuple(
-        f"fixed_latency_reuse{trace}_{variant}"
-        for trace in ("", "_trace")
-        for variant in ("native", "a", "b")
-    )
+    names = tuple(f"fixed_latency_reuse_{variant}" for variant in ("native", "a", "b"))
     sidecars = {}
     binaries = {}
     for name in names:
@@ -158,7 +154,7 @@ def validate_static(root: Path) -> dict[str, Any]:
 
     patch_documents = {}
     hot_pcs: dict[str, set[int]] = {}
-    for label in ("long", "trace"):
+    for label in ("long",):
         document = read_json(root / "metadata" / f"{label}_reuse_patch.json")
         require(document["patched_instructions"] == 80, f"{label}: patch count")
         require(document["all_changed_bytes_inside_selected_words"] is True, f"{label}: scope")

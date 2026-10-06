@@ -1,9 +1,11 @@
 #include <cuda.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <limits>
 #include <vector>
 
 #define DRIVER_CHECK(call)                                                      \
@@ -27,14 +29,26 @@ constexpr int kMaxWarps = 16;
 constexpr int kTimestamps = 9;
 constexpr const char* kFunction = "_Z22ibuffer_timeline_probePyPj";
 
+bool parse_int(const char* text, int* value) {
+    if (text == nullptr || *text == '\0' || value == nullptr) return false;
+    errno = 0;
+    char* end = nullptr;
+    const long parsed = std::strtol(text, &end, 10);
+    if (errno == ERANGE || end == text || *end != '\0' ||
+        parsed < std::numeric_limits<int>::min() ||
+        parsed > std::numeric_limits<int>::max()) return false;
+    *value = static_cast<int>(parsed);
+    return true;
+}
+
 int main(int argc, char** argv) {
     if (argc != 5) {
         std::fprintf(stderr, "usage: %s CUBIN WARPS TRIALS VARIANT\n", argv[0]);
         return 2;
     }
-    const int warps = std::atoi(argv[2]);
-    const int trials = std::atoi(argv[3]);
-    if (warps < 1 || warps > kMaxWarps || trials < 1 || trials > 32) {
+    int warps = 0, trials = 0;
+    if (!parse_int(argv[2], &warps) || !parse_int(argv[3], &trials) ||
+        warps < 1 || warps > kMaxWarps || trials < 1 || trials > 32) {
         return 2;
     }
     std::vector<unsigned long long> timeline(warps * kTimestamps);
@@ -59,21 +73,37 @@ int main(int argc, char** argv) {
     DRIVER_CHECK(cuMemAlloc(&sink_device,
                             kMaxWarps * sizeof(std::uint32_t)));
     void* arguments[] = {&timeline_device, &sink_device};
+    bool timeline_valid = true;
     for (int trial = 0; trial < trials; ++trial) {
+        DRIVER_CHECK(cuMemsetD8(timeline_device, 0xff,
+                                kMaxWarps * kTimestamps * sizeof(unsigned long long)));
+        DRIVER_CHECK(cuMemsetD8(sink_device, 0xa5,
+                                kMaxWarps * sizeof(std::uint32_t)));
         DRIVER_CHECK(cuLaunchKernel(function, 1, 1, 1, warps * kWarpSize, 1, 1,
                                     0, nullptr, arguments, nullptr));
         DRIVER_CHECK(cuCtxSynchronize());
         DRIVER_CHECK(cuMemcpyDtoH(timeline.data(), timeline_device,
                                   timeline.size() * sizeof(unsigned long long)));
         samples[trial] = timeline;
+        for (int warp = 0; warp < warps; ++warp) {
+            for (int index = 1; index < kTimestamps; ++index) {
+                timeline_valid = timeline_valid &&
+                    timeline[warp * kTimestamps + index] !=
+                        std::numeric_limits<unsigned long long>::max() &&
+                    timeline[warp * kTimestamps + index] >
+                        timeline[warp * kTimestamps + index - 1];
+            }
+        }
     }
     DRIVER_CHECK(cuMemcpyDtoH(sink.data(), sink_device,
                               warps * sizeof(std::uint32_t)));
 
     bool correct = true;
+    bool sink_valid = true;
     std::uint64_t checksum = 0;
     for (int warp = 0; warp < warps; ++warp) {
         correct = correct && sink[warp] == 0x1b0f0000u + warp;
+        sink_valid = sink_valid && sink[warp] != 0xa5a5a5a5u;
         checksum = checksum * 131u + sink[warp];
         for (int index = 1; index < kTimestamps; ++index) {
             correct = correct &&
@@ -102,8 +132,11 @@ int main(int argc, char** argv) {
         std::printf("]");
     }
     std::printf(
-        "],\"checksum\":%llu,\"correct\":%s}\n",
+        "],\"checksum\":%llu,\"correct\":%s,\"timeline_valid\":%s,"
+        "\"sink_valid\":%s}\n",
         static_cast<unsigned long long>(checksum),
-        correct ? "true" : "false");
+        (correct && timeline_valid && sink_valid) ? "true" : "false",
+        timeline_valid ? "true" : "false", sink_valid ? "true" : "false");
+    correct = correct && timeline_valid && sink_valid;
     return correct ? 0 : 1;
 }

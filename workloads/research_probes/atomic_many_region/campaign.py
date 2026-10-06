@@ -23,7 +23,7 @@ DEFAULT_OUTPUT = (
 )
 DRIVER = PREDECESSOR / "atomic_multism_service_driver"
 LONG_CUBIN = PREDECESSOR / "atomic_multism_service_red32.cubin"
-TRACE_CUBIN = PREDECESSOR / "atomic_multism_service_trace_red32.cubin"
+TRACE_CUBIN = LONG_CUBIN
 FIXED_DATA_BYTES = 32 * 1024 * 1024
 REGION_UNIVERSE = tuple(range(12))
 ANCHOR_MAX_REGION = 128
@@ -100,7 +100,7 @@ class TripletCell:
             str(DRIVER),
             str(TRACE_CUBIN if trace else LONG_CUBIN),
             "84",
-            "64" if trace else "1024",
+            "1024",
             str(trials),
             self.key,
             "0",
@@ -192,7 +192,7 @@ def emit_manifest(output: Path) -> None:
             "blocks": 84,
             "threads_per_block": 32,
             "long_generations": 1024,
-            "trace_generations": 64,
+            "trace_generations": 1024,
             "fixed_data_bytes": FIXED_DATA_BYTES,
             "region_bytes": 256,
             "operation": "RED.E.ADD.STRONG.GPU",

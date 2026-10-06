@@ -1,0 +1,181 @@
+{
+  "schema": "sm86_m5g1_tf32_pipeline_probe_v1",
+  "phase": "M5-G1",
+  "status": "complete_public_shape_independent_probe_model_basis",
+  "host_identity": {
+    "device_index": 0,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "compute_capability": "8.6",
+    "driver": "615.71.09",
+    "pstate": "P0",
+    "graphics_clock_mhz": 1350,
+    "memory_clock_mhz": 10501
+  },
+  "source_basis": {
+    "ptx_isa": "https://docs.nvidia.com/cuda/parallel-thread-execution/",
+    "ga102_whitepaper": "https://images.nvidia.com/aem-dam/en-zz/Solutions/geforce/ampere/pdf/NVIDIA-ampere-GA102-GPU-Architecture-Whitepaper-V1.pdf",
+    "shape_contract": "mma.sync.aligned.m16n8k8.row.col.f32.tf32.tf32.f32; public PTX documents the m16n8k8 TF32 form; GA102 is the local SM86 family"
+  },
+  "identity": {
+    "source": "workloads/research_probes/tf32_issue_probe/tf32_issue_probe.cu",
+    "binary": "workloads/research_probes/tf32_issue_probe/tf32_issue_probe",
+    "binary_sha256": "5f07da5be807861b5679da72814a87f93d90bffa4d16377d933c4293c1b0c5e5",
+    "arch": "sm_86",
+    "arguments": [
+      "dependent 1024",
+      "independent 1024"
+    ],
+    "profile_protocol": "application replay; profile-from-start off; launch-skip 0; launch-count 1; base clock; cache all",
+    "ncu_metric": "gpc__cycles_elapsed.max",
+    "auxiliary_metrics": [
+      "sm__cycles_active.max",
+      "smsp__inst_executed_pipe_tensor_op_hmma.sum",
+      "smsp__inst_executed.sum",
+      "smsp__inst_issued.sum"
+    ],
+    "corrected_oracle": "results/alpha/m5g_tf32_issue_probe_20261006/oracle_corrected/correctness.json",
+    "corrected_memcheck": [
+      "results/alpha/m5g_tf32_issue_probe_20261006/oracle_corrected/memcheck-dependent.stdout",
+      "results/alpha/m5g_tf32_issue_probe_20261006/oracle_corrected/memcheck-independent.stdout"
+    ],
+    "corrected_ncu_root": "results/alpha/m5g_tf32_issue_probe_20261006/corrected_ncu"
+  },
+  "probe": {
+    "dependent": {
+      "iterations": 1024,
+      "repeats": 5,
+      "rows": [
+        {
+          "gpc__cycles_elapsed.max": 42362.0,
+          "gpu__time_duration.sum": 27200.0,
+          "sm__cycles_active.max": 40336.0,
+          "smsp__inst_executed.sum": 8230.0,
+          "smsp__inst_executed_pipe_tensor_op_hmma.sum": 1024.0,
+          "smsp__inst_issued.sum": 8236.0
+        },
+        {
+          "gpc__cycles_elapsed.max": 42350.0,
+          "gpu__time_duration.sum": 27200.0,
+          "sm__cycles_active.max": 40336.0,
+          "smsp__inst_executed.sum": 8230.0,
+          "smsp__inst_executed_pipe_tensor_op_hmma.sum": 1024.0,
+          "smsp__inst_issued.sum": 8236.0
+        },
+        {
+          "gpc__cycles_elapsed.max": 42338.0,
+          "gpu__time_duration.sum": 27200.0,
+          "sm__cycles_active.max": 40324.0,
+          "smsp__inst_executed.sum": 8230.0,
+          "smsp__inst_executed_pipe_tensor_op_hmma.sum": 1024.0,
+          "smsp__inst_issued.sum": 8236.0
+        },
+        {
+          "gpc__cycles_elapsed.max": 42356.0,
+          "gpu__time_duration.sum": 27168.0,
+          "sm__cycles_active.max": 40339.0,
+          "smsp__inst_executed.sum": 8230.0,
+          "smsp__inst_executed_pipe_tensor_op_hmma.sum": 1024.0,
+          "smsp__inst_issued.sum": 8236.0
+        },
+        {
+          "gpc__cycles_elapsed.max": 42346.0,
+          "gpu__time_duration.sum": 27168.0,
+          "sm__cycles_active.max": 40325.0,
+          "smsp__inst_executed.sum": 8230.0,
+          "smsp__inst_executed_pipe_tensor_op_hmma.sum": 1024.0,
+          "smsp__inst_issued.sum": 8236.0
+        }
+      ],
+      "medians": {
+        "gpc__cycles_elapsed.max": 42350.0,
+        "gpu__time_duration.sum": 27200.0,
+        "sm__cycles_active.max": 40336.0,
+        "smsp__inst_executed.sum": 8230.0,
+        "smsp__inst_executed_pipe_tensor_op_hmma.sum": 1024.0,
+        "smsp__inst_issued.sum": 8236.0
+      },
+      "hmma_per_iteration": 1,
+      "dependency": "each HMMA consumes the previous accumulator tuple"
+    },
+    "independent": {
+      "iterations": 1024,
+      "repeats": 5,
+      "rows": [
+        {
+          "gpc__cycles_elapsed.max": 267996.0,
+          "gpu__time_duration.sum": 171840.0,
+          "sm__cycles_active.max": 265966.0,
+          "smsp__inst_executed.sum": 15426.0,
+          "smsp__inst_executed_pipe_tensor_op_hmma.sum": 8192.0,
+          "smsp__inst_issued.sum": 15432.0
+        },
+        {
+          "gpc__cycles_elapsed.max": 267849.0,
+          "gpu__time_duration.sum": 171712.0,
+          "sm__cycles_active.max": 265816.0,
+          "smsp__inst_executed.sum": 15426.0,
+          "smsp__inst_executed_pipe_tensor_op_hmma.sum": 8192.0,
+          "smsp__inst_issued.sum": 15432.0
+        },
+        {
+          "gpc__cycles_elapsed.max": 267837.0,
+          "gpu__time_duration.sum": 171744.0,
+          "sm__cycles_active.max": 265814.0,
+          "smsp__inst_executed.sum": 15426.0,
+          "smsp__inst_executed_pipe_tensor_op_hmma.sum": 8192.0,
+          "smsp__inst_issued.sum": 15432.0
+        },
+        {
+          "gpc__cycles_elapsed.max": 267833.0,
+          "gpu__time_duration.sum": 171744.0,
+          "sm__cycles_active.max": 265814.0,
+          "smsp__inst_executed.sum": 15426.0,
+          "smsp__inst_executed_pipe_tensor_op_hmma.sum": 8192.0,
+          "smsp__inst_issued.sum": 15432.0
+        },
+        {
+          "gpc__cycles_elapsed.max": 267848.0,
+          "gpu__time_duration.sum": 171744.0,
+          "sm__cycles_active.max": 265825.0,
+          "smsp__inst_executed.sum": 15426.0,
+          "smsp__inst_executed_pipe_tensor_op_hmma.sum": 8192.0,
+          "smsp__inst_issued.sum": 15432.0
+        }
+      ],
+      "medians": {
+        "gpc__cycles_elapsed.max": 267848.0,
+        "gpu__time_duration.sum": 171744.0,
+        "sm__cycles_active.max": 265816.0,
+        "smsp__inst_executed.sum": 15426.0,
+        "smsp__inst_executed_pipe_tensor_op_hmma.sum": 8192.0,
+        "smsp__inst_issued.sum": 15432.0
+      },
+      "hmma_per_iteration": 8,
+      "dependency": "eight independent accumulator tuples per loop"
+    },
+    "derived": {
+      "dependent_sm_active_cycles_per_hmma": 39.390625,
+      "independent_sm_active_cycles_per_hmma": 32.4482421875,
+      "independent_gpc_cycles_per_hmma": 32.6962890625,
+      "interpretation": "independent issue arm establishes a roughly 32-cycle initiation cadence; dependent arm is a roughly 40-cycle result-dependency latency and is not collapsed into the initiation field"
+    }
+  },
+  "model_decision": {
+    "arch": "sm_86",
+    "opcode": "HMMA.1688.F32.TF32",
+    "pipeline_class": "Tensor",
+    "initiation_interval_cycles": 32,
+    "dependency_latency_mode": "not represented by PipelineClass::Tensor; retain detailed dependence/barrier semantics",
+    "static_site_saturation_rule": "do not reuse dense-HMMA.16816 static-site halving until a separate TF32 multi-site probe justifies it",
+    "ncu_values_used_for_workload_parameter_fitting": false,
+    "ncu_values_used_for_blocked_SOL_target_selection": false,
+    "rationale": "Public PTX shape support plus an independent no-memory probe with a numerical per-accumulator oracle support a 32-cycle initiation interval. The corrected probe uses 1024 per-lane numerical checks, seven trials for each measured arm, and zero Compute Sanitizer errors. The probe is not the blocked L1/problem022 target and does not score it."
+  },
+  "next": {
+    "implementation": "add exact SM86 opcode capability only; preserve refusal for other HMMA forms and SM120 research gap",
+    "focused_replay": "retained c7_s11 trace and then C7-S34CO L1/problem022 trace",
+    "physical_completion": "remain open",
+    "native_dispatch": "remain separate and unclaimed"
+  }
+}

@@ -30,3 +30,13 @@ cells, 98 correctness executions, 110 NCU profiles, eight SourceCounters
 profiles, 14 NVBit captures, and 77,900 replay records. W4/W8 form an exact
 opposite-bank null. W16 enters a global slow regime in 8/11 HF profiles and is
 retained as a phase sentinel rather than queue-depth evidence.
+
+## C7-S33AW live same-binary refresh (2026-10-04)
+
+The active Makefile/campaign interface now uses one 8,192-generation cubin for
+correctness, NVBit, replay, and NCU; the historical 64-generation trace cubin
+is not an active input. The host driver now parses numeric arguments strictly,
+initializes elapsed/sink buffers with sentinels, and reports elapsed/sink
+validity separately from the functional oracle. The selected W8 HF cell is the
+current live vertical target; no result-order or issue-queue timing is fitted
+from one cell.

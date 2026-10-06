@@ -1,0 +1,10 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://gpu-simulator.local/schemas/sm86_m5h_store_tail_differential_v1.schema.json",
+  "title":"SM86 M5-H store retirement-tail differential",
+  "type":"object","additionalProperties":false,
+  "required":["schema","phase","status","selection","host_identity","evidence_source","identity","arms","differential","interpretation"],
+  "properties":{
+    "schema":{"const":"sm86_m5h_store_tail_differential_v1"},"phase":{"const":"M5-H"},"status":{"const":"complete_scoped_store_tail_differential_physical_upper_open"},"selection":{"type":"object"},"host_identity":{"type":"object"},"evidence_source":{"type":"string"},"identity":{"type":"object"},"arms":{"type":"object"},"differential":{"type":"object","required":["simulator_lower_bound_delta_cycles","ncu_median_delta_cycles","ncu_values_not_used_for_model_selection","physical_completion_upper_closed"],"properties":{"ncu_values_not_used_for_model_selection":{"const":true},"physical_completion_upper_closed":{"const":false}},"additionalProperties":true},"interpretation":{"type":"string","minLength":1}
+  }
+}

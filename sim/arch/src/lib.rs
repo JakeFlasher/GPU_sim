@@ -413,14 +413,20 @@ impl ArchId {
     /// functions that cannot fill this window use the 16-cycle initiation
     /// cadence in `sim-sm`; the carded value is the saturated ceiling, not a
     /// claim that every independent HMMA issue consumes 32 cycles.
+    /// TF32 m16n8k8 has a separate 32-cycle interval, with no static-site
+    /// halving. The independent eight-accumulator probe approaches that
+    /// cadence; its dependent-loop time is not result latency.
+    /// See workloads/research_probes/tf32_issue_probe/README.md.
     pub const fn tensor_issue_intervals(self) -> Capability<TensorIssueIntervals> {
         match self {
             Self::Sm86 => Capability::available(
                 Self::Sm86,
                 TensorIssueIntervals {
                     hmma_16816_f16_bf16: 32,
+                    hmma_1688_tf32: 32,
                     hmma_sparse_16832_f16_bf16: 16,
                     imma_16816_s8: 8,
+                    imma_16832_s8: 16,
                 },
             ),
             Self::Sm120 => Capability::research_gap(
@@ -1147,8 +1153,16 @@ pub struct ConstantMemoryReturnService {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TensorIssueIntervals {
     pub hmma_16816_f16_bf16: u64,
+    /// Dense SM86 TF32 `HMMA.1688.F32.TF32` initiation interval.  This is
+    /// intentionally separate from the m16n8k16 field and its static-site
+    /// heuristic; it is not a dependent-result latency or retirement bound.
+    pub hmma_1688_tf32: u64,
     pub hmma_sparse_16832_f16_bf16: u64,
     pub imma_16816_s8: u64,
+    /// Dense SM86 INT8 `IMMA.16832.S8.S8` initiation interval.  This is
+    /// distinct from the m16n8k16 INT8 form and is backed by the independent
+    /// eight-accumulator probe in workloads/research_probes/imma_issue_probe.
+    pub imma_16832_s8: u64,
 }
 
 /// Architecture-local CTA-barrier issue resource. The warp initiation
@@ -1534,8 +1548,10 @@ mod tests {
                 .unwrap(),
             TensorIssueIntervals {
                 hmma_16816_f16_bf16: 32,
+                hmma_1688_tf32: 32,
                 hmma_sparse_16832_f16_bf16: 16,
                 imma_16816_s8: 8,
+                imma_16832_s8: 16,
             }
         );
     }

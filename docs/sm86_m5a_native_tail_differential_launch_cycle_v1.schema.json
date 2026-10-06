@@ -1,0 +1,128 @@
+{
+  "$id": "https://gpu-simulator.local/schemas/sm86_m5a_native_tail_differential_launch_cycle_v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "arms": {
+      "items": {
+        "additionalProperties": true,
+        "required": [
+          "tail",
+          "cell",
+          "args",
+          "correctness",
+          "sanitizer",
+          "trace",
+          "simulator",
+          "ncu"
+        ],
+        "type": "object"
+      },
+      "minItems": 2,
+      "type": "array"
+    },
+    "differential": {
+      "additionalProperties": true,
+      "required": [
+        "simulator_gpc_lower_bound_delta_cycles",
+        "ncu_median_delta_cycles",
+        "delta_difference_cycles",
+        "simulator_delta_positive",
+        "ncu_delta_positive",
+        "both_arm_instruction_counts_match",
+        "both_arm_replays_deterministic",
+        "lower_bound_consistent_each_arm"
+      ],
+      "type": "object"
+    },
+    "frontier_reconciliation": {
+      "additionalProperties": true,
+      "required": [
+        "completion",
+        "launch_envelope",
+        "typed_tail",
+        "native_dispatch",
+        "hardware_completion"
+      ],
+      "type": "object"
+    },
+    "host_identity": {
+      "additionalProperties": true,
+      "required": [
+        "device_index",
+        "name",
+        "uuid",
+        "compute_capability",
+        "driver"
+      ],
+      "type": "object"
+    },
+    "identity": {
+      "additionalProperties": true,
+      "required": [
+        "source",
+        "binary",
+        "trace_binary",
+        "shape",
+        "host_args_trials",
+        "ncu_repeats_per_arm"
+      ],
+      "type": "object"
+    },
+    "interpretation": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "milestone": {
+      "additionalProperties": true,
+      "required": [
+        "phase",
+        "selection",
+        "completion_bar",
+        "ncus_are_independent_targets"
+      ],
+      "type": "object"
+    },
+    "population_reconciliation": {
+      "additionalProperties": true,
+      "required": [
+        "inventory",
+        "inventory_status",
+        "directory_count",
+        "live_stage_records",
+        "current_cuda_entries_with_live_artifact",
+        "analysis_only_entries_with_explicit_disposition",
+        "unassigned_entries",
+        "expanded_observation_units",
+        "native_macro_dispatches_numeric_total",
+        "lower_bound_consistent_observations",
+        "lower_bound_falsifier_observations",
+        "completion_frontier_reconciliation",
+        "launch_envelope_reconciliation",
+        "typed_tail_reconciliation",
+        "native_dispatch_reconciliation"
+      ],
+      "type": "object"
+    },
+    "schema": {
+      "const": "sm86_m5a_native_tail_differential_launch_cycle_v1"
+    },
+    "status": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "status",
+    "host_identity",
+    "milestone",
+    "identity",
+    "arms",
+    "differential",
+    "frontier_reconciliation",
+    "interpretation",
+    "population_reconciliation"
+  ],
+  "title": "sm86_m5a_native_tail_differential_launch_cycle_v1",
+  "type": "object"
+}

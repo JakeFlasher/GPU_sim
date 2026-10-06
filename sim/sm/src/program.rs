@@ -644,8 +644,10 @@ fn classify_pipeline(
         .map_err(ProgramError::TensorPipelineCapability)?;
     let initiation_interval_cycles = match opcode {
         "HMMA.16816.F32" | "HMMA.16816.F32.BF16" => intervals.hmma_16816_f16_bf16,
+        "HMMA.1688.F32.TF32" => intervals.hmma_1688_tf32,
         "HMMA.SP.16832.F32.BF16" => intervals.hmma_sparse_16832_f16_bf16,
         "IMMA.16816.S8.S8" => intervals.imma_16816_s8,
+        "IMMA.16832.S8.S8" => intervals.imma_16832_s8,
         _ => {
             return Err(ProgramError::TensorPipelineUnsupported {
                 arch,
@@ -1657,8 +1659,10 @@ mod tests {
         for (opcode, expected_interval) in [
             ("HMMA.16816.F32", 32),
             ("HMMA.16816.F32.BF16", 32),
+            ("HMMA.1688.F32.TF32", 32),
             ("HMMA.SP.16832.F32.BF16", 16),
             ("IMMA.16816.S8.S8", 8),
+            ("IMMA.16832.S8.S8", 16),
         ] {
             assert_eq!(
                 classify_pipeline_test(&format!("{opcode} R0, R2, R4, R6"), ArchId::Sm86).unwrap(),
@@ -1712,6 +1716,30 @@ mod tests {
     }
 
     #[test]
+    fn tf32_schedule_does_not_inherit_fp16_static_site_halving() {
+        for site_count in [1, DENSE_HMMA_SATURATION_SITES, 16] {
+            let pcs: Vec<u64> = (0..site_count).map(|index| index as u64 * 16).collect();
+            let mut sidecar = sidecar(&pcs);
+            for instruction in sidecar
+                .functions
+                .get_mut("my_kernel")
+                .unwrap()
+                .by_pc
+                .values_mut()
+            {
+                instruction.opcode_text = "HMMA.1688.F32.TF32 R0, R2, R4, R6".to_owned();
+            }
+            let schedules = build_schedules(&exec_info(&pcs), &sidecar).unwrap();
+            assert!(schedules[&1].by_pc.values().all(|slot| {
+                slot.pipeline_class
+                    == PipelineClass::Tensor {
+                        initiation_interval_cycles: 32,
+                    }
+            }));
+        }
+    }
+
+    #[test]
     fn scalar_opcode_candidate_is_explicit_and_other_forms_stay_dispatch_only() {
         assert_eq!(
             classify_pipeline_test("IADD3 R0, R1, R2, RZ", ArchId::Sm86).unwrap(),
@@ -1751,8 +1779,12 @@ mod tests {
     fn unknown_tensor_forms_are_rejected_without_generic_fallback() {
         for opcode in [
             "HMMA.884.F32 R0, R2, R4, R6",
+            "HMMA.1684.F32.TF32 R0",
+            "HMMA.1688.F32.TF32.EXTRA R0",
+            "HMMA.SP.1688.F32.TF32 R0",
             "HMMA.16816.F32.BF16.EXTRA R0",
             "IMMA.16816.U8.U8 R0",
+            "IMMA.16832.S8.S8.EXTRA R0",
             "BMMA.168256.XOR.POPC R0",
             "DMMA.884.F64 R0",
         ] {
@@ -1768,16 +1800,18 @@ mod tests {
 
     #[test]
     fn tensor_classifier_does_not_inherit_sm86_intervals_on_sm120() {
-        assert!(matches!(
-            classify_pipeline_test("HMMA.16816.F32 R0", ArchId::Sm120),
-            Err(ProgramError::TensorPipelineCapability(
-                CapabilityError::ResearchGap {
-                    arch: ArchId::Sm120,
-                    capability: "tensor_issue_intervals",
-                    reason,
-                }
-            )) if !reason.is_empty()
-        ));
+        for opcode in ["HMMA.16816.F32 R0", "HMMA.1688.F32.TF32 R0"] {
+            assert!(matches!(
+                classify_pipeline_test(opcode, ArchId::Sm120),
+                Err(ProgramError::TensorPipelineCapability(
+                    CapabilityError::ResearchGap {
+                        arch: ArchId::Sm120,
+                        capability: "tensor_issue_intervals",
+                        reason,
+                    }
+                )) if !reason.is_empty()
+            ));
+        }
     }
 
     #[test]

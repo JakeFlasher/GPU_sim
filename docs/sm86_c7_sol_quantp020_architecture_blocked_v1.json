@@ -1,0 +1,35 @@
+{
+  "schema": "sm86_c7_sol_quantp020_architecture_blocked_v1",
+  "phase": "C7-S34CF2",
+  "status": "unsupported_sm86_blackwell_sm120_nvfp4_path",
+  "candidate": "Quant/problem_020_nvfp4_linear_layer/cuda_cpp",
+  "identity": {
+    "arch_host": "sm_86",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "device_index": 0,
+    "driver": "615.71.09",
+    "cuda_toolkit": "13.2",
+    "torch": "2.12.0+cu130",
+    "environment": "tools/sol_execbench/.venv",
+    "source": "workloads/sol_execbench_baselines/Quant/problem_020_nvfp4_linear_layer/cuda_cpp",
+    "solution_compile_target": "compute_120a,sm_120a",
+    "source_kernel_arch": "cutlass::arch::Sm120 / OpClassBlockScaledTensorOp"
+  },
+  "source_review": "docs/sm86_c7_sol_quantp020_source_v1.json",
+  "declared_workload_rows": 16,
+  "build": {
+    "status": "not_admitted",
+    "reason": "The packaged implementation has no SM86 variant and its central CUTLASS NVFP4 GEMM is defined for Sm120 block-scaled tensor cores. Building or translating it for SM86 would be a different implementation, not the declared candidate."
+  },
+  "correctness_and_sanitizer": {
+    "status": "not_run",
+    "reason": "No SM86-compatible executable path exists in the retained source; correctness on a substituted kernel would not validate this candidate."
+  },
+  "capture_replay_ncu": {
+    "status": "not_applicable_on_sm86",
+    "reason": "The RTX 3090 Ti cannot execute Blackwell SM120 NVFP4 tensor-core instructions; no trace, replay, or NCU observation is substituted."
+  },
+  "no_substitute": "No SM86 source rewrite, software FP4 fallback, or borrowed Blackwell measurement is admitted. The row remains in the Quant population denominator and requires an SM120/Blackwell host for live validation.",
+  "interpretation": "This is an architecture/source disposition, not a correctness result and not a claim that the NVFP4 mechanism is complete. M4/C7 inventory coverage remains explicit while the SM86 capability boundary is preserved."
+}

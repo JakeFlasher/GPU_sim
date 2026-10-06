@@ -24,3 +24,13 @@ profiles, eight NVBit captures, and 37,920 replay records. W4/W8 are null to
 within 0.001 cycles/generation, identifying timing-neutral two-result same-bank
 buffering/bypass. W12 adds a bank-specific 0.742 cycles/generation beyond the
 opposite-bank pair; queue capacity versus bank retirement remains unresolved.
+
+## C7-S33AX live same-binary refresh (2026-10-04)
+
+The active Makefile/campaign interface now uses one 8,192-generation cubin for
+correctness, NVBit, replay, and NCU; the historical 64-generation trace twin
+is not an active input. The driver now parses numeric arguments strictly,
+initializes elapsed/sink buffers with sentinels, and reports elapsed/sink
+validity separately from the functional oracle. The selected W8 HF cell is the
+current live vertical target; no physical bank mapping or latency is inferred
+from this single contrast.

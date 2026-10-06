@@ -1,0 +1,65 @@
+{
+  "schema": "sm86_c4f_sfu_quad_wave_holdout_v1",
+  "status": "held_out_observation_joined_after_prediction_interval_miss",
+  "phase": "C4-F",
+  "prediction": "docs/sm86_c4f_sfu_quad_wave_prediction_pre_ncu_v1.json",
+  "identity": {
+    "binary": "workloads/research_probes/sfu_frontier/sfu_frontier",
+    "target_args": [
+      "210",
+      "8",
+      "512",
+      "quad"
+    ],
+    "target_trace": "results/alpha/c4f_sfu_quad_wave_20261004/target_trace_full_retry",
+    "target_control": "results/alpha/c4f_sfu_quad_wave_20261004/target_control.json",
+    "target_tail_facts": "results/alpha/c4f_sfu_quad_wave_20261004/target_tail_facts.json",
+    "target_simulator": "results/alpha/c4f_sfu_quad_wave_20261004/target_sim.json",
+    "arch_card": "arch_profiles/cards/sm_86.json",
+    "pchase_card": "data/pchase/sm_86_static_card.json",
+    "ncu_repeats": 5,
+    "failed_selected_launch_attempt": "results/alpha/c4f_sfu_quad_wave_20261004/target_kernel4_nvbit.status",
+    "target_ncu_root": "results/alpha/c4f_sfu_quad_wave_20261004/ncu"
+  },
+  "observation": {
+    "metric": "gpc__cycles_elapsed.max",
+    "values": [
+      101630.0,
+      101634.0,
+      101622.0,
+      101754.0,
+      101627.0
+    ],
+    "median_cycles": 101630.0,
+    "min_cycles": 101622.0,
+    "max_cycles": 101754.0,
+    "interval_lower_cycles": 101574.5,
+    "interval_upper_cycles": 101742.0,
+    "interval_covered": false,
+    "raw_repetition_coverage": 0.8,
+    "point_error_cycles": 28.25,
+    "point_absolute_percentage_error": 0.0002779691036111384,
+    "target_ncu_values_collected_after_prediction": true,
+    "instruction_count_match": true,
+    "hardware_completion": "not_observed",
+    "ncu_values_not_consumed_by_simulator": true,
+    "interval_miss_values": [
+      101754.0
+    ]
+  },
+  "target_features": {
+    "blocks": 210,
+    "warp_count": 8,
+    "iterations": 512,
+    "mode": "quad",
+    "sm_count": 84,
+    "trace_records": 6081600,
+    "tail_fact_records": 24326400,
+    "simulator_lower_bound_cycles": 57377,
+    "simulator_gpc_observation_frontier_cycles": 59209,
+    "completion_status": "incomplete_unmodeled_retirement_tails",
+    "hardware_completion": "not_observed",
+    "native_macro_dispatches": 0
+  },
+  "interpretation": "The wave-aware empirical feature predicted the 210-block target before target NCU collection. Four of five repeats fall inside the interval; one repeat at 101754 is 12 cycles above the upper endpoint. The median point APE is 0.028%, but the designed extrapolation has no coverage guarantee and the single miss is retained. Target NCU values did not enter simulator execution or model selection; this is not a physical CTA-wave or completion claim."
+}

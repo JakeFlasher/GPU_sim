@@ -1,0 +1,66 @@
+{
+  "candidate": "L1/problem_035_flux_ada_layer_norm_zero_modulation_extraction/cuda_cpp",
+  "correctness_and_sanitizer": {
+    "build_smoke": "docs/sm86_c7_sol_l1p035_smoke_v1.json",
+    "correctness_passed": true,
+    "sanitizer_errors": 0,
+    "capture_correctness": "results/alpha/c7_s34ad_sol_l1p035_20261005/native_capture.stdout"
+  },
+  "crosswalk": {
+    "native_hardware_scheduling_claimed": false,
+    "ncu_values_used_to_change_simulator": false,
+    "nvbit_raw_stat_unit_is_separate": true,
+    "physical_completion_upper_closed": false,
+    "simulator_lower_vs_ncu_median_cycles": {"delta": -22194, "lower": 319277, "median": 341471},
+    "simulator_ncu_instruction_count_equal": true,
+    "unsupported_memory_path_count": 18432,
+    "unsupported_memory_path_is_retained": true
+  },
+  "identity": {
+    "arch": "sm_86",
+    "binary_extension": "results/alpha/c7_s34ad_sol_l1p035_20261005/build/sol_l1p035_sm86.so",
+    "cuda_toolkit": "13.2",
+    "environment": "tools/sol_execbench/.venv",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "host_compiler": "/usr/bin/g++-14",
+    "capture_selection": "ACTIVE_FROM_START=0; MAX_ACCEPTED_ACTIVE_LAUNCHES=1; profiler-delimited single target launch",
+    "profiler_protocol": "cudaProfilerStart/Stop; NCU profile-from-start off; application replay; clock none; cache all",
+    "source": "workloads/sol_execbench_baselines/L1/problem_035_flux_ada_layer_norm_zero_modulation_extraction/cuda_cpp",
+    "torch": "2.12.0+cu130",
+    "representative_capture_shape": {"batch": 1}
+  },
+  "interpretation": "C7-S34AD completes a large AdaLN modulation custom CUDA vertical through all-shape build/correctness/memcheck screening, live NVBit/control capture, deterministic replay, and five target NCU repetitions. Simulator and NCU instruction counts match at 8607744. The tracer reports 18432 unsupported-memory-path records for the kernel's indirect chunk store; this typed limitation remains explicit and no dispatch or completion claim is made.",
+  "ncu": {
+    "instruction_values": [8607744.0,8607744.0,8607744.0,8607744.0,8607744.0],
+    "kernel": "<unnamed>::k_ada_modulation_extract(const float *, const float *, const float *, float *, float *, float *, float *, float *, float *)",
+    "median": 341471.0,
+    "median_instructions": 8607744.0,
+    "metric": "gpc__cycles_elapsed.max",
+    "paths": "results/alpha/c7_s34ad_sol_l1p035_20261005/ncu/repeat-*/ncu.csv",
+    "sm_active_median": 339727.0,
+    "sm_active_values": [337071.0,344426.0,339727.0,334762.0,347239.0],
+    "values": [338804.0,346132.0,341471.0,336445.0,348990.0]
+  },
+  "nvbit": {
+    "accepted_launches": 1,
+    "control_sidecar": "results/alpha/c7_s34ad_sol_l1p035_20261005/control_bits.json",
+    "decoded_static_instructions": 232,
+    "enhanced_parser_limitation": "cuobjdump failed for the JIT .so; independent control-sidecar extraction succeeded",
+    "raw_stats_total_insts": 23205888,
+    "raw_stats_total_reported_insts": 23205888,
+    "trace": "results/alpha/c7_s34ad_sol_l1p035_20261005/nvbit",
+    "unknown_control_encodings": 0
+  },
+  "phase": "C7-S34AD",
+  "schema": "sm86_c7_sol_l1p035_vertical_v1",
+  "simulator": {
+    "completion_status": "incomplete_unmodeled_retirement_tails",
+    "instructions_issued": 8607744,
+    "lower_bound_cycles": 319277,
+    "native_macro_dispatches": 0,
+    "records_seen": 8607744,
+    "replay": "results/alpha/c7_s34ad_sol_l1p035_20261005/replay.json",
+    "unmodeled_tails": {"async_copy_shared_visibility": false,"coherence": true,"dirty_writeback": true,"reduction_read_modify_write": false}
+  },
+  "status": "complete_large_native_vertical_ncu_simulator_crosswalk_with_typed_unsupported_memory_path"
+}

@@ -18,7 +18,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 DEFAULT_ROOT = REPO_ROOT / "results" / "captures" / "sm86_fixed_latency_allocate_20260817_v1"
 LONG_GENERATIONS = 8192
-TRACE_GENERATIONS = 64
+TRACE_GENERATIONS = 8192
 PROTOCOL_NAMES = {
     "r00": "r00_control",
     "r10": "r10_parity_triplets",
@@ -115,8 +115,6 @@ def validate_static(root: Path) -> dict[str, Any]:
     names = (
         "fixed_latency_allocate",
         "fixed_latency_allocate_same_bank",
-        "fixed_latency_allocate_trace",
-        "fixed_latency_allocate_trace_same_bank",
     )
     binaries = {}
     for name in names:
@@ -130,8 +128,7 @@ def validate_static(root: Path) -> dict[str, Any]:
         binaries[name] = {"decoded": 408, "functions": 6, "spill_free": True}
 
     long_patch = read_json(root / "metadata" / "r11_same_bank_patch.json")
-    trace_patch = read_json(root / "metadata" / "r11_same_bank_trace_patch.json")
-    for label, document in (("long", long_patch), ("trace", trace_patch)):
+    for label, document in (("long", long_patch),):
         require(document["patched_instructions"] == 16, f"{label}: patch count")
         require(document["changed_bytes"] == 28, f"{label}: changed bytes")
         require(document["all_changed_bytes_inside_selected_words"] is True, f"{label}: scope")

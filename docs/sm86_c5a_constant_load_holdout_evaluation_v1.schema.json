@@ -1,0 +1,61 @@
+{
+  "$id": "https://gpu-simulator.local/schemas/sm86_c5a_constant_load_holdout_evaluation_v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "decision": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "evidence": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 3,
+      "type": "array"
+    },
+    "frontier_separation": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "identity": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "interpretation": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "phase": {
+      "const": "C5-A"
+    },
+    "prediction": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "schema": {
+      "const": "sm86_c5a_constant_load_holdout_evaluation_v1"
+    },
+    "status": {
+      "type": "string"
+    },
+    "target_observation": {
+      "additionalProperties": true,
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema",
+    "status",
+    "phase",
+    "evidence",
+    "identity",
+    "prediction",
+    "target_observation",
+    "frontier_separation",
+    "decision",
+    "interpretation"
+  ],
+  "title": "SM86 C5-A constant-load holdout evaluation",
+  "type": "object"
+}

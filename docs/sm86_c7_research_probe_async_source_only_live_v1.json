@@ -1,0 +1,164 @@
+{
+  "comparison": {
+    "gap_cycles": 2895.0,
+    "gap_fraction": 0.0856508875739645,
+    "hardware_completion": "not_observed",
+    "instruction_count_match": true,
+    "lower_bound_consistency": true,
+    "lower_bound_cycles": 30905,
+    "ncu_median_cycles": 33800.0,
+    "point_estimator": "not_claimed"
+  },
+  "correctness": {
+    "all_trials_checked": true,
+    "correct": true,
+    "oracle": "host recomputation of phase interval sum and lane-zero source token; sentinel result initialized before launch",
+    "status": "passed",
+    "stdout": "results/alpha/c7_s33bb_async_source_20261004/correctness_0.stdout",
+    "trials": 7
+  },
+  "host_identity": {
+    "compute_capability": "8.6",
+    "device_index": 0,
+    "driver": "615.71.09",
+    "graphics_clock_mhz": 1350,
+    "memory_clock_mhz": 10501,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "pstate": "P0",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c"
+  },
+  "identity": {
+    "args": [
+      "--groups",
+      "64",
+      "--depth",
+      "4",
+      "--route",
+      "l2",
+      "--layout",
+      "compact",
+      "--markers",
+      "off"
+    ],
+    "binary": "workloads/research_probes/async_source_only/async_visibility_phase",
+    "binary_used_for_correctness_trace_replay_ncu": "same rebuilt vertical input (loaded cubin sidecar recorded separately when applicable)",
+    "control": "results/alpha/c7_s33bb_async_source_20261004/control.json",
+    "ncu_cache_control": "all",
+    "ncu_clock_control": "base",
+    "ncu_launch_count": 1,
+    "ncu_launch_skip": 0,
+    "ncu_metric": "gpc__cycles_elapsed.max",
+    "ncu_repeats": 5,
+    "ncu_replay_mode": "application",
+    "source": "workloads/research_probes/async_source_only/async_visibility_phase",
+    "target_block": [
+      32,
+      1,
+      1
+    ],
+    "target_grid": [
+      1,
+      1,
+      1
+    ],
+    "target_kernel": "_Z23visibility_phase_kernelILi4ELb1ELb0ELi0EEvPKciP11PhaseResult",
+    "target_kernel_id": 1,
+    "trace": "results/alpha/c7_s33bb_async_source_20261004/trace"
+  },
+  "interpretation": "The async-source family was captured through its visibility-phase executable. The same binary passed seven correctness trials, Compute Sanitizer, NVBit, replay, and five NCU captures; the lower bound is below the NCU median, while async shared visibility and retirement tails remain open.",
+  "ncu": {
+    "instruction_count": [
+      2088.0,
+      2088.0,
+      2088.0,
+      2088.0,
+      2088.0
+    ],
+    "max": 33824.0,
+    "median": 33800.0,
+    "metric": "gpc__cycles_elapsed.max",
+    "min": 33786.0,
+    "rows": [
+      {
+        "dram__sectors_read.sum": 508.0,
+        "gpc__cycles_elapsed.max": 33819.0,
+        "sm__cycles_active.max": 31630.0,
+        "smsp__inst_executed.sum": 2088.0,
+        "smsp__inst_executed_pipe_lsu.sum": 773.0,
+        "smsp__inst_issued.sum": 2100.0
+      },
+      {
+        "dram__sectors_read.sum": 252.0,
+        "gpc__cycles_elapsed.max": 33786.0,
+        "sm__cycles_active.max": 31588.0,
+        "smsp__inst_executed.sum": 2088.0,
+        "smsp__inst_executed_pipe_lsu.sum": 773.0,
+        "smsp__inst_issued.sum": 2100.0
+      },
+      {
+        "dram__sectors_read.sum": 796.0,
+        "gpc__cycles_elapsed.max": 33800.0,
+        "sm__cycles_active.max": 31597.0,
+        "smsp__inst_executed.sum": 2088.0,
+        "smsp__inst_executed_pipe_lsu.sum": 773.0,
+        "smsp__inst_issued.sum": 2100.0
+      },
+      {
+        "dram__sectors_read.sum": 252.0,
+        "gpc__cycles_elapsed.max": 33794.0,
+        "sm__cycles_active.max": 31605.0,
+        "smsp__inst_executed.sum": 2088.0,
+        "smsp__inst_executed_pipe_lsu.sum": 773.0,
+        "smsp__inst_issued.sum": 2100.0
+      },
+      {
+        "dram__sectors_read.sum": 252.0,
+        "gpc__cycles_elapsed.max": 33824.0,
+        "sm__cycles_active.max": 31606.0,
+        "smsp__inst_executed.sum": 2088.0,
+        "smsp__inst_executed_pipe_lsu.sum": 773.0,
+        "smsp__inst_issued.sum": 2100.0
+      }
+    ],
+    "stdev": 14.582180906846547,
+    "values": [
+      33819.0,
+      33786.0,
+      33800.0,
+      33794.0,
+      33824.0
+    ]
+  },
+  "schema": "sm86_c7_research_probe_async_source_only_live_v1",
+  "simulator": {
+    "completion_frontier": {
+      "lower_bound_cycles": 30905,
+      "status": "incomplete_unmodeled_retirement_tails",
+      "unmodeled_tails": {
+        "async_copy_shared_visibility": true,
+        "coherence": true,
+        "dirty_writeback": true,
+        "reduction_read_modify_write": false
+      }
+    },
+    "instructions_issued": 2088,
+    "native_macro_dispatches": 0,
+    "records": 2088,
+    "runtime_measurement": "sim-run output retained; no speedup/compression comparison"
+  },
+  "status": "correctness_trace_replay_ncu_complete_lower_bound_consistent_async_tail_open",
+  "trace": {
+    "launches": 1,
+    "static_control_decoded_instructions": 4096,
+    "static_control_functions": 48,
+    "static_control_unknown_encodings": 0,
+    "target_coverage": {
+      "blocks_observed": 1,
+      "kind": "full",
+      "population_blocks": 1
+    },
+    "target_records_replayed": 2088,
+    "tracer_total_insts": 6384,
+    "tracer_total_reported_insts": 6384
+  }
+}

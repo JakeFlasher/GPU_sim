@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpu-simulator.local/schemas/sm86_c4d_sfu_quad_observer_holdout_v1.schema.json",
+  "title": "SM86 C4-D quad SFU observer holdout",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "status",
+    "phase",
+    "prediction",
+    "identity",
+    "observation",
+    "target_features",
+    "interpretation"
+  ],
+  "properties": {
+    "schema": {
+      "const": "sm86_c4d_sfu_quad_observer_holdout_v1"
+    },
+    "status": {
+      "const": "held_out_observation_joined_after_prediction"
+    },
+    "phase": {
+      "const": "C4-D"
+    },
+    "prediction": {
+      "type": "string"
+    },
+    "identity": {
+      "type": "object"
+    },
+    "observation": {
+      "type": "object",
+      "required": [
+        "values",
+        "median_cycles",
+        "interval_covered",
+        "family_transfer_miss",
+        "target_ncu_values_collected_after_prediction",
+        "hardware_completion",
+        "ncu_values_not_consumed_by_simulator"
+      ],
+      "properties": {
+        "values": {
+          "type": "array",
+          "minItems": 5,
+          "items": {
+            "type": "number"
+          }
+        },
+        "interval_covered": {
+          "type": "boolean"
+        },
+        "family_transfer_miss": {
+          "const": true
+        },
+        "target_ncu_values_collected_after_prediction": {
+          "const": true
+        },
+        "hardware_completion": {
+          "const": "not_observed"
+        },
+        "ncu_values_not_consumed_by_simulator": {
+          "const": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "target_features": {
+      "type": "object"
+    },
+    "interpretation": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "candidate": "L2/problem_008_moe_sparse_routing_and_dispatch/cuda_cpp",
+  "environment": {"cuda_available": true, "torch": "2.12.0+cu130", "torch_cuda_runtime": "13.0", "gpu": "NVIDIA GeForce RTX 3090 Ti", "capability": "8.6", "permitted_environment": "tools/sol_execbench/.venv", "host_compiler": "/usr/bin/g++-14", "nvcc_expected": "CUDA 13.2"},
+  "phase": "C7-S34CA1",
+  "schema": "sm86_c7_sol_l2p008_source_v1",
+  "source_contract": {
+    "source": "workloads/sol_execbench_baselines/L2/problem_008_moe_sparse_routing_and_dispatch/cuda_cpp",
+    "entry_point": "main.cpp::run",
+    "class": "custom_cuda_plus_aten",
+    "sm86_marker": "solution.json compile option arch=compute_86,code=sm_86",
+    "custom_kernel": "silu_mul_bf16_kernel",
+    "aten_surfaces": "routing matmul/softmax/topk, one-hot/nonzero/index_select/index_add and per-expert projections",
+    "constants": {"hidden_size": 2048, "num_experts": 128, "top_k": 8, "intermediate_size": 768, "block_threads": 256},
+    "inputs": "BF16 hidden and expert/gate/down weights; bool norm_topk_prob scalar",
+    "outputs": "output [B,S,2048] BF16 destination tensor",
+    "math": "top-8 sparse routing with per-expert SwiGLU and weighted index-add; custom BF16 SiLU*up fusion",
+    "oracle": "independent L2 definition.json/reference.py",
+    "workload_rows": 16,
+    "resource_risk": "128-expert loop can launch many vendor/cuBLAS kernels; full NVBit may hit parser or trace-volume blockers"
+  },
+  "selection_basis": "Next remaining L2 custom-CUDA row after decoder/MLP blocker records; no timing or NCU values transferred",
+  "status": "complete_source_contract_and_sm86_environment_review"
+}

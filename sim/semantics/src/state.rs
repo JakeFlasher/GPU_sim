@@ -1090,16 +1090,22 @@ impl AsyncCopyBoundaryState {
                     got: observation.delivery_work,
                 });
             }
-            if destination_lines != observation.destination_lines
-                || max_bank_wavefronts != observation.max_bank_wavefronts
-                || max_bypass_wavefronts != observation.max_bypass_wavefronts
+            // The compact observation aggregates source-bearing cohorts and
+            // executing source-ignored (zero-fill) destination cohorts.  The
+            // sparse boundary sidecar intentionally carries only source
+            // cohorts because zero-fill lanes have no source-response event.
+            // A source-only sum may therefore be lower, but must never exceed
+            // the aggregate topology published in the compact observation.
+            if destination_lines > observation.destination_lines
+                || max_bank_wavefronts > observation.max_bank_wavefronts
+                || max_bypass_wavefronts > observation.max_bypass_wavefronts
             {
                 return Err(AsyncCopyStateError::BypassObservationAggregateMismatch {
                     group: observation.group,
                     instruction: observation.instruction,
-                    field: "cohort topology aggregates",
-                    expected: destination_lines,
-                    got: observation.destination_lines,
+                    field: "source cohort topology exceeds aggregate",
+                    expected: observation.destination_lines,
+                    got: destination_lines,
                 });
             }
         }
@@ -2536,12 +2542,7 @@ impl PowerBoundaryState {
             if end_cycle < domain.last_cycle {
                 return Err(PowerStateError::TimeTravel);
             }
-            let delta = end_cycle - domain.last_cycle;
             domain.status = PowerDomainStatus::Clocked;
-            domain.clocked_cycles = domain
-                .clocked_cycles
-                .checked_add(delta)
-                .ok_or(PowerStateError::CounterOverflow)?;
             domain.queue_events = domain
                 .queue_events
                 .checked_add(1)

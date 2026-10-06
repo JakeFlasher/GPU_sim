@@ -1,0 +1,34 @@
+{
+  "candidate": "L1/problem_066_masked_softmax_with_attention_dropout_backward/cuda_cpp",
+  "phase": "C7-S34AW3",
+  "schema": "sm86_c7_sol_l1p066_correctness_blocked_v1",
+  "status": "complete_bounded_correctness_blocker_no_native_vertical",
+  "smoke": "docs/sm86_c7_sol_l1p066_smoke_v1.json",
+  "identity": {
+    "arch": "sm_86",
+    "cuda_toolkit": "13.2",
+    "host_compiler": "/usr/bin/g++-14",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "source": "workloads/sol_execbench_baselines/L1/problem_066_masked_softmax_with_attention_dropout_backward/cuda_cpp"
+  },
+  "observation": {
+    "declared_rows": 17,
+    "screened_rows_per_seed": 17,
+    "seeds": [223, 224, 225],
+    "seed_223_failed_rows": 14,
+    "maximum_absolute_error": 0.000244140625,
+    "nonfinite_observed": false,
+    "declared_tolerance": "max_atol=1e-5, max_rtol=1e-5"
+  },
+  "mechanism": {
+    "observed": "The custom FP32 row reduction differs from the independent PyTorch reference by more than the unusually tight 1e-5 absolute/relative tolerance on many rows; failures persist at p_dropout=0 and are not caused by dropout masking.",
+    "hypothesis": "Reduction order and/or compiler FP32 arithmetic differ from the reference's reduction implementation; the current source does not provide an independently closed numerical contract at this tolerance.",
+    "inference": "No sanitizer, NVBit, replay, or NCU vertical is scientifically admissible until the source matches the declared oracle or the benchmark contract is independently revised. No timing value is transferred."
+  },
+  "disposition": {
+    "native_vertical_admitted": false,
+    "build_passed": true,
+    "sanitizer_run": false,
+    "next_supported_check": "Reconcile the FP32 reduction/order contract with a focused differential before any capture; retain this failed screen in the coverage denominator."
+  }
+}

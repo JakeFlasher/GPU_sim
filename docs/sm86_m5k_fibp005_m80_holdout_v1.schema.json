@@ -1,0 +1,10 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://gpu-simulator.local/schemas/sm86_m5k_fibp005_m80_holdout_v1.schema.json",
+  "title":"SM86 M5-K FIB005 M80 holdout",
+  "type":"object","additionalProperties":false,
+  "required":["schema","phase","status","prediction","identity","host_identity","protocol","target","evaluation","frontier_separation","interpretation"],
+  "properties":{
+    "schema":{"const":"sm86_m5k_fibp005_m80_holdout_v1"},"phase":{"const":"M5-K"},"status":{"const":"complete_scoped_negative_within_family_holdout"},"prediction":{"const":"docs/sm86_m5k_fibp005_m80_prediction_pre_ncu_v1.json"},"identity":{"type":"object"},"host_identity":{"type":"object"},"protocol":{"type":"object","properties":{"prediction_materialized_before_target_ncu":{"const":true},"target_ncu_values_used_for_model_selection":{"const":false},"target_ncu_values_used_by_simulator":{"const":false}},"required":["prediction_materialized_before_target_ncu","target_ncu_values_used_for_model_selection","target_ncu_values_used_by_simulator"],"additionalProperties":true},"target":{"type":"object"},"evaluation":{"type":"object","properties":{"interval_coverage":{"const":0.0},"covered_repetitions":{"const":0},"target_repetitions":{"const":5}},"required":["interval_coverage","covered_repetitions","target_repetitions"],"additionalProperties":true},"frontier_separation":{"type":"object","properties":{"hardware_completion":{"const":"not_observed"},"physical_completion_upper_closed":{"const":false},"broad_accuracy_claim":{"const":false}},"required":["hardware_completion","physical_completion_upper_closed","broad_accuracy_claim"],"additionalProperties":true},"interpretation":{"type":"string","minLength":1}
+  }
+}

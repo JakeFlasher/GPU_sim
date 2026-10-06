@@ -1,0 +1,94 @@
+{
+  "$id": "https://gpu-simulator.local/schemas/sm86_c3a_completion_obligation_reconciliation_v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "fixes": {
+      "items": {
+        "additionalProperties": true,
+        "required": [
+          "path",
+          "change",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "interpretation": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "invariants": {
+      "items": {
+        "additionalProperties": true,
+        "required": [
+          "name",
+          "result"
+        ],
+        "type": "object"
+      },
+      "minItems": 6,
+      "type": "array"
+    },
+    "limits": {
+      "additionalProperties": true,
+      "required": [
+        "hardware_completion",
+        "dirty_writeback_tail",
+        "coherence_tail",
+        "native_macro_dispatches",
+        "timing_parameter_fit",
+        "positive_native_continuation"
+      ],
+      "type": "object"
+    },
+    "phase": {
+      "const": "C3-A"
+    },
+    "regression": {
+      "items": {
+        "additionalProperties": true,
+        "required": [
+          "command",
+          "passed",
+          "failed"
+        ],
+        "type": "object"
+      },
+      "minItems": 4,
+      "type": "array"
+    },
+    "schema": {
+      "const": "sm86_c3a_completion_obligation_reconciliation_v1"
+    },
+    "source_seams": {
+      "items": {
+        "additionalProperties": true,
+        "required": [
+          "path",
+          "surface"
+        ],
+        "type": "object"
+      },
+      "minItems": 4,
+      "type": "array"
+    },
+    "status": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "status",
+    "phase",
+    "source_seams",
+    "invariants",
+    "regression",
+    "limits",
+    "interpretation"
+  ],
+  "title": "sm86_c3a_completion_obligation_reconciliation_v1",
+  "type": "object"
+}

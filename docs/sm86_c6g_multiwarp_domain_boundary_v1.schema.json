@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpu-simulator.local/schemas/sm86_c6g_multiwarp_domain_boundary_v1.schema.json",
+  "title": "SM86 C6-G multiwarp domain boundary",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "status",
+    "phase",
+    "checks",
+    "evidence",
+    "supported_domain",
+    "unsupported_or_open",
+    "interpretation"
+  ],
+  "properties": {
+    "schema": {
+      "const": "sm86_c6g_multiwarp_domain_boundary_v1"
+    },
+    "status": {
+      "type": "string"
+    },
+    "phase": {
+      "const": "C6-G"
+    },
+    "checks": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "boolean"
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 3
+    },
+    "supported_domain": {
+      "type": "object"
+    },
+    "unsupported_or_open": {
+      "type": "object"
+    },
+    "interpretation": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

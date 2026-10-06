@@ -1,0 +1,775 @@
+{
+  "schema": "sm86_c7_sol_l1p030_smoke_v1",
+  "phase": "C7-S34CP2",
+  "status": "complete_sm86_build_correctness_memcheck",
+  "candidate": "L1/problem_030_attention_output_projection_with_residual/cuda_cpp",
+  "identity": {
+    "arch": "sm_86",
+    "capability": "8.6",
+    "cuda_toolkit": "13.2",
+    "torch": "2.12.0+cu130",
+    "torch_cuda_runtime": "13.0",
+    "environment": "tools/sol_execbench/.venv",
+    "source": "workloads/sol_execbench_baselines/L1/problem_030_attention_output_projection_with_residual/cuda_cpp",
+    "extension": "results/alpha/c7_s34cp_sol_l1p030_20261005/pinned/official_build/sol_l1p030_sm86.so",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "device_index": 0,
+    "nvcc": "/usr/local/cuda-13.2/bin/nvcc",
+    "host_compiler": "/usr/bin/g++-14",
+    "cutlass_include": "third_party/cutlass/include"
+  },
+  "build": {
+    "status": "passed",
+    "compiler": "/usr/bin/g++-14",
+    "cuda_arch": "sm_86",
+    "build_dir": "results/alpha/c7_s34cp_sol_l1p030_20261005/pinned/official_build"
+  },
+  "correctness": {
+    "official_rows": 48,
+    "declared_workload_rows": 16,
+    "seeds": [
+      223,
+      224,
+      225
+    ],
+    "rows": [
+      {
+        "workload_index": 0,
+        "axes": {
+          "batch_size": 16,
+          "seq_len": 512
+        },
+        "seed": 223,
+        "uuid": "73a42d0a-10f7-5d89-899f-c783f1a56e73",
+        "elements": 20971520,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 1,
+        "axes": {
+          "batch_size": 4,
+          "seq_len": 128
+        },
+        "seed": 223,
+        "uuid": "a38a3e91-9961-563f-beac-a6609a7af8f0",
+        "elements": 1310720,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 2,
+        "axes": {
+          "batch_size": 8,
+          "seq_len": 1024
+        },
+        "seed": 223,
+        "uuid": "4fd0eace-d7cf-5db3-ab4d-1f87d5cae75d",
+        "elements": 20971520,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 3,
+        "axes": {
+          "batch_size": 1,
+          "seq_len": 1571
+        },
+        "seed": 223,
+        "uuid": "3493d75e-bd08-51db-bdc6-d3bb9b8d20e4",
+        "elements": 4021760,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 4,
+        "axes": {
+          "batch_size": 4,
+          "seq_len": 1024
+        },
+        "seed": 223,
+        "uuid": "7882ceec-15e5-5550-bc7a-c654534e8ed8",
+        "elements": 10485760,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 5,
+        "axes": {
+          "batch_size": 2,
+          "seq_len": 2053
+        },
+        "seed": 223,
+        "uuid": "a3d86f51-1602-52d5-b98b-680fba482606",
+        "elements": 10511360,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 6,
+        "axes": {
+          "batch_size": 8,
+          "seq_len": 997
+        },
+        "seed": 223,
+        "uuid": "8875e22c-2dda-53fc-a141-fce38361965c",
+        "elements": 20418560,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 7,
+        "axes": {
+          "batch_size": 16,
+          "seq_len": 256
+        },
+        "seed": 223,
+        "uuid": "bdf82911-b9ff-50ca-9bd3-ea97111d38ec",
+        "elements": 10485760,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 8,
+        "axes": {
+          "batch_size": 64,
+          "seq_len": 128
+        },
+        "seed": 223,
+        "uuid": "3eef4227-00b2-56f6-88fc-c298fd6d1939",
+        "elements": 20971520,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 9,
+        "axes": {
+          "batch_size": 32,
+          "seq_len": 256
+        },
+        "seed": 223,
+        "uuid": "90b9db2a-da1c-5aec-8817-0c6d11821bc6",
+        "elements": 20971520,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 10,
+        "axes": {
+          "batch_size": 8,
+          "seq_len": 512
+        },
+        "seed": 223,
+        "uuid": "e896226e-74ab-5808-b0aa-4140d14ebfce",
+        "elements": 10485760,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 11,
+        "axes": {
+          "batch_size": 1,
+          "seq_len": 1024
+        },
+        "seed": 223,
+        "uuid": "fc337b24-5955-55cf-97fe-eba866f47d81",
+        "elements": 2621440,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 12,
+        "axes": {
+          "batch_size": 16,
+          "seq_len": 128
+        },
+        "seed": 223,
+        "uuid": "bd36a55a-095b-5cba-aade-d599546e4e1a",
+        "elements": 5242880,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 13,
+        "axes": {
+          "batch_size": 2,
+          "seq_len": 293
+        },
+        "seed": 223,
+        "uuid": "749ab67c-0be4-5b49-afb2-8a0ff296171c",
+        "elements": 1500160,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 14,
+        "axes": {
+          "batch_size": 1,
+          "seq_len": 2048
+        },
+        "seed": 223,
+        "uuid": "40c35ccb-3e78-5071-8d0c-2a620a9bda03",
+        "elements": 5242880,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 15,
+        "axes": {
+          "batch_size": 1,
+          "seq_len": 256
+        },
+        "seed": 223,
+        "uuid": "7194f7ab-2a2e-57e3-bb5a-0aa6e5081c12",
+        "elements": 655360,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 0,
+        "axes": {
+          "batch_size": 16,
+          "seq_len": 512
+        },
+        "seed": 224,
+        "uuid": "73a42d0a-10f7-5d89-899f-c783f1a56e73",
+        "elements": 20971520,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 1,
+        "axes": {
+          "batch_size": 4,
+          "seq_len": 128
+        },
+        "seed": 224,
+        "uuid": "a38a3e91-9961-563f-beac-a6609a7af8f0",
+        "elements": 1310720,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 2,
+        "axes": {
+          "batch_size": 8,
+          "seq_len": 1024
+        },
+        "seed": 224,
+        "uuid": "4fd0eace-d7cf-5db3-ab4d-1f87d5cae75d",
+        "elements": 20971520,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 3,
+        "axes": {
+          "batch_size": 1,
+          "seq_len": 1571
+        },
+        "seed": 224,
+        "uuid": "3493d75e-bd08-51db-bdc6-d3bb9b8d20e4",
+        "elements": 4021760,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 4,
+        "axes": {
+          "batch_size": 4,
+          "seq_len": 1024
+        },
+        "seed": 224,
+        "uuid": "7882ceec-15e5-5550-bc7a-c654534e8ed8",
+        "elements": 10485760,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 5,
+        "axes": {
+          "batch_size": 2,
+          "seq_len": 2053
+        },
+        "seed": 224,
+        "uuid": "a3d86f51-1602-52d5-b98b-680fba482606",
+        "elements": 10511360,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 6,
+        "axes": {
+          "batch_size": 8,
+          "seq_len": 997
+        },
+        "seed": 224,
+        "uuid": "8875e22c-2dda-53fc-a141-fce38361965c",
+        "elements": 20418560,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 7,
+        "axes": {
+          "batch_size": 16,
+          "seq_len": 256
+        },
+        "seed": 224,
+        "uuid": "bdf82911-b9ff-50ca-9bd3-ea97111d38ec",
+        "elements": 10485760,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 8,
+        "axes": {
+          "batch_size": 64,
+          "seq_len": 128
+        },
+        "seed": 224,
+        "uuid": "3eef4227-00b2-56f6-88fc-c298fd6d1939",
+        "elements": 20971520,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 9,
+        "axes": {
+          "batch_size": 32,
+          "seq_len": 256
+        },
+        "seed": 224,
+        "uuid": "90b9db2a-da1c-5aec-8817-0c6d11821bc6",
+        "elements": 20971520,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 10,
+        "axes": {
+          "batch_size": 8,
+          "seq_len": 512
+        },
+        "seed": 224,
+        "uuid": "e896226e-74ab-5808-b0aa-4140d14ebfce",
+        "elements": 10485760,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 11,
+        "axes": {
+          "batch_size": 1,
+          "seq_len": 1024
+        },
+        "seed": 224,
+        "uuid": "fc337b24-5955-55cf-97fe-eba866f47d81",
+        "elements": 2621440,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 12,
+        "axes": {
+          "batch_size": 16,
+          "seq_len": 128
+        },
+        "seed": 224,
+        "uuid": "bd36a55a-095b-5cba-aade-d599546e4e1a",
+        "elements": 5242880,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 13,
+        "axes": {
+          "batch_size": 2,
+          "seq_len": 293
+        },
+        "seed": 224,
+        "uuid": "749ab67c-0be4-5b49-afb2-8a0ff296171c",
+        "elements": 1500160,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 14,
+        "axes": {
+          "batch_size": 1,
+          "seq_len": 2048
+        },
+        "seed": 224,
+        "uuid": "40c35ccb-3e78-5071-8d0c-2a620a9bda03",
+        "elements": 5242880,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 15,
+        "axes": {
+          "batch_size": 1,
+          "seq_len": 256
+        },
+        "seed": 224,
+        "uuid": "7194f7ab-2a2e-57e3-bb5a-0aa6e5081c12",
+        "elements": 655360,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 0,
+        "axes": {
+          "batch_size": 16,
+          "seq_len": 512
+        },
+        "seed": 225,
+        "uuid": "73a42d0a-10f7-5d89-899f-c783f1a56e73",
+        "elements": 20971520,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 1,
+        "axes": {
+          "batch_size": 4,
+          "seq_len": 128
+        },
+        "seed": 225,
+        "uuid": "a38a3e91-9961-563f-beac-a6609a7af8f0",
+        "elements": 1310720,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 2,
+        "axes": {
+          "batch_size": 8,
+          "seq_len": 1024
+        },
+        "seed": 225,
+        "uuid": "4fd0eace-d7cf-5db3-ab4d-1f87d5cae75d",
+        "elements": 20971520,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 3,
+        "axes": {
+          "batch_size": 1,
+          "seq_len": 1571
+        },
+        "seed": 225,
+        "uuid": "3493d75e-bd08-51db-bdc6-d3bb9b8d20e4",
+        "elements": 4021760,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 4,
+        "axes": {
+          "batch_size": 4,
+          "seq_len": 1024
+        },
+        "seed": 225,
+        "uuid": "7882ceec-15e5-5550-bc7a-c654534e8ed8",
+        "elements": 10485760,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 5,
+        "axes": {
+          "batch_size": 2,
+          "seq_len": 2053
+        },
+        "seed": 225,
+        "uuid": "a3d86f51-1602-52d5-b98b-680fba482606",
+        "elements": 10511360,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 6,
+        "axes": {
+          "batch_size": 8,
+          "seq_len": 997
+        },
+        "seed": 225,
+        "uuid": "8875e22c-2dda-53fc-a141-fce38361965c",
+        "elements": 20418560,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 7,
+        "axes": {
+          "batch_size": 16,
+          "seq_len": 256
+        },
+        "seed": 225,
+        "uuid": "bdf82911-b9ff-50ca-9bd3-ea97111d38ec",
+        "elements": 10485760,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 8,
+        "axes": {
+          "batch_size": 64,
+          "seq_len": 128
+        },
+        "seed": 225,
+        "uuid": "3eef4227-00b2-56f6-88fc-c298fd6d1939",
+        "elements": 20971520,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 9,
+        "axes": {
+          "batch_size": 32,
+          "seq_len": 256
+        },
+        "seed": 225,
+        "uuid": "90b9db2a-da1c-5aec-8817-0c6d11821bc6",
+        "elements": 20971520,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 10,
+        "axes": {
+          "batch_size": 8,
+          "seq_len": 512
+        },
+        "seed": 225,
+        "uuid": "e896226e-74ab-5808-b0aa-4140d14ebfce",
+        "elements": 10485760,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 11,
+        "axes": {
+          "batch_size": 1,
+          "seq_len": 1024
+        },
+        "seed": 225,
+        "uuid": "fc337b24-5955-55cf-97fe-eba866f47d81",
+        "elements": 2621440,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 12,
+        "axes": {
+          "batch_size": 16,
+          "seq_len": 128
+        },
+        "seed": 225,
+        "uuid": "bd36a55a-095b-5cba-aade-d599546e4e1a",
+        "elements": 5242880,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 13,
+        "axes": {
+          "batch_size": 2,
+          "seq_len": 293
+        },
+        "seed": 225,
+        "uuid": "749ab67c-0be4-5b49-afb2-8a0ff296171c",
+        "elements": 1500160,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 14,
+        "axes": {
+          "batch_size": 1,
+          "seq_len": 2048
+        },
+        "seed": 225,
+        "uuid": "40c35ccb-3e78-5071-8d0c-2a620a9bda03",
+        "elements": 5242880,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      },
+      {
+        "workload_index": 15,
+        "axes": {
+          "batch_size": 1,
+          "seq_len": 256
+        },
+        "seed": 225,
+        "uuid": "7194f7ab-2a2e-57e3-bb5a-0aa6e5081c12",
+        "elements": 655360,
+        "matched_ratio": 1.0,
+        "max_abs_error": 0.03125,
+        "elements_exceeding_declared_tolerance": 0,
+        "strict_all_elements_passed": true,
+        "passed": true
+      }
+    ],
+    "all_rows_passed": true,
+    "min_matched_ratio": 1.0,
+    "max_abs_error": 0.03125,
+    "oracle": "official L1/030 reference.py; compute_error_stats required_match_ratio=0.99",
+    "status": "passed"
+  },
+  "sanitizer": {
+    "tool": "compute-sanitizer memcheck",
+    "representative_row": {
+      "workload_index": 14,
+      "batch_size": 1,
+      "seq_len": 2048
+    },
+    "errors": 0,
+    "status": "passed",
+    "result": "results/alpha/c7_s34cp_sol_l1p030_20261005/pinned/memcheck.json"
+  }
+}

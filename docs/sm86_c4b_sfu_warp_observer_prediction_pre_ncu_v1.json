@@ -1,0 +1,223 @@
+{
+  "schema": "sm86_c4b_sfu_warp_observer_prediction_pre_ncu_v1",
+  "status": "prediction_materialized_before_target_ncu",
+  "phase": "C4-B",
+  "protocol": {
+    "calibration_cells": [
+      "84x1x1024 dependent",
+      "84x2x1024 dependent",
+      "84x4x1024 dependent"
+    ],
+    "holdout_cell": "84x8x1024 dependent",
+    "target_metric": "gpc__cycles_elapsed.max",
+    "target_ncu_values_collected": false,
+    "ncu_values_used_by_simulator": false,
+    "prediction_before_target_collection": true,
+    "interval_method": "OLS over all five calibration repeats per warp count plus maximum absolute calibration residual"
+  },
+  "host_identity": {
+    "device_index": 0,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "compute_capability": "8.6",
+    "driver": "615.71.09",
+    "pstate": "P0",
+    "graphics_clock_mhz": 1350,
+    "memory_clock_mhz": 10501
+  },
+  "identity": {
+    "binary": "workloads/research_probes/sfu_frontier/sfu_frontier",
+    "binary_used_for_calibration_and_holdout": "same rebuilt CUDA 13.2/GCC 14 binary",
+    "target_args": [
+      "84",
+      "8",
+      "1024",
+      "dependent"
+    ],
+    "target_trace": "results/alpha/c4b_sfu_observer_20261004/target_trace",
+    "target_control": "results/alpha/c4b_sfu_observer_20261004/target_control.json",
+    "target_tail_facts": "results/alpha/c4b_sfu_observer_20261004/target_tail_facts.json",
+    "target_simulator": "results/alpha/c4b_sfu_observer_20261004/target_sim.json",
+    "arch_card": "arch_profiles/cards/sm_86.json",
+    "pchase_card": "data/pchase/sm_86_static_card.json",
+    "ncu_repeats": 5
+  },
+  "calibration": {
+    "warps": [
+      1,
+      2,
+      4
+    ],
+    "raw_repetitions": [
+      {
+        "warps": 1,
+        "repeat": 0,
+        "gpc__cycles_elapsed.max": 34315.0,
+        "smsp__inst_executed.sum": 347256.0,
+        "smsp__inst_issued.sum": 347844.0,
+        "gpu__time_duration.sum": 22048.0
+      },
+      {
+        "warps": 1,
+        "repeat": 1,
+        "gpc__cycles_elapsed.max": 34325.0,
+        "smsp__inst_executed.sum": 347256.0,
+        "smsp__inst_issued.sum": 347844.0,
+        "gpu__time_duration.sum": 22048.0
+      },
+      {
+        "warps": 1,
+        "repeat": 2,
+        "gpc__cycles_elapsed.max": 34329.0,
+        "smsp__inst_executed.sum": 347256.0,
+        "smsp__inst_issued.sum": 347844.0,
+        "gpu__time_duration.sum": 22048.0
+      },
+      {
+        "warps": 1,
+        "repeat": 3,
+        "gpc__cycles_elapsed.max": 34309.0,
+        "smsp__inst_executed.sum": 347256.0,
+        "smsp__inst_issued.sum": 347844.0,
+        "gpu__time_duration.sum": 22016.0
+      },
+      {
+        "warps": 1,
+        "repeat": 4,
+        "gpc__cycles_elapsed.max": 34317.0,
+        "smsp__inst_executed.sum": 347256.0,
+        "smsp__inst_issued.sum": 347844.0,
+        "gpu__time_duration.sum": 22048.0
+      },
+      {
+        "warps": 2,
+        "repeat": 0,
+        "gpc__cycles_elapsed.max": 34361.0,
+        "smsp__inst_executed.sum": 694512.0,
+        "smsp__inst_issued.sum": 695688.0,
+        "gpu__time_duration.sum": 22080.0
+      },
+      {
+        "warps": 2,
+        "repeat": 1,
+        "gpc__cycles_elapsed.max": 34357.0,
+        "smsp__inst_executed.sum": 694512.0,
+        "smsp__inst_issued.sum": 695688.0,
+        "gpu__time_duration.sum": 22048.0
+      },
+      {
+        "warps": 2,
+        "repeat": 2,
+        "gpc__cycles_elapsed.max": 34352.0,
+        "smsp__inst_executed.sum": 694512.0,
+        "smsp__inst_issued.sum": 695688.0,
+        "gpu__time_duration.sum": 22080.0
+      },
+      {
+        "warps": 2,
+        "repeat": 3,
+        "gpc__cycles_elapsed.max": 34426.0,
+        "smsp__inst_executed.sum": 694512.0,
+        "smsp__inst_issued.sum": 695688.0,
+        "gpu__time_duration.sum": 22112.0
+      },
+      {
+        "warps": 2,
+        "repeat": 4,
+        "gpc__cycles_elapsed.max": 34358.0,
+        "smsp__inst_executed.sum": 694512.0,
+        "smsp__inst_issued.sum": 695688.0,
+        "gpu__time_duration.sum": 22048.0
+      },
+      {
+        "warps": 4,
+        "repeat": 0,
+        "gpc__cycles_elapsed.max": 34413.0,
+        "smsp__inst_executed.sum": 1389024.0,
+        "smsp__inst_issued.sum": 1391376.0,
+        "gpu__time_duration.sum": 22112.0
+      },
+      {
+        "warps": 4,
+        "repeat": 1,
+        "gpc__cycles_elapsed.max": 34507.0,
+        "smsp__inst_executed.sum": 1389024.0,
+        "smsp__inst_issued.sum": 1391376.0,
+        "gpu__time_duration.sum": 22176.0
+      },
+      {
+        "warps": 4,
+        "repeat": 2,
+        "gpc__cycles_elapsed.max": 34266.0,
+        "smsp__inst_executed.sum": 1389024.0,
+        "smsp__inst_issued.sum": 1391376.0,
+        "gpu__time_duration.sum": 21984.0
+      },
+      {
+        "warps": 4,
+        "repeat": 3,
+        "gpc__cycles_elapsed.max": 34275.0,
+        "smsp__inst_executed.sum": 1389024.0,
+        "smsp__inst_issued.sum": 1391376.0,
+        "gpu__time_duration.sum": 22016.0
+      },
+      {
+        "warps": 4,
+        "repeat": 4,
+        "gpc__cycles_elapsed.max": 34236.0,
+        "smsp__inst_executed.sum": 1389024.0,
+        "smsp__inst_issued.sum": 1391376.0,
+        "gpu__time_duration.sum": 21984.0
+      }
+    ],
+    "group_medians": {
+      "warps_1": 34317.0,
+      "warps_2": 34358.0,
+      "warps_4": 34275.0
+    },
+    "fit": {
+      "family": "OLS gpc cycles vs resident warp count",
+      "intercept_cycles": 34334.7,
+      "slope_cycles_per_warp": 3.5857142857142863,
+      "max_absolute_calibration_residual_cycles": 157.95714285714348,
+      "residuals_cycles": [
+        -23.285714285710128,
+        -13.285714285710128,
+        -9.285714285710128,
+        -29.285714285710128,
+        -21.285714285710128,
+        19.128571428576834,
+        15.128571428576834,
+        10.128571428576834,
+        84.12857142857683,
+        16.128571428576834,
+        63.95714285714348,
+        157.95714285714348,
+        -83.04285714285652,
+        -74.04285714285652,
+        -113.04285714285652
+      ]
+    }
+  },
+  "target_features": {
+    "warp_count": 8,
+    "blocks": 84,
+    "iterations": 1024,
+    "mode": "dependent",
+    "trace_records": 2778048,
+    "target_tail_fact_records": 11112192,
+    "simulator_lower_bound_cycles": 38126,
+    "simulator_gpc_observation_frontier_cycles": 39950,
+    "completion_status": "incomplete_unmodeled_retirement_tails",
+    "hardware_completion": "not_observed",
+    "native_macro_dispatches": 0
+  },
+  "prediction": {
+    "point_cycles": 34363.38571428571,
+    "interval_lower_cycles": 34205.428571428565,
+    "interval_upper_cycles": 34521.34285714285,
+    "interval_width_cycles": 315.91428571428696,
+    "interval_role": "empirical_observer_prediction_not_semantic_completion_upper"
+  },
+  "interpretation": "Prediction uses only five NCU calibration repeats each from disjoint warp-count cells 1, 2, and 4. The target warp-8 NCU values were not collected when this document was materialized; target trace/replay counters are retained separately and do not alter simulator execution. The interval is an empirical observer interval from calibration residuals, not a semantic or hardware completion upper. Family transfer, physical completion, and native dispatch remain open."
+}

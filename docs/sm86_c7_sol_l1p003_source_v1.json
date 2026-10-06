@@ -1,0 +1,138 @@
+{
+  "candidate": "L1/problem_003_lm_head_projection_with_logit_slicing/cutlass",
+  "environment": {
+    "cuda_available": true,
+    "torch": "2.12.0+cu130",
+    "torch_cuda_runtime": "13.0",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "capability": "8.6",
+    "permitted_environment": "tools/sol_execbench/.venv",
+    "host_compiler": "/usr/bin/g++-14",
+    "nvcc_expected": "CUDA 13.2",
+    "cutlass_include": "third_party/cutlass/include"
+  },
+  "phase": "C7-S34CN1",
+  "schema": "sm86_c7_sol_l1p003_source_v1",
+  "source_contract": {
+    "source": "workloads/sol_execbench_baselines/L1/problem_003_lm_head_projection_with_logit_slicing/cutlass",
+    "entry_point": "main.cpp::run",
+    "class": "cutlass_cuda",
+    "sm86_marker": true,
+    "packaged_target": "-gencode arch=compute_86,code=sm_86",
+    "custom_kernels": [],
+    "vendor_kernel": "CUTLASS device::Gemm TensorOp",
+    "cutlass_arch_tag": "cutlass::arch::Sm80 (TensorOp; valid for SM86 target)",
+    "constants": {
+      "hidden_size": 2048,
+      "vocab_size": 102400,
+      "dtype": "BF16 inputs/output with FP32 accumulator",
+      "threadblock": [
+        128,
+        128,
+        32
+      ],
+      "warp": [
+        64,
+        64,
+        32
+      ],
+      "instruction": [
+        16,
+        8,
+        16
+      ],
+      "stages": 3,
+      "canonical_slice": "logits_to_keep == seq_len"
+    },
+    "inputs": "BF16 hidden_states [B,S,2048], BF16 weight [102400,2048], logits_to_keep scalar/canonical axis",
+    "outputs": "BF16 destination logits [B,logits_to_keep,102400]",
+    "math": "flattened hidden_states @ weight.T; canonical logits slice is a no-op",
+    "oracle": "independent L1/003_lm_head_projection_with_logit_slicing/reference.py torch.matmul",
+    "workload_rows": 16,
+    "declared_shapes": [
+      {
+        "batch_size": 32,
+        "seq_len": 128,
+        "logits_to_keep": 128
+      },
+      {
+        "batch_size": 2,
+        "seq_len": 128,
+        "logits_to_keep": 128
+      },
+      {
+        "batch_size": 64,
+        "seq_len": 128,
+        "logits_to_keep": 128
+      },
+      {
+        "batch_size": 1,
+        "seq_len": 128,
+        "logits_to_keep": 128
+      },
+      {
+        "batch_size": 4,
+        "seq_len": 512,
+        "logits_to_keep": 512
+      },
+      {
+        "batch_size": 4,
+        "seq_len": 256,
+        "logits_to_keep": 256
+      },
+      {
+        "batch_size": 1,
+        "seq_len": 293,
+        "logits_to_keep": 293
+      },
+      {
+        "batch_size": 1,
+        "seq_len": 1024,
+        "logits_to_keep": 1024
+      },
+      {
+        "batch_size": 4,
+        "seq_len": 853,
+        "logits_to_keep": 853
+      },
+      {
+        "batch_size": 1,
+        "seq_len": 2048,
+        "logits_to_keep": 2048
+      },
+      {
+        "batch_size": 2,
+        "seq_len": 2048,
+        "logits_to_keep": 2048
+      },
+      {
+        "batch_size": 4,
+        "seq_len": 997,
+        "logits_to_keep": 997
+      },
+      {
+        "batch_size": 1,
+        "seq_len": 256,
+        "logits_to_keep": 256
+      },
+      {
+        "batch_size": 1,
+        "seq_len": 3011,
+        "logits_to_keep": 3011
+      },
+      {
+        "batch_size": 1,
+        "seq_len": 691,
+        "logits_to_keep": 691
+      },
+      {
+        "batch_size": 8,
+        "seq_len": 128,
+        "logits_to_keep": 128
+      }
+    ],
+    "resource_risk": "102400x2048 BF16 weight is ~400 MiB; largest logits rows require bounded capacity checks"
+  },
+  "selection_basis": "First CUTLASS-backed L1 row after the FIB CUTLASS cohort; no timing or NCU values transferred",
+  "status": "complete_source_contract_and_sm86_environment_review"
+}

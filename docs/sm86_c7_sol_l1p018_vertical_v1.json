@@ -1,0 +1,67 @@
+{
+  "candidate": "L1/problem_018_fused_rope_with_qk_norm_and_kv_cache_update/cuda_cpp",
+  "correctness_and_sanitizer": {
+    "build_smoke": "results/alpha/c7_s34v_sol_l1p018_20261005/smoke.json",
+    "correctness_passed": true,
+    "sanitizer": "results/alpha/c7_s34v_sol_l1p018_20261005/compute_sanitizer.stderr",
+    "sanitizer_errors": 0,
+    "capture_correctness": "results/alpha/c7_s34v_sol_l1p018_20261005/limited.stdout"
+  },
+  "crosswalk": {
+    "native_hardware_scheduling_claimed": false,
+    "ncu_values_used_to_change_simulator": false,
+    "nvbit_raw_stat_unit_is_separate": true,
+    "physical_completion_upper_closed": false,
+    "simulator_ncu_instruction_count_equal": true,
+    "per_kernel_instruction_counts_equal": true,
+    "simulator_lower_frontiers_by_launch": {"query_rms_rope": 3145, "key_rms_rope": 2886, "scatter_k": 1859, "scatter_v": 1859}
+  },
+  "identity": {
+    "arch": "sm_86",
+    "binary_extension": "results/alpha/c7_s34v_sol_l1p018_20261005/build/sol_l1p018_sm86.so",
+    "cuda_toolkit": "13.2",
+    "environment": "tools/sol_execbench/.venv",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "host_compiler": "/usr/bin/g++-14",
+    "capture_selection": "ACTIVE_FROM_START=1; DYNAMIC_KERNEL_LIMIT_START=0; DYNAMIC_KERNEL_LIMIT_END=4; four candidate launches retained",
+    "profiler_protocol": "NCU profile-from-start off; application replay; clock none; cache all",
+    "source": "workloads/sol_execbench_baselines/L1/problem_018_fused_rope_with_qk_norm_and_kv_cache_update/cuda_cpp",
+    "torch": "2.12.0+cu130",
+    "representative_capture_shape": {"batch": 1, "seq_len": 1, "cache_len": 0, "max_position_embeddings": 262144}
+  },
+  "interpretation": "C7-S34V completes a four-kernel custom CUDA L1 RoPE/QK-norm/cache-update vertical through source review, SM86 build, bounded custom-input correctness, memcheck, four-launch NVBit/control capture, deterministic replay, and five per-launch NCU repetitions. All four simulator/NCU instruction counts match. The 1 GiB-class cache clone is part of the workload contract; per-launch tails, parser limitation, raw tracer units, and zero native macro dispatch remain explicit.",
+  "ncu": {
+    "metric": "gpc__cycles_elapsed.max",
+    "paths": "results/alpha/c7_s34v_sol_l1p018_20261005/ncu/repeat-*/ncu.csv",
+    "repetitions": 5,
+    "per_kernel": {
+      "query_rms_rope": {"kernel": "<unnamed>::rms_rope_kernel(const __nv_bfloat16 *, const __nv_bfloat16 *, const long *, const float *, float, __nv_bfloat16 *, int, int, int)", "cycles": [4911.0,4853.0,4894.0,4894.0,5138.0], "median_cycles": 4894.0, "sm_active": [3223.0,3207.0,3215.0,3217.0,3471.0], "median_sm_active": 3217.0, "instructions": [42432.0,42432.0,42432.0,42432.0,42432.0], "median_instructions": 42432.0},
+      "key_rms_rope": {"kernel": "<unnamed>::rms_rope_kernel(const __nv_bfloat16 *, const __nv_bfloat16 *, const long *, const float *, float, __nv_bfloat16 *, int, int, int)", "cycles": [4069.0,3808.0,3839.0,3857.0,3812.0], "median_cycles": 3839.0, "sm_active": [2459.0,2221.0,2253.0,2256.0,2224.0], "median_sm_active": 2253.0, "instructions": [3536.0,3536.0,3536.0,3536.0,3536.0], "median_instructions": 3536.0},
+      "scatter_k": {"kernel": "<unnamed>::scatter_k_kernel(const __nv_bfloat16 *, const long *, __nv_bfloat16 *, int, int, int, int)", "cycles": [3419.0,3414.0,3389.0,3436.0,3425.0], "median_cycles": 3419.0, "sm_active": [1444.0,1436.0,1437.0,1465.0,1438.0], "median_sm_active": 1438.0, "instructions": [1312.0,1312.0,1312.0,1312.0,1312.0], "median_instructions": 1312.0},
+      "scatter_v": {"kernel": "<unnamed>::scatter_v_kernel(const __nv_bfloat16 *, const long *, __nv_bfloat16 *, int, int, int, int)", "cycles": [3346.0,3389.0,3320.0,3350.0,3356.0], "median_cycles": 3350.0, "sm_active": [1413.0,1444.0,1394.0,1407.0,1395.0], "median_sm_active": 1407.0, "instructions": [1312.0,1312.0,1312.0,1312.0,1312.0], "median_instructions": 1312.0}
+    },
+    "total_instructions_per_repeat": [48592.0,48592.0,48592.0,48592.0,48592.0]
+  },
+  "nvbit": {
+    "accepted_launches": 4,
+    "control_sidecar": "results/alpha/c7_s34v_sol_l1p018_20261005/control_bits.json",
+    "decoded_static_instructions": 304,
+    "enhanced_parser_limitation": "cuobjdump failed for the JIT .so; independent control-sidecar extraction succeeded",
+    "raw_stats_total_insts": 136016,
+    "raw_stats_total_reported_insts": 136016,
+    "trace": "results/alpha/c7_s34v_sol_l1p018_20261005/nvbit_both",
+    "unknown_control_encodings": 0
+  },
+  "phase": "C7-S34V",
+  "schema": "sm86_c7_sol_l1p018_vertical_v1",
+  "simulator": {
+    "completion_status": "incomplete_unmodeled_retirement_tails",
+    "instructions_issued_by_launch": {"query_rms_rope": 42432, "key_rms_rope": 3536, "scatter_k": 1312, "scatter_v": 1312},
+    "mode": "l1-l2",
+    "native_macro_dispatches": 0,
+    "records_seen_by_launch": {"query_rms_rope": 42432, "key_rms_rope": 3536, "scatter_k": 1312, "scatter_v": 1312},
+    "replay": "results/alpha/c7_s34v_sol_l1p018_20261005/replay.json",
+    "unmodeled_tails": {"query_rms_rope": {"async_copy_shared_visibility": false, "coherence": true, "dirty_writeback": true, "reduction_read_modify_write": false}, "key_rms_rope": {"async_copy_shared_visibility": false, "coherence": true, "dirty_writeback": true, "reduction_read_modify_write": false}, "scatter_k": {"async_copy_shared_visibility": false, "coherence": true, "dirty_writeback": true, "reduction_read_modify_write": false}, "scatter_v": {"async_copy_shared_visibility": false, "coherence": true, "dirty_writeback": true, "reduction_read_modify_write": false}}
+  },
+  "status": "complete_four_kernel_native_vertical_ncu_simulator_crosswalk_with_parser_limitation"
+}

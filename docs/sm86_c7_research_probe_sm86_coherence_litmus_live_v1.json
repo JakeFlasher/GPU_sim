@@ -1,0 +1,165 @@
+{
+  "comparison": {
+    "gap_cycles": 3468.0,
+    "gap_fraction": 0.6942942942942943,
+    "hardware_completion": "not_observed",
+    "instruction_count_match": true,
+    "lower_bound_consistency": true,
+    "lower_bound_cycles": 1527,
+    "ncu_median_cycles": 4995.0,
+    "point_estimator": "not_claimed"
+  },
+  "correctness": {
+    "all_trials_checked": true,
+    "correct": true,
+    "oracle": "device-scope release/acquire flag, bounded polling, and host failure/timeout check",
+    "status": "passed",
+    "stdout": "results/alpha/c7_s33bb_src_coherence_device_20261004/correctness_0.stdout",
+    "trials": 7
+  },
+  "host_identity": {
+    "compute_capability": "8.6",
+    "device_index": 0,
+    "driver": "615.71.09",
+    "graphics_clock_mhz": 1350,
+    "memory_clock_mhz": 10501,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "pstate": "P0",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c"
+  },
+  "identity": {
+    "args": [
+      "1"
+    ],
+    "binary": "workloads/research_probes/sm86_coherence_litmus/message_passing_device",
+    "binary_used_for_correctness_trace_replay_ncu": "same rebuilt vertical input (loaded cubin sidecar recorded separately when applicable)",
+    "control": "results/alpha/c7_s33bb_src_coherence_device_20261004/control.json",
+    "ncu_cache_control": "all",
+    "ncu_clock_control": "base",
+    "ncu_launch_count": 1,
+    "ncu_launch_skip": 0,
+    "ncu_metric": "gpc__cycles_elapsed.max",
+    "ncu_repeats": 5,
+    "ncu_replay_mode": "application",
+    "source": "workloads/research_probes/sm86_coherence_litmus/message_passing_device",
+    "target_block": [
+      1,
+      1,
+      1
+    ],
+    "target_grid": [
+      2,
+      1,
+      1
+    ],
+    "target_kernel": "_Z22message_passing_devicePjS_S_j",
+    "target_kernel_id": 1,
+    "trace": "results/alpha/c7_s33bb_src_coherence_device_20261004/trace"
+  },
+  "interpretation": "The resident-device release/acquire message-passing arm passed seven one-iteration litmus runs, Compute Sanitizer, NVBit, replay, and five NCU captures. It is a value/visibility observation; it does not establish a finite coherence completion upper or a universal fence timing rule.",
+  "ncu": {
+    "instruction_count": [
+      47.0,
+      47.0,
+      47.0,
+      47.0,
+      47.0
+    ],
+    "max": 5028.0,
+    "median": 4995.0,
+    "metric": "gpc__cycles_elapsed.max",
+    "min": 4975.0,
+    "rows": [
+      {
+        "dram__sectors_read.sum": 100.0,
+        "dram__sectors_write.sum": 0.0,
+        "gpc__cycles_elapsed.max": 4975.0,
+        "sm__cycles_active.max": 2765.0,
+        "smsp__inst_executed.sum": 47.0,
+        "smsp__inst_executed_pipe_alu.sum": 16.0,
+        "smsp__inst_executed_pipe_lsu.sum": 9.0,
+        "smsp__inst_issued.sum": 60.0
+      },
+      {
+        "dram__sectors_read.sum": 100.0,
+        "dram__sectors_write.sum": 8.0,
+        "gpc__cycles_elapsed.max": 4992.0,
+        "sm__cycles_active.max": 2778.0,
+        "smsp__inst_executed.sum": 47.0,
+        "smsp__inst_executed_pipe_alu.sum": 16.0,
+        "smsp__inst_executed_pipe_lsu.sum": 9.0,
+        "smsp__inst_issued.sum": 60.0
+      },
+      {
+        "dram__sectors_read.sum": 136.0,
+        "dram__sectors_write.sum": 8.0,
+        "gpc__cycles_elapsed.max": 5009.0,
+        "sm__cycles_active.max": 2795.0,
+        "smsp__inst_executed.sum": 47.0,
+        "smsp__inst_executed_pipe_alu.sum": 16.0,
+        "smsp__inst_executed_pipe_lsu.sum": 9.0,
+        "smsp__inst_issued.sum": 60.0
+      },
+      {
+        "dram__sectors_read.sum": 104.0,
+        "dram__sectors_write.sum": 0.0,
+        "gpc__cycles_elapsed.max": 4995.0,
+        "sm__cycles_active.max": 2787.0,
+        "smsp__inst_executed.sum": 47.0,
+        "smsp__inst_executed_pipe_alu.sum": 16.0,
+        "smsp__inst_executed_pipe_lsu.sum": 9.0,
+        "smsp__inst_issued.sum": 60.0
+      },
+      {
+        "dram__sectors_read.sum": 104.0,
+        "dram__sectors_write.sum": 8.0,
+        "gpc__cycles_elapsed.max": 5028.0,
+        "sm__cycles_active.max": 2818.0,
+        "smsp__inst_executed.sum": 47.0,
+        "smsp__inst_executed_pipe_alu.sum": 16.0,
+        "smsp__inst_executed_pipe_lsu.sum": 9.0,
+        "smsp__inst_issued.sum": 60.0
+      }
+    ],
+    "stdev": 17.769637024992942,
+    "values": [
+      4975.0,
+      4992.0,
+      5009.0,
+      4995.0,
+      5028.0
+    ]
+  },
+  "schema": "sm86_c7_research_probe_sm86_coherence_litmus_live_v1",
+  "simulator": {
+    "completion_frontier": {
+      "lower_bound_cycles": 1527,
+      "status": "incomplete_unmodeled_retirement_tails",
+      "unmodeled_tails": {
+        "async_copy_shared_visibility": false,
+        "coherence": true,
+        "dirty_writeback": true,
+        "reduction_read_modify_write": false
+      }
+    },
+    "instructions_issued": 47,
+    "native_macro_dispatches": 0,
+    "records": 47,
+    "runtime_measurement": "sim-run output retained; no speedup/compression comparison"
+  },
+  "status": "correctness_trace_replay_ncu_complete_coherence_observation",
+  "trace": {
+    "launches": 1,
+    "static_control_decoded_instructions": 48,
+    "static_control_functions": 1,
+    "static_control_unknown_encodings": 0,
+    "target_coverage": {
+      "blocks_observed": 2,
+      "kind": "full",
+      "population_blocks": 2
+    },
+    "target_records_replayed": 47,
+    "tracer_total_insts": 105,
+    "tracer_total_reported_insts": 105
+  }
+}

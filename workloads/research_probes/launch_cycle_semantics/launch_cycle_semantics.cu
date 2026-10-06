@@ -1,6 +1,7 @@
 #include <cuda_profiler_api.h>
 #include <cuda_runtime.h>
 
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -8,6 +9,7 @@
 #include <cstring>
 #include <string>
 #include <vector>
+#include <limits>
 
 #define CUDA_CHECK(call)                                                        \
     do {                                                                        \
@@ -176,6 +178,18 @@ std::uint32_t work_value(std::size_t logical, int iterations) {
     return value;
 }
 
+bool parse_int(const char* text, int* value) {
+    if (text == nullptr || *text == '\0' || value == nullptr) return false;
+    errno = 0;
+    char* end = nullptr;
+    const long parsed = std::strtol(text, &end, 10);
+    if (errno == ERANGE || end == text || *end != '\0' ||
+        parsed < std::numeric_limits<int>::min() ||
+        parsed > std::numeric_limits<int>::max()) return false;
+    *value = static_cast<int>(parsed);
+    return true;
+}
+
 int main(int argc, char** argv) {
     if (argc != 6 && argc != 7) {
         std::fprintf(stderr,
@@ -186,10 +200,14 @@ int main(int argc, char** argv) {
     }
 
     int tail = -1;
-    const int blocks = std::atoi(argv[2]);
-    const int iterations = std::atoi(argv[3]);
-    const int chain_length = std::atoi(argv[4]);
-    const int trials = std::atoi(argv[5]);
+    int blocks = 0;
+    int iterations = 0;
+    int chain_length = 0;
+    int trials = 0;
+    if (!parse_int(argv[2], &blocks) || !parse_int(argv[3], &iterations) ||
+        !parse_int(argv[4], &chain_length) || !parse_int(argv[5], &trials)) {
+        return 2;
+    }
     const bool sync_inside_range =
         argc == 6 || std::strcmp(argv[6], "SYNC_INSIDE_RANGE") == 0;
     if (!parse_tail(argv[1], &tail) || blocks < 1 || blocks > 168 ||

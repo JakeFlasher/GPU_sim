@@ -1,0 +1,30 @@
+{
+  "candidate": "L1/problem_025_video_latent_gelu_activation/cuda_cpp",
+  "environment": {
+    "cuda_available": true,
+    "torch": "2.12.0+cu130",
+    "torch_cuda_runtime": "13.0",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "capability": "8.6",
+    "permitted_environment": "tools/sol_execbench/.venv",
+    "host_compiler": "/usr/bin/g++-14",
+    "nvcc_expected": "CUDA 13.2"
+  },
+  "phase": "C7-S34Z1",
+  "schema": "sm86_c7_sol_l1p025_source_v1",
+  "source_contract": {
+    "source": "workloads/sol_execbench_baselines/L1/problem_025_video_latent_gelu_activation/cuda_cpp",
+    "entry_point": "main.cpp::run",
+    "class": "custom_cuda",
+    "sm86_marker": "solution.json compile option arch=compute_86,code=sm_86",
+    "custom_kernels": ["problem_025_gelu_vec4_kernel", "problem_025_gelu_tail_kernel"],
+    "constants": {"intermediate_size": 4096, "vector_width": 4, "block_threads": 256},
+    "inputs": "x [batch,seq,4096] FP32",
+    "output": "output same shape FP32 destination",
+    "math": "GELU tanh approximation with vectorized float4 body and scalar tail",
+    "oracle": "independent definition.json GELU-tanh FP32 reference",
+    "workload_shapes": [[2,512],[8,997],[4,541],[4,128],[32,1024]]
+  },
+  "selection_basis": "Next executable L1 custom-CUDA row after correcting problem024 marker false positive; no timing or NCU values transferred",
+  "status": "complete_source_contract_and_sm86_environment_review"
+}

@@ -1,0 +1,38 @@
+{
+  "schema": "sm86_c7_sol_l2p008_capture_blocked_v1",
+  "phase": "C7-S34CA3",
+  "status": "capture_blocked_vendor_sass_parser",
+  "candidate": "L2/problem_008_moe_sparse_routing_and_dispatch/cuda_cpp",
+  "identity": {
+    "arch": "sm_86",
+    "capability": "8.6",
+    "cuda_toolkit": "13.2",
+    "torch": "2.12.0+cu130",
+    "torch_cuda_runtime": "13.0",
+    "environment": "tools/sol_execbench/.venv",
+    "source": "workloads/sol_execbench_baselines/L2/problem_008_moe_sparse_routing_and_dispatch/cuda_cpp",
+    "extension": "results/alpha/c7_s34ca_sol_l2p008_20261005/pinned/official_build/sol_l2p008_sm86.so",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "device_index": 0,
+    "nvcc": "/usr/local/cuda-13.2/bin/nvcc",
+    "host_compiler": "/usr/bin/g++-14"
+  },
+  "correctness_and_sanitizer": {
+    "smoke": "docs/sm86_c7_sol_l2p008_smoke_v1.json",
+    "official_rows": 48,
+    "memcheck_errors": 0
+  },
+  "nvbit_attempts": [
+    {
+      "trace": "results/alpha/c7_s34ca_sol_l2p008_20261005/pinned/trace_v2",
+      "return_code": 1,
+      "failure": "NVBit fatal HMNMX2.BF16_V2 static SASS parser failure after many ATen routing kernels; no dynamic_trace/control/replay."
+    }
+  ],
+  "replay": {
+    "admitted": false,
+    "reason": "No usable trace/control sidecar"
+  },
+  "interpretation": "Official correctness/memcheck pass, but full native capture is blocked by the same vendor HMNMX2.BF16_V2 decoder boundary; no parser substitution, replay, timing fit, or full vertical claim."
+}

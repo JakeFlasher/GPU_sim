@@ -1,0 +1,95 @@
+{
+  "schema": "sm86_m5j_multiwarp_continuation_boundary_v1",
+  "phase": "M5-J",
+  "status": "complete_scoped_negative_multiwarp_continuation_exact_fallback",
+  "selection": {
+    "candidate": "real C6-F two-warp scalar trace",
+    "reason": "second real candidate after the one-warp C6-C/D positive; it has typed entry but exercises global/multiwarp state outside the narrow scalar contract",
+    "source_boundary": "docs/sm86_c6f_multiwarp_frontend_boundary_v1.json"
+  },
+  "host_identity": {
+    "device_index": 0,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "compute_capability": "8.6",
+    "driver": "615.71.09",
+    "pstate": "P0",
+    "graphics_clock_mhz": 1350,
+    "memory_clock_mhz": 10501
+  },
+  "identity": {
+    "trace": "results/alpha/c6f_scalar_multiwarp_20261004/trace2",
+    "control": "results/alpha/c6f_scalar_multiwarp_20261004/control.json",
+    "control_actual": "results/alpha/c6f_scalar_multiwarp_20261004/control.json",
+    "arch_card": "arch_profiles/cards/sm_86.json",
+    "pchase_card": "data/pchase/sm_86_static_card.json",
+    "reference_binary": "sim/target/m5j_reference/release/sim-run",
+    "reference_feature": "reference",
+    "environment": {
+      "SIM_SM_REFERENCE_MODE": "event",
+      "SIM_SM_REFERENCE_MAX_RECORDS": "256"
+    }
+  },
+  "typed_precheck": {
+    "coverage": "full one-block/two-warp",
+    "warps": 2,
+    "threads": 64,
+    "nvbit_records": 12,
+    "memory_records": 0,
+    "typed_entry_complete": true,
+    "typed_effect_exit_witness_complete": false,
+    "future_relevant_warp_or_response_state_closed": false,
+    "expected_decision": "refuse before mutation"
+  },
+  "attempts": [
+    {
+      "run": "results/alpha/m5j_multiwarp_20261006/reference-1",
+      "returncode": 0,
+      "replay": "results/alpha/m5j_multiwarp_20261006/reference-1/replay.json",
+      "reference_trace": "results/alpha/m5j_multiwarp_20261006/reference-1/reference.jsonl",
+      "reference_lines": 4,
+      "event_or_delta_records": 2,
+      "footer_present": true,
+      "native_macro_dispatches": 0,
+      "native_macro_fallbacks": 0,
+      "replay_records": 12,
+      "instructions_issued": 12,
+      "completion_frontier": {
+        "status": "complete",
+        "cycles": 620
+      },
+      "diagnostics": "SIM_REFERENCE_PERF mode=event calls=1 local_cycle_steps=35 idle_jumps=6 skipped_cycles=585"
+    },
+    {
+      "run": "results/alpha/m5j_multiwarp_20261006/reference-2",
+      "returncode": 0,
+      "replay": "results/alpha/m5j_multiwarp_20261006/reference-2/replay.json",
+      "reference_trace": "results/alpha/m5j_multiwarp_20261006/reference-2/reference.jsonl",
+      "reference_lines": 4,
+      "event_or_delta_records": 2,
+      "footer_present": true,
+      "native_macro_dispatches": 0,
+      "native_macro_fallbacks": 0,
+      "replay_records": 12,
+      "instructions_issued": 12,
+      "completion_frontier": {
+        "status": "complete",
+        "cycles": 620
+      },
+      "diagnostics": "SIM_REFERENCE_PERF mode=event calls=1 local_cycle_steps=35 idle_jumps=6 skipped_cycles=585"
+    }
+  ],
+  "determinism": {
+    "replay_json_byte_identical": true,
+    "reference_jsonl_byte_identical": true
+  },
+  "decision": {
+    "typed_macro_dispatch": false,
+    "exact_fallback_preserved": true,
+    "refusal_reason": "future_relevant_warp_or_response_state_is_not_closed",
+    "physical_completion": "unknown",
+    "native_hardware_scheduling": "not_claimed",
+    "broad_native_continuation": "open"
+  },
+  "interpretation": "M5-J closes the scoped second-candidate negative branch. The real two-warp trace has complete typed entry and a footer-terminated bounded reference run, but the narrow scalar transition refuses before mutation because future-relevant multiwarp/global response state is not closed. Two current reference-feature runs are byte-identical with zero macro dispatches and exact replay preserved. This does not weaken the separate one-warp C6-C/D positive; it establishes the current multiwarp domain boundary and leaves broader native continuation and physical completion open."
+}

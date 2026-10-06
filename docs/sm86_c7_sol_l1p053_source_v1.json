@@ -1,0 +1,43 @@
+{
+  "candidate": "L1/problem_053_gaussian_topk_sparse_activation/cuda_cpp",
+  "environment": {
+    "cuda_available": true,
+    "torch": "2.12.0+cu130",
+    "torch_cuda_runtime": "13.0",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "capability": "8.6",
+    "permitted_environment": "tools/sol_execbench/.venv",
+    "host_compiler": "/usr/bin/g++-14",
+    "nvcc_expected": "CUDA 13.2"
+  },
+  "phase": "C7-S34AO1",
+  "schema": "sm86_c7_sol_l1p053_source_v1",
+  "source_contract": {
+    "source": "workloads/sol_execbench_baselines/L1/problem_053_gaussian_topk_sparse_activation/cuda_cpp",
+    "entry_point": "main.cpp::run",
+    "class": "custom_cuda",
+    "sm86_marker": "solution.json compile option arch=compute_86,code=sm_86",
+    "custom_kernel": "problem_053_gaussian_topk_sparse_kernel",
+    "constants": {
+      "block_threads": 256,
+      "one_cta_per_batch_seq_row": true,
+      "bf16x2_vector_access": true,
+      "intermediate_size_even": true,
+      "statistics_dtype": "FP32"
+    },
+    "inputs": "inputs [B,S,I] contiguous BF16; target_sparsity host scalar in [0,1]",
+    "outputs": "output [B,S,I] contiguous BF16 destination tensor",
+    "math": "per-row FP32 mean/std, cutoff = mean + std * ndtri(target_sparsity), output = relu(input - cutoff) rounded to BF16",
+    "oracle": "independent definition.json/reference.py Gaussian cutoff and BF16 output reference",
+    "workload_shapes_and_sparsities": [
+      [1, 512, 12288, 0.2], [4, 2048, 12288, 0.1], [32, 128, 12288, 0.3],
+      [2, 211, 8192, 0.2], [1, 8192, 4096, 0.3], [1, 1024, 16384, 0.3],
+      [16, 1163, 8192, 0.1], [4, 541, 8192, 0.3], [4, 449, 4096, 0.2],
+      [64, 1024, 8192, 0.3], [2, 131, 4096, 0.1], [2, 293, 12288, 0.3]
+    ],
+    "tolerance": {"max_atol": 1e-5, "max_rtol": 0.05},
+    "edge_contract": "target_sparsity == 0.0 copies inputs to output; declared workload rows use 0.1, 0.2, or 0.3"
+  },
+  "selection_basis": "Next genuine L1 custom-CUDA row after the problem052 source correction; no timing or NCU values transferred",
+  "status": "complete_source_contract_and_sm86_environment_review"
+}

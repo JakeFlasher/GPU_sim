@@ -1,0 +1,162 @@
+{
+  "comparison": {
+    "gap_cycles": 2680.0,
+    "gap_fraction": 0.6355228835665164,
+    "hardware_completion": "not_observed",
+    "instruction_count_match": true,
+    "lower_bound_consistency": true,
+    "lower_bound_cycles": 1537,
+    "ncu_median_cycles": 4217.0,
+    "point_estimator": "not_claimed"
+  },
+  "correctness": {
+    "all_trials_checked": true,
+    "correct": true,
+    "oracle": "32-lane unsigned add/subtract boundary oracle, including 0x7fffffff/0x80000000 edges",
+    "status": "passed",
+    "stdout": "results/alpha/c7_s33bb_src_value_differential_20261004/correctness_0.stdout",
+    "trials": 7
+  },
+  "host_identity": {
+    "compute_capability": "8.6",
+    "device_index": 0,
+    "driver": "615.71.09",
+    "graphics_clock_mhz": 1350,
+    "memory_clock_mhz": 10501,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "pstate": "P0",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c"
+  },
+  "identity": {
+    "args": [
+      "value.sm_86.cubin",
+      "2147483648",
+      "17"
+    ],
+    "binary": "workloads/research_probes/sm86_value_differential/runner + value.sm_86.cubin",
+    "binary_used_for_correctness_trace_replay_ncu": "same rebuilt vertical input (loaded cubin sidecar recorded separately when applicable)",
+    "control": "results/alpha/c7_s33bb_src_value_differential_20261004/control.json",
+    "ncu_cache_control": "all",
+    "ncu_clock_control": "base",
+    "ncu_launch_count": 1,
+    "ncu_launch_skip": 0,
+    "ncu_metric": "gpc__cycles_elapsed.max",
+    "ncu_repeats": 5,
+    "ncu_replay_mode": "application",
+    "source": "workloads/research_probes/sm86_value_differential",
+    "target_block": [
+      32,
+      1,
+      1
+    ],
+    "target_grid": [
+      1,
+      1,
+      1
+    ],
+    "target_kernel": "value_kernel",
+    "target_kernel_id": 1,
+    "trace": "results/alpha/c7_s33bb_src_value_differential_20261004/trace"
+  },
+  "interpretation": "The value-dependent SM86 runner passed seven oracle executions, Compute Sanitizer, NVBit, replay using the loaded cubin sidecar, and five NCU captures. This closes a finite value differential only; ownership, flush completion, calls, atomics, fences, and timing remain outside the contract.",
+  "ncu": {
+    "instruction_count": [
+      13.0,
+      13.0,
+      13.0,
+      13.0,
+      13.0
+    ],
+    "max": 4246.0,
+    "median": 4217.0,
+    "metric": "gpc__cycles_elapsed.max",
+    "min": 4206.0,
+    "rows": [
+      {
+        "dram__sectors_read.sum": 120.0,
+        "dram__sectors_write.sum": 8.0,
+        "gpc__cycles_elapsed.max": 4216.0,
+        "sm__cycles_active.max": 2003.0,
+        "smsp__inst_executed.sum": 13.0,
+        "smsp__inst_executed_pipe_alu.sum": 4.0,
+        "smsp__inst_issued.sum": 19.0
+      },
+      {
+        "dram__sectors_read.sum": 100.0,
+        "dram__sectors_write.sum": 0.0,
+        "gpc__cycles_elapsed.max": 4246.0,
+        "sm__cycles_active.max": 2026.0,
+        "smsp__inst_executed.sum": 13.0,
+        "smsp__inst_executed_pipe_alu.sum": 4.0,
+        "smsp__inst_issued.sum": 19.0
+      },
+      {
+        "dram__sectors_read.sum": 96.0,
+        "dram__sectors_write.sum": 0.0,
+        "gpc__cycles_elapsed.max": 4217.0,
+        "sm__cycles_active.max": 2012.0,
+        "smsp__inst_executed.sum": 13.0,
+        "smsp__inst_executed_pipe_alu.sum": 4.0,
+        "smsp__inst_issued.sum": 19.0
+      },
+      {
+        "dram__sectors_read.sum": 96.0,
+        "dram__sectors_write.sum": 0.0,
+        "gpc__cycles_elapsed.max": 4206.0,
+        "sm__cycles_active.max": 2001.0,
+        "smsp__inst_executed.sum": 13.0,
+        "smsp__inst_executed_pipe_alu.sum": 4.0,
+        "smsp__inst_issued.sum": 19.0
+      },
+      {
+        "dram__sectors_read.sum": 96.0,
+        "dram__sectors_write.sum": 8.0,
+        "gpc__cycles_elapsed.max": 4238.0,
+        "sm__cycles_active.max": 2037.0,
+        "smsp__inst_executed.sum": 13.0,
+        "smsp__inst_executed_pipe_alu.sum": 4.0,
+        "smsp__inst_issued.sum": 19.0
+      }
+    ],
+    "stdev": 14.934523762075575,
+    "values": [
+      4216.0,
+      4246.0,
+      4217.0,
+      4206.0,
+      4238.0
+    ]
+  },
+  "schema": "sm86_c7_research_probe_sm86_value_differential_live_v1",
+  "simulator": {
+    "completion_frontier": {
+      "lower_bound_cycles": 1537,
+      "status": "incomplete_unmodeled_retirement_tails",
+      "unmodeled_tails": {
+        "async_copy_shared_visibility": false,
+        "coherence": true,
+        "dirty_writeback": true,
+        "reduction_read_modify_write": false
+      }
+    },
+    "instructions_issued": 13,
+    "native_macro_dispatches": 0,
+    "records": 13,
+    "runtime_measurement": "sim-run output retained; no speedup/compression comparison"
+  },
+  "status": "correctness_trace_replay_ncu_complete_value_differential",
+  "trace": {
+    "launches": 1,
+    "static_control_decoded_instructions": 24,
+    "static_control_functions": 1,
+    "static_control_unknown_encodings": 0,
+    "target_coverage": {
+      "blocks_observed": 1,
+      "kind": "full",
+      "population_blocks": 1
+    },
+    "target_records_replayed": 13,
+    "tracer_total_insts": 33,
+    "tracer_total_reported_insts": 33
+  }
+}

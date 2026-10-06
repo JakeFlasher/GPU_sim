@@ -1,0 +1,168 @@
+{
+  "schema": "sm86_c7_sol_l1p085_vertical_v1",
+  "phase": "C7-S34BI",
+  "status": "complete_representative_native_vertical_physical_tails_open",
+  "candidate": "L1/problem_085_geglu_activation/cuda_cpp",
+  "identity": {
+    "arch": "sm_86",
+    "capability": "8.6",
+    "cuda_toolkit": "13.2",
+    "device_index": 0,
+    "environment": "tools/sol_execbench/.venv",
+    "extension": "results/alpha/c7_s34bi_sol_l1p085_20261005/pinned/official_build/sol_l1p085_sm86.so",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "host_compiler": "/usr/bin/g++-14",
+    "nvcc": "/usr/local/cuda-13.2/bin/nvcc",
+    "source": "workloads/sol_execbench_baselines/L1/problem_085_geglu_activation/cuda_cpp",
+    "torch": "2.12.0+cu130",
+    "torch_cuda_runtime": "13.0",
+    "driver": "615.71.09",
+    "independent_host_query": "results/alpha/c7_s34bi_sol_l1p085_20261005/pinned/host.csv",
+    "representative_workload_index": 12,
+    "representative_axes": {
+      "batch_size": 1,
+      "seq_len": 131,
+      "inner_dim": 5120
+    },
+    "seed": 223,
+    "runner": "results/alpha/c7_s34bi_sol_l1p085_20261005_run.py"
+  },
+  "correctness_and_sanitizer": {
+    "build_smoke": "docs/sm86_c7_sol_l1p085_smoke_v1.json",
+    "official_result": "results/alpha/c7_s34bi_sol_l1p085_20261005/pinned/official_full.json",
+    "official_rows": 48,
+    "official_min_matched_ratio": 0.9998833678909953,
+    "official_max_abs_error": 2.47955322265625e-05,
+    "strict_all_elements_passed": false,
+    "sanitizer_errors": 0,
+    "representative_result": "results/alpha/c7_s34bi_sol_l1p085_20261005/pinned/trace_correctness.json"
+  },
+  "nvbit": {
+    "trace": "results/alpha/c7_s34bi_sol_l1p085_20261005/pinned/trace",
+    "capture_stdout": "results/alpha/c7_s34bi_sol_l1p085_20261005/pinned/trace.stdout",
+    "capture_stderr": "results/alpha/c7_s34bi_sol_l1p085_20261005/pinned/trace.stderr",
+    "selection": "ACTIVE_FROM_START=0; cudaProfilerStart/Stop; all launches within one invocation",
+    "accepted_launches": 1,
+    "raw_stats_total_insts": 707400,
+    "raw_stats_total_reported_insts": 707400,
+    "control_sidecar": "results/alpha/c7_s34bi_sol_l1p085_20261005/pinned/control_bits.json",
+    "target_decoded_instructions": 72,
+    "helper_decoded_instructions": 16,
+    "unknown_control_encodings": 0,
+    "enhanced_parser_limitation": "Enhanced pass tried Python executable and did not parse extension binary; independently extracted extension control sidecar used for replay."
+  },
+  "simulator": {
+    "binary": "sim/target/release/sim-run",
+    "arch_card": "arch_profiles/cards/sm_86.json",
+    "pchase_card": "data/pchase/sm_86_static_card.json",
+    "mode": "l1-l2",
+    "cache_scope": "launch",
+    "replay": "results/alpha/c7_s34bi_sol_l1p085_20261005/pinned/replay.json",
+    "repeat_replay": "results/alpha/c7_s34bi_sol_l1p085_20261005/pinned/replay_repeat.json",
+    "replays_byte_equal": true,
+    "instructions_issued": 293440,
+    "records_seen": 293440,
+    "grid": [
+      655,
+      1,
+      1
+    ],
+    "block": [
+      256,
+      1,
+      1
+    ],
+    "coverage": {
+      "kind": "full",
+      "blocks_observed": 655,
+      "population_blocks": 655
+    },
+    "frontiers": {
+      "diagnostic_last_issue_cycles": 10772,
+      "last_processed_modeled_system_event_time": 10789,
+      "terminal_modeled_event_time": 10789,
+      "sm_active_terminal_frontier": {
+        "cycles": 10789,
+        "role": "causal_sm_active_terminal_lower_bound_excludes_write_ack_and_service_only_events"
+      },
+      "sm_active_observation_frontier": {
+        "issue_lower_bound_cycles": 10772,
+        "issue_cycles": 10772,
+        "terminal_lower_bound_cycles": 10789,
+        "terminal_cycles": 10789,
+        "envelope_cycles": 0,
+        "role": "architecture_scoped_sm_active_observation_boundary_not_raw_lower_bound"
+      },
+      "gpc_observation_frontier": {
+        "lower_bound_cycles": 10789,
+        "envelope_cycles": 1848,
+        "grid_blocks": 655,
+        "grid_log2": 9,
+        "cycles": 12637,
+        "role": "architecture_scoped_gpc_observation_boundary_not_timing_crosswalk"
+      },
+      "completion_frontier": {
+        "status": "incomplete_unmodeled_retirement_tails",
+        "lower_bound_cycles": 10789,
+        "unmodeled_tails": {
+          "reduction_read_modify_write": false,
+          "dirty_writeback": true,
+          "coherence": true,
+          "async_copy_shared_visibility": false
+        }
+      }
+    },
+    "native_macro_dispatches": 0
+  },
+  "ncu": {
+    "executable": "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu",
+    "replay_mode": "application",
+    "profile_from_start": false,
+    "cache_control": "all",
+    "clock_control": "none",
+    "repetitions": 5,
+    "kernel": "<unnamed>::problem_085_geglu_vec4_kernel(const float4 *, float4 *, int)",
+    "paths": "results/alpha/c7_s34bi_sol_l1p085_20261005/pinned/ncu/repeat-*/ncu.csv",
+    "observations": [
+      {
+        "gpc_cycles": 14077.0,
+        "sm_active_cycles": 12367.0,
+        "warp_instructions": 293440.0
+      },
+      {
+        "gpc_cycles": 15161.0,
+        "sm_active_cycles": 13515.0,
+        "warp_instructions": 293440.0
+      },
+      {
+        "gpc_cycles": 15425.0,
+        "sm_active_cycles": 13740.0,
+        "warp_instructions": 293440.0
+      },
+      {
+        "gpc_cycles": 14092.0,
+        "sm_active_cycles": 12433.0,
+        "warp_instructions": 293440.0
+      },
+      {
+        "gpc_cycles": 14152.0,
+        "sm_active_cycles": 12456.0,
+        "warp_instructions": 293440.0
+      }
+    ],
+    "medians": {
+      "gpc_cycles": 14152.0,
+      "sm_active_cycles": 12456.0,
+      "warp_instructions": 293440.0
+    }
+  },
+  "crosswalk": {
+    "per_kernel_instruction_counts_equal": true,
+    "raw_tracer_stats_are_a_separate_unit": true,
+    "scored_ncu_used_for_model_changes": false,
+    "physical_completion_upper_closed": false,
+    "hardware_scheduling_claimed": false
+  },
+  "interpretation": "All 16 official SOL shapes pass across three seeds using gen_inputs/reference/compute_error_stats. Fast-math GELU has small per-element mismatches, but its worst matched ratio 0.999883 exceeds the declared 0.99 requirement; no strict all-element claim. One representative 655-block launch passes memcheck, NVBit, independent control extraction, byte-identical replay, and five same-extension NCU application-replay repetitions. Replay/NCU match at 293440 warp instructions. Model last issue 10772, terminal lower 10789, and GPC envelope 12637 remain separate; independent NCU GPC/SM-active medians are 14152/12456. Dirty-writeback and coherence tails remain open; this is capture coverage, not accuracy or physical completion."
+}

@@ -1,0 +1,198 @@
+{
+  "candidate": "L1/problem_084_silu_activation_backward/cuda_cpp",
+  "correctness_and_sanitizer": {
+    "all_declared_shapes_passed": true,
+    "build_smoke": "docs/sm86_c7_sol_l1p084_smoke_v1.json",
+    "correctness_passed": true,
+    "official_max_abs_error": 1.52587890625e-05,
+    "official_min_matched_ratio": 1.0,
+    "official_rows": 48,
+    "sanitizer_errors": 0
+  },
+  "crosswalk": {
+    "gpc_envelope_is_not_timing_crosswalk": true,
+    "gpc_lower_bound_below_ncu_median_by_launch": {
+      "tail": true,
+      "vec4": true
+    },
+    "gpc_observation_frontiers_by_launch": {
+      "tail": 3614,
+      "vec4": 4489
+    },
+    "native_hardware_scheduling_claimed": false,
+    "ncu_values_used_to_change_simulator": false,
+    "nvbit_raw_stat_unit_is_separate": true,
+    "per_kernel_instruction_counts_equal": true,
+    "physical_completion_upper_closed": false,
+    "simulator_lower_frontiers_by_launch": {
+      "tail": 1838,
+      "vec4": 2705
+    },
+    "simulator_ncu_instruction_count_equal": true,
+    "sm_active_terminal_lower_exceeds_all_five_observations": {
+      "vec4": true,
+      "tail": true
+    }
+  },
+  "identity": {
+    "arch": "sm_86",
+    "binary_extension": "results/alpha/c7_s34bh_sol_l1p084_20261005/pinned/official_build/sol_l1p084_sm86.so",
+    "capability": "8.6",
+    "capture_selection": "ACTIVE_FROM_START=0; profiler-gated one target invocation; n=2053 exercises vec4 plus one-element scalar tail; FP32 tensors initialized before gate",
+    "cuda_toolkit": "13.2",
+    "device_index": 0,
+    "driver": "615.71.09",
+    "environment": "tools/sol_execbench/.venv",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "host_compiler": "/usr/bin/g++-14",
+    "profiler_protocol": "cudaProfilerStart/Stop; NCU profile-from-start off; application replay; clock none; cache all",
+    "representative_capture_elements": 2053,
+    "source": "workloads/sol_execbench_baselines/L1/problem_084_silu_activation_backward/cuda_cpp",
+    "torch": "2.12.0+cu130",
+    "torch_cuda_runtime": "13.0",
+    "independent_host_query": "results/alpha/c7_s34bh_sol_l1p084_20261005/pinned/official/host.csv"
+  },
+  "interpretation": "C7-S34BH completes the genuine L1 two-path FP32 custom CUDA SiLU backward row after all 16 declared element counts were screened across three deterministic seeds (48 rows) using the official SOL generator/reference criterion. The pinned CUDA 13.2/GCC14 extension passed the official correctness screen, representative non-multiple-of-four Compute Sanitizer memcheck, one profiler-gated NVBit capture containing both custom launches, independent control-bit extraction, deterministic byte-identical replay, and five application-replay NCU repetitions per launch. Simulator and NCU instruction counts match. The simulator GPC lower bounds remain below the independent NCU medians; the larger architecture-scoped GPC observation envelope is retained separately and is not a timing crosswalk. Dirty-writeback/coherence tails, JIT cuobjdump parser limitation, raw tracer units, and zero native macro dispatch remain explicit. SM-active terminal lower frontiers 2705/1838 exceed all five respective NCU SM-active observations (medians 1926/1400); these are explicit SM-active lower-bound falsifiers. The separate GPC envelope predictions 4489/3614 also exceed measured GPC medians 3551/2976. Neither endpoint is fitted or claimed accurate.",
+  "ncu": {
+    "metric": "gpc__cycles_elapsed.max, sm__cycles_active.max, smsp__inst_executed.sum",
+    "paths": "results/alpha/c7_s34bh_sol_l1p084_20261005/pinned/official/ncu/repeat-*/ncu.csv",
+    "per_kernel": {
+      "tail": {
+        "cycles": [
+          2973.0,
+          2990.0,
+          3004.0,
+          2976.0,
+          2968.0
+        ],
+        "instructions": [
+          71.0,
+          71.0,
+          71.0,
+          71.0,
+          71.0
+        ],
+        "kernel": "<unnamed>::problem_084_silu_bwd_tail_kernel(const float *, const float *, const float *, float *, int, int)",
+        "median_cycles": 2976.0,
+        "median_instructions": 71.0,
+        "median_sm_active": 1400.0,
+        "sm_active": [
+          1389.0,
+          1404.0,
+          1423.0,
+          1392.0,
+          1400.0
+        ]
+      },
+      "vec4": {
+        "cycles": [
+          3558.0,
+          3542.0,
+          3551.0,
+          3566.0,
+          3547.0
+        ],
+        "instructions": [
+          603.0,
+          603.0,
+          603.0,
+          603.0,
+          603.0
+        ],
+        "kernel": "<unnamed>::problem_084_silu_bwd_vec4_kernel(const float4 *, const float4 *, const float4 *, float4 *, int)",
+        "median_cycles": 3551.0,
+        "median_instructions": 603.0,
+        "median_sm_active": 1926.0,
+        "sm_active": [
+          1933.0,
+          1915.0,
+          1926.0,
+          1932.0,
+          1913.0
+        ]
+      }
+    },
+    "repetitions": 5,
+    "replay_mode": "application"
+  },
+  "nvbit": {
+    "accepted_launches": 2,
+    "control_sidecar": "results/alpha/c7_s34bh_sol_l1p084_20261005/pinned/official/control_bits.json",
+    "decoded_static_instructions": {
+      "tail": 32,
+      "vec4": 48
+    },
+    "enhanced_parser_limitation": "cuobjdump failed for the JIT .so; independent control-sidecar extraction succeeded",
+    "module_mapping": "results/alpha/c7_s34bh_sol_l1p084_20261005/pinned/official/trace/extra_info/traced_kernel_modules.json",
+    "module_origin": "stable_static_module",
+    "raw_stats_total_insts": 1549,
+    "raw_stats_total_reported_insts": 1549,
+    "sidecar_helper_function_decoded_instructions": 16,
+    "sidecar_total_decoded_instructions": 96,
+    "sidecar_unknown_control_encodings": 0,
+    "trace": "results/alpha/c7_s34bh_sol_l1p084_20261005/pinned/official/trace",
+    "earlier_attempt": "native_capture.stdout/stderr and empty nvbit_target under the parent pinned directory: application exited zero but injection failed to load because protobuf/Abseil runtime libraries were missing from LD_LIBRARY_PATH; not a capture success. Exploratory uniform-sigmoid capture_v2 is not the official vertical."
+  },
+  "phase": "C7-S34BH",
+  "schema": "sm86_c7_sol_l1p084_vertical_v1",
+  "simulator": {
+    "completion_status": "incomplete_unmodeled_retirement_tails",
+    "instructions_issued_by_launch": {
+      "tail": 71,
+      "vec4": 603
+    },
+    "kernel_block": {
+      "tail": [
+        256,
+        1,
+        1
+      ],
+      "vec4": [
+        256,
+        1,
+        1
+      ]
+    },
+    "kernel_grid": {
+      "tail": [
+        1,
+        1,
+        1
+      ],
+      "vec4": [
+        3,
+        1,
+        1
+      ]
+    },
+    "mode": "l1-l2",
+    "native_macro_dispatches": 0,
+    "records_seen_by_launch": {
+      "tail": 71,
+      "vec4": 603
+    },
+    "repeat_replay": "results/alpha/c7_s34bh_sol_l1p084_20261005/pinned/official/replay-2.json",
+    "replay": "results/alpha/c7_s34bh_sol_l1p084_20261005/pinned/official/replay-1.json",
+    "replays_byte_equal": true,
+    "unmodeled_tails": {
+      "tail": {
+        "async_copy_shared_visibility": false,
+        "coherence": true,
+        "dirty_writeback": true,
+        "reduction_read_modify_write": false
+      },
+      "vec4": {
+        "async_copy_shared_visibility": false,
+        "coherence": true,
+        "dirty_writeback": true,
+        "reduction_read_modify_write": false
+      }
+    },
+    "binary": "sim/target/release/sim-run",
+    "arch_card": "arch_profiles/cards/sm_86.json",
+    "pchase_card": "data/pchase/sm_86_static_card.json",
+    "command_script": "results/alpha/c7_s34bh_sol_l1p084_20261005/collect_official.sh"
+  },
+  "status": "complete_two_launch_native_vertical_ncu_simulator_crosswalk_with_parser_limitation"
+}

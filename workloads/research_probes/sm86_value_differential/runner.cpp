@@ -31,10 +31,16 @@ int main(int argc,char **argv) {
     check(cuMemcpyHtoD(in,input,sizeof(input))); check(cuMemsetD8(out,0xa5,sizeof(output)));
     void *args[]={&in,&out,&delta}; check(cuLaunchKernel(kernel,1,1,1,32,1,1,0,nullptr,args,nullptr));
     check(cuCtxSynchronize()); check(cuMemcpyDtoH(output,out,sizeof(output)));
+    bool correct = true;
+    for(unsigned i=0;i<32;++i) {
+        const uint32_t expected = input[i] < delta ? input[i] + delta : input[i] - delta;
+        if(output[i] != expected) correct = false;
+    }
     printf("RESULT {\"device_index\":0,\"name\":\"%s\",\"pci\":\"%s\",\"cc\":\"%d.%d\",\"driver_api\":%d,\"uuid_hex\":\"",name,bus,major,minor,driver);
     for(auto b:uuid.bytes) printf("%02x",static_cast<unsigned char>(b));
     printf("\",\"input_address\":%llu,\"output_address\":%llu,\"delta\":%u,\"inputs\":[",(unsigned long long)in,(unsigned long long)out,delta);
     for(unsigned i=0;i<32;++i) printf("%s%u",i?",":"",input[i]);
-    printf("],\"outputs\":["); for(unsigned i=0;i<32;++i) printf("%s%u",i?",":"",output[i]); printf("]}\n");
+    printf("],\"outputs\":["); for(unsigned i=0;i<32;++i) printf("%s%u",i?",":"",output[i]); printf("],\"correct\":%s}\n", correct ? "true" : "false");
     check(cuMemFree(in)); check(cuMemFree(out)); check(cuModuleUnload(module)); check(cuDevicePrimaryCtxRelease(dev));
+    return correct ? 0 : 1;
 }

@@ -1,0 +1,1555 @@
+{
+  "schema": "sm86_c7_sol_l2p002_capture_blocked_v1",
+  "phase": "C7-S34BV",
+  "status": "incomplete_reference_capacity_and_full_trace_timeout",
+  "candidate": "L2/problem_002_decoder_layer_full_block/cuda_cpp",
+  "execution": {
+    "runner": "results/alpha/c7_s34bv_sol_l2p002_20261005_run.py",
+    "extension": "results/alpha/c7_s34bv_sol_l2p002_20261005/pinned/official_build/sol_l2p002_sm86.so",
+    "toolchain": "CUDA 13.2; GCC14; Torch 2.12.0+cu130",
+    "host_query": "results/alpha/c7_s34bv_sol_l2p002_20261005/pinned/host.csv"
+  },
+  "correctness": {
+    "declared_shapes": 18,
+    "seeds": [
+      223,
+      224,
+      225
+    ],
+    "runnable_rows": 51,
+    "all_runnable_passed": true,
+    "minimum_matched_ratio": 1.0,
+    "maximum_absolute_error": 7.3909759521484375e-06,
+    "result": "results/alpha/c7_s34bv_sol_l2p002_20261005/pinned/runnable_rows.json",
+    "unavailable_shape": {
+      "index": 17,
+      "batch_size": 2,
+      "seq_len": 8192,
+      "stage": "official reference attention matmul/scaling",
+      "attempted_seed": 223,
+      "other_seeds": "not rerun after shape capacity failure",
+      "reason": "reference requires two simultaneous 16-GiB attention tensors plus other live tensors on a 24-GB GPU",
+      "stderr": "results/alpha/c7_s34bv_sol_l2p002_20261005/pinned/official_full.stderr"
+    },
+    "allocator": "PYTORCH_ALLOC_CONF=expandable_segments:True for runnable screen; initial allocator attempt failed on row16 before retry",
+    "tolerance_note": "Dataset key required_match_ratio is ignored by retained ToleranceSpec; actual required_matched_ratio=0.99, all runnable results match 1.0."
+  },
+  "memcheck": {
+    "case": {
+      "index": 0,
+      "batch_size": 1,
+      "seq_len": 131
+    },
+    "errors": 0,
+    "result": "results/alpha/c7_s34bv_sol_l2p002_20261005/pinned/memcheck.json",
+    "log": "results/alpha/c7_s34bv_sol_l2p002_20261005/pinned/memcheck.log"
+  },
+  "nvbit": {
+    "timeout_seconds": 420,
+    "return_code": 124,
+    "trace": "results/alpha/c7_s34bv_sol_l2p002_20261005/pinned/trace",
+    "stdout": "results/alpha/c7_s34bv_sol_l2p002_20261005/pinned/trace.stdout",
+    "stderr": "results/alpha/c7_s34bv_sol_l2p002_20261005/pinned/trace.stderr",
+    "completed_launches": [
+      {
+        "name": "rms_norm_kernel",
+        "blocks": 131,
+        "raw_instructions": 1030184
+      }
+    ],
+    "incomplete_launch": {
+      "name": "ampere_sgemm_128x32_tn",
+      "grid": [
+        32,
+        5,
+        1
+      ],
+      "blocks": 160,
+      "total_instructions": null
+    },
+    "threadblock_files": 131,
+    "dynamic_trace_present": false,
+    "interpretation": "Timeout occurred during instrumented SGEMM, before primary trace completion. Increasing RSS and GPU activity were observed, but no definitive internal serialization-versus-instrumentation diagnosis is claimed."
+  },
+  "ncu": {
+    "scope": "all kernels in the full row0 invocation, not just custom kernels",
+    "replay_mode": "application",
+    "cache_control": "all",
+    "clock_control": "none",
+    "repetitions": 5,
+    "reports": "results/alpha/c7_s34bv_sol_l2p002_20261005/pinned/ncu/repeat-*/report.ncu-rep",
+    "observations": [
+      {
+        "repeat": "repeat-0",
+        "kernels": [
+          {
+            "id": 0,
+            "kernel": "<unnamed>::rms_norm_kernel(const float *, const float *, float *, float, int, int)",
+            "grid": "(131, 1, 1)",
+            "warp_instructions": 328286.0,
+            "gpc_cycles": 10756.0,
+            "sm_active_cycles": 9026.0
+          },
+          {
+            "id": 1,
+            "kernel": "ampere_sgemm_128x32_tn",
+            "grid": "(32, 5, 1)",
+            "warp_instructions": 115237120.0,
+            "gpc_cycles": 577584.0,
+            "sm_active_cycles": 575944.0
+          },
+          {
+            "id": 2,
+            "kernel": "ampere_sgemm_128x64_tn",
+            "grid": "(8, 3, 10)",
+            "warp_instructions": 31076640.0,
+            "gpc_cycles": 147515.0,
+            "sm_active_cycles": 145900.0
+          },
+          {
+            "id": 3,
+            "kernel": "void cublasLt::splitKreduce_kernel<32, 16, int, float, float, float, float, 0, float, float, float, 1, 0, 0, 0>(cublasLt::cublasSplitKParams<T6>, const T4 *, const T10 *, T9 *, T5 *, const T6 *, const T6 *, const T11 *, const T4 *, T11 *, void *, long, T6 *, int *, T6 *, T6 *, const T6 *, const T6 *, const T6 *, const T6 *, const T6 *)",
+            "grid": "(32, 9, 1)",
+            "warp_instructions": 518048.0,
+            "gpc_cycles": 12804.0,
+            "sm_active_cycles": 11126.0
+          },
+          {
+            "id": 4,
+            "kernel": "ampere_sgemm_128x64_tn",
+            "grid": "(8, 3, 10)",
+            "warp_instructions": 31076640.0,
+            "gpc_cycles": 147133.0,
+            "sm_active_cycles": 145447.0
+          },
+          {
+            "id": 5,
+            "kernel": "void cublasLt::splitKreduce_kernel<32, 16, int, float, float, float, float, 0, float, float, float, 1, 0, 0, 0>(cublasLt::cublasSplitKParams<T6>, const T4 *, const T10 *, T9 *, T5 *, const T6 *, const T6 *, const T11 *, const T4 *, T11 *, void *, long, T6 *, int *, T6 *, T6 *, const T6 *, const T6 *, const T6 *, const T6 *, const T6 *)",
+            "grid": "(32, 9, 1)",
+            "warp_instructions": 518048.0,
+            "gpc_cycles": 12856.0,
+            "sm_active_cycles": 11179.0
+          },
+          {
+            "id": 6,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2096, 1, 1)",
+            "warp_instructions": 746176.0,
+            "gpc_cycles": 8703.0,
+            "sm_active_cycles": 7021.0
+          },
+          {
+            "id": 7,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(524, 1, 1)",
+            "warp_instructions": 186544.0,
+            "gpc_cycles": 5012.0,
+            "sm_active_cycles": 3234.0
+          },
+          {
+            "id": 8,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(524, 1, 1)",
+            "warp_instructions": 186544.0,
+            "gpc_cycles": 4994.0,
+            "sm_active_cycles": 3255.0
+          },
+          {
+            "id": 9,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::neg_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 2)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(1048, 1, 1)",
+            "warp_instructions": 306016.0,
+            "gpc_cycles": 6051.0,
+            "sm_active_cycles": 4402.0
+          },
+          {
+            "id": 10,
+            "kernel": "void at::<unnamed>::CatArrayBatchedCopy<at::<unnamed>::OpaqueType<4>, unsigned int, 4, 64, 64>(T1 *, at::<unnamed>::CatArrInputTensorMetadata<T1, T2, T4, T5>, at::<unnamed>::TensorSizeStride<T2, 4>, int, T2)",
+            "grid": "(168, 2, 1)",
+            "warp_instructions": 1897088.0,
+            "gpc_cycles": 14503.0,
+            "sm_active_cycles": 12777.0
+          },
+          {
+            "id": 11,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::BinaryFunctor<float, float, float, binary_internal::MulFunctor<float>>>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2096, 1, 1)",
+            "warp_instructions": 712640.0,
+            "gpc_cycles": 8669.0,
+            "sm_active_cycles": 6968.0
+          },
+          {
+            "id": 12,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::BinaryFunctor<float, float, float, binary_internal::MulFunctor<float>>>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2096, 1, 1)",
+            "warp_instructions": 712640.0,
+            "gpc_cycles": 8028.0,
+            "sm_active_cycles": 6387.0
+          },
+          {
+            "id": 13,
+            "kernel": "void at::vectorized_elementwise_kernel<4, at::CUDAFunctor_add<float>, std::array<char *, 3>>(int, T2, T3)",
+            "grid": "(524, 1, 1)",
+            "warp_instructions": 62880.0,
+            "gpc_cycles": 9382.0,
+            "sm_active_cycles": 7746.0
+          },
+          {
+            "id": 14,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::neg_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 2)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(262, 1, 1)",
+            "warp_instructions": 76504.0,
+            "gpc_cycles": 4533.0,
+            "sm_active_cycles": 2879.0
+          },
+          {
+            "id": 15,
+            "kernel": "void at::<unnamed>::CatArrayBatchedCopy<at::<unnamed>::OpaqueType<4>, unsigned int, 4, 64, 64>(T1 *, at::<unnamed>::CatArrInputTensorMetadata<T1, T2, T4, T5>, at::<unnamed>::TensorSizeStride<T2, 4>, int, T2)",
+            "grid": "(168, 2, 1)",
+            "warp_instructions": 753824.0,
+            "gpc_cycles": 8395.0,
+            "sm_active_cycles": 6714.0
+          },
+          {
+            "id": 16,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::BinaryFunctor<float, float, float, binary_internal::MulFunctor<float>>>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(524, 1, 1)",
+            "warp_instructions": 178160.0,
+            "gpc_cycles": 5059.0,
+            "sm_active_cycles": 3339.0
+          },
+          {
+            "id": 17,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::BinaryFunctor<float, float, float, binary_internal::MulFunctor<float>>>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(524, 1, 1)",
+            "warp_instructions": 178160.0,
+            "gpc_cycles": 5058.0,
+            "sm_active_cycles": 3323.0
+          },
+          {
+            "id": 18,
+            "kernel": "void at::vectorized_elementwise_kernel<4, at::CUDAFunctor_add<float>, std::array<char *, 3>>(int, T2, T3)",
+            "grid": "(131, 1, 1)",
+            "warp_instructions": 15720.0,
+            "gpc_cycles": 4617.0,
+            "sm_active_cycles": 3004.0
+          },
+          {
+            "id": 19,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2096, 1, 1)",
+            "warp_instructions": 746176.0,
+            "gpc_cycles": 7219.0,
+            "sm_active_cycles": 5529.0
+          },
+          {
+            "id": 20,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2096, 1, 1)",
+            "warp_instructions": 746176.0,
+            "gpc_cycles": 7203.0,
+            "sm_active_cycles": 5514.0
+          },
+          {
+            "id": 21,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2096, 1, 1)",
+            "warp_instructions": 746176.0,
+            "gpc_cycles": 13975.0,
+            "sm_active_cycles": 12281.0
+          },
+          {
+            "id": 22,
+            "kernel": "ampere_sgemm_128x128_nn",
+            "grid": "(2, 2, 32)",
+            "warp_instructions": 10421248.0,
+            "gpc_cycles": 62236.0,
+            "sm_active_cycles": 60625.0
+          },
+          {
+            "id": 23,
+            "kernel": "void at::vectorized_elementwise_kernel<4, at::AUnaryFunctor<float, float, float, binary_internal::MulFunctor<float>>, std::array<char *, 2>>(int, T2, T3)",
+            "grid": "(537, 1, 1)",
+            "warp_instructions": 56142.0,
+            "gpc_cycles": 6434.0,
+            "sm_active_cycles": 4772.0
+          },
+          {
+            "id": 24,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::CUDAFunctor_add<float>>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2146, 1, 1)",
+            "warp_instructions": 729381.0,
+            "gpc_cycles": 8094.0,
+            "sm_active_cycles": 6443.0
+          },
+          {
+            "id": 25,
+            "kernel": "void <unnamed>::softmax_warp_forward<float, float, float, 8, 0, 0, 32>(T2 *, const T1 *, int, int, int, const bool *, int, bool)",
+            "grid": "(1048, 1, 1)",
+            "warp_instructions": 1594272.0,
+            "gpc_cycles": 10749.0,
+            "sm_active_cycles": 8973.0
+          },
+          {
+            "id": 26,
+            "kernel": "ampere_sgemm_128x128_nn",
+            "grid": "(1, 2, 32)",
+            "warp_instructions": 5535744.0,
+            "gpc_cycles": 38354.0,
+            "sm_active_cycles": 36671.0
+          },
+          {
+            "id": 27,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2096, 1, 1)",
+            "warp_instructions": 746176.0,
+            "gpc_cycles": 8093.0,
+            "sm_active_cycles": 6427.0
+          },
+          {
+            "id": 28,
+            "kernel": "ampere_sgemm_128x32_tn",
+            "grid": "(32, 5, 1)",
+            "warp_instructions": 115237120.0,
+            "gpc_cycles": 580228.0,
+            "sm_active_cycles": 578599.0
+          },
+          {
+            "id": 29,
+            "kernel": "void at::vectorized_elementwise_kernel<4, at::CUDAFunctor_add<float>, std::array<char *, 3>>(int, T2, T3)",
+            "grid": "(524, 1, 1)",
+            "warp_instructions": 62880.0,
+            "gpc_cycles": 9450.0,
+            "sm_active_cycles": 7790.0
+          },
+          {
+            "id": 30,
+            "kernel": "<unnamed>::rms_norm_kernel(const float *, const float *, float *, float, int, int)",
+            "grid": "(131, 1, 1)",
+            "warp_instructions": 328286.0,
+            "gpc_cycles": 9573.0,
+            "sm_active_cycles": 7953.0
+          },
+          {
+            "id": 31,
+            "kernel": "ampere_sgemm_128x64_tn",
+            "grid": "(112, 3, 5)",
+            "warp_instructions": 425585664.0,
+            "gpc_cycles": 1712675.0,
+            "sm_active_cycles": 1711039.0
+          },
+          {
+            "id": 32,
+            "kernel": "ampere_sgemm_128x64_tn",
+            "grid": "(112, 3, 5)",
+            "warp_instructions": 425585664.0,
+            "gpc_cycles": 1713666.0,
+            "sm_active_cycles": 1712013.0
+          },
+          {
+            "id": 33,
+            "kernel": "<unnamed>::silu_mul_kernel(const float *, const float *, float *, long)",
+            "grid": "(2688, 1, 1)",
+            "warp_instructions": 1656704.0,
+            "gpc_cycles": 32271.0,
+            "sm_active_cycles": 30634.0
+          },
+          {
+            "id": 34,
+            "kernel": "ampere_sgemm_128x32_tn",
+            "grid": "(32, 5, 1)",
+            "warp_instructions": 401957120.0,
+            "gpc_cycles": 2032105.0,
+            "sm_active_cycles": 2030451.0
+          },
+          {
+            "id": 35,
+            "kernel": "void at::vectorized_elementwise_kernel<4, at::CUDAFunctor_add<float>, std::array<char *, 3>>(int, T2, T3)",
+            "grid": "(524, 1, 1)",
+            "warp_instructions": 62880.0,
+            "gpc_cycles": 9394.0,
+            "sm_active_cycles": 7737.0
+          }
+        ]
+      },
+      {
+        "repeat": "repeat-1",
+        "kernels": [
+          {
+            "id": 0,
+            "kernel": "<unnamed>::rms_norm_kernel(const float *, const float *, float *, float, int, int)",
+            "grid": "(131, 1, 1)",
+            "warp_instructions": 328286.0,
+            "gpc_cycles": 10498.0,
+            "sm_active_cycles": 8798.0
+          },
+          {
+            "id": 1,
+            "kernel": "ampere_sgemm_128x32_tn",
+            "grid": "(32, 5, 1)",
+            "warp_instructions": 115237120.0,
+            "gpc_cycles": 579928.0,
+            "sm_active_cycles": 578282.0
+          },
+          {
+            "id": 2,
+            "kernel": "ampere_sgemm_128x64_tn",
+            "grid": "(8, 3, 10)",
+            "warp_instructions": 31076640.0,
+            "gpc_cycles": 147961.0,
+            "sm_active_cycles": 146289.0
+          },
+          {
+            "id": 3,
+            "kernel": "void cublasLt::splitKreduce_kernel<32, 16, int, float, float, float, float, 0, float, float, float, 1, 0, 0, 0>(cublasLt::cublasSplitKParams<T6>, const T4 *, const T10 *, T9 *, T5 *, const T6 *, const T6 *, const T11 *, const T4 *, T11 *, void *, long, T6 *, int *, T6 *, T6 *, const T6 *, const T6 *, const T6 *, const T6 *, const T6 *)",
+            "grid": "(32, 9, 1)",
+            "warp_instructions": 518048.0,
+            "gpc_cycles": 12877.0,
+            "sm_active_cycles": 11235.0
+          },
+          {
+            "id": 4,
+            "kernel": "ampere_sgemm_128x64_tn",
+            "grid": "(8, 3, 10)",
+            "warp_instructions": 31076640.0,
+            "gpc_cycles": 147661.0,
+            "sm_active_cycles": 145988.0
+          },
+          {
+            "id": 5,
+            "kernel": "void cublasLt::splitKreduce_kernel<32, 16, int, float, float, float, float, 0, float, float, float, 1, 0, 0, 0>(cublasLt::cublasSplitKParams<T6>, const T4 *, const T10 *, T9 *, T5 *, const T6 *, const T6 *, const T11 *, const T4 *, T11 *, void *, long, T6 *, int *, T6 *, T6 *, const T6 *, const T6 *, const T6 *, const T6 *, const T6 *)",
+            "grid": "(32, 9, 1)",
+            "warp_instructions": 518048.0,
+            "gpc_cycles": 12796.0,
+            "sm_active_cycles": 11150.0
+          },
+          {
+            "id": 6,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2096, 1, 1)",
+            "warp_instructions": 746176.0,
+            "gpc_cycles": 8378.0,
+            "sm_active_cycles": 6734.0
+          },
+          {
+            "id": 7,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(524, 1, 1)",
+            "warp_instructions": 186544.0,
+            "gpc_cycles": 5099.0,
+            "sm_active_cycles": 3468.0
+          },
+          {
+            "id": 8,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(524, 1, 1)",
+            "warp_instructions": 186544.0,
+            "gpc_cycles": 4988.0,
+            "sm_active_cycles": 3315.0
+          },
+          {
+            "id": 9,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::neg_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 2)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(1048, 1, 1)",
+            "warp_instructions": 306016.0,
+            "gpc_cycles": 6028.0,
+            "sm_active_cycles": 4397.0
+          },
+          {
+            "id": 10,
+            "kernel": "void at::<unnamed>::CatArrayBatchedCopy<at::<unnamed>::OpaqueType<4>, unsigned int, 4, 64, 64>(T1 *, at::<unnamed>::CatArrInputTensorMetadata<T1, T2, T4, T5>, at::<unnamed>::TensorSizeStride<T2, 4>, int, T2)",
+            "grid": "(168, 2, 1)",
+            "warp_instructions": 1897088.0,
+            "gpc_cycles": 14881.0,
+            "sm_active_cycles": 13242.0
+          },
+          {
+            "id": 11,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::BinaryFunctor<float, float, float, binary_internal::MulFunctor<float>>>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2096, 1, 1)",
+            "warp_instructions": 712640.0,
+            "gpc_cycles": 8692.0,
+            "sm_active_cycles": 7023.0
+          },
+          {
+            "id": 12,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::BinaryFunctor<float, float, float, binary_internal::MulFunctor<float>>>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2096, 1, 1)",
+            "warp_instructions": 712640.0,
+            "gpc_cycles": 8050.0,
+            "sm_active_cycles": 6422.0
+          },
+          {
+            "id": 13,
+            "kernel": "void at::vectorized_elementwise_kernel<4, at::CUDAFunctor_add<float>, std::array<char *, 3>>(int, T2, T3)",
+            "grid": "(524, 1, 1)",
+            "warp_instructions": 62880.0,
+            "gpc_cycles": 9411.0,
+            "sm_active_cycles": 7766.0
+          },
+          {
+            "id": 14,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::neg_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 2)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(262, 1, 1)",
+            "warp_instructions": 76504.0,
+            "gpc_cycles": 4521.0,
+            "sm_active_cycles": 2867.0
+          },
+          {
+            "id": 15,
+            "kernel": "void at::<unnamed>::CatArrayBatchedCopy<at::<unnamed>::OpaqueType<4>, unsigned int, 4, 64, 64>(T1 *, at::<unnamed>::CatArrInputTensorMetadata<T1, T2, T4, T5>, at::<unnamed>::TensorSizeStride<T2, 4>, int, T2)",
+            "grid": "(168, 2, 1)",
+            "warp_instructions": 753824.0,
+            "gpc_cycles": 8322.0,
+            "sm_active_cycles": 6651.0
+          },
+          {
+            "id": 16,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::BinaryFunctor<float, float, float, binary_internal::MulFunctor<float>>>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(524, 1, 1)",
+            "warp_instructions": 178160.0,
+            "gpc_cycles": 5153.0,
+            "sm_active_cycles": 3452.0
+          },
+          {
+            "id": 17,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::BinaryFunctor<float, float, float, binary_internal::MulFunctor<float>>>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(524, 1, 1)",
+            "warp_instructions": 178160.0,
+            "gpc_cycles": 5050.0,
+            "sm_active_cycles": 3288.0
+          },
+          {
+            "id": 18,
+            "kernel": "void at::vectorized_elementwise_kernel<4, at::CUDAFunctor_add<float>, std::array<char *, 3>>(int, T2, T3)",
+            "grid": "(131, 1, 1)",
+            "warp_instructions": 15720.0,
+            "gpc_cycles": 4829.0,
+            "sm_active_cycles": 3153.0
+          },
+          {
+            "id": 19,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2096, 1, 1)",
+            "warp_instructions": 746176.0,
+            "gpc_cycles": 7183.0,
+            "sm_active_cycles": 5532.0
+          },
+          {
+            "id": 20,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2096, 1, 1)",
+            "warp_instructions": 746176.0,
+            "gpc_cycles": 7129.0,
+            "sm_active_cycles": 5500.0
+          },
+          {
+            "id": 21,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2096, 1, 1)",
+            "warp_instructions": 746176.0,
+            "gpc_cycles": 13678.0,
+            "sm_active_cycles": 11957.0
+          },
+          {
+            "id": 22,
+            "kernel": "ampere_sgemm_128x128_nn",
+            "grid": "(2, 2, 32)",
+            "warp_instructions": 10421248.0,
+            "gpc_cycles": 62312.0,
+            "sm_active_cycles": 60679.0
+          },
+          {
+            "id": 23,
+            "kernel": "void at::vectorized_elementwise_kernel<4, at::AUnaryFunctor<float, float, float, binary_internal::MulFunctor<float>>, std::array<char *, 2>>(int, T2, T3)",
+            "grid": "(537, 1, 1)",
+            "warp_instructions": 56142.0,
+            "gpc_cycles": 6489.0,
+            "sm_active_cycles": 4837.0
+          },
+          {
+            "id": 24,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::CUDAFunctor_add<float>>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2146, 1, 1)",
+            "warp_instructions": 729381.0,
+            "gpc_cycles": 8108.0,
+            "sm_active_cycles": 6455.0
+          },
+          {
+            "id": 25,
+            "kernel": "void <unnamed>::softmax_warp_forward<float, float, float, 8, 0, 0, 32>(T2 *, const T1 *, int, int, int, const bool *, int, bool)",
+            "grid": "(1048, 1, 1)",
+            "warp_instructions": 1594272.0,
+            "gpc_cycles": 10834.0,
+            "sm_active_cycles": 9140.0
+          },
+          {
+            "id": 26,
+            "kernel": "ampere_sgemm_128x128_nn",
+            "grid": "(1, 2, 32)",
+            "warp_instructions": 5535744.0,
+            "gpc_cycles": 38157.0,
+            "sm_active_cycles": 36531.0
+          },
+          {
+            "id": 27,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2096, 1, 1)",
+            "warp_instructions": 746176.0,
+            "gpc_cycles": 8256.0,
+            "sm_active_cycles": 6563.0
+          },
+          {
+            "id": 28,
+            "kernel": "ampere_sgemm_128x32_tn",
+            "grid": "(32, 5, 1)",
+            "warp_instructions": 115237120.0,
+            "gpc_cycles": 580439.0,
+            "sm_active_cycles": 578815.0
+          },
+          {
+            "id": 29,
+            "kernel": "void at::vectorized_elementwise_kernel<4, at::CUDAFunctor_add<float>, std::array<char *, 3>>(int, T2, T3)",
+            "grid": "(524, 1, 1)",
+            "warp_instructions": 62880.0,
+            "gpc_cycles": 9501.0,
+            "sm_active_cycles": 7831.0
+          },
+          {
+            "id": 30,
+            "kernel": "<unnamed>::rms_norm_kernel(const float *, const float *, float *, float, int, int)",
+            "grid": "(131, 1, 1)",
+            "warp_instructions": 328286.0,
+            "gpc_cycles": 9756.0,
+            "sm_active_cycles": 8148.0
+          },
+          {
+            "id": 31,
+            "kernel": "ampere_sgemm_128x64_tn",
+            "grid": "(112, 3, 5)",
+            "warp_instructions": 425585664.0,
+            "gpc_cycles": 1713073.0,
+            "sm_active_cycles": 1711435.0
+          },
+          {
+            "id": 32,
+            "kernel": "ampere_sgemm_128x64_tn",
+            "grid": "(112, 3, 5)",
+            "warp_instructions": 425585664.0,
+            "gpc_cycles": 1712754.0,
+            "sm_active_cycles": 1711159.0
+          },
+          {
+            "id": 33,
+            "kernel": "<unnamed>::silu_mul_kernel(const float *, const float *, float *, long)",
+            "grid": "(2688, 1, 1)",
+            "warp_instructions": 1656704.0,
+            "gpc_cycles": 31778.0,
+            "sm_active_cycles": 30077.0
+          },
+          {
+            "id": 34,
+            "kernel": "ampere_sgemm_128x32_tn",
+            "grid": "(32, 5, 1)",
+            "warp_instructions": 401957120.0,
+            "gpc_cycles": 2022609.0,
+            "sm_active_cycles": 2020951.0
+          },
+          {
+            "id": 35,
+            "kernel": "void at::vectorized_elementwise_kernel<4, at::CUDAFunctor_add<float>, std::array<char *, 3>>(int, T2, T3)",
+            "grid": "(524, 1, 1)",
+            "warp_instructions": 62880.0,
+            "gpc_cycles": 9538.0,
+            "sm_active_cycles": 7876.0
+          }
+        ]
+      },
+      {
+        "repeat": "repeat-2",
+        "kernels": [
+          {
+            "id": 0,
+            "kernel": "<unnamed>::rms_norm_kernel(const float *, const float *, float *, float, int, int)",
+            "grid": "(131, 1, 1)",
+            "warp_instructions": 328286.0,
+            "gpc_cycles": 10814.0,
+            "sm_active_cycles": 9107.0
+          },
+          {
+            "id": 1,
+            "kernel": "ampere_sgemm_128x32_tn",
+            "grid": "(32, 5, 1)",
+            "warp_instructions": 115237120.0,
+            "gpc_cycles": 577178.0,
+            "sm_active_cycles": 575533.0
+          },
+          {
+            "id": 2,
+            "kernel": "ampere_sgemm_128x64_tn",
+            "grid": "(8, 3, 10)",
+            "warp_instructions": 31076640.0,
+            "gpc_cycles": 147513.0,
+            "sm_active_cycles": 145828.0
+          },
+          {
+            "id": 3,
+            "kernel": "void cublasLt::splitKreduce_kernel<32, 16, int, float, float, float, float, 0, float, float, float, 1, 0, 0, 0>(cublasLt::cublasSplitKParams<T6>, const T4 *, const T10 *, T9 *, T5 *, const T6 *, const T6 *, const T11 *, const T4 *, T11 *, void *, long, T6 *, int *, T6 *, T6 *, const T6 *, const T6 *, const T6 *, const T6 *, const T6 *)",
+            "grid": "(32, 9, 1)",
+            "warp_instructions": 518048.0,
+            "gpc_cycles": 12814.0,
+            "sm_active_cycles": 11136.0
+          },
+          {
+            "id": 4,
+            "kernel": "ampere_sgemm_128x64_tn",
+            "grid": "(8, 3, 10)",
+            "warp_instructions": 31076640.0,
+            "gpc_cycles": 147860.0,
+            "sm_active_cycles": 146147.0
+          },
+          {
+            "id": 5,
+            "kernel": "void cublasLt::splitKreduce_kernel<32, 16, int, float, float, float, float, 0, float, float, float, 1, 0, 0, 0>(cublasLt::cublasSplitKParams<T6>, const T4 *, const T10 *, T9 *, T5 *, const T6 *, const T6 *, const T11 *, const T4 *, T11 *, void *, long, T6 *, int *, T6 *, T6 *, const T6 *, const T6 *, const T6 *, const T6 *, const T6 *)",
+            "grid": "(32, 9, 1)",
+            "warp_instructions": 518048.0,
+            "gpc_cycles": 12888.0,
+            "sm_active_cycles": 11226.0
+          },
+          {
+            "id": 6,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2096, 1, 1)",
+            "warp_instructions": 746176.0,
+            "gpc_cycles": 8459.0,
+            "sm_active_cycles": 6790.0
+          },
+          {
+            "id": 7,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(524, 1, 1)",
+            "warp_instructions": 186544.0,
+            "gpc_cycles": 5100.0,
+            "sm_active_cycles": 3456.0
+          },
+          {
+            "id": 8,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(524, 1, 1)",
+            "warp_instructions": 186544.0,
+            "gpc_cycles": 5120.0,
+            "sm_active_cycles": 3478.0
+          },
+          {
+            "id": 9,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::neg_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 2)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(1048, 1, 1)",
+            "warp_instructions": 306016.0,
+            "gpc_cycles": 5983.0,
+            "sm_active_cycles": 4354.0
+          },
+          {
+            "id": 10,
+            "kernel": "void at::<unnamed>::CatArrayBatchedCopy<at::<unnamed>::OpaqueType<4>, unsigned int, 4, 64, 64>(T1 *, at::<unnamed>::CatArrInputTensorMetadata<T1, T2, T4, T5>, at::<unnamed>::TensorSizeStride<T2, 4>, int, T2)",
+            "grid": "(168, 2, 1)",
+            "warp_instructions": 1897088.0,
+            "gpc_cycles": 14755.0,
+            "sm_active_cycles": 13133.0
+          },
+          {
+            "id": 11,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::BinaryFunctor<float, float, float, binary_internal::MulFunctor<float>>>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2096, 1, 1)",
+            "warp_instructions": 712640.0,
+            "gpc_cycles": 8769.0,
+            "sm_active_cycles": 7032.0
+          },
+          {
+            "id": 12,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::BinaryFunctor<float, float, float, binary_internal::MulFunctor<float>>>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2096, 1, 1)",
+            "warp_instructions": 712640.0,
+            "gpc_cycles": 8187.0,
+            "sm_active_cycles": 6524.0
+          },
+          {
+            "id": 13,
+            "kernel": "void at::vectorized_elementwise_kernel<4, at::CUDAFunctor_add<float>, std::array<char *, 3>>(int, T2, T3)",
+            "grid": "(524, 1, 1)",
+            "warp_instructions": 62880.0,
+            "gpc_cycles": 9429.0,
+            "sm_active_cycles": 7743.0
+          },
+          {
+            "id": 14,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::neg_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 2)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(262, 1, 1)",
+            "warp_instructions": 76504.0,
+            "gpc_cycles": 4551.0,
+            "sm_active_cycles": 2899.0
+          },
+          {
+            "id": 15,
+            "kernel": "void at::<unnamed>::CatArrayBatchedCopy<at::<unnamed>::OpaqueType<4>, unsigned int, 4, 64, 64>(T1 *, at::<unnamed>::CatArrInputTensorMetadata<T1, T2, T4, T5>, at::<unnamed>::TensorSizeStride<T2, 4>, int, T2)",
+            "grid": "(168, 2, 1)",
+            "warp_instructions": 753824.0,
+            "gpc_cycles": 8336.0,
+            "sm_active_cycles": 6651.0
+          },
+          {
+            "id": 16,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::BinaryFunctor<float, float, float, binary_internal::MulFunctor<float>>>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(524, 1, 1)",
+            "warp_instructions": 178160.0,
+            "gpc_cycles": 5048.0,
+            "sm_active_cycles": 3284.0
+          },
+          {
+            "id": 17,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::BinaryFunctor<float, float, float, binary_internal::MulFunctor<float>>>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(524, 1, 1)",
+            "warp_instructions": 178160.0,
+            "gpc_cycles": 5062.0,
+            "sm_active_cycles": 3397.0
+          },
+          {
+            "id": 18,
+            "kernel": "void at::vectorized_elementwise_kernel<4, at::CUDAFunctor_add<float>, std::array<char *, 3>>(int, T2, T3)",
+            "grid": "(131, 1, 1)",
+            "warp_instructions": 15720.0,
+            "gpc_cycles": 4671.0,
+            "sm_active_cycles": 3051.0
+          },
+          {
+            "id": 19,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2096, 1, 1)",
+            "warp_instructions": 746176.0,
+            "gpc_cycles": 7102.0,
+            "sm_active_cycles": 5468.0
+          },
+          {
+            "id": 20,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2096, 1, 1)",
+            "warp_instructions": 746176.0,
+            "gpc_cycles": 7137.0,
+            "sm_active_cycles": 5490.0
+          },
+          {
+            "id": 21,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2096, 1, 1)",
+            "warp_instructions": 746176.0,
+            "gpc_cycles": 13588.0,
+            "sm_active_cycles": 11943.0
+          },
+          {
+            "id": 22,
+            "kernel": "ampere_sgemm_128x128_nn",
+            "grid": "(2, 2, 32)",
+            "warp_instructions": 10421248.0,
+            "gpc_cycles": 62400.0,
+            "sm_active_cycles": 60773.0
+          },
+          {
+            "id": 23,
+            "kernel": "void at::vectorized_elementwise_kernel<4, at::AUnaryFunctor<float, float, float, binary_internal::MulFunctor<float>>, std::array<char *, 2>>(int, T2, T3)",
+            "grid": "(537, 1, 1)",
+            "warp_instructions": 56142.0,
+            "gpc_cycles": 6538.0,
+            "sm_active_cycles": 4800.0
+          },
+          {
+            "id": 24,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::CUDAFunctor_add<float>>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2146, 1, 1)",
+            "warp_instructions": 729381.0,
+            "gpc_cycles": 8223.0,
+            "sm_active_cycles": 6548.0
+          },
+          {
+            "id": 25,
+            "kernel": "void <unnamed>::softmax_warp_forward<float, float, float, 8, 0, 0, 32>(T2 *, const T1 *, int, int, int, const bool *, int, bool)",
+            "grid": "(1048, 1, 1)",
+            "warp_instructions": 1594272.0,
+            "gpc_cycles": 10809.0,
+            "sm_active_cycles": 9044.0
+          },
+          {
+            "id": 26,
+            "kernel": "ampere_sgemm_128x128_nn",
+            "grid": "(1, 2, 32)",
+            "warp_instructions": 5535744.0,
+            "gpc_cycles": 38566.0,
+            "sm_active_cycles": 36910.0
+          },
+          {
+            "id": 27,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2096, 1, 1)",
+            "warp_instructions": 746176.0,
+            "gpc_cycles": 7879.0,
+            "sm_active_cycles": 6206.0
+          },
+          {
+            "id": 28,
+            "kernel": "ampere_sgemm_128x32_tn",
+            "grid": "(32, 5, 1)",
+            "warp_instructions": 115237120.0,
+            "gpc_cycles": 579178.0,
+            "sm_active_cycles": 577552.0
+          },
+          {
+            "id": 29,
+            "kernel": "void at::vectorized_elementwise_kernel<4, at::CUDAFunctor_add<float>, std::array<char *, 3>>(int, T2, T3)",
+            "grid": "(524, 1, 1)",
+            "warp_instructions": 62880.0,
+            "gpc_cycles": 9353.0,
+            "sm_active_cycles": 7693.0
+          },
+          {
+            "id": 30,
+            "kernel": "<unnamed>::rms_norm_kernel(const float *, const float *, float *, float, int, int)",
+            "grid": "(131, 1, 1)",
+            "warp_instructions": 328286.0,
+            "gpc_cycles": 9983.0,
+            "sm_active_cycles": 8356.0
+          },
+          {
+            "id": 31,
+            "kernel": "ampere_sgemm_128x64_tn",
+            "grid": "(112, 3, 5)",
+            "warp_instructions": 425585664.0,
+            "gpc_cycles": 1712926.0,
+            "sm_active_cycles": 1711262.0
+          },
+          {
+            "id": 32,
+            "kernel": "ampere_sgemm_128x64_tn",
+            "grid": "(112, 3, 5)",
+            "warp_instructions": 425585664.0,
+            "gpc_cycles": 1712618.0,
+            "sm_active_cycles": 1711008.0
+          },
+          {
+            "id": 33,
+            "kernel": "<unnamed>::silu_mul_kernel(const float *, const float *, float *, long)",
+            "grid": "(2688, 1, 1)",
+            "warp_instructions": 1656704.0,
+            "gpc_cycles": 31973.0,
+            "sm_active_cycles": 30237.0
+          },
+          {
+            "id": 34,
+            "kernel": "ampere_sgemm_128x32_tn",
+            "grid": "(32, 5, 1)",
+            "warp_instructions": 401957120.0,
+            "gpc_cycles": 2027301.0,
+            "sm_active_cycles": 2025627.0
+          },
+          {
+            "id": 35,
+            "kernel": "void at::vectorized_elementwise_kernel<4, at::CUDAFunctor_add<float>, std::array<char *, 3>>(int, T2, T3)",
+            "grid": "(524, 1, 1)",
+            "warp_instructions": 62880.0,
+            "gpc_cycles": 9494.0,
+            "sm_active_cycles": 7850.0
+          }
+        ]
+      },
+      {
+        "repeat": "repeat-3",
+        "kernels": [
+          {
+            "id": 0,
+            "kernel": "<unnamed>::rms_norm_kernel(const float *, const float *, float *, float, int, int)",
+            "grid": "(131, 1, 1)",
+            "warp_instructions": 328286.0,
+            "gpc_cycles": 10876.0,
+            "sm_active_cycles": 9176.0
+          },
+          {
+            "id": 1,
+            "kernel": "ampere_sgemm_128x32_tn",
+            "grid": "(32, 5, 1)",
+            "warp_instructions": 115237120.0,
+            "gpc_cycles": 577620.0,
+            "sm_active_cycles": 575977.0
+          },
+          {
+            "id": 2,
+            "kernel": "ampere_sgemm_128x64_tn",
+            "grid": "(8, 3, 10)",
+            "warp_instructions": 31076640.0,
+            "gpc_cycles": 147602.0,
+            "sm_active_cycles": 145939.0
+          },
+          {
+            "id": 3,
+            "kernel": "void cublasLt::splitKreduce_kernel<32, 16, int, float, float, float, float, 0, float, float, float, 1, 0, 0, 0>(cublasLt::cublasSplitKParams<T6>, const T4 *, const T10 *, T9 *, T5 *, const T6 *, const T6 *, const T11 *, const T4 *, T11 *, void *, long, T6 *, int *, T6 *, T6 *, const T6 *, const T6 *, const T6 *, const T6 *, const T6 *)",
+            "grid": "(32, 9, 1)",
+            "warp_instructions": 518048.0,
+            "gpc_cycles": 12743.0,
+            "sm_active_cycles": 11066.0
+          },
+          {
+            "id": 4,
+            "kernel": "ampere_sgemm_128x64_tn",
+            "grid": "(8, 3, 10)",
+            "warp_instructions": 31076640.0,
+            "gpc_cycles": 147397.0,
+            "sm_active_cycles": 145738.0
+          },
+          {
+            "id": 5,
+            "kernel": "void cublasLt::splitKreduce_kernel<32, 16, int, float, float, float, float, 0, float, float, float, 1, 0, 0, 0>(cublasLt::cublasSplitKParams<T6>, const T4 *, const T10 *, T9 *, T5 *, const T6 *, const T6 *, const T11 *, const T4 *, T11 *, void *, long, T6 *, int *, T6 *, T6 *, const T6 *, const T6 *, const T6 *, const T6 *, const T6 *)",
+            "grid": "(32, 9, 1)",
+            "warp_instructions": 518048.0,
+            "gpc_cycles": 12622.0,
+            "sm_active_cycles": 10960.0
+          },
+          {
+            "id": 6,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2096, 1, 1)",
+            "warp_instructions": 746176.0,
+            "gpc_cycles": 8344.0,
+            "sm_active_cycles": 6732.0
+          },
+          {
+            "id": 7,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(524, 1, 1)",
+            "warp_instructions": 186544.0,
+            "gpc_cycles": 4993.0,
+            "sm_active_cycles": 3276.0
+          },
+          {
+            "id": 8,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(524, 1, 1)",
+            "warp_instructions": 186544.0,
+            "gpc_cycles": 5002.0,
+            "sm_active_cycles": 3293.0
+          },
+          {
+            "id": 9,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::neg_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 2)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(1048, 1, 1)",
+            "warp_instructions": 306016.0,
+            "gpc_cycles": 6131.0,
+            "sm_active_cycles": 4499.0
+          },
+          {
+            "id": 10,
+            "kernel": "void at::<unnamed>::CatArrayBatchedCopy<at::<unnamed>::OpaqueType<4>, unsigned int, 4, 64, 64>(T1 *, at::<unnamed>::CatArrInputTensorMetadata<T1, T2, T4, T5>, at::<unnamed>::TensorSizeStride<T2, 4>, int, T2)",
+            "grid": "(168, 2, 1)",
+            "warp_instructions": 1897088.0,
+            "gpc_cycles": 14400.0,
+            "sm_active_cycles": 12743.0
+          },
+          {
+            "id": 11,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::BinaryFunctor<float, float, float, binary_internal::MulFunctor<float>>>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2096, 1, 1)",
+            "warp_instructions": 712640.0,
+            "gpc_cycles": 8552.0,
+            "sm_active_cycles": 6867.0
+          },
+          {
+            "id": 12,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::BinaryFunctor<float, float, float, binary_internal::MulFunctor<float>>>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2096, 1, 1)",
+            "warp_instructions": 712640.0,
+            "gpc_cycles": 8213.0,
+            "sm_active_cycles": 6581.0
+          },
+          {
+            "id": 13,
+            "kernel": "void at::vectorized_elementwise_kernel<4, at::CUDAFunctor_add<float>, std::array<char *, 3>>(int, T2, T3)",
+            "grid": "(524, 1, 1)",
+            "warp_instructions": 62880.0,
+            "gpc_cycles": 9416.0,
+            "sm_active_cycles": 7772.0
+          },
+          {
+            "id": 14,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::neg_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 2)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(262, 1, 1)",
+            "warp_instructions": 76504.0,
+            "gpc_cycles": 4532.0,
+            "sm_active_cycles": 2891.0
+          },
+          {
+            "id": 15,
+            "kernel": "void at::<unnamed>::CatArrayBatchedCopy<at::<unnamed>::OpaqueType<4>, unsigned int, 4, 64, 64>(T1 *, at::<unnamed>::CatArrInputTensorMetadata<T1, T2, T4, T5>, at::<unnamed>::TensorSizeStride<T2, 4>, int, T2)",
+            "grid": "(168, 2, 1)",
+            "warp_instructions": 753824.0,
+            "gpc_cycles": 8369.0,
+            "sm_active_cycles": 6719.0
+          },
+          {
+            "id": 16,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::BinaryFunctor<float, float, float, binary_internal::MulFunctor<float>>>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(524, 1, 1)",
+            "warp_instructions": 178160.0,
+            "gpc_cycles": 5057.0,
+            "sm_active_cycles": 3331.0
+          },
+          {
+            "id": 17,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::BinaryFunctor<float, float, float, binary_internal::MulFunctor<float>>>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(524, 1, 1)",
+            "warp_instructions": 178160.0,
+            "gpc_cycles": 5114.0,
+            "sm_active_cycles": 3461.0
+          },
+          {
+            "id": 18,
+            "kernel": "void at::vectorized_elementwise_kernel<4, at::CUDAFunctor_add<float>, std::array<char *, 3>>(int, T2, T3)",
+            "grid": "(131, 1, 1)",
+            "warp_instructions": 15720.0,
+            "gpc_cycles": 4820.0,
+            "sm_active_cycles": 3217.0
+          },
+          {
+            "id": 19,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2096, 1, 1)",
+            "warp_instructions": 746176.0,
+            "gpc_cycles": 7277.0,
+            "sm_active_cycles": 5597.0
+          },
+          {
+            "id": 20,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2096, 1, 1)",
+            "warp_instructions": 746176.0,
+            "gpc_cycles": 7186.0,
+            "sm_active_cycles": 5526.0
+          },
+          {
+            "id": 21,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2096, 1, 1)",
+            "warp_instructions": 746176.0,
+            "gpc_cycles": 13769.0,
+            "sm_active_cycles": 12102.0
+          },
+          {
+            "id": 22,
+            "kernel": "ampere_sgemm_128x128_nn",
+            "grid": "(2, 2, 32)",
+            "warp_instructions": 10421248.0,
+            "gpc_cycles": 62171.0,
+            "sm_active_cycles": 60524.0
+          },
+          {
+            "id": 23,
+            "kernel": "void at::vectorized_elementwise_kernel<4, at::AUnaryFunctor<float, float, float, binary_internal::MulFunctor<float>>, std::array<char *, 2>>(int, T2, T3)",
+            "grid": "(537, 1, 1)",
+            "warp_instructions": 56142.0,
+            "gpc_cycles": 6305.0,
+            "sm_active_cycles": 4608.0
+          },
+          {
+            "id": 24,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::CUDAFunctor_add<float>>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2146, 1, 1)",
+            "warp_instructions": 729381.0,
+            "gpc_cycles": 8299.0,
+            "sm_active_cycles": 6563.0
+          },
+          {
+            "id": 25,
+            "kernel": "void <unnamed>::softmax_warp_forward<float, float, float, 8, 0, 0, 32>(T2 *, const T1 *, int, int, int, const bool *, int, bool)",
+            "grid": "(1048, 1, 1)",
+            "warp_instructions": 1594272.0,
+            "gpc_cycles": 10954.0,
+            "sm_active_cycles": 9229.0
+          },
+          {
+            "id": 26,
+            "kernel": "ampere_sgemm_128x128_nn",
+            "grid": "(1, 2, 32)",
+            "warp_instructions": 5535744.0,
+            "gpc_cycles": 38267.0,
+            "sm_active_cycles": 36598.0
+          },
+          {
+            "id": 27,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2096, 1, 1)",
+            "warp_instructions": 746176.0,
+            "gpc_cycles": 8010.0,
+            "sm_active_cycles": 6321.0
+          },
+          {
+            "id": 28,
+            "kernel": "ampere_sgemm_128x32_tn",
+            "grid": "(32, 5, 1)",
+            "warp_instructions": 115237120.0,
+            "gpc_cycles": 580267.0,
+            "sm_active_cycles": 578567.0
+          },
+          {
+            "id": 29,
+            "kernel": "void at::vectorized_elementwise_kernel<4, at::CUDAFunctor_add<float>, std::array<char *, 3>>(int, T2, T3)",
+            "grid": "(524, 1, 1)",
+            "warp_instructions": 62880.0,
+            "gpc_cycles": 9552.0,
+            "sm_active_cycles": 7879.0
+          },
+          {
+            "id": 30,
+            "kernel": "<unnamed>::rms_norm_kernel(const float *, const float *, float *, float, int, int)",
+            "grid": "(131, 1, 1)",
+            "warp_instructions": 328286.0,
+            "gpc_cycles": 9759.0,
+            "sm_active_cycles": 8064.0
+          },
+          {
+            "id": 31,
+            "kernel": "ampere_sgemm_128x64_tn",
+            "grid": "(112, 3, 5)",
+            "warp_instructions": 425585664.0,
+            "gpc_cycles": 1713301.0,
+            "sm_active_cycles": 1711615.0
+          },
+          {
+            "id": 32,
+            "kernel": "ampere_sgemm_128x64_tn",
+            "grid": "(112, 3, 5)",
+            "warp_instructions": 425585664.0,
+            "gpc_cycles": 1713475.0,
+            "sm_active_cycles": 1711838.0
+          },
+          {
+            "id": 33,
+            "kernel": "<unnamed>::silu_mul_kernel(const float *, const float *, float *, long)",
+            "grid": "(2688, 1, 1)",
+            "warp_instructions": 1656704.0,
+            "gpc_cycles": 31691.0,
+            "sm_active_cycles": 30018.0
+          },
+          {
+            "id": 34,
+            "kernel": "ampere_sgemm_128x32_tn",
+            "grid": "(32, 5, 1)",
+            "warp_instructions": 401957120.0,
+            "gpc_cycles": 2027088.0,
+            "sm_active_cycles": 2025413.0
+          },
+          {
+            "id": 35,
+            "kernel": "void at::vectorized_elementwise_kernel<4, at::CUDAFunctor_add<float>, std::array<char *, 3>>(int, T2, T3)",
+            "grid": "(524, 1, 1)",
+            "warp_instructions": 62880.0,
+            "gpc_cycles": 9476.0,
+            "sm_active_cycles": 7759.0
+          }
+        ]
+      },
+      {
+        "repeat": "repeat-4",
+        "kernels": [
+          {
+            "id": 0,
+            "kernel": "<unnamed>::rms_norm_kernel(const float *, const float *, float *, float, int, int)",
+            "grid": "(131, 1, 1)",
+            "warp_instructions": 328286.0,
+            "gpc_cycles": 11174.0,
+            "sm_active_cycles": 9465.0
+          },
+          {
+            "id": 1,
+            "kernel": "ampere_sgemm_128x32_tn",
+            "grid": "(32, 5, 1)",
+            "warp_instructions": 115237120.0,
+            "gpc_cycles": 578168.0,
+            "sm_active_cycles": 576500.0
+          },
+          {
+            "id": 2,
+            "kernel": "ampere_sgemm_128x64_tn",
+            "grid": "(8, 3, 10)",
+            "warp_instructions": 31076640.0,
+            "gpc_cycles": 147475.0,
+            "sm_active_cycles": 145810.0
+          },
+          {
+            "id": 3,
+            "kernel": "void cublasLt::splitKreduce_kernel<32, 16, int, float, float, float, float, 0, float, float, float, 1, 0, 0, 0>(cublasLt::cublasSplitKParams<T6>, const T4 *, const T10 *, T9 *, T5 *, const T6 *, const T6 *, const T11 *, const T4 *, T11 *, void *, long, T6 *, int *, T6 *, T6 *, const T6 *, const T6 *, const T6 *, const T6 *, const T6 *)",
+            "grid": "(32, 9, 1)",
+            "warp_instructions": 518048.0,
+            "gpc_cycles": 12838.0,
+            "sm_active_cycles": 11214.0
+          },
+          {
+            "id": 4,
+            "kernel": "ampere_sgemm_128x64_tn",
+            "grid": "(8, 3, 10)",
+            "warp_instructions": 31076640.0,
+            "gpc_cycles": 147724.0,
+            "sm_active_cycles": 146046.0
+          },
+          {
+            "id": 5,
+            "kernel": "void cublasLt::splitKreduce_kernel<32, 16, int, float, float, float, float, 0, float, float, float, 1, 0, 0, 0>(cublasLt::cublasSplitKParams<T6>, const T4 *, const T10 *, T9 *, T5 *, const T6 *, const T6 *, const T11 *, const T4 *, T11 *, void *, long, T6 *, int *, T6 *, T6 *, const T6 *, const T6 *, const T6 *, const T6 *, const T6 *)",
+            "grid": "(32, 9, 1)",
+            "warp_instructions": 518048.0,
+            "gpc_cycles": 12905.0,
+            "sm_active_cycles": 11243.0
+          },
+          {
+            "id": 6,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2096, 1, 1)",
+            "warp_instructions": 746176.0,
+            "gpc_cycles": 8480.0,
+            "sm_active_cycles": 6725.0
+          },
+          {
+            "id": 7,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(524, 1, 1)",
+            "warp_instructions": 186544.0,
+            "gpc_cycles": 5023.0,
+            "sm_active_cycles": 3259.0
+          },
+          {
+            "id": 8,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(524, 1, 1)",
+            "warp_instructions": 186544.0,
+            "gpc_cycles": 4992.0,
+            "sm_active_cycles": 3286.0
+          },
+          {
+            "id": 9,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::neg_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 2)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(1048, 1, 1)",
+            "warp_instructions": 306016.0,
+            "gpc_cycles": 6037.0,
+            "sm_active_cycles": 4382.0
+          },
+          {
+            "id": 10,
+            "kernel": "void at::<unnamed>::CatArrayBatchedCopy<at::<unnamed>::OpaqueType<4>, unsigned int, 4, 64, 64>(T1 *, at::<unnamed>::CatArrInputTensorMetadata<T1, T2, T4, T5>, at::<unnamed>::TensorSizeStride<T2, 4>, int, T2)",
+            "grid": "(168, 2, 1)",
+            "warp_instructions": 1897088.0,
+            "gpc_cycles": 14758.0,
+            "sm_active_cycles": 13148.0
+          },
+          {
+            "id": 11,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::BinaryFunctor<float, float, float, binary_internal::MulFunctor<float>>>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2096, 1, 1)",
+            "warp_instructions": 712640.0,
+            "gpc_cycles": 8644.0,
+            "sm_active_cycles": 6895.0
+          },
+          {
+            "id": 12,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::BinaryFunctor<float, float, float, binary_internal::MulFunctor<float>>>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2096, 1, 1)",
+            "warp_instructions": 712640.0,
+            "gpc_cycles": 8023.0,
+            "sm_active_cycles": 6353.0
+          },
+          {
+            "id": 13,
+            "kernel": "void at::vectorized_elementwise_kernel<4, at::CUDAFunctor_add<float>, std::array<char *, 3>>(int, T2, T3)",
+            "grid": "(524, 1, 1)",
+            "warp_instructions": 62880.0,
+            "gpc_cycles": 9514.0,
+            "sm_active_cycles": 7865.0
+          },
+          {
+            "id": 14,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::neg_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 2)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(262, 1, 1)",
+            "warp_instructions": 76504.0,
+            "gpc_cycles": 4588.0,
+            "sm_active_cycles": 2944.0
+          },
+          {
+            "id": 15,
+            "kernel": "void at::<unnamed>::CatArrayBatchedCopy<at::<unnamed>::OpaqueType<4>, unsigned int, 4, 64, 64>(T1 *, at::<unnamed>::CatArrInputTensorMetadata<T1, T2, T4, T5>, at::<unnamed>::TensorSizeStride<T2, 4>, int, T2)",
+            "grid": "(168, 2, 1)",
+            "warp_instructions": 753824.0,
+            "gpc_cycles": 8308.0,
+            "sm_active_cycles": 6675.0
+          },
+          {
+            "id": 16,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::BinaryFunctor<float, float, float, binary_internal::MulFunctor<float>>>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(524, 1, 1)",
+            "warp_instructions": 178160.0,
+            "gpc_cycles": 5043.0,
+            "sm_active_cycles": 3319.0
+          },
+          {
+            "id": 17,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::BinaryFunctor<float, float, float, binary_internal::MulFunctor<float>>>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(524, 1, 1)",
+            "warp_instructions": 178160.0,
+            "gpc_cycles": 5027.0,
+            "sm_active_cycles": 3284.0
+          },
+          {
+            "id": 18,
+            "kernel": "void at::vectorized_elementwise_kernel<4, at::CUDAFunctor_add<float>, std::array<char *, 3>>(int, T2, T3)",
+            "grid": "(131, 1, 1)",
+            "warp_instructions": 15720.0,
+            "gpc_cycles": 4950.0,
+            "sm_active_cycles": 3342.0
+          },
+          {
+            "id": 19,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2096, 1, 1)",
+            "warp_instructions": 746176.0,
+            "gpc_cycles": 7252.0,
+            "sm_active_cycles": 5578.0
+          },
+          {
+            "id": 20,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2096, 1, 1)",
+            "warp_instructions": 746176.0,
+            "gpc_cycles": 7181.0,
+            "sm_active_cycles": 5517.0
+          },
+          {
+            "id": 21,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2096, 1, 1)",
+            "warp_instructions": 746176.0,
+            "gpc_cycles": 13536.0,
+            "sm_active_cycles": 11847.0
+          },
+          {
+            "id": 22,
+            "kernel": "ampere_sgemm_128x128_nn",
+            "grid": "(2, 2, 32)",
+            "warp_instructions": 10421248.0,
+            "gpc_cycles": 62514.0,
+            "sm_active_cycles": 60853.0
+          },
+          {
+            "id": 23,
+            "kernel": "void at::vectorized_elementwise_kernel<4, at::AUnaryFunctor<float, float, float, binary_internal::MulFunctor<float>>, std::array<char *, 2>>(int, T2, T3)",
+            "grid": "(537, 1, 1)",
+            "warp_instructions": 56142.0,
+            "gpc_cycles": 6428.0,
+            "sm_active_cycles": 4741.0
+          },
+          {
+            "id": 24,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::CUDAFunctor_add<float>>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2146, 1, 1)",
+            "warp_instructions": 729381.0,
+            "gpc_cycles": 8450.0,
+            "sm_active_cycles": 6783.0
+          },
+          {
+            "id": 25,
+            "kernel": "void <unnamed>::softmax_warp_forward<float, float, float, 8, 0, 0, 32>(T2 *, const T1 *, int, int, int, const bool *, int, bool)",
+            "grid": "(1048, 1, 1)",
+            "warp_instructions": 1594272.0,
+            "gpc_cycles": 10826.0,
+            "sm_active_cycles": 9070.0
+          },
+          {
+            "id": 26,
+            "kernel": "ampere_sgemm_128x128_nn",
+            "grid": "(1, 2, 32)",
+            "warp_instructions": 5535744.0,
+            "gpc_cycles": 38360.0,
+            "sm_active_cycles": 36672.0
+          },
+          {
+            "id": 27,
+            "kernel": "void at::elementwise_kernel<128, 2, void at::gpu_kernel_impl_nocast<at::direct_copy_kernel_cuda(at::TensorIteratorBase &)::[lambda() (instance 3)]::operator ()() const::[lambda() (instance 7)]::operator ()() const::[lambda(float) (instance 1)]>(at::TensorIteratorBase &, const T1 &)::[lambda(int) (instance 1)]>(int, T3)",
+            "grid": "(2096, 1, 1)",
+            "warp_instructions": 746176.0,
+            "gpc_cycles": 7942.0,
+            "sm_active_cycles": 6251.0
+          },
+          {
+            "id": 28,
+            "kernel": "ampere_sgemm_128x32_tn",
+            "grid": "(32, 5, 1)",
+            "warp_instructions": 115237120.0,
+            "gpc_cycles": 579420.0,
+            "sm_active_cycles": 577727.0
+          },
+          {
+            "id": 29,
+            "kernel": "void at::vectorized_elementwise_kernel<4, at::CUDAFunctor_add<float>, std::array<char *, 3>>(int, T2, T3)",
+            "grid": "(524, 1, 1)",
+            "warp_instructions": 62880.0,
+            "gpc_cycles": 9406.0,
+            "sm_active_cycles": 7729.0
+          },
+          {
+            "id": 30,
+            "kernel": "<unnamed>::rms_norm_kernel(const float *, const float *, float *, float, int, int)",
+            "grid": "(131, 1, 1)",
+            "warp_instructions": 328286.0,
+            "gpc_cycles": 9555.0,
+            "sm_active_cycles": 7906.0
+          },
+          {
+            "id": 31,
+            "kernel": "ampere_sgemm_128x64_tn",
+            "grid": "(112, 3, 5)",
+            "warp_instructions": 425585664.0,
+            "gpc_cycles": 1713509.0,
+            "sm_active_cycles": 1711844.0
+          },
+          {
+            "id": 32,
+            "kernel": "ampere_sgemm_128x64_tn",
+            "grid": "(112, 3, 5)",
+            "warp_instructions": 425585664.0,
+            "gpc_cycles": 1712001.0,
+            "sm_active_cycles": 1710346.0
+          },
+          {
+            "id": 33,
+            "kernel": "<unnamed>::silu_mul_kernel(const float *, const float *, float *, long)",
+            "grid": "(2688, 1, 1)",
+            "warp_instructions": 1656704.0,
+            "gpc_cycles": 31510.0,
+            "sm_active_cycles": 29759.0
+          },
+          {
+            "id": 34,
+            "kernel": "ampere_sgemm_128x32_tn",
+            "grid": "(32, 5, 1)",
+            "warp_instructions": 401957120.0,
+            "gpc_cycles": 2023373.0,
+            "sm_active_cycles": 2021689.0
+          },
+          {
+            "id": 35,
+            "kernel": "void at::vectorized_elementwise_kernel<4, at::CUDAFunctor_add<float>, std::array<char *, 3>>(int, T2, T3)",
+            "grid": "(524, 1, 1)",
+            "warp_instructions": 62880.0,
+            "gpc_cycles": 9612.0,
+            "sm_active_cycles": 7960.0
+          }
+        ]
+      }
+    ],
+    "simulator_crosswalk_available": false
+  },
+  "limits": [
+    "Shape17 lacks reference correctness on this host; no smaller replacement closes that row.",
+    "Full representative native trace/replay remains open after the timeout.",
+    "NCU observations are not features, timing fits, or a substitute for missing replay."
+  ]
+}

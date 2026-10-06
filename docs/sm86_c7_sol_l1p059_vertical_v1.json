@@ -1,0 +1,87 @@
+{
+  "candidate": "L1/problem_059_moe_group_score_aggregation_and_masking/cuda_cpp",
+  "correctness_and_sanitizer": {
+    "build_smoke": "docs/sm86_c7_sol_l1p059_smoke_v1.json",
+    "correctness_passed": true,
+    "sanitizer_errors": 0,
+    "all_declared_shapes_passed": true
+  },
+  "crosswalk": {
+    "native_hardware_scheduling_claimed": false,
+    "ncu_values_used_to_change_simulator": false,
+    "nvbit_raw_stat_unit_is_separate": true,
+    "physical_completion_upper_closed": false,
+    "simulator_ncu_instruction_count_equal": true,
+    "per_kernel_instruction_counts_equal": true,
+    "simulator_lower_frontier_cycles": 9507,
+    "gpc_observation_frontier_cycles": 11363
+  },
+  "identity": {
+    "arch": "sm_86",
+    "binary_extension": "results/alpha/c7_s34as_sol_l1p059_20261005/pinned/build/sol_l1p059_sm86.so",
+    "binary_sha256": "5bcc5a1ca7dcc2d714a90774b2af43cb8428f09d018cf1850914a6b3f169e246",
+    "cuda_toolkit": "13.2",
+    "environment": "tools/sol_execbench/.venv",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "capability": "8.6",
+    "driver": "615.71.09",
+    "device_index": 0,
+    "host_compiler": "/usr/bin/g++-14",
+    "source": "workloads/sol_execbench_baselines/L1/problem_059_moe_group_score_aggregation_and_masking/cuda_cpp",
+    "torch": "2.12.0+cu130",
+    "capture_selection": "ACTIVE_FROM_START=0; profiler-gated one target launch; FP32 input/output initialized before gate",
+    "profiler_protocol": "cudaProfilerStart/Stop; NCU profile-from-start off; application replay; clock none; cache all",
+    "representative_capture_shape": {"num_tokens": 1163, "num_experts": 256}
+  },
+  "interpretation": "C7-S34AS completes one genuine custom CUDA MoE group-score aggregation/masking SM86 vertical after all 16 declared token counts were screened across three deterministic seeds (48 rows). The pinned CUDA 13.2/GCC14 extension passed independent FP32 correctness with the declared negative-infinity exception, representative Compute Sanitizer memcheck, one profiler-gated NVBit launch, independent control-bit extraction, deterministic byte-identical replay, and five application-replay NCU repetitions. Simulator and NCU instruction counts match. Tie behavior is source-specific and the official random rows passed; dirty-writeback/coherence tails, parser limitation, raw tracer units, and zero native macro dispatch remain explicit.",
+  "ncu": {
+    "metric": "gpc__cycles_elapsed.max, sm__cycles_active.max, smsp__inst_executed.sum",
+    "paths": "results/alpha/c7_s34as_sol_l1p059_20261005/pinned/ncu/repeat-*/ncu2.csv",
+    "repetitions": 5,
+    "replay_mode": "application",
+    "kernel": "<unnamed>::problem_059_moe_group_score_kernel(const float *, float *, float *)",
+    "cycles": [11298.0, 11154.0, 11160.0, 11294.0, 11377.0],
+    "median_cycles": 11294.0,
+    "sm_active": [9608.0, 9462.0, 9475.0, 9582.0, 9700.0],
+    "median_sm_active": 9582.0,
+    "instructions": [711756.0, 711756.0, 711756.0, 711756.0, 711756.0],
+    "median_instructions": 711756.0
+  },
+  "nvbit": {
+    "accepted_launches": 1,
+    "control_sidecar": "results/alpha/c7_s34as_sol_l1p059_20261005/pinned/control_bits_checked.json",
+    "decoded_static_instructions": 296,
+    "sidecar_total_decoded_instructions": 312,
+    "sidecar_helper_function_decoded_instructions": 16,
+    "sidecar_unknown_control_encodings": 0,
+    "raw_stats_total_insts": 2120149,
+    "raw_stats_total_reported_insts": 2120149,
+    "trace": "results/alpha/c7_s34as_sol_l1p059_20261005/pinned/nvbit_target_checked",
+    "module_origin": "stable_static_module",
+    "module_sha256": "5bcc5a1ca7dcc2d714a90774b2af43cb8428f09d018cf1850914a6b3f169e246",
+    "enhanced_parser_limitation": "cuobjdump failed for the JIT .so; independent control-sidecar extraction succeeded",
+    "superseded_attempt": "results/alpha/c7_s34as_sol_l1p059_20261005/pinned/nvbit_target had an inline-oracle reporting error; checked capture uses the official reference and is authoritative"
+  },
+  "phase": "C7-S34AS",
+  "schema": "sm86_c7_sol_l1p059_vertical_v1",
+  "simulator": {
+    "completion_status": "incomplete_unmodeled_retirement_tails",
+    "instructions_issued": 711756,
+    "records_seen": 711756,
+    "mode": "l1-l2",
+    "native_macro_dispatches": 0,
+    "replay": "results/alpha/c7_s34as_sol_l1p059_20261005/pinned/replay_checked.json",
+    "repeat_replay": "results/alpha/c7_s34as_sol_l1p059_20261005/pinned/replay_checked_repeat.json",
+    "replays_byte_equal": true,
+    "kernel_grid": [1163, 1, 1],
+    "kernel_block": [256, 1, 1],
+    "unmodeled_tails": {
+      "reduction_read_modify_write": false,
+      "dirty_writeback": true,
+      "coherence": true,
+      "async_copy_shared_visibility": false
+    }
+  },
+  "status": "complete_one_launch_native_vertical_ncu_simulator_crosswalk_with_parser_limitation"
+}

@@ -251,7 +251,7 @@ int main(int argc, char** argv) {
         "\"shared_bytes\":%zu,\"destination_position_stride\":%zu,"
         "\"destination_lane_stride\":%zu,"
         "\"global_store_target\":false,\"cta_barrier_target\":false,"
-        "\"correct\":true}\n",
+        "\"correct\":null,\"functional_oracle\":\"no_host_visible_result\"}\n",
         depth, streaming ? "dram" : (bypass ? "l2" : "l1"),
         layout == 0
             ? "compact"

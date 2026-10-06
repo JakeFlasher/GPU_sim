@@ -1,0 +1,229 @@
+{
+  "schema": "sm86_c7_research_probe_l1tex_admission_backpressure_live_v2",
+  "status": "correctness_trace_replay_ncu_complete_same_binary_lower_bound_consistent",
+  "host_identity": {
+    "device_index": 0,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "compute_capability": "8.6",
+    "driver": "615.71.09",
+    "pstate": "P0",
+    "graphics_clock_mhz": 1350,
+    "memory_clock_mhz": 10501
+  },
+  "identity": {
+    "source": "workloads/research_probes/l1tex_admission_backpressure",
+    "binary": "workloads/research_probes/l1tex_admission_backpressure/l1tex_admission_backpressure",
+    "binary_used_for_correctness_trace_replay_ncu": "same rebuilt binary; historical trace twin not used",
+    "control": "results/alpha/c7_s33ar_l1tex_single_20261004/sass/l1tex_admission_backpressure.control_bits.json",
+    "trace": "results/alpha/c7_s33ar_l1tex_single_20261004/nvbit/b84_w8_store_line_unique_d32_g0_all/dynamic_trace.pb",
+    "arch_card": "arch_profiles/cards/sm_86.json",
+    "args": [
+      "store",
+      "line_unique",
+      "84",
+      "8",
+      "32",
+      "8",
+      "0",
+      "all",
+      "1"
+    ],
+    "cell": "b84_w8_store_line_unique_d32_g0_all",
+    "tail": "store",
+    "layout": "line_unique",
+    "blocks": 84,
+    "warps": 8,
+    "depth": 32,
+    "active_lanes": 8,
+    "gap_steps": 0,
+    "pattern": "all",
+    "ncu_repeats": 5,
+    "ncu_metric": "gpc__cycles_elapsed.max",
+    "ncu_replay_mode": "application",
+    "ncu_clock_control": "base",
+    "ncu_cache_control": "all",
+    "ncu_launch_count": 1,
+    "ncu_profile_from_start": "off",
+    "static_control_functions": 4,
+    "static_control_decoded_instructions": 712,
+    "static_control_unknown_encodings": 0
+  },
+  "correctness": {
+    "status": "passed",
+    "correct": true,
+    "trials": 7,
+    "compute_sanitizer": "one full-shape trial; zero errors",
+    "measurement": {
+      "active_lanes": 8,
+      "allocation_bytes": 22020096,
+      "blocks": 84,
+      "checksum": 7862306678089687171,
+      "correct": true,
+      "depth": 32,
+      "fence_cycles_max": 4470,
+      "fence_cycles_median": 3293,
+      "fence_cycles_min": 1646,
+      "gap_steps": 0,
+      "issue_cycles_max": 18323,
+      "issue_cycles_median": 16463,
+      "issue_cycles_min": 14968,
+      "l2_eviction_bytes": 33554432,
+      "layout": "line_unique",
+      "memory_instructions": 21504,
+      "pattern": "all",
+      "prefix_steps": 128,
+      "selected_warps_per_block": 8,
+      "tail": "store",
+      "trials": 7,
+      "warps": 8
+    },
+    "native_stdout": "results/alpha/c7_s33ar_l1tex_single_20261004/correctness/b84_w8_store_line_unique_d32_g0_all/result.json"
+  },
+  "trace": {
+    "launches": 1,
+    "target_kernel": "_Z27admission_backpressure_tailILi1EEvPjPyS1_iiiiii___0",
+    "target_grid": [
+      84,
+      1,
+      1
+    ],
+    "target_block": [
+      256,
+      1,
+      1
+    ],
+    "target_records_replayed": 1255968,
+    "target_coverage": {
+      "kind": "full",
+      "blocks_observed": 84,
+      "population_blocks": 84
+    },
+    "tracer_total_insts": 3671808,
+    "tracer_total_reported_insts": 3671808,
+    "dynamic_trace_bytes": 223,
+    "enhanced_metadata": "SASS/control parse emitted 712 decoded instructions; zero unknown encodings",
+    "stats": "results/alpha/c7_s33ar_l1tex_single_20261004/nvbit/b84_w8_store_line_unique_d32_g0_all/stats.csv"
+  },
+  "simulator": {
+    "records": 1255968,
+    "instructions_issued": 1255968,
+    "completion_frontier": {
+      "status": "incomplete_unmodeled_retirement_tails",
+      "lower_bound_cycles": 12905,
+      "unmodeled_tails": {
+        "reduction_read_modify_write": false,
+        "dirty_writeback": true,
+        "coherence": true,
+        "async_copy_shared_visibility": false
+      }
+    },
+    "native_macro_dispatches": 0,
+    "runtime_seconds": "not captured around this replay"
+  },
+  "ncu": {
+    "metric": "gpc__cycles_elapsed.max",
+    "values": [
+      30467.0,
+      29879.0,
+      30473.0,
+      29698.0,
+      29528.0
+    ],
+    "median": 29879.0,
+    "min": 29528.0,
+    "max": 30473.0,
+    "stdev": 438.760185066968,
+    "instruction_count": [
+      1255968.0,
+      1255968.0,
+      1255968.0,
+      1255968.0,
+      1255968.0
+    ],
+    "gpu_time_us": [
+      19.552,
+      19.2,
+      19.552,
+      19.072,
+      18.976
+    ],
+    "rows": [
+      {
+        "rep": "ncu_0",
+        "gpc__cycles_elapsed.max": 30467.0,
+        "gpc__cycles_elapsed.avg": 30454.142857,
+        "smsp__inst_executed.sum": 1255968.0,
+        "gpu__time_duration.sum": 19.552,
+        "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": 24192.0,
+        "dram__sectors_write.sum": 231680.0
+      },
+      {
+        "rep": "ncu_1",
+        "gpc__cycles_elapsed.max": 29879.0,
+        "gpc__cycles_elapsed.avg": 29866.857143,
+        "smsp__inst_executed.sum": 1255968.0,
+        "gpu__time_duration.sum": 19.2,
+        "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": 24192.0,
+        "dram__sectors_write.sum": 212004.0
+      },
+      {
+        "rep": "ncu_2",
+        "gpc__cycles_elapsed.max": 30473.0,
+        "gpc__cycles_elapsed.avg": 30457.857143,
+        "smsp__inst_executed.sum": 1255968.0,
+        "gpu__time_duration.sum": 19.552,
+        "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": 24192.0,
+        "dram__sectors_write.sum": 231552.0
+      },
+      {
+        "rep": "ncu_3",
+        "gpc__cycles_elapsed.max": 29698.0,
+        "gpc__cycles_elapsed.avg": 29686.0,
+        "smsp__inst_executed.sum": 1255968.0,
+        "gpu__time_duration.sum": 19.072,
+        "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": 24192.0,
+        "dram__sectors_write.sum": 210364.0
+      },
+      {
+        "rep": "ncu_4",
+        "gpc__cycles_elapsed.max": 29528.0,
+        "gpc__cycles_elapsed.avg": 29516.142857,
+        "smsp__inst_executed.sum": 1255968.0,
+        "gpu__time_duration.sum": 18.976,
+        "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": 24192.0,
+        "dram__sectors_write.sum": 210968.0
+      }
+    ],
+    "kernel": "void admission_backpressure_tail<1>(unsigned int *, unsigned long long *, unsigned long long *, int, int, int, int, int, int)",
+    "clock_control": "base",
+    "cache_control": "all",
+    "launch_skip": 0,
+    "launch_count": 1
+  },
+  "comparison": {
+    "instruction_count_match": true,
+    "lower_bound_consistency": true,
+    "lower_bound_cycles": 12905,
+    "ncu_median_cycles": 29879.0,
+    "gap_cycles": 16974.0,
+    "gap_fraction": 0.5680913015830517,
+    "hardware_completion": "not_observed",
+    "point_estimator": "not_claimed",
+    "memory_request_metric_observed": [
+      24192.0,
+      24192.0,
+      24192.0,
+      24192.0,
+      24192.0
+    ],
+    "dram_write_metric_observed": [
+      231680.0,
+      212004.0,
+      231552.0,
+      210364.0,
+      210968.0
+    ]
+  },
+  "interpretation": "A single rebuilt l1tex_admission_backpressure binary served correctness, Compute Sanitizer, NVBit, simulator replay, and five application-replay NCU captures; the historical trace twin is not used. Replay and NCU match at 1,255,968 target warp instructions and the simulator lower bound remains below the NCU median. This is one held-out admission observation only: hardware completion is not observed, dirty-writeback/coherence tails remain open, and no L1TEX admission or cache-latency parameter is fitted."
+}

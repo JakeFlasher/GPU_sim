@@ -1,0 +1,40 @@
+{
+  "schema": "sm86_c4c_sfu_ood_observer_reconciliation_v1",
+  "status": "complete_negative_ood_transfer_miss_semantic_upper_open",
+  "phase": "C4-C",
+  "checks": {
+    "prediction_precedes_target_ncu": true,
+    "frozen_interval_not_refit": true,
+    "target_ncu_not_simulator_input": true,
+    "instruction_crosswalk": true,
+    "ood_miss_retained": true,
+    "completion_open": true,
+    "referenced_files_present": true
+  },
+  "evidence": {
+    "prediction": "docs/sm86_c4c_sfu_ood_observer_prediction_pre_ncu_v1.json",
+    "holdout": "docs/sm86_c4c_sfu_ood_observer_holdout_v1.json",
+    "target_trace": "results/alpha/c4c_sfu_ood_20261004/target_trace",
+    "target_simulator": "results/alpha/c4c_sfu_ood_20261004/target_sim.json",
+    "target_ncu_root": "results/alpha/c4c_sfu_ood_20261004/ncu"
+  },
+  "result": {
+    "predicted_interval_cycles": [
+      34205.428571428565,
+      34521.34285714285
+    ],
+    "ood_target_values": [
+      69123.0,
+      69122.0,
+      69187.0,
+      69143.0,
+      69127.0
+    ],
+    "ood_target_median_cycles": 69127.0,
+    "interval_coverage": 0.0,
+    "point_ape": 0.502894878784184,
+    "simulator_lower_bound_cycles": 42226,
+    "native_macro_dispatches": 0
+  },
+  "interpretation": "C4-C is a predeclared negative OOD transfer. The dependent-chain warp observer was not refit for the quad-chain target; all five target values miss the frozen interval, so cross-mechanism transfer is rejected. The miss is useful accuracy evidence, not a completion upper or a model-tuning instruction. Target NCU values did not enter simulator execution or model selection; physical completion and native dispatch remain open."
+}

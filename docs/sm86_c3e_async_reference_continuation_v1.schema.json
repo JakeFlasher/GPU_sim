@@ -1,0 +1,98 @@
+{
+  "$id": "https://gpu-simulator.local/schemas/sm86_c3e_async_reference_continuation_v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "attempts": {
+      "items": {
+        "additionalProperties": true,
+        "required": [
+          "max_records",
+          "return_code",
+          "result",
+          "reference_trace"
+        ],
+        "type": "object"
+      },
+      "minItems": 2,
+      "type": "array"
+    },
+    "decision": {
+      "additionalProperties": true,
+      "required": [
+        "positive_independent_completion_witness",
+        "exact_fallback_preserved",
+        "synthetic_witness_used",
+        "hardware_completion",
+        "async_visibility_tail",
+        "dirty_writeback_tail",
+        "coherence_tail"
+      ],
+      "type": "object"
+    },
+    "identity": {
+      "additionalProperties": true,
+      "required": [
+        "trace",
+        "control",
+        "arch_card",
+        "pchase_card",
+        "simulator_binary",
+        "reference_feature",
+        "mode",
+        "cache_scope"
+      ],
+      "type": "object"
+    },
+    "interpretation": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "phase": {
+      "const": "C3-E"
+    },
+    "replay": {
+      "additionalProperties": true,
+      "required": [
+        "records_seen",
+        "instructions_issued",
+        "completion_frontier",
+        "native_macro_dispatches"
+      ],
+      "type": "object"
+    },
+    "schema": {
+      "const": "sm86_c3e_async_reference_continuation_v1"
+    },
+    "status": {
+      "type": "string"
+    },
+    "typed_boundary": {
+      "additionalProperties": true,
+      "required": [
+        "native_boundary_records",
+        "complete_boundary_records",
+        "exact_fallback_boundary_records",
+        "exact_fallback_required",
+        "transition_boundary_pairs",
+        "complete_transition_pairs",
+        "dominant_unknown_reason",
+        "dominant_unknown_count"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema",
+    "status",
+    "phase",
+    "identity",
+    "attempts",
+    "typed_boundary",
+    "replay",
+    "decision",
+    "interpretation"
+  ],
+  "title": "sm86_c3e_async_reference_continuation_v1",
+  "type": "object"
+}

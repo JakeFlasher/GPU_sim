@@ -1,0 +1,32 @@
+{
+  "schema": "sm86_c6g_multiwarp_domain_boundary_v1",
+  "status": "complete_scoped_multiwarp_boundary_open_global_continuation",
+  "phase": "C6-G",
+  "checks": {
+    "one_warp_no_frontend_dispatch_present": true,
+    "one_warp_default_frontend_dispatch_present": true,
+    "two_warp_entry_complete": true,
+    "two_warp_dispatch_refused": true,
+    "two_warp_exact_fallback_preserved": true,
+    "multiwarp_global_state_not_self_certified": true,
+    "hardware_completion_open": true,
+    "native_hardware_scheduling_not_claimed": true
+  },
+  "evidence": [
+    "docs/sm86_c6c_positive_real_scalar_dispatch_v1.json",
+    "docs/sm86_c6d_positive_default_frontend_dispatch_v1.json",
+    "docs/sm86_c6f_multiwarp_frontend_boundary_v1.json"
+  ],
+  "supported_domain": {
+    "warp_count": 1,
+    "front_end": "narrow terminal scalar/barrier snapshot transition",
+    "state": "single-warp typed entry/effects/exit with detailed witness"
+  },
+  "unsupported_or_open": {
+    "warp_count": "multi-warp/global order and residency transition",
+    "front_end": "broader multi-warp cache/stream state",
+    "completion": "physical completion and semantic upper unknown",
+    "next": "return to C1-R/C3 completion and native-tail seams"
+  },
+  "interpretation": "C6-G fixes the current native continuation domain. One-warp real scalar continuation dispatch is supported only in the narrow reference transition; the default front-end snapshot variant also dispatches. A real two-warp input refuses before mutation and preserves exact replay. This is a principled boundary, not a hardware scheduling claim or a substitute for broader native completion."
+}

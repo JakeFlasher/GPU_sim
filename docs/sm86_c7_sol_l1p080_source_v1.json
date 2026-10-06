@@ -1,0 +1,8 @@
+{
+  "candidate":"L1/problem_080_adaptive_layernorm_continuous_with_modulation/cuda_cpp",
+  "environment":{"cuda_available":true,"torch":"2.12.0+cu130","torch_cuda_runtime":"13.0","gpu":"NVIDIA GeForce RTX 3090 Ti","capability":"8.6","permitted_environment":"tools/sol_execbench/.venv","host_compiler":"/usr/bin/g++-14","nvcc_expected":"CUDA 13.2"},
+  "phase":"C7-S34BE1","schema":"sm86_c7_sol_l1p080_source_v1",
+  "source_contract":{"source":"workloads/sol_execbench_baselines/L1/problem_080_adaptive_layernorm_continuous_with_modulation/cuda_cpp","entry_point":"main.cpp::run","class":"custom_cuda","sm86_marker":"solution.json compile option arch=compute_86,code=sm_86","custom_kernels":["k_small_m_linear","k_layernorm_with_modulation"],"constants":{"inner_dim":2432,"inner_dim_x2":4864,"block_threads":256,"two_launches":true},"inputs":"hidden_states [B,S,2432], temb [B,2432], linear_weight [4864,2432], linear_bias [4864] contiguous FP32; eps host FP32 scalar","outputs":"output [B,S,2432] contiguous FP32 destination tensor","math":"FP32 timestep linear modulation, per-row LayerNorm, affine modulation output","oracle":"independent definition.json/reference.py AdaLayerNormContinuous reference","workload_shapes":[[4,449],[2,2048],[1,4096],[1,256],[1,1024],[4,256],[1,128],[2,128],[16,256],[2,1321],[2,293],[1,2048],[1,997],[8,1024],[2,512],[32,128]]},
+  "selection_basis":"Next genuine L1 custom-CUDA row after problem078; no timing or NCU values transferred",
+  "status":"complete_source_contract_and_sm86_environment_review"
+}

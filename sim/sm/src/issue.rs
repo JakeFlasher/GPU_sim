@@ -100,7 +100,7 @@ use sim_semantics::{
     InstructionCacheEntryState, InstructionCacheState, InstructionFrontEndBoundaryState,
     InstructionStreamLineState, InstructionStreamState, L1BoundaryState, L2RequestKey,
     L2RequestOwner, L2RequestState, MemoryPipelineBoundaryState, ScalarPipelineBoundaryState,
-    TypedResponseKind, WarpBoundaryState,
+    TypedEventTransition, TypedResponseKind, WarpBoundaryState,
 };
 #[cfg(feature = "reference")]
 use sim_semantics::{NativeBoundaryExecutionPath, NativeBoundaryExecutionResult};
@@ -4223,7 +4223,8 @@ impl MemoryAdmissionFeedbackState {
         if !self.candidate.membar_waits_for_service_completion || !is_gpu_membar_issue(slot) {
             return Some(0);
         }
-        if self.has_unpriced() || self.warp_pending_write_acks.get(warp).copied().unwrap_or(0) != 0
+        if self.has_unpriced_for_warp(warp)
+            || self.warp_pending_write_acks.get(warp).copied().unwrap_or(0) != 0
         {
             return None;
         }
@@ -4718,6 +4719,14 @@ impl MemoryAdmissionFeedbackState {
             .iter()
             .flatten()
             .any(|entry| entry.release_at.is_none())
+    }
+
+    fn has_unpriced_for_warp(&self, warp: usize) -> bool {
+        let warp = u32::try_from(warp).ok();
+        self.queues
+            .iter()
+            .flatten()
+            .any(|entry| entry.release_at.is_none() && Some(entry.warp) == warp)
     }
 
     fn has_pending_write_acks(&self) -> bool {
@@ -5989,6 +5998,151 @@ impl InstructionFrontEndState {
             prefetch_priority: 0,
             cold_fill_latency,
             diagnostics: InstructionFrontEndDiagnostics::default(),
+        })
+    }
+
+    #[cfg(feature = "reference")]
+    fn from_typed_boundary(
+        boundary: &InstructionFrontEndBoundaryState,
+    ) -> Result<Self, IssueError> {
+        boundary
+            .validate()
+            .map_err(|_| IssueError::ReferenceMacroUnsupported {
+                reason: "typed_front_end_exit_invalid",
+            })?;
+        let cache =
+            |state: &InstructionCacheState| -> Result<SetAssociativeInstructionCache, IssueError> {
+                let ways = usize::try_from(state.ways).map_err(|_| {
+                    IssueError::ReferenceMacroUnsupported {
+                        reason: "typed_front_end_cache_ways_out_of_range",
+                    }
+                })?;
+                let sets = state
+                    .sets
+                    .iter()
+                    .map(|entries| {
+                        entries
+                            .iter()
+                            .map(|entry| InstructionCacheEntry {
+                                key: InstructionLineKey {
+                                    function_unique_id: entry.function_unique_id,
+                                    line: entry.line,
+                                },
+                                ready_at: entry.ready_at,
+                                last_access: entry.last_access,
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                    .collect::<Vec<_>>();
+                Ok(SetAssociativeInstructionCache {
+                    sets,
+                    ways,
+                    access_sequence: state.access_sequence,
+                })
+            };
+        let l0 = boundary
+            .l0
+            .iter()
+            .map(cache)
+            .collect::<Result<Vec<_>, _>>()?;
+        let l0: [SetAssociativeInstructionCache; SUB_CORES] =
+            l0.try_into()
+                .map_err(|_| IssueError::ReferenceMacroUnsupported {
+                    reason: "typed_front_end_l0_shape_invalid",
+                })?;
+        let streams = boundary
+            .streams
+            .iter()
+            .map(|stream| InstructionStreamBuffer {
+                lines: stream
+                    .lines
+                    .iter()
+                    .map(|line| StreamBufferLine {
+                        key: InstructionLineKey {
+                            function_unique_id: line.function_unique_id,
+                            line: line.line,
+                        },
+                        ready_at: line.ready_at,
+                        demanded: line.demanded,
+                    })
+                    .collect(),
+                next_line: stream
+                    .next_line
+                    .map(|(function_unique_id, line)| InstructionLineKey {
+                        function_unique_id,
+                        line,
+                    }),
+            })
+            .collect::<Vec<_>>();
+        let streams: [InstructionStreamBuffer; SUB_CORES] =
+            streams
+                .try_into()
+                .map_err(|_| IssueError::ReferenceMacroUnsupported {
+                    reason: "typed_front_end_stream_shape_invalid",
+                })?;
+        let config = InstructionFrontEnd {
+            line_bytes: boundary.line_bytes,
+            l0_sets: u32::try_from(boundary.l0.first().map_or(0, |cache| cache.sets.len()))
+                .map_err(|_| IssueError::ReferenceMacroUnsupported {
+                    reason: "typed_front_end_l0_sets_out_of_range",
+                })?,
+            l0_ways: u32::try_from(boundary.l0.first().map_or(0, |cache| cache.ways)).map_err(
+                |_| IssueError::ReferenceMacroUnsupported {
+                    reason: "typed_front_end_l0_ways_out_of_range",
+                },
+            )?,
+            l1_sets: u32::try_from(boundary.l1.sets.len()).map_err(|_| {
+                IssueError::ReferenceMacroUnsupported {
+                    reason: "typed_front_end_l1_sets_out_of_range",
+                }
+            })?,
+            l1_ways: u32::try_from(boundary.l1.ways).map_err(|_| {
+                IssueError::ReferenceMacroUnsupported {
+                    reason: "typed_front_end_l1_ways_out_of_range",
+                }
+            })?,
+            l0_to_l1_cycles: boundary.l0_to_l1_cycles,
+            l1_to_l0_cycles: boundary.l1_to_l0_cycles,
+            l1_request_ports: boundary.l1_request_ports,
+            l1_reply_ports: boundary.l1_reply_ports,
+            stream_buffer_lines: boundary.stream_buffer_lines,
+            stream_buffers_per_subcore: boundary.stream_buffers_per_subcore,
+            prefetches_per_cycle: boundary.prefetches_per_cycle,
+            instruction_buffer_entries: boundary.instruction_buffer_entries,
+            fetch_decode_width: boundary.fetch_decode_width,
+            fetch_to_issue_stages: boundary.fetch_to_issue_stages,
+        };
+        Ok(Self {
+            config,
+            l0,
+            l1: cache(&boundary.l1)?,
+            streams,
+            l1_request_ready: boundary.l1_request_ready,
+            l1_reply_ready: boundary.l1_reply_ready,
+            l0_response_ready: boundary.l0_response_ready.clone().try_into().map_err(|_| {
+                IssueError::ReferenceMacroUnsupported {
+                    reason: "typed_front_end_response_shape_invalid",
+                }
+            })?,
+            prefetch_priority: usize::try_from(boundary.prefetch_priority).map_err(|_| {
+                IssueError::ReferenceMacroUnsupported {
+                    reason: "typed_front_end_prefetch_priority_invalid",
+                }
+            })?,
+            cold_fill_latency: boundary.cold_fill_latency,
+            diagnostics: InstructionFrontEndDiagnostics {
+                instructions_fetched: boundary.instructions_fetched,
+                demand_l0_hits: boundary.demand_l0_hits,
+                demand_stream_buffer_hits: boundary.demand_stream_buffer_hits,
+                demand_l0_misses: boundary.demand_l0_misses,
+                demand_l1_hits: boundary.demand_l1_hits,
+                demand_l1_misses: boundary.demand_l1_misses,
+                prefetch_requests: boundary.prefetch_requests,
+                prefetch_l1_hits: boundary.prefetch_l1_hits,
+                prefetch_l1_misses: boundary.prefetch_l1_misses,
+                stream_restarts: boundary.stream_restarts,
+                maximum_fetch_latency_cycles: boundary.maximum_fetch_latency_cycles,
+            },
         })
     }
 
@@ -7583,31 +7737,46 @@ fn build_bypass_cohort_observation(
             )?,
         });
     }
-    for (field, expected, got) in [
-        ("exact cohort payload work", delivery_work, payload_work_sum),
+    if delivery_work != payload_work_sum {
+        return Err(invalid_cohort_projection(
+            warp,
+            input.instruction,
+            "exact cohort payload work",
+            delivery_work,
+            payload_work_sum,
+        ));
+    }
+    // The compact aggregate also includes executing source-ignored (zero-fill)
+    // destination lanes.  Those lanes deliberately have no global source
+    // response and therefore do not appear in the sparse source-cohort sidecar.
+    // Require the detailed source-bearing projection to fit inside the compact
+    // aggregate instead of requiring equality that would reject valid mixed
+    // source/zero-fill instructions.  The residual remains topology-only and
+    // is not converted into a completion timestamp.
+    for (field, aggregate, source_only) in [
         (
-            "exact cohort destination line sum",
+            "source cohort destination line sum exceeds aggregate",
             input.destination_lines,
             destination_lines_sum,
         ),
         (
-            "exact cohort maximum bank wavefronts",
+            "source cohort maximum bank wavefronts exceeds aggregate",
             input.max_bank_wavefronts,
             max_bank_wavefronts,
         ),
         (
-            "exact cohort maximum bypass wavefronts",
+            "source cohort maximum bypass wavefronts exceeds aggregate",
             input.max_bypass_wavefronts,
             max_bypass_wavefronts,
         ),
     ] {
-        if expected != got {
+        if source_only > aggregate {
             return Err(invalid_cohort_projection(
                 warp,
                 input.instruction,
                 field,
-                expected,
-                got,
+                aggregate,
+                source_only,
             ));
         }
     }
@@ -10130,6 +10299,9 @@ impl<'a> SmCore<'a> {
         warp_slot: i32,
         instruction_count: u64,
         initiation_interval_cycles: u64,
+        terminal_block_barrier: bool,
+        detailed_effects: &[TypedEventTransition],
+        terminal_front_end_exit: Option<&InstructionFrontEndBoundaryState>,
     ) -> Result<ReferenceScalarMacroExecution, IssueError> {
         if instruction_count == 0 || initiation_interval_cycles == 0 {
             return Err(IssueError::ReferenceMacroUnsupported {
@@ -10205,12 +10377,39 @@ impl<'a> SmCore<'a> {
                 reason: "macro_exceeds_warp_stream",
             });
         }
-        if self.instruction_front_end.is_some() {
+        let instruction_count_usize = end_index - next;
+        // A comparator-selected production witness carries one detailed issue
+        // effect per collapsed instruction.  The model-local helper tests
+        // intentionally omit effects and use the scalar recurrence, so keep
+        // that compatibility path; whenever effects are supplied, however,
+        // reject a truncated or non-monotone span before any actor mutation.
+        if terminal_block_barrier && detailed_effects.len() != instruction_count_usize
+            || (!detailed_effects.is_empty()
+                && (detailed_effects.len() != instruction_count_usize
+                    || detailed_effects
+                        .windows(2)
+                        .any(|window| window[1].event.time < window[0].event.time)))
+        {
+            return Err(IssueError::ReferenceMacroUnsupported {
+                reason: "detailed_effect_span_not_closed",
+            });
+        }
+        if self.instruction_front_end.is_some() && !terminal_block_barrier {
             return Err(IssueError::ReferenceMacroUnsupported {
                 reason: "front_end_transition_not_implemented",
             });
         }
-        for instruction in next..end_index {
+        let front_end_transition = if terminal_block_barrier && self.instruction_front_end.is_some()
+        {
+            let boundary =
+                terminal_front_end_exit.ok_or(IssueError::ReferenceMacroUnsupported {
+                    reason: "terminal_front_end_exit_missing",
+                })?;
+            Some(InstructionFrontEndState::from_typed_boundary(boundary)?)
+        } else {
+            None
+        };
+        for (offset, instruction) in (next..end_index).enumerate() {
             let slot = lookup_dense(
                 &self.schedule_slots,
                 self.schedule,
@@ -10218,15 +10417,22 @@ impl<'a> SmCore<'a> {
                 launch_index,
                 warp_slot,
             )?;
-            if !matches!(slot.pipeline_class, PipelineClass::ScalarAlu { .. })
+            let terminal_barrier_slot =
+                terminal_block_barrier && offset + 2 == instruction_count_usize;
+            let terminal_exit_slot =
+                terminal_block_barrier && offset + 1 == instruction_count_usize;
+            let supported_issue_slot = terminal_barrier_slot
+                || terminal_exit_slot
+                || matches!(slot.pipeline_class, PipelineClass::ScalarAlu { .. });
+            let terminal_sequence_slot = terminal_block_barrier
+                && matches!(slot.pipeline_class, PipelineClass::DispatchOnly);
+            if !supported_issue_slot && !terminal_sequence_slot
                 || !matches!(slot.mem_role, MemRole::None)
-                || slot.op_class != OpClass::Other
-                || slot.control.stall() == 0
-                || slot.control.yield_flag()
-                || slot.control.write_barrier().is_some()
-                || slot.control.read_barrier().is_some()
-                || slot.control.wait_mask().bits() != 0
-                || slot.control.reuse() != 0
+                || (!terminal_barrier_slot
+                    && !terminal_exit_slot
+                    && slot.op_class != OpClass::Other)
+                || (terminal_barrier_slot && slot.op_class != OpClass::BlockBarrier)
+                || (terminal_exit_slot && !slot.opcode_text().starts_with("EXIT"))
             {
                 return Err(IssueError::ReferenceMacroUnsupported {
                     reason: "scalar_macro_descriptor_not_closed",
@@ -10250,16 +10456,20 @@ impl<'a> SmCore<'a> {
         let subcore = self.warps[warp_index]
             .warp_slot
             .rem_euclid(SUB_CORES as i32) as usize;
-        let first_issue = self.t.max(self.warps[warp_index].eligible);
-        let last_issue = first_issue
-            .checked_add(
+        let block = self.warps[warp_index].block;
+        let first_issue = detailed_effects
+            .first()
+            .map(|effect| effect.event.time)
+            .unwrap_or_else(|| self.t.max(self.warps[warp_index].eligible));
+        let last_issue = detailed_effects
+            .last()
+            .map(|effect| effect.event.time)
+            .or_else(|| {
                 instruction_count
                     .checked_sub(1)
                     .and_then(|count| count.checked_mul(initiation_interval_cycles))
-                    .ok_or(IssueError::ReferenceMacroUnsupported {
-                        reason: "macro_timing_overflow",
-                    })?,
-            )
+                    .and_then(|offset| first_issue.checked_add(offset))
+            })
             .ok_or(IssueError::ReferenceMacroUnsupported {
                 reason: "macro_timing_overflow",
             })?;
@@ -10269,9 +10479,18 @@ impl<'a> SmCore<'a> {
                 reason: "macro_end_overflow",
             })?;
         self.warps[warp_index].next = end_index;
-        self.warps[warp_index].eligible = end_cycle;
+        self.warps[warp_index].eligible = if terminal_block_barrier {
+            last_issue
+        } else {
+            end_cycle
+        };
         self.warps[warp_index].current_since = end_cycle;
         self.warps[warp_index].next_slot = next_slot;
+        if let Some(boundary) = terminal_front_end_exit {
+            let _ = boundary;
+            self.warps[warp_index].front_end_fetch_cursor = end_index;
+            self.warps[warp_index].instruction_buffer.clear();
+        }
         self.issued =
             self.issued
                 .checked_add(instruction_count)
@@ -10289,6 +10508,56 @@ impl<'a> SmCore<'a> {
                 counter: "reference macro SMSP active cycles",
             })?;
         self.hold[subcore] = Some(warp_index);
+        if let Some(front_end) = front_end_transition {
+            self.instruction_front_end = Some(front_end);
+        }
+        if terminal_block_barrier {
+            let barrier_issue = detailed_effects
+                .get(detailed_effects.len().saturating_sub(2))
+                .map(|effect| effect.event.time)
+                .ok_or(IssueError::ReferenceMacroUnsupported {
+                    reason: "terminal_barrier_effect_missing",
+                })?;
+            let barrier_arrival =
+                barrier_issue
+                    .checked_add(2)
+                    .ok_or(IssueError::ReferenceMacroUnsupported {
+                        reason: "terminal_barrier_arrival_overflow",
+                    })?;
+            let barrier_release =
+                barrier_arrival
+                    .checked_add(1)
+                    .ok_or(IssueError::ReferenceMacroUnsupported {
+                        reason: "terminal_barrier_release_overflow",
+                    })?;
+            self.block_states[block].waiting = 0;
+            self.block_states[block].barrier_generation = self.block_states[block]
+                .barrier_generation
+                .checked_add(1)
+                .ok_or(IssueError::CounterOverflow {
+                    counter: "reference macro barrier generation",
+                })?;
+            self.block_states[block].barrier_rearm_ready = barrier_arrival;
+            self.block_states[block].barrier_first_dispatch = None;
+            self.block_states[block].barrier_first_arrival = None;
+            self.barrier_pipe_ready = barrier_arrival;
+            self.local_completion_time = Some(barrier_release);
+            self.warps[warp_index].barrier_clear[0] = detailed_effects
+                .get(detailed_effects.len().saturating_sub(4))
+                .map(|effect| effect.event.time)
+                .ok_or(IssueError::ReferenceMacroUnsupported {
+                    reason: "terminal_barrier_clear_effect_missing",
+                })?;
+            self.warps[warp_index].barrier_pipeline_ready = barrier_release;
+            self.warps[warp_index].at_block_barrier = true;
+            self.warps[warp_index].next_slot = None;
+            // Retire after the terminal EXIT issue.  `retire_warp` records
+            // activity through `t + 1`; using the barrier release here would
+            // shorten the warp lifetime relative to detailed replay even
+            // though the barrier's local completion frontier is earlier.
+            self.retire_warp(subcore, warp_index, last_issue)?;
+            self.t = end_cycle;
+        }
         self.t = end_cycle;
         Ok(ReferenceScalarMacroExecution {
             warp_slot,
@@ -10309,6 +10578,9 @@ impl<'a> SmCore<'a> {
         warp_slot: i32,
         instruction_count: u64,
         initiation_interval_cycles: u64,
+        terminal_block_barrier: bool,
+        detailed_effects: &[TypedEventTransition],
+        terminal_front_end_exit: Option<&InstructionFrontEndBoundaryState>,
     ) -> Result<Option<ReferenceScalarMacroExecution>, IssueError> {
         match path {
             NativeBoundaryExecutionPath::TypedMacro => self
@@ -10316,6 +10588,9 @@ impl<'a> SmCore<'a> {
                     warp_slot,
                     instruction_count,
                     initiation_interval_cycles,
+                    terminal_block_barrier,
+                    detailed_effects,
+                    terminal_front_end_exit,
                 )
                 .map(Some),
             NativeBoundaryExecutionPath::ExactReplay { .. } => Ok(None),
@@ -10358,11 +10633,23 @@ impl<'a> SmCore<'a> {
             .and_then(|effects| effects[1].event.time.checked_sub(effects[0].event.time))
             .unwrap_or(1)
             .max(1);
+        let terminal_block_barrier = contract
+            .observable_labels
+            .iter()
+            .any(|label| label == "terminal_scalar_barrier_v1");
+        let terminal_front_end_exit = contract
+            .exit
+            .cores
+            .first()
+            .and_then(|core| core.front_end.as_ref());
         self.execute_reference_macro_path(
             &NativeBoundaryExecutionPath::TypedMacro,
             warp.warp_slot,
             count,
             interval,
+            terminal_block_barrier,
+            &contract.internal_effects,
+            terminal_front_end_exit,
         )
     }
 
@@ -17245,7 +17532,7 @@ mod tests {
             &sim_semantics::NativeBoundaryRefinementDecision::Preserve,
         );
         let transition = macro_core
-            .execute_reference_macro_path(&preserve, 0, 2, 1)
+            .execute_reference_macro_path(&preserve, 0, 2, 1, false, &[], None)
             .unwrap()
             .expect("preserve path must execute a macro");
         assert_eq!(transition.first_issue, 0);
@@ -17282,7 +17569,7 @@ mod tests {
         );
         assert!(
             fallback_core
-                .execute_reference_macro_path(&fallback, 0, 2, 1)
+                .execute_reference_macro_path(&fallback, 0, 2, 1, false, &[], None)
                 .unwrap()
                 .is_none()
         );
@@ -17318,9 +17605,61 @@ mod tests {
             &sim_semantics::NativeBoundaryRefinementDecision::Preserve,
         );
         assert!(matches!(
-            core.execute_reference_macro_path(&typed_macro, 0, 2, 1),
+            core.execute_reference_macro_path(&typed_macro, 0, 2, 1, false, &[], None),
             Err(IssueError::ReferenceMacroUnsupported {
                 reason: "scalar_macro_descriptor_not_closed"
+            })
+        ));
+        assert_eq!(core.boundary_snapshot(), before);
+    }
+
+    #[cfg(feature = "reference")]
+    #[test]
+    fn reference_scalar_macro_rejects_truncated_detailed_effects_without_mutation() {
+        let mut first = slot(cb(1), OpClass::Other, "IADD3 R1, R1, 1");
+        first.pipeline_class = PipelineClass::ScalarAlu {
+            latency_cycles: 1,
+            initiation_interval_cycles: 1,
+            in_flight_capacity: 8,
+        };
+        let mut second = slot(cb(1), OpClass::Other, "IADD3 R2, R2, 1");
+        second.pipeline_class = PipelineClass::ScalarAlu {
+            latency_cycles: 1,
+            initiation_interval_cycles: 1,
+            in_flight_capacity: 8,
+        };
+        let schedule = schedule(vec![(0, first), (16, second)]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(0, vec![inst(0), inst(16)])],
+        }];
+        let mut core = SmCore::new_with_residency(
+            &blocks,
+            &schedule,
+            &params(),
+            SharedMemoryResidency::unconstrained_fixture(),
+            SmMemMode::Flat,
+        )
+        .unwrap();
+        let before = core.boundary_snapshot();
+        let typed_macro = sim_semantics::native_boundary_execution_path(
+            &sim_semantics::NativeBoundaryRefinementDecision::Preserve,
+        );
+        let truncated = vec![TypedEventTransition {
+            phase: 0,
+            event: sim_semantics::TypedEventIdentity {
+                time: 0,
+                sequence: 1,
+                sequence_span: 1,
+                phase: 0,
+                target: 0,
+                payload: sim_semantics::TypedEventPayload::SmWake,
+            },
+        }];
+        assert!(matches!(
+            core.execute_reference_macro_path(&typed_macro, 0, 2, 1, false, &truncated, None),
+            Err(IssueError::ReferenceMacroUnsupported {
+                reason: "detailed_effect_span_not_closed"
             })
         ));
         assert_eq!(core.boundary_snapshot(), before);
@@ -22518,6 +22857,87 @@ mod tests {
                 maximum: MAX_MEMORY_ADMISSION_SERVICE_WIDTH_SECTORS,
             })
         );
+    }
+
+    #[test]
+    fn feedback_fence_waits_only_for_issuing_warps_unpriced_writes_and_acks() {
+        for scope in [
+            MemoryServiceCandidateScope::Sm,
+            MemoryServiceCandidateScope::Smsp,
+        ] {
+            let mut candidate = admission_candidate(9, scope);
+            candidate.queue_capacity_instructions = 4;
+            candidate.membar_waits_for_service_completion = true;
+            let mut feedback = MemoryAdmissionFeedbackState::checked(candidate).unwrap();
+            let store = AccessKind::GlobalStore { off: 0, len: 1 };
+            let membar = slot(cb(1), OpClass::Other, "MEMBAR.SC.GPU");
+            let ordinary = slot(cb(1), OpClass::Other, "IADD3");
+
+            feedback.reserve(1, 1, 0, store, 0).unwrap();
+            assert_eq!(feedback.completion_ready_at(1, &membar), None);
+            assert_eq!(
+                feedback.completion_ready_at(0, &membar),
+                Some(0),
+                "an unrelated warp's unpriced write is not this fence's obligation"
+            );
+            feedback.reserve(0, 0, 0, store, 0).unwrap();
+            assert_eq!(feedback.completion_ready_at(0, &membar), None);
+            assert_eq!(feedback.completion_ready_at(0, &ordinary), Some(0));
+            let ack = feedback
+                .complete(
+                    AdmissionRequestWitness::new(0, 0, 0, 0, 1).unwrap(),
+                    MemoryOperation::Store,
+                    0,
+                    1,
+                    1,
+                    1,
+                    0,
+                )
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                feedback.completion_ready_at(0, &membar),
+                None,
+                "pricing a write does not deliver its acknowledgement"
+            );
+            feedback
+                .acknowledge_write(ack, ack.fence_visible_at)
+                .unwrap();
+            assert_eq!(
+                feedback.completion_ready_at(0, &membar),
+                Some(ack.fence_visible_at)
+            );
+            assert_eq!(feedback.completion_ready_at(1, &membar), None);
+            assert!(
+                feedback.has_unpriced(),
+                "system drain still sees the other warp"
+            );
+
+            let other_ack = feedback
+                .complete(
+                    AdmissionRequestWitness::new(1, 0, 1, 0, 1).unwrap(),
+                    MemoryOperation::Store,
+                    0,
+                    1,
+                    1,
+                    1,
+                    ack.fence_visible_at,
+                )
+                .unwrap()
+                .unwrap();
+            assert_eq!(feedback.completion_ready_at(1, &membar), None);
+            feedback
+                .acknowledge_write(other_ack, other_ack.fence_visible_at)
+                .unwrap();
+            assert_eq!(
+                feedback.completion_ready_at(1, &membar),
+                Some(other_ack.fence_visible_at)
+            );
+            assert_eq!(feedback.pending_write_ack_count(), 0);
+            assert!(!feedback.has_unpriced());
+            assert_eq!(feedback.write_ack_diagnostics().acks_scheduled, 2);
+            assert_eq!(feedback.write_ack_diagnostics().acks_processed, 2);
+        }
     }
 
     #[test]

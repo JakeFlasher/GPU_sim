@@ -1,0 +1,51 @@
+{
+  "$id": "https://gpu-simulator.local/schemas/sm86_c4i_observer_domain_reconciliation_v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "decision": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "evidence": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 7,
+      "type": "array"
+    },
+    "interpretation": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "negative_boundaries": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "phase": {
+      "const": "C4-I"
+    },
+    "schema": {
+      "const": "sm86_c4i_observer_domain_reconciliation_v1"
+    },
+    "status": {
+      "type": "string"
+    },
+    "supported_domain": {
+      "additionalProperties": true,
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema",
+    "status",
+    "phase",
+    "evidence",
+    "supported_domain",
+    "negative_boundaries",
+    "decision",
+    "interpretation"
+  ],
+  "title": "SM86 C4-I observer domain reconciliation",
+  "type": "object"
+}

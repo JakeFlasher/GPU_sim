@@ -1,0 +1,110 @@
+{
+  "candidate": "L1/problem_048_fused_gate_up_projection_with_swiglu/cuda_cpp",
+  "environment": {
+    "cuda_available": true,
+    "torch": "2.12.0+cu130",
+    "torch_cuda_runtime": "13.0",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "capability": "8.6",
+    "permitted_environment": "tools/sol_execbench/.venv",
+    "host_compiler": "/usr/bin/g++-14",
+    "nvcc_expected": "CUDA 13.2"
+  },
+  "phase": "C7-S34AM1",
+  "schema": "sm86_c7_sol_l1p048_source_v1",
+  "source_contract": {
+    "source": "workloads/sol_execbench_baselines/L1/problem_048_fused_gate_up_projection_with_swiglu/cuda_cpp",
+    "entry_point": "main.cpp::run",
+    "class": "custom_cuda_with_vendor_matmul",
+    "sm86_marker": "solution.json compile option arch=compute_86,code=sm_86",
+    "custom_kernel": "k_fused_gelu_tanh_mul",
+    "launch_chain": [
+      "at::matmul(x, gate_proj.t()) via the permitted Torch/cuBLAS path",
+      "at::matmul(x, up_proj.t()) via the permitted Torch/cuBLAS path",
+      "k_fused_gelu_tanh_mul custom CUDA elementwise GELU-tanh and BF16 multiply"
+    ],
+    "constants": {
+      "hidden_size": 3072,
+      "intermediate_size": 24576,
+      "block_threads": 256,
+      "gelu_tanh": true,
+      "output_multiply_dtype": "BF16 after activated-gate downcast"
+    },
+    "inputs": "x [B,S,3072] contiguous BF16; gate_proj/up_proj [24576,3072] contiguous BF16",
+    "outputs": "output [B,S,24576] contiguous BF16 destination tensor",
+    "math": "gelu_tanh(x @ gate_proj.T) cast to BF16, multiplied by BF16 up projection with BF16 result rounding",
+    "oracle": "independent tools/sol_execbench definition reference.py with two matmuls and exact GELU-tanh/BF16 path",
+    "workload_shapes": [
+      [
+        2,
+        1321
+      ],
+      [
+        2,
+        128
+      ],
+      [
+        64,
+        128
+      ],
+      [
+        1,
+        8192
+      ],
+      [
+        4,
+        256
+      ],
+      [
+        4,
+        449
+      ],
+      [
+        1,
+        131
+      ],
+      [
+        2,
+        1024
+      ],
+      [
+        16,
+        512
+      ],
+      [
+        1,
+        256
+      ],
+      [
+        4,
+        128
+      ],
+      [
+        8,
+        128
+      ],
+      [
+        4,
+        512
+      ],
+      [
+        1,
+        128
+      ],
+      [
+        2,
+        2048
+      ],
+      [
+        4,
+        2048
+      ]
+    ],
+    "tolerance_source": "per-workload definition.json/workload.jsonl max_atol with max_rtol=0.05",
+    "capture_risk": "two vendor cuBLAS GEMM launches plus one custom launch may lack a complete local control/replay crosswalk; no substitute or timing transfer is allowed",
+    "output_dtype_note": "The BF16 activation downcast and __hmul product are unchanged. The multiply-only experiment did not fix the failure; the earlier claim of BF16 multiply flushing was incorrect.",
+    "source_fix": "Use double tanh rounded to FP32 instead of fast tanhf; the approximate-tanh saturation erased small negative GELU outputs. No source-level multiply defect was established."
+  },
+  "selection_basis": "Next executable L1 custom-CUDA row after problem046; no timing or NCU values transferred",
+  "status": "complete_source_contract_and_sm86_environment_review"
+}

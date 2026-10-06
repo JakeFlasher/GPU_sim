@@ -1,0 +1,48 @@
+{
+  "$id": "https://gpu-simulator.local/schemas/sm86_c5b_constant_load_mode1_prediction_pre_ncu_v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "identity": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "interpretation": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "observer": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "phase": {
+      "const": "C5-B"
+    },
+    "schema": {
+      "const": "sm86_c5b_constant_load_mode1_prediction_pre_ncu_v1"
+    },
+    "simulator_frontier_separation": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "status": {
+      "type": "string"
+    },
+    "target_gate": {
+      "additionalProperties": true,
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema",
+    "status",
+    "phase",
+    "identity",
+    "observer",
+    "simulator_frontier_separation",
+    "target_gate",
+    "interpretation"
+  ],
+  "title": "SM86 C5-B mode-1 prediction before target NCU",
+  "type": "object"
+}

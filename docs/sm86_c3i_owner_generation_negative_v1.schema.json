@@ -1,0 +1,53 @@
+{
+  "$id": "https://gpu-simulator.local/schemas/sm86_c3i_owner_generation_negative_v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "decision": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "host_identity": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "identity": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "independent_observation": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "interpretation": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "phase": {
+      "const": "C3-I/C6-K"
+    },
+    "reference_boundary": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "schema": {
+      "const": "sm86_c3i_owner_generation_negative_v1"
+    },
+    "status": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "status",
+    "phase",
+    "host_identity",
+    "identity",
+    "independent_observation",
+    "reference_boundary",
+    "decision",
+    "interpretation"
+  ],
+  "title": "SM86 C3-I/C6-K owner-generation negative boundary",
+  "type": "object"
+}

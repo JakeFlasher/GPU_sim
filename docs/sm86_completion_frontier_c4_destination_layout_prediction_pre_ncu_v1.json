@@ -116,7 +116,8 @@
     "ncu_values_not_consumed": true,
     "simulator_completion": {
       "cycles": 25523,
-      "status": "complete"
+      "status": "model_local_endpoint_complete_semantic_completion_open",
+      "endpoint_role": "model_local_observer_projection_not_physical_completion"
     },
     "simulator_model_local_endpoint_cycles": 25523,
     "trace_records": 1039

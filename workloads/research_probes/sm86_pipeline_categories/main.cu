@@ -36,6 +36,7 @@ __global__ void pipe_probe(unsigned* out, unsigned selector) {
 
 template<int Op, int Repeats>
 int check(unsigned* out) {
+  CUDA_OK(cudaMemset(out, 0xa5, 32 * sizeof(unsigned)));
   pipe_probe<Op, Repeats><<<1, 32>>>(out, 0x0123);
   CUDA_OK(cudaGetLastError());
   CUDA_OK(cudaDeviceSynchronize());

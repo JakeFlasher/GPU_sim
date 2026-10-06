@@ -1,0 +1,169 @@
+{
+  "schema": "sm86_c7_sol_l1p008_row9_vertical_v1",
+  "phase": "C7-S34BW",
+  "status": "complete_smaller_declared_row_native_vertical_with_ncu_crosswalk_mismatch",
+  "candidate": "L1/problem_008_expert_output_weighted_index_add_accumulation/cuda_cpp",
+  "identity": {
+    "arch": "sm_86",
+    "capability": "8.6",
+    "cuda_toolkit": "13.2",
+    "device_index": 0,
+    "environment": "tools/sol_execbench/.venv",
+    "extension": "results/alpha/c7_s34bo_sol_l1p008_20261005/pinned/official_build/sol_l1p008_sm86.so",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "host_compiler": "/usr/bin/g++-14",
+    "nvcc": "/usr/local/cuda-13.2/bin/nvcc",
+    "source": "workloads/sol_execbench_baselines/L1/problem_008_expert_output_weighted_index_add_accumulation/cuda_cpp",
+    "torch": "2.12.0+cu130",
+    "torch_cuda_runtime": "13.0",
+    "driver": "615.71.09",
+    "independent_host_query": "results/alpha/c7_s34bw_sol_l1p008_row9_20261005/host.csv",
+    "representative_workload_index": 9,
+    "representative_axes": {
+      "batch_size": 1,
+      "seq_len": 131,
+      "batch_seq_len": 131,
+      "num_selected_tokens": 1048,
+      "hidden_size": 3072
+    },
+    "seed": 223,
+    "runner": "results/alpha/c7_s34bo_sol_l1p008_20261005_run.py"
+  },
+  "correctness_and_sanitizer": {
+    "build_smoke": "docs/sm86_c7_sol_l1p008_smoke_v1.json",
+    "row_index": 9,
+    "row_seed": 223,
+    "representative_result": "results/alpha/c7_s34bw_sol_l1p008_row9_20261005/capture_correctness.json",
+    "sanitizer_errors": 0,
+    "official_full_population_status": "all 48 rows passed before row0 full-capture blocker; row9 is a declared row, not synthetic"
+  },
+  "nvbit": {
+    "trace": "results/alpha/c7_s34bw_sol_l1p008_row9_20261005/trace",
+    "accepted_launches": 1,
+    "raw_stats_total_insts": 41915250,
+    "raw_stats_total_reported_insts": 41915250,
+    "control_sidecar": "results/alpha/c7_s34bw_sol_l1p008_row9_20261005/control_bits.json",
+    "decoded_static_instructions": 64,
+    "helper_decoded_instructions": 16,
+    "sidecar_total_decoded_instructions": 80,
+    "unknown_control_encodings": 0,
+    "grid": [
+      1048,
+      12,
+      1
+    ],
+    "blocks": 12576,
+    "module_mapping": "results/alpha/c7_s34bw_sol_l1p008_row9_20261005/trace/extra_info/traced_kernel_modules.json",
+    "enhanced_parser_limitation": "JIT cuobjdump parse unavailable; independent extension control sidecar used."
+  },
+  "simulator": {
+    "binary": "sim/target/release/sim-run",
+    "arch_card": "arch_profiles/cards/sm_86.json",
+    "pchase_card": "data/pchase/sm_86_static_card.json",
+    "mode": "l1-l2",
+    "replay": "results/alpha/c7_s34bw_sol_l1p008_row9_20261005/replay.json",
+    "repeat_replay": "results/alpha/c7_s34bw_sol_l1p008_row9_20261005/replay_repeat.json",
+    "replays_byte_equal": true,
+    "native_macro_dispatches": 0,
+    "instructions_issued": 13197018,
+    "records_seen": 13197018,
+    "grid": [
+      1048,
+      12,
+      1
+    ],
+    "block": [
+      256,
+      1,
+      1
+    ],
+    "frontiers": {
+      "sm_active_terminal_frontier": {
+        "cycles": 179606,
+        "role": "causal_sm_active_terminal_lower_bound_excludes_write_ack_and_service_only_events"
+      },
+      "sm_active_observation_frontier": {
+        "issue_lower_bound_cycles": 179606,
+        "issue_cycles": 179606,
+        "terminal_lower_bound_cycles": 179606,
+        "terminal_cycles": 179606,
+        "envelope_cycles": 0,
+        "role": "architecture_scoped_sm_active_observation_boundary_not_raw_lower_bound"
+      },
+      "gpc_observation_frontier": {
+        "lower_bound_cycles": 179606,
+        "envelope_cycles": 1880,
+        "grid_blocks": 12576,
+        "grid_log2": 13,
+        "cycles": 181486,
+        "role": "architecture_scoped_gpc_observation_boundary_not_timing_crosswalk"
+      },
+      "completion_frontier": {
+        "status": "incomplete_unmodeled_retirement_tails",
+        "lower_bound_cycles": 179606,
+        "unmodeled_tails": {
+          "reduction_read_modify_write": false,
+          "dirty_writeback": true,
+          "coherence": true,
+          "async_copy_shared_visibility": false
+        }
+      }
+    }
+  },
+  "ncu": {
+    "metric": "gpc__cycles_elapsed.max, sm__cycles_active.max, smsp__inst_executed.sum",
+    "paths": "results/alpha/c7_s34bw_sol_l1p008_row9_20261005/ncu/repeat-*/ncu.csv",
+    "repetitions": 5,
+    "replay_mode": "application",
+    "observations": [
+      {
+        "gpc_cycles": 140136.0,
+        "sm_active_cycles": 138397.0,
+        "warp_instructions": 12608909.0
+      },
+      {
+        "gpc_cycles": 139218.0,
+        "sm_active_cycles": 137526.0,
+        "warp_instructions": 12571029.0
+      },
+      {
+        "gpc_cycles": 139845.0,
+        "sm_active_cycles": 138166.0,
+        "warp_instructions": 12503517.0
+      },
+      {
+        "gpc_cycles": 139467.0,
+        "sm_active_cycles": 137796.0,
+        "warp_instructions": 12564963.0
+      },
+      {
+        "gpc_cycles": 141110.0,
+        "sm_active_cycles": 139354.0,
+        "warp_instructions": 12525270.0
+      }
+    ],
+    "medians": {
+      "gpc_cycles": 139845.0,
+      "sm_active_cycles": 138166.0,
+      "warp_instructions": 12564963.0
+    }
+  },
+  "crosswalk": {
+    "instruction_count_equal": false,
+    "replay_warp_instructions": 13197018,
+    "ncu_instruction_values": [
+      12608909.0,
+      12571029.0,
+      12503517.0,
+      12564963.0,
+      12525270.0
+    ],
+    "ncu_values_used_to_change_simulator": false,
+    "physical_completion_upper_closed": false,
+    "hardware_scheduling_claimed": false,
+    "lower_bound_vs_ncu_gpc_median": false,
+    "crosswalk_disposition": "instruction mismatch retained; NCU is not used to alter simulator"
+  },
+  "interpretation": "Declared row9 (B=1,S=131,num_selected=1048) completes correctness, memcheck, NVBit, independent control extraction, deterministic replay, and five NCU application-replay observations. The same extension and same arguments were used. The replay reports 13197018 warp instructions, while NCU reports 12.50\u201312.61M; this is a retained crosswalk mismatch, not balanced away or used for tuning. Row0 remains a separate full-capture timeout blocker."
+}

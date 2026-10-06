@@ -1,0 +1,62 @@
+{
+  "$id": "https://gpu-simulator.local/schemas/sm86_c7_sol_candidate_fib004_replay_blocked_v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "build_smoke": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "candidate": {
+      "type": "string"
+    },
+    "decision": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "identity": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "interpretation": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "ncu": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "nvbit": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "phase": {
+      "const": "C7-S34H"
+    },
+    "replay": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "schema": {
+      "const": "sm86_c7_sol_candidate_fib004_replay_blocked_v1"
+    },
+    "status": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "status",
+    "phase",
+    "candidate",
+    "identity",
+    "build_smoke",
+    "nvbit",
+    "replay",
+    "ncu",
+    "decision",
+    "interpretation"
+  ],
+  "title": "SM86 C7-S34H FIB004 replay blocker",
+  "type": "object"
+}

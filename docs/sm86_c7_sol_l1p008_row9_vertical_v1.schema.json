@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "schema",
+    "phase",
+    "status",
+    "candidate",
+    "identity",
+    "correctness_and_sanitizer",
+    "nvbit",
+    "simulator",
+    "ncu",
+    "crosswalk",
+    "interpretation"
+  ],
+  "properties": {
+    "schema": {
+      "const": "sm86_c7_sol_l1p008_row9_vertical_v1"
+    },
+    "phase": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string"
+    },
+    "candidate": {
+      "type": "string"
+    },
+    "identity": {
+      "type": "object"
+    },
+    "correctness_and_sanitizer": {
+      "type": "object"
+    },
+    "nvbit": {
+      "type": "object"
+    },
+    "simulator": {
+      "type": "object"
+    },
+    "ncu": {
+      "type": "object"
+    },
+    "crosswalk": {
+      "type": "object"
+    },
+    "interpretation": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

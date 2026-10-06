@@ -1,0 +1,133 @@
+{
+  "candidate": "L1/problem_088_rotary_position_embedding_application/cuda_cpp",
+  "environment": {
+    "cuda_available": true,
+    "torch": "2.12.0+cu130",
+    "torch_cuda_runtime": "13.0",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "capability": "8.6",
+    "permitted_environment": "tools/sol_execbench/.venv",
+    "host_compiler": "/usr/bin/g++-14",
+    "nvcc_expected": "CUDA 13.2"
+  },
+  "phase": "C7-S34BK1",
+  "schema": "sm86_c7_sol_l1p088_source_v1",
+  "source_contract": {
+    "source": "workloads/sol_execbench_baselines/L1/problem_088_rotary_position_embedding_application/cuda_cpp",
+    "entry_point": "main.cpp::run",
+    "class": "custom_cuda",
+    "sm86_marker": "solution.json compile option arch=compute_86,code=sm_86",
+    "custom_kernel": "problem_088_rope_kernel (launched once for query and once for key)",
+    "constants": {
+      "head_dim": 128,
+      "half_head_dim": 64,
+      "block_threads": 128,
+      "two_launches": true,
+      "grid_layout": "(seq_len, heads, batch)"
+    },
+    "inputs": "query [B,num_heads,S,128], key [B,num_kv_heads,S,128], cos/sin [S,128], all contiguous FP32",
+    "outputs": "query_rotated and key_rotated destination tensors matching their respective input shapes",
+    "math": "x*cos + rotate_half(x)*sin; rotate_half uses a 64-element half split and sign change",
+    "oracle": "independent definition.json/reference.py rotate_half/broadcast reference",
+    "workload_shapes": [
+      [
+        4,
+        24,
+        6,
+        293
+      ],
+      [
+        32,
+        16,
+        4,
+        4096
+      ],
+      [
+        2,
+        40,
+        8,
+        4096
+      ],
+      [
+        8,
+        24,
+        8,
+        1024
+      ],
+      [
+        8,
+        16,
+        4,
+        373
+      ],
+      [
+        2,
+        48,
+        6,
+        919
+      ],
+      [
+        64,
+        8,
+        8,
+        128
+      ],
+      [
+        8,
+        32,
+        4,
+        1087
+      ],
+      [
+        1,
+        40,
+        8,
+        131
+      ],
+      [
+        4,
+        48,
+        12,
+        1321
+      ],
+      [
+        1,
+        64,
+        8,
+        8192
+      ],
+      [
+        4,
+        36,
+        6,
+        2048
+      ],
+      [
+        2,
+        32,
+        4,
+        211
+      ],
+      [
+        1,
+        56,
+        8,
+        853
+      ],
+      [
+        1,
+        8,
+        8,
+        128
+      ],
+      [
+        8,
+        28,
+        4,
+        1024
+      ]
+    ]
+  },
+  "selection_basis": "Next genuine L1 custom-CUDA row after problem087 bounded capture blocker; no timing or NCU values transferred",
+  "status": "complete_source_contract_and_sm86_environment_review"
+}

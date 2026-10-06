@@ -1,5 +1,6 @@
 CUDA_BIN ?= /usr/local/cuda-13.2/bin
-NVCC = $(CUDA_BIN)/nvcc
+NVCC_CCBIN ?= /usr/bin/g++-14
+NVCC := $(CUDA_BIN)/nvcc
 NVCC_FLAGS ?= -std=c++17 -O3 -arch=sm_86 -lineinfo -Xptxas=-v
 PYTHON ?= ../../../.venv/bin/python
 CONTROL_TOOL = ../../../tools/sass_control/emit_control_bits_sidecar.py
@@ -21,10 +22,10 @@ all: front_end_ibuffer_depth_driver front_end_ibuffer_depth_native.cubin \
 	front_end_ibuffer_depth_native.control_bits.json $(VARIANT_CUBINS)
 
 front_end_ibuffer_depth_driver: front_end_ibuffer_depth_driver.cpp
-	$(NVCC) -std=c++17 -O3 -o $@ $< -lcuda
+	$(NVCC) -ccbin $(NVCC_CCBIN) -std=c++17 -O3 -o $@ $< -lcuda
 
 front_end_ibuffer_depth_native.cubin: front_end_ibuffer_depth.cu
-	$(NVCC) $(NVCC_FLAGS) -cubin -o $@ $<
+	$(NVCC) -ccbin $(NVCC_CCBIN) $(NVCC_FLAGS) -cubin -o $@ $<
 
 front_end_ibuffer_depth_native.control_bits.json: front_end_ibuffer_depth_native.cubin
 	$(PYTHON) $(CONTROL_TOOL) --binary $< --arch sm_86 --out $@ \

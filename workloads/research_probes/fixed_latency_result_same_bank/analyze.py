@@ -21,7 +21,7 @@ DEFAULT_ROOT = (
     REPO_ROOT / "results" / "captures" / "sm86_fixed_latency_result_same_bank_20260817_v1"
 )
 LONG_GENERATIONS = 8192
-TRACE_GENERATIONS = 64
+TRACE_GENERATIONS = 8192
 WIDTHS = (4, 8, 12, 16)
 FUNCTIONS = {
     "fh": "_Z16result_same_bankILb0EEvPyPjPKjS3_",
@@ -76,12 +76,7 @@ def source_bank_demand(opcode_text: str) -> tuple[int, int]:
 
 
 def validate_static(root: Path) -> dict[str, Any]:
-    names = (
-        "fixed_latency_result_same_bank_native",
-        "fixed_latency_result_same_bank",
-        "fixed_latency_result_same_bank_trace_native",
-        "fixed_latency_result_same_bank_trace",
-    )
+    names = ("fixed_latency_result_same_bank_native", "fixed_latency_result_same_bank")
     sidecars = {}
     for name in names:
         sidecar = read_json(root / "sass" / f"{name}.control_bits.json")

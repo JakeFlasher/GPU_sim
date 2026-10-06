@@ -1,9 +1,11 @@
 #include <cuda.h>
 
+#include <cerrno>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <vector>
 
 #define DRIVER_CHECK(call)                                                      \
@@ -83,6 +85,20 @@ bool parse_protocol(const char* text, int* protocol) {
         }
     }
     return false;
+}
+
+bool parse_int(const char* text, int* value) {
+    if (text == nullptr || *text == '\0' || value == nullptr) return false;
+    errno = 0;
+    char* end = nullptr;
+    const long parsed = std::strtol(text, &end, 10);
+    if (errno == ERANGE || end == text || *end != '\0' ||
+        parsed < std::numeric_limits<int>::min() ||
+        parsed > std::numeric_limits<int>::max()) {
+        return false;
+    }
+    *value = static_cast<int>(parsed);
+    return true;
 }
 
 std::uint32_t mad(std::uint32_t lhs, std::uint32_t rhs,
@@ -173,9 +189,13 @@ int main(int argc, char** argv) {
     int protocol = -1;
     const bool patched_r11 = std::strcmp(argv[3], "r11-same-bank") == 0;
     const bool original = std::strcmp(argv[3], "original") == 0;
-    const int warps = std::atoi(argv[4]);
-    const int generations = std::atoi(argv[5]);
-    const int trials = argc == 7 ? std::atoi(argv[6]) : 7;
+    int warps = 0;
+    int generations = 0;
+    int trials = 7;
+    if (!parse_int(argv[4], &warps) || !parse_int(argv[5], &generations) ||
+        (argc == 7 && !parse_int(argv[6], &trials))) {
+        return 2;
+    }
     if (!parse_protocol(argv[2], &protocol) || (!original && !patched_r11) ||
         (patched_r11 && protocol != kAdjacentTriplets) ||
         (warps != 4 && warps != 8 && warps != 12 && warps != 16) ||
@@ -200,20 +220,34 @@ int main(int argc, char** argv) {
     DRIVER_CHECK(cuMemAlloc(&sink, kMaxWarps * sizeof(std::uint32_t)));
     std::vector<std::vector<unsigned long long>> samples(
         trials, std::vector<unsigned long long>(warps));
+    bool elapsed_samples_valid = true;
     for (int trial = 0; trial < trials; ++trial) {
+        DRIVER_CHECK(cuMemsetD8(elapsed, 0xff,
+                                kMaxWarps * sizeof(unsigned long long)));
+        DRIVER_CHECK(cuMemsetD8(sink, 0xa5,
+                                kMaxWarps * sizeof(std::uint32_t)));
         void* arguments[] = {&elapsed, &sink};
         DRIVER_CHECK(cuLaunchKernel(function, 1, 1, 1, warps * kWarpSize, 1, 1,
                                     0, nullptr, arguments, nullptr));
         DRIVER_CHECK(cuCtxSynchronize());
         DRIVER_CHECK(cuMemcpyDtoH(samples[trial].data(), elapsed,
                                   warps * sizeof(unsigned long long)));
+        for (int warp = 0; warp < warps; ++warp) {
+            elapsed_samples_valid =
+                elapsed_samples_valid &&
+                samples[trial][warp] !=
+                    std::numeric_limits<unsigned long long>::max() &&
+                samples[trial][warp] > 0;
+        }
     }
     std::vector<std::uint32_t> values(warps);
     DRIVER_CHECK(cuMemcpyDtoH(values.data(), sink,
                               warps * sizeof(std::uint32_t)));
     bool correct = true;
+    bool sink_valid = true;
     std::uint64_t checksum = 0;
     for (int warp = 0; warp < warps; ++warp) {
+        sink_valid = sink_valid && values[warp] != 0xa5a5a5a5u;
         correct = correct &&
                   values[warp] == expected(protocol, patched_r11, generations,
                                            warp, 0);
@@ -234,8 +268,12 @@ int main(int argc, char** argv) {
         std::printf("]");
     }
     std::printf(
-        "],\"checksum\":%llu,\"correct\":%s}\n",
-        static_cast<unsigned long long>(checksum), correct ? "true" : "false");
+        "],\"checksum\":%llu,\"correct\":%s,"
+        "\"elapsed_samples_valid\":%s,\"sink_valid\":%s}\n",
+        static_cast<unsigned long long>(checksum),
+        (correct && elapsed_samples_valid && sink_valid) ? "true" : "false",
+        elapsed_samples_valid ? "true" : "false", sink_valid ? "true" : "false");
+    correct = correct && elapsed_samples_valid && sink_valid;
 
     DRIVER_CHECK(cuMemFree(sink));
     DRIVER_CHECK(cuMemFree(elapsed));

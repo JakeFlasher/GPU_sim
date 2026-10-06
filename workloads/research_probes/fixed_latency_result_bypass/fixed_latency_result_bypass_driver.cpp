@@ -97,6 +97,11 @@ int main(int argc, char** argv) {
     DRIVER_CHECK(cuMemcpyHtoD(zeros_device, zeros.data(),
                               zeros.size() * sizeof(std::uint32_t)));
 
+    const std::uint32_t expected = fixed
+        ? static_cast<std::uint32_t>(((generations + 1ull) / 2ull) * 4ull)
+        : static_cast<std::uint32_t>(generations * 0x12345678ull);
+    bool correct = true, sink_valid = true;
+    std::uint64_t checksum = 0;
     bool elapsed_valid = true;
     for (int trial = 0; trial < trials; ++trial) {
         DRIVER_CHECK(cuMemsetD8(elapsed_device, 0xff,
@@ -112,28 +117,21 @@ int main(int argc, char** argv) {
         DRIVER_CHECK(cuCtxSynchronize());
         DRIVER_CHECK(cuMemcpyDtoH(samples[trial].data(), elapsed_device,
                                   warps * sizeof(unsigned long long)));
-        for (int warp = 0; warp < warps; ++warp)
+        DRIVER_CHECK(cuMemcpyDtoH(sink.data(), sink_device,
+                                  warps * sizeof(std::uint32_t)));
+        for (int warp = 0; warp < warps; ++warp) {
             elapsed_valid = elapsed_valid && samples[trial][warp] != UINT64_MAX &&
                             samples[trial][warp] > 0;
-    }
-    DRIVER_CHECK(cuMemcpyDtoH(sink.data(), sink_device,
-                              warps * sizeof(std::uint32_t)));
-    const std::uint32_t expected = fixed
-        ? static_cast<std::uint32_t>(((generations + 1ull) / 2ull) * 4ull)
-        : static_cast<std::uint32_t>(generations * 0x12345678ull);
-    bool correct = true;
-    bool sink_valid = true;
-    std::uint64_t checksum = 0;
-    for (std::uint32_t value : sink) {
-        correct = correct && value == expected;
-        sink_valid = sink_valid && value != 0xa5a5a5a5u;
-        checksum = checksum * 131u + value;
+            correct = correct && sink[warp] == expected;
+            sink_valid = sink_valid && sink[warp] != 0xa5a5a5a5u;
+            checksum = checksum * 131u + sink[warp];
+        }
     }
 
     std::printf(
         "{\"variant\":\"%s\",\"kind\":\"%s\",\"warps\":%d,"
-        "\"generations\":%d,\"samples_cycles\":[",
-        argv[6], argv[2], warps, generations);
+        "\"generations\":%d,\"trials\":%d,\"all_trials_checked\":true,\"samples_cycles\":[",
+        argv[6], argv[2], warps, generations, trials);
     for (int trial = 0; trial < trials; ++trial) {
         std::printf("%s[", trial == 0 ? "" : ",");
         for (int warp = 0; warp < warps; ++warp) {

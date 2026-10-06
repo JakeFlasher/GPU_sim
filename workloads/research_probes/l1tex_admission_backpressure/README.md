@@ -43,3 +43,19 @@ work and bounded-lane successor. The retained result contains 100 cells, 384 NCU
 profiles, 16 SourceCounters reports, 100 NVBit captures, and deterministic
 ordinary/candidate replay pairs. Sweep selection uses five shallow cells and
 advances every width at calibration-Pareto rates to the remaining 20 cells.
+
+## C7-S33AR live refresh (2026-10-04)
+
+The active Makefile/campaign interface now builds and invokes only
+`l1tex_admission_backpressure`; the historical trace-only executable is no
+longer a required input. A fresh `store, line_unique, blocks=84, warps=8,
+depth=32, active_lanes=8, gap=0, pattern=all` cell is captured with the same
+rebuilt binary through correctness, NVBit, replay, and five application-replay
+NCU runs. The retained artifact records the exact binary/control/trace binding,
+instruction crosswalk, lower-bound comparison, and open completion tails.
+
+The follow-up same-shape `control` versus `store` differential also uses that
+single rebuilt binary. Five NCU medians are 16,967 and 29,790 cycles, whereas
+the simulator lower-bound delta is 556 cycles (12,349 to 12,905). This is a
+mechanism-local mismatch, not a fitted store/L1TEX latency. Evidence:
+`docs/sm86_c7_research_probe_l1tex_admission_backpressure_pair_live_v1.json`.

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema": {"const": "sm86_c7_sol_l2p066_capture_blocked_v1"},
+    "phase": {"const": "C7-S34CD3"},
+    "status": {"type": "string"},
+    "candidate": {"type": "string"},
+    "identity": {"type": "object", "additionalProperties": true},
+    "correctness_and_sanitizer": {"type": "object", "additionalProperties": true},
+    "nvbit_attempts": {"type": "array", "items": {"type": "object", "additionalProperties": true}},
+    "ncu": {"type": "object", "additionalProperties": true},
+    "control_replay": {"type": "object", "additionalProperties": true},
+    "interpretation": {"type": "string"},
+    "metadata_correction": {"type": "string"}
+  },
+  "required": ["schema", "phase", "status", "candidate", "identity", "correctness_and_sanitizer", "nvbit_attempts", "ncu", "control_replay", "interpretation"]
+}

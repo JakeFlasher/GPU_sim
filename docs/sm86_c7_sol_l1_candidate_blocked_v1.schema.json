@@ -1,0 +1,57 @@
+{
+  "$id": "https://gpu-simulator.local/schemas/sm86_c7_sol_l1_candidate_blocked_v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "build_smoke": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "candidate": {
+      "type": "string"
+    },
+    "decision": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "identity": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "interpretation": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "native_vertical": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "nvbit_attempt": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "phase": {
+      "const": "C7-S34E"
+    },
+    "schema": {
+      "const": "sm86_c7_sol_l1_candidate_blocked_v1"
+    },
+    "status": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "status",
+    "phase",
+    "candidate",
+    "identity",
+    "build_smoke",
+    "nvbit_attempt",
+    "native_vertical",
+    "decision",
+    "interpretation"
+  ],
+  "title": "SM86 C7-S34E L1 pure-ATen blocker",
+  "type": "object"
+}

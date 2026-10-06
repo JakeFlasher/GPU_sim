@@ -1,0 +1,630 @@
+{
+  "arms": [
+    {
+      "args": [
+        "control",
+        "none",
+        "line_stream",
+        "84",
+        "16",
+        "32",
+        "7"
+      ],
+      "cell": "b84_control_none_line_stream_d16_l32",
+      "correctness": {
+        "correct": true,
+        "trials": 7
+      },
+      "fence": "none",
+      "ncu": {
+        "instruction_count": [
+          92484.0,
+          92484.0,
+          92484.0,
+          92484.0,
+          92484.0
+        ],
+        "instruction_crosswalk": true,
+        "median": 10925.0,
+        "metric": "gpc__cycles_elapsed.max",
+        "repeats": 5,
+        "rows": [
+          {
+            "gpc__cycles_elapsed.max": 10923.0,
+            "sm__cycles_active.max": 8759.0,
+            "smsp__inst_executed.sum": 92484.0,
+            "smsp__inst_issued.sum": 92904.0
+          },
+          {
+            "gpc__cycles_elapsed.max": 10911.0,
+            "sm__cycles_active.max": 8746.0,
+            "smsp__inst_executed.sum": 92484.0,
+            "smsp__inst_issued.sum": 92904.0
+          },
+          {
+            "gpc__cycles_elapsed.max": 10925.0,
+            "sm__cycles_active.max": 8746.0,
+            "smsp__inst_executed.sum": 92484.0,
+            "smsp__inst_issued.sum": 92904.0
+          },
+          {
+            "gpc__cycles_elapsed.max": 10936.0,
+            "sm__cycles_active.max": 8747.0,
+            "smsp__inst_executed.sum": 92484.0,
+            "smsp__inst_issued.sum": 92904.0
+          },
+          {
+            "gpc__cycles_elapsed.max": 10938.0,
+            "sm__cycles_active.max": 8752.0,
+            "smsp__inst_executed.sum": 92484.0,
+            "smsp__inst_issued.sum": 92904.0
+          }
+        ],
+        "values": [
+          10923.0,
+          10911.0,
+          10925.0,
+          10936.0,
+          10938.0
+        ]
+      },
+      "sanitizer_return_code": 0,
+      "simulator": {
+        "completion_frontier": {
+          "cycles": 8242,
+          "status": "complete"
+        },
+        "deterministic_replay": true,
+        "gpc_observation_cycles": 10066,
+        "native_macro_dispatches": 0,
+        "path": "results/alpha/c1r_memret_store_fence_20261004/simulator/b84_control_none_line_stream_d16_l32/replay-1.json",
+        "records": 92484,
+        "repeat_path": "results/alpha/c1r_memret_store_fence_20261004/simulator/b84_control_none_line_stream_d16_l32/replay-2.json"
+      },
+      "tail": "control",
+      "target_records": 92484,
+      "trace": {
+        "kernel": "_Z15retirement_tailILi0ELi0EEvPjiii",
+        "nvbit_total_reported_insts": 253848,
+        "path": "results/alpha/c1r_memret_store_fence_20261004/nvbit/b84_control_none_line_stream_d16_l32",
+        "static_control_sidecar": "results/alpha/c1r_memret_store_fence_20261004/sass/memory_retirement_service_trace.control_bits.json"
+      }
+    },
+    {
+      "args": [
+        "store",
+        "none",
+        "line_stream",
+        "84",
+        "16",
+        "32",
+        "7"
+      ],
+      "cell": "b84_store_none_line_stream_d16_l32",
+      "correctness": {
+        "correct": true,
+        "trials": 7
+      },
+      "fence": "none",
+      "ncu": {
+        "instruction_count": [
+          131208.0,
+          131208.0,
+          131208.0,
+          131208.0,
+          131208.0
+        ],
+        "instruction_crosswalk": true,
+        "median": 17005.0,
+        "metric": "gpc__cycles_elapsed.max",
+        "repeats": 5,
+        "rows": [
+          {
+            "gpc__cycles_elapsed.max": 16484.0,
+            "sm__cycles_active.max": 13443.0,
+            "smsp__inst_executed.sum": 131208.0,
+            "smsp__inst_issued.sum": 131796.0
+          },
+          {
+            "gpc__cycles_elapsed.max": 18207.0,
+            "sm__cycles_active.max": 12691.0,
+            "smsp__inst_executed.sum": 131208.0,
+            "smsp__inst_issued.sum": 131796.0
+          },
+          {
+            "gpc__cycles_elapsed.max": 16807.0,
+            "sm__cycles_active.max": 12600.0,
+            "smsp__inst_executed.sum": 131208.0,
+            "smsp__inst_issued.sum": 131796.0
+          },
+          {
+            "gpc__cycles_elapsed.max": 17698.0,
+            "sm__cycles_active.max": 14570.0,
+            "smsp__inst_executed.sum": 131208.0,
+            "smsp__inst_issued.sum": 131796.0
+          },
+          {
+            "gpc__cycles_elapsed.max": 17005.0,
+            "sm__cycles_active.max": 12786.0,
+            "smsp__inst_executed.sum": 131208.0,
+            "smsp__inst_issued.sum": 131796.0
+          }
+        ],
+        "values": [
+          16484.0,
+          18207.0,
+          16807.0,
+          17698.0,
+          17005.0
+        ]
+      },
+      "sanitizer_return_code": 0,
+      "simulator": {
+        "completion_frontier": {
+          "lower_bound_cycles": 11128,
+          "status": "incomplete_unmodeled_retirement_tails",
+          "unmodeled_tails": {
+            "async_copy_shared_visibility": false,
+            "coherence": true,
+            "dirty_writeback": true,
+            "reduction_read_modify_write": false
+          }
+        },
+        "deterministic_replay": true,
+        "gpc_observation_cycles": 12952,
+        "native_macro_dispatches": 0,
+        "path": "results/alpha/c1r_memret_store_fence_20261004/simulator/b84_store_none_line_stream_d16_l32/replay-1.json",
+        "records": 131208,
+        "repeat_path": "results/alpha/c1r_memret_store_fence_20261004/simulator/b84_store_none_line_stream_d16_l32/replay-2.json"
+      },
+      "tail": "store",
+      "target_records": 131208,
+      "trace": {
+        "kernel": "_Z15retirement_tailILi2ELi0EEvPjiii",
+        "nvbit_total_reported_insts": 366240,
+        "path": "results/alpha/c1r_memret_store_fence_20261004/nvbit/b84_store_none_line_stream_d16_l32",
+        "static_control_sidecar": "results/alpha/c1r_memret_store_fence_20261004/sass/memory_retirement_service_trace.control_bits.json"
+      }
+    },
+    {
+      "args": [
+        "control",
+        "device",
+        "line_stream",
+        "84",
+        "16",
+        "32",
+        "7"
+      ],
+      "cell": "b84_control_device_line_stream_d16_l32",
+      "correctness": {
+        "correct": true,
+        "trials": 7
+      },
+      "fence": "device",
+      "ncu": {
+        "instruction_count": [
+          92736.0,
+          92736.0,
+          92736.0,
+          92736.0,
+          92736.0
+        ],
+        "instruction_crosswalk": true,
+        "median": 11102.0,
+        "metric": "gpc__cycles_elapsed.max",
+        "repeats": 5,
+        "rows": [
+          {
+            "gpc__cycles_elapsed.max": 11106.0,
+            "sm__cycles_active.max": 8936.0,
+            "smsp__inst_executed.sum": 92736.0,
+            "smsp__inst_issued.sum": 93156.0
+          },
+          {
+            "gpc__cycles_elapsed.max": 11090.0,
+            "sm__cycles_active.max": 8937.0,
+            "smsp__inst_executed.sum": 92736.0,
+            "smsp__inst_issued.sum": 93156.0
+          },
+          {
+            "gpc__cycles_elapsed.max": 11105.0,
+            "sm__cycles_active.max": 8925.0,
+            "smsp__inst_executed.sum": 92736.0,
+            "smsp__inst_issued.sum": 93156.0
+          },
+          {
+            "gpc__cycles_elapsed.max": 11102.0,
+            "sm__cycles_active.max": 8943.0,
+            "smsp__inst_executed.sum": 92736.0,
+            "smsp__inst_issued.sum": 93156.0
+          },
+          {
+            "gpc__cycles_elapsed.max": 11089.0,
+            "sm__cycles_active.max": 8937.0,
+            "smsp__inst_executed.sum": 92736.0,
+            "smsp__inst_issued.sum": 93156.0
+          }
+        ],
+        "values": [
+          11106.0,
+          11090.0,
+          11105.0,
+          11102.0,
+          11089.0
+        ]
+      },
+      "sanitizer_return_code": 0,
+      "simulator": {
+        "completion_frontier": {
+          "cycles": 8254,
+          "status": "complete"
+        },
+        "deterministic_replay": true,
+        "gpc_observation_cycles": 10078,
+        "native_macro_dispatches": 0,
+        "path": "results/alpha/c1r_memret_store_fence_20261004/simulator/b84_control_device_line_stream_d16_l32/replay-1.json",
+        "records": 92736,
+        "repeat_path": "results/alpha/c1r_memret_store_fence_20261004/simulator/b84_control_device_line_stream_d16_l32/replay-2.json"
+      },
+      "tail": "control",
+      "target_records": 92736,
+      "trace": {
+        "kernel": "_Z15retirement_tailILi0ELi1EEvPjiii",
+        "nvbit_total_reported_insts": 254100,
+        "path": "results/alpha/c1r_memret_store_fence_20261004/nvbit/b84_control_device_line_stream_d16_l32",
+        "static_control_sidecar": "results/alpha/c1r_memret_store_fence_20261004/sass/memory_retirement_service_trace.control_bits.json"
+      }
+    },
+    {
+      "args": [
+        "store",
+        "device",
+        "line_stream",
+        "84",
+        "16",
+        "32",
+        "7"
+      ],
+      "cell": "b84_store_device_line_stream_d16_l32",
+      "correctness": {
+        "correct": true,
+        "trials": 7
+      },
+      "fence": "device",
+      "ncu": {
+        "instruction_count": [
+          131460.0,
+          131460.0,
+          131460.0,
+          131460.0,
+          131460.0
+        ],
+        "instruction_crosswalk": true,
+        "median": 17330.0,
+        "metric": "gpc__cycles_elapsed.max",
+        "repeats": 5,
+        "rows": [
+          {
+            "gpc__cycles_elapsed.max": 17203.0,
+            "sm__cycles_active.max": 15076.0,
+            "smsp__inst_executed.sum": 131460.0,
+            "smsp__inst_issued.sum": 132048.0
+          },
+          {
+            "gpc__cycles_elapsed.max": 17002.0,
+            "sm__cycles_active.max": 15042.0,
+            "smsp__inst_executed.sum": 131460.0,
+            "smsp__inst_issued.sum": 132048.0
+          },
+          {
+            "gpc__cycles_elapsed.max": 17408.0,
+            "sm__cycles_active.max": 14616.0,
+            "smsp__inst_executed.sum": 131460.0,
+            "smsp__inst_issued.sum": 132048.0
+          },
+          {
+            "gpc__cycles_elapsed.max": 17330.0,
+            "sm__cycles_active.max": 15901.0,
+            "smsp__inst_executed.sum": 131460.0,
+            "smsp__inst_issued.sum": 132048.0
+          },
+          {
+            "gpc__cycles_elapsed.max": 17490.0,
+            "sm__cycles_active.max": 14917.0,
+            "smsp__inst_executed.sum": 131460.0,
+            "smsp__inst_issued.sum": 132048.0
+          }
+        ],
+        "values": [
+          17203.0,
+          17002.0,
+          17408.0,
+          17330.0,
+          17490.0
+        ]
+      },
+      "sanitizer_return_code": 0,
+      "simulator": {
+        "completion_frontier": {
+          "lower_bound_cycles": 11140,
+          "status": "incomplete_unmodeled_retirement_tails",
+          "unmodeled_tails": {
+            "async_copy_shared_visibility": false,
+            "coherence": true,
+            "dirty_writeback": true,
+            "reduction_read_modify_write": false
+          }
+        },
+        "deterministic_replay": true,
+        "gpc_observation_cycles": 12964,
+        "native_macro_dispatches": 0,
+        "path": "results/alpha/c1r_memret_store_fence_20261004/simulator/b84_store_device_line_stream_d16_l32/replay-1.json",
+        "records": 131460,
+        "repeat_path": "results/alpha/c1r_memret_store_fence_20261004/simulator/b84_store_device_line_stream_d16_l32/replay-2.json"
+      },
+      "tail": "store",
+      "target_records": 131460,
+      "trace": {
+        "kernel": "_Z15retirement_tailILi2ELi1EEvPjiii",
+        "nvbit_total_reported_insts": 366492,
+        "path": "results/alpha/c1r_memret_store_fence_20261004/nvbit/b84_store_device_line_stream_d16_l32",
+        "static_control_sidecar": "results/alpha/c1r_memret_store_fence_20261004/sass/memory_retirement_service_trace.control_bits.json"
+      }
+    },
+    {
+      "args": [
+        "control",
+        "system",
+        "line_stream",
+        "84",
+        "16",
+        "32",
+        "7"
+      ],
+      "cell": "b84_control_system_line_stream_d16_l32",
+      "correctness": {
+        "correct": true,
+        "trials": 7
+      },
+      "fence": "system",
+      "ncu": {
+        "instruction_count": [
+          93492.0,
+          93492.0,
+          93492.0,
+          93492.0,
+          93492.0
+        ],
+        "instruction_crosswalk": false,
+        "median": 18067.0,
+        "metric": "gpc__cycles_elapsed.max",
+        "repeats": 5,
+        "rows": [
+          {
+            "gpc__cycles_elapsed.max": 18429.0,
+            "sm__cycles_active.max": 15874.0,
+            "smsp__inst_executed.sum": 93492.0,
+            "smsp__inst_issued.sum": 94080.0
+          },
+          {
+            "gpc__cycles_elapsed.max": 18067.0,
+            "sm__cycles_active.max": 15715.0,
+            "smsp__inst_executed.sum": 93492.0,
+            "smsp__inst_issued.sum": 94080.0
+          },
+          {
+            "gpc__cycles_elapsed.max": 18181.0,
+            "sm__cycles_active.max": 17309.0,
+            "smsp__inst_executed.sum": 93492.0,
+            "smsp__inst_issued.sum": 94080.0
+          },
+          {
+            "gpc__cycles_elapsed.max": 17897.0,
+            "sm__cycles_active.max": 16929.0,
+            "smsp__inst_executed.sum": 93492.0,
+            "smsp__inst_issued.sum": 94080.0
+          },
+          {
+            "gpc__cycles_elapsed.max": 17968.0,
+            "sm__cycles_active.max": 16185.0,
+            "smsp__inst_executed.sum": 93492.0,
+            "smsp__inst_issued.sum": 94080.0
+          }
+        ],
+        "values": [
+          18429.0,
+          18067.0,
+          18181.0,
+          17897.0,
+          17968.0
+        ]
+      },
+      "sanitizer_return_code": 0,
+      "simulator": {
+        "completion_frontier": {
+          "cycles": 8254,
+          "status": "complete"
+        },
+        "deterministic_replay": true,
+        "gpc_observation_cycles": 10078,
+        "native_macro_dispatches": 0,
+        "path": "results/alpha/c1r_memret_store_fence_20261004/simulator/b84_control_system_line_stream_d16_l32/replay-1.json",
+        "records": 92736,
+        "repeat_path": "results/alpha/c1r_memret_store_fence_20261004/simulator/b84_control_system_line_stream_d16_l32/replay-2.json"
+      },
+      "tail": "control",
+      "target_records": 92736,
+      "trace": {
+        "kernel": "_Z15retirement_tailILi0ELi2EEvPjiii",
+        "nvbit_total_reported_insts": 254100,
+        "path": "results/alpha/c1r_memret_store_fence_20261004/nvbit/b84_control_system_line_stream_d16_l32",
+        "static_control_sidecar": "results/alpha/c1r_memret_store_fence_20261004/sass/memory_retirement_service_trace.control_bits.json"
+      }
+    },
+    {
+      "args": [
+        "store",
+        "system",
+        "line_stream",
+        "84",
+        "16",
+        "32",
+        "7"
+      ],
+      "cell": "b84_store_system_line_stream_d16_l32",
+      "correctness": {
+        "correct": true,
+        "trials": 7
+      },
+      "fence": "system",
+      "ncu": {
+        "instruction_count": [
+          132216.0,
+          132216.0,
+          132216.0,
+          132216.0,
+          132216.0
+        ],
+        "instruction_crosswalk": false,
+        "median": 21662.0,
+        "metric": "gpc__cycles_elapsed.max",
+        "repeats": 5,
+        "rows": [
+          {
+            "gpc__cycles_elapsed.max": 22096.0,
+            "sm__cycles_active.max": 21147.0,
+            "smsp__inst_executed.sum": 132216.0,
+            "smsp__inst_issued.sum": 132804.0
+          },
+          {
+            "gpc__cycles_elapsed.max": 21662.0,
+            "sm__cycles_active.max": 21377.0,
+            "smsp__inst_executed.sum": 132216.0,
+            "smsp__inst_issued.sum": 132804.0
+          },
+          {
+            "gpc__cycles_elapsed.max": 23602.0,
+            "sm__cycles_active.max": 21247.0,
+            "smsp__inst_executed.sum": 132216.0,
+            "smsp__inst_issued.sum": 132804.0
+          },
+          {
+            "gpc__cycles_elapsed.max": 21198.0,
+            "sm__cycles_active.max": 19233.0,
+            "smsp__inst_executed.sum": 132216.0,
+            "smsp__inst_issued.sum": 132804.0
+          },
+          {
+            "gpc__cycles_elapsed.max": 21005.0,
+            "sm__cycles_active.max": 20571.0,
+            "smsp__inst_executed.sum": 132216.0,
+            "smsp__inst_issued.sum": 132804.0
+          }
+        ],
+        "values": [
+          22096.0,
+          21662.0,
+          23602.0,
+          21198.0,
+          21005.0
+        ]
+      },
+      "sanitizer_return_code": 0,
+      "simulator": {
+        "completion_frontier": {
+          "lower_bound_cycles": 11140,
+          "status": "incomplete_unmodeled_retirement_tails",
+          "unmodeled_tails": {
+            "async_copy_shared_visibility": false,
+            "coherence": true,
+            "dirty_writeback": true,
+            "reduction_read_modify_write": false
+          }
+        },
+        "deterministic_replay": true,
+        "gpc_observation_cycles": 12964,
+        "native_macro_dispatches": 0,
+        "path": "results/alpha/c1r_memret_store_fence_20261004/simulator/b84_store_system_line_stream_d16_l32/replay-1.json",
+        "records": 131460,
+        "repeat_path": "results/alpha/c1r_memret_store_fence_20261004/simulator/b84_store_system_line_stream_d16_l32/replay-2.json"
+      },
+      "tail": "store",
+      "target_records": 131460,
+      "trace": {
+        "kernel": "_Z15retirement_tailILi2ELi2EEvPjiii",
+        "nvbit_total_reported_insts": 366492,
+        "path": "results/alpha/c1r_memret_store_fence_20261004/nvbit/b84_store_system_line_stream_d16_l32",
+        "static_control_sidecar": "results/alpha/c1r_memret_store_fence_20261004/sass/memory_retirement_service_trace.control_bits.json"
+      }
+    }
+  ],
+  "comparisons": {
+    "control_system_minus_device": {
+      "ncu_instruction_crosswalk": false,
+      "ncu_median_delta_cycles": 6965.0,
+      "simulator_gpc_delta_cycles": 0
+    },
+    "store_minus_control_device": {
+      "ncu_instruction_crosswalk": true,
+      "ncu_median_delta_cycles": 6228.0,
+      "simulator_gpc_delta_cycles": 2886
+    },
+    "store_minus_control_system": {
+      "ncu_instruction_crosswalk": false,
+      "ncu_median_delta_cycles": 3595.0,
+      "simulator_gpc_delta_cycles": 2886
+    },
+    "store_system_minus_device": {
+      "ncu_instruction_crosswalk": false,
+      "ncu_median_delta_cycles": 4332.0,
+      "simulator_gpc_delta_cycles": 0
+    }
+  },
+  "host_identity": {
+    "compute_capability": "8.6",
+    "device_index": 0,
+    "driver": "615.71.09",
+    "graphics_clock_mhz": 1350,
+    "memory_clock_mhz": 10501,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "pstate": "P0",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c"
+  },
+  "identity": {
+    "binary": "workloads/research_probes/memory_retirement_service/memory_retirement_service",
+    "capture_root": "results/alpha/c1r_memret_store_fence_20261004",
+    "ncu_metric": "gpc__cycles_elapsed.max",
+    "ncu_repeats_per_arm": 5,
+    "shape": {
+      "active_lanes": 32,
+      "block": [
+        32,
+        1,
+        1
+      ],
+      "depth": 16,
+      "grid": [
+        84,
+        1,
+        1
+      ],
+      "layout": "line_stream"
+    },
+    "source": "workloads/research_probes/memory_retirement_service",
+    "trace_binary": "workloads/research_probes/memory_retirement_service/memory_retirement_service_trace"
+  },
+  "interpretation": "The fresh current-source system-fence arms reproduce the earlier crosswalk blocker: NCU smsp instruction counts exceed replay records by 756 for both system-fence arms, while no/device arms crosswalk exactly. System-scope NCU medians are 18067 (control) and 21662 (store), but these rows are not scored as timing differentials because instruction identity is not matched. The simulator has no system-versus-device fence delta (0 cycles); this remains a scope/crosswalk blocker, not a fitted fence constant. Dirty-writeback/coherence tails remain open.",
+  "phase": "C1-R-B",
+  "reconciliation": {
+    "all_host_oracles_passed": true,
+    "all_replays_deterministic": true,
+    "all_sanitizer_passed": true,
+    "hardware_completion": "not_observed",
+    "native_macro_dispatches": 0,
+    "system_scope_instruction_crosswalk_failed": true,
+    "system_scope_replay_status": "retained_but_not_score_applicable"
+  },
+  "schema": "sm86_c1r_store_fence_scope_reconciliation_live_v1",
+  "status": "complete_system_scope_crosswalk_mismatch_reproduced"
+}

@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpu-simulator.local/schemas/sm86_c4e_sfu_quad_occupancy_prediction_pre_ncu_v1.schema.json",
+  "title": "SM86 C4-E quad occupancy prediction before target NCU",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "status",
+    "phase",
+    "protocol",
+    "identity",
+    "calibration",
+    "target_features",
+    "prediction",
+    "interpretation"
+  ],
+  "properties": {
+    "schema": {
+      "const": "sm86_c4e_sfu_quad_occupancy_prediction_pre_ncu_v1"
+    },
+    "status": {
+      "const": "prediction_materialized_before_target_ncu"
+    },
+    "phase": {
+      "const": "C4-E"
+    },
+    "protocol": {
+      "type": "object",
+      "required": [
+        "target_ncu_values_collected",
+        "ncu_values_used_by_simulator",
+        "prediction_before_target_collection"
+      ],
+      "properties": {
+        "target_ncu_values_collected": {
+          "const": false
+        },
+        "ncu_values_used_by_simulator": {
+          "const": false
+        },
+        "prediction_before_target_collection": {
+          "const": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "identity": {
+      "type": "object"
+    },
+    "calibration": {
+      "type": "object"
+    },
+    "target_features": {
+      "type": "object",
+      "properties": {
+        "hardware_completion": {
+          "const": "not_observed"
+        },
+        "native_macro_dispatches": {
+          "const": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "prediction": {
+      "type": "object",
+      "properties": {
+        "interval_role": {
+          "const": "empirical_observer_prediction_not_semantic_completion_upper"
+        }
+      },
+      "additionalProperties": true
+    },
+    "interpretation": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

@@ -1,0 +1,163 @@
+{
+  "schema": "sm86_c7_sol_fibp012_vertical_v1",
+  "phase": "C7-S34BU",
+  "status": "complete_one_launch_native_vertical",
+  "candidate": "FIB/problem_012_gqa_paged_decode_h32_kv4_d128_ps1/cuda_cpp",
+  "identity": {
+    "arch": "sm_86",
+    "capability": "8.6",
+    "cuda_toolkit": "13.2",
+    "device_index": 0,
+    "environment": "tools/sol_execbench/.venv",
+    "extension": "results/alpha/c7_s34bu_sol_fibp012_20261005/pinned/official_build/sol_fibp012_sm86.so",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "host_compiler": "/usr/bin/g++-14",
+    "nvcc": "/usr/local/cuda-13.2/bin/nvcc",
+    "source": "workloads/sol_execbench_baselines/FIB/problem_012_gqa_paged_decode_h32_kv4_d128_ps1/cuda_cpp",
+    "torch": "2.12.0+cu130",
+    "torch_cuda_runtime": "13.0",
+    "driver": "615.71.09",
+    "independent_host_query": "results/alpha/c7_s34bu_sol_fibp012_20261005/pinned/host.csv",
+    "representative_workload_index": 0,
+    "representative_axes": {
+      "batch_size": 1,
+      "num_pages": 8,
+      "num_kv_indices": 7
+    },
+    "seed": 223,
+    "runner": "results/alpha/c7_s34bu_sol_fibp012_20261005_run.py",
+    "blob_root": "tools/sol_execbench/data/flashinfer-trace/blob",
+    "definition_adapter": "The dataset hf_id is empty; runner supplies local/FlashInfer-Bench only to satisfy the metadata parser, without changing axes, tensors, reference or tolerances."
+  },
+  "correctness_and_sanitizer": {
+    "build_smoke": "docs/sm86_c7_sol_fibp012_smoke_v1.json",
+    "official_rows": 144,
+    "official_min_matched_ratio_by_output": {
+      "lse": 1.0,
+      "output": 1.0
+    },
+    "official_max_abs_error_by_output": {
+      "lse": 5.7220458984375e-06,
+      "output": 0.00390625
+    },
+    "sanitizer_errors": 0,
+    "representative_result": "results/alpha/c7_s34bu_sol_fibp012_20261005/pinned/trace_correctness.json"
+  },
+  "nvbit": {
+    "trace": "results/alpha/c7_s34bu_sol_fibp012_20261005/pinned/trace",
+    "accepted_launches": 1,
+    "raw_stats_total_insts": 131744,
+    "raw_stats_total_reported_insts": 131744,
+    "control_sidecar": "results/alpha/c7_s34bu_sol_fibp012_20261005/pinned/control_bits.json",
+    "target_decoded_instructions": 336,
+    "helper_decoded_instructions": 16,
+    "sidecar_total_decoded_instructions": 352,
+    "unknown_control_encodings": 0,
+    "module_mapping": "results/alpha/c7_s34bu_sol_fibp012_20261005/pinned/trace/extra_info/traced_kernel_modules.json",
+    "enhanced_parser_limitation": "JIT cuobjdump parse unavailable; independent extension control sidecar used."
+  },
+  "simulator": {
+    "binary": "sim/target/release/sim-run",
+    "arch_card": "arch_profiles/cards/sm_86.json",
+    "pchase_card": "data/pchase/sm_86_static_card.json",
+    "mode": "l1-l2",
+    "replay": "results/alpha/c7_s34bu_sol_fibp012_20261005/pinned/replay.json",
+    "repeat_replay": "results/alpha/c7_s34bu_sol_fibp012_20261005/pinned/replay_repeat.json",
+    "replays_byte_equal": true,
+    "native_macro_dispatches": 0,
+    "instructions_issued": 55104,
+    "records_seen": 55104,
+    "grid": [
+      1,
+      32,
+      1
+    ],
+    "block": [
+      128,
+      1,
+      1
+    ],
+    "frontiers": {
+      "sm_active_terminal_frontier": {
+        "cycles": 10664,
+        "role": "causal_sm_active_terminal_lower_bound_excludes_write_ack_and_service_only_events"
+      },
+      "sm_active_observation_frontier": {
+        "issue_lower_bound_cycles": 10653,
+        "issue_cycles": 10653,
+        "terminal_lower_bound_cycles": 10664,
+        "terminal_cycles": 10664,
+        "envelope_cycles": 0,
+        "role": "architecture_scoped_sm_active_observation_boundary_not_raw_lower_bound"
+      },
+      "gpc_observation_frontier": {
+        "lower_bound_cycles": 10664,
+        "envelope_cycles": 1816,
+        "grid_blocks": 32,
+        "grid_log2": 5,
+        "cycles": 12480,
+        "role": "architecture_scoped_gpc_observation_boundary_not_timing_crosswalk"
+      },
+      "completion_frontier": {
+        "status": "incomplete_unmodeled_retirement_tails",
+        "lower_bound_cycles": 10664,
+        "unmodeled_tails": {
+          "reduction_read_modify_write": false,
+          "dirty_writeback": true,
+          "coherence": true,
+          "async_copy_shared_visibility": false
+        }
+      }
+    }
+  },
+  "ncu": {
+    "metric": "gpc__cycles_elapsed.max, sm__cycles_active.max, smsp__inst_executed.sum",
+    "paths": "results/alpha/c7_s34bu_sol_fibp012_20261005/pinned/ncu/repeat-*/ncu.csv",
+    "repetitions": 5,
+    "replay_mode": "application",
+    "observations": [
+      {
+        "gpc_cycles": 11866.0,
+        "sm_active_cycles": 10222.0,
+        "warp_instructions": 55104.0
+      },
+      {
+        "gpc_cycles": 11616.0,
+        "sm_active_cycles": 9978.0,
+        "warp_instructions": 55104.0
+      },
+      {
+        "gpc_cycles": 11620.0,
+        "sm_active_cycles": 9974.0,
+        "warp_instructions": 55104.0
+      },
+      {
+        "gpc_cycles": 11727.0,
+        "sm_active_cycles": 10069.0,
+        "warp_instructions": 55104.0
+      },
+      {
+        "gpc_cycles": 11667.0,
+        "sm_active_cycles": 10028.0,
+        "warp_instructions": 55104.0
+      }
+    ],
+    "medians": {
+      "gpc_cycles": 11667.0,
+      "sm_active_cycles": 10028.0,
+      "warp_instructions": 55104.0
+    }
+  },
+  "crosswalk": {
+    "per_kernel_instruction_counts_equal": true,
+    "raw_tracer_stats_are_separate_unit": true,
+    "ncu_values_used_to_change_simulator": false,
+    "physical_completion_upper_closed": false,
+    "hardware_scheduling_claimed": false,
+    "gpc_lower_bound_below_ncu_median": true,
+    "lower_bound_falsifier": false,
+    "sm_active_lower_bound_falsifier": true
+  },
+  "interpretation": "All 48 official FlashInfer-Bench rows across three seeds pass using retained safetensor inputs and custom GQA reference; representative memcheck is clean. One 32-block GQA paged-decode launch passes independent control extraction, byte-identical replay, and five application-replay NCU repetitions. Replay/NCU instruction counts match at 55104. The modeled GPC lower bound 10664 remains below the NCU median 11667; the observation envelope 12480 is separate and not fitted. Dirty-writeback/coherence tails remain open. The SM-active terminal lower exceeds all five corresponding NCU SM-active values; this is a retained SM-active falsifier, separate from the GPC lower comparison."
+}

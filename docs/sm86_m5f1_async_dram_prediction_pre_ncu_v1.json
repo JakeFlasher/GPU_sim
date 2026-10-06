@@ -1,0 +1,284 @@
+{
+  "schema": "sm86_m5f1_async_dram_prediction_pre_ncu_v1",
+  "phase": "M5-F1",
+  "status": "prediction_materialized_before_target_ncu",
+  "protocol": {
+    "selection_bar": "one calibration-only observer/tail family with a disjoint untouched target",
+    "target_ncu_values_collected": false,
+    "target_ncu_values_used_by_simulator": false,
+    "prediction_before_target_collection": true,
+    "ncu_metric": "gpc__cycles_elapsed.max",
+    "clock_control": "base",
+    "cache_control": "all",
+    "replay_mode": "application",
+    "calibration_repetitions_per_cell": 5,
+    "prediction_parameters_unchanged_after_target": true,
+    "metadata_correction": "Removed unnecessary binary digest and replaced assumed pre-run host status with the actual post-run query; coefficients/interval untouched.",
+    "interval_method": "OLS on all ten calibration repetitions, radius = maximum absolute calibration residual; no nominal coverage guarantee"
+  },
+  "host_identity": {
+    "device_index": 0,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "compute_capability": "8.6",
+    "driver": "615.71.09",
+    "pstate": "P0",
+    "graphics_clock_mhz": 1350,
+    "memory_clock_mhz": 10501,
+    "observation": "results/alpha/m5f_async_dram_20261006/host_observed_after_ncu.csv",
+    "observation_time_role": "independent nvidia-smi query after target collection; not a pre-NCU hardware observation"
+  },
+  "identity": {
+    "source": "workloads/research_probes/async_source_only/async_visibility_phase.cu",
+    "binary": "workloads/research_probes/async_source_only/async_visibility_phase",
+    "binary_args_calibration": [
+      "--depth",
+      "4",
+      "--route",
+      "dram",
+      "--layout",
+      "compact",
+      "--markers",
+      "on"
+    ],
+    "binary_args_target": [
+      "--groups",
+      "64",
+      "--depth",
+      "4",
+      "--route",
+      "dram",
+      "--layout",
+      "compact",
+      "--markers",
+      "on"
+    ],
+    "calibration_groups": [
+      16,
+      32
+    ],
+    "target_groups": 64,
+    "target_trace": "results/alpha/m5f_async_dram_20261006/target_trace",
+    "target_control": "results/alpha/m5f_async_dram_20261006/target_control.json",
+    "target_simulator": "results/alpha/m5f_async_dram_20261006/target_sim.json",
+    "arch_card": "arch_profiles/cards/sm_86.json",
+    "pchase_card": "data/pchase/sm_86_static_card.json",
+    "target_kernel": "_Z23visibility_phase_kernelILi4ELb1ELb1ELi0EEvPKciP11PhaseResult",
+    "target_ncu_root": "results/alpha/m5f_async_dram_20261006/target_ncu",
+    "simulator_binary": "sim/target/release/sim-run",
+    "route_caveat": "dram is the executable's streaming/bypass selector, not a guarantee of DRAM service for every request"
+  },
+  "calibration": {
+    "family": "streaming cp.async.cg shared-global visibility phase, depth=4, compact destination",
+    "cells": [
+      {
+        "groups": 16,
+        "repeats": [
+          {
+            "groups": 16,
+            "repeat": 0,
+            "gpc__cycles_elapsed.max": 15185.0,
+            "gpu__time_duration.sum": 9792.0,
+            "sm__cycles_active.max": 12985.0,
+            "sm__inst_executed.sum": 584.0,
+            "smsp__inst_executed_op_ldgsts.sum": 64.0,
+            "dram__sectors_read.sum": 2252.0,
+            "dram__sectors_write.sum": 0.0,
+            "lts__t_sectors_srcunit_tex.sum": 2049.0,
+            "fit_prediction_cycles": 15105.600000000002,
+            "fit_residual_cycles": 79.39999999999782
+          },
+          {
+            "groups": 16,
+            "repeat": 1,
+            "gpc__cycles_elapsed.max": 14990.0,
+            "gpu__time_duration.sum": 9632.0,
+            "sm__cycles_active.max": 12789.0,
+            "sm__inst_executed.sum": 584.0,
+            "smsp__inst_executed_op_ldgsts.sum": 64.0,
+            "dram__sectors_read.sum": 2172.0,
+            "dram__sectors_write.sum": 8.0,
+            "lts__t_sectors_srcunit_tex.sum": 2049.0,
+            "fit_prediction_cycles": 15105.600000000002,
+            "fit_residual_cycles": -115.60000000000218
+          },
+          {
+            "groups": 16,
+            "repeat": 2,
+            "gpc__cycles_elapsed.max": 15202.0,
+            "gpu__time_duration.sum": 9792.0,
+            "sm__cycles_active.max": 12998.0,
+            "sm__inst_executed.sum": 584.0,
+            "smsp__inst_executed_op_ldgsts.sum": 64.0,
+            "dram__sectors_read.sum": 2172.0,
+            "dram__sectors_write.sum": 0.0,
+            "lts__t_sectors_srcunit_tex.sum": 2049.0,
+            "fit_prediction_cycles": 15105.600000000002,
+            "fit_residual_cycles": 96.39999999999782
+          },
+          {
+            "groups": 16,
+            "repeat": 3,
+            "gpc__cycles_elapsed.max": 15135.0,
+            "gpu__time_duration.sum": 9728.0,
+            "sm__cycles_active.max": 12937.0,
+            "sm__inst_executed.sum": 584.0,
+            "smsp__inst_executed_op_ldgsts.sum": 64.0,
+            "dram__sectors_read.sum": 2172.0,
+            "dram__sectors_write.sum": 0.0,
+            "lts__t_sectors_srcunit_tex.sum": 2049.0,
+            "fit_prediction_cycles": 15105.600000000002,
+            "fit_residual_cycles": 29.399999999997817
+          },
+          {
+            "groups": 16,
+            "repeat": 4,
+            "gpc__cycles_elapsed.max": 15016.0,
+            "gpu__time_duration.sum": 9664.0,
+            "sm__cycles_active.max": 12820.0,
+            "sm__inst_executed.sum": 584.0,
+            "smsp__inst_executed_op_ldgsts.sum": 64.0,
+            "dram__sectors_read.sum": 2172.0,
+            "dram__sectors_write.sum": 8.0,
+            "lts__t_sectors_srcunit_tex.sum": 2049.0,
+            "fit_prediction_cycles": 15105.600000000002,
+            "fit_residual_cycles": -89.60000000000218
+          }
+        ],
+        "median_cycles": 15135.0
+      },
+      {
+        "groups": 32,
+        "repeats": [
+          {
+            "groups": 32,
+            "repeat": 0,
+            "gpc__cycles_elapsed.max": 26121.0,
+            "gpu__time_duration.sum": 16800.0,
+            "sm__cycles_active.max": 23846.0,
+            "sm__inst_executed.sum": 1128.0,
+            "smsp__inst_executed_op_ldgsts.sum": 128.0,
+            "dram__sectors_read.sum": 4220.0,
+            "dram__sectors_write.sum": 0.0,
+            "lts__t_sectors_srcunit_tex.sum": 4097.0,
+            "fit_prediction_cycles": 26385.4,
+            "fit_residual_cycles": -264.40000000000146
+          },
+          {
+            "groups": 32,
+            "repeat": 1,
+            "gpc__cycles_elapsed.max": 26339.0,
+            "gpu__time_duration.sum": 16928.0,
+            "sm__cycles_active.max": 24055.0,
+            "sm__inst_executed.sum": 1128.0,
+            "smsp__inst_executed_op_ldgsts.sum": 128.0,
+            "dram__sectors_read.sum": 4220.0,
+            "dram__sectors_write.sum": 4.0,
+            "lts__t_sectors_srcunit_tex.sum": 4097.0,
+            "fit_prediction_cycles": 26385.4,
+            "fit_residual_cycles": -46.400000000001455
+          },
+          {
+            "groups": 32,
+            "repeat": 2,
+            "gpc__cycles_elapsed.max": 26335.0,
+            "gpu__time_duration.sum": 16928.0,
+            "sm__cycles_active.max": 24070.0,
+            "sm__inst_executed.sum": 1128.0,
+            "smsp__inst_executed_op_ldgsts.sum": 128.0,
+            "dram__sectors_read.sum": 4220.0,
+            "dram__sectors_write.sum": 0.0,
+            "lts__t_sectors_srcunit_tex.sum": 4097.0,
+            "fit_prediction_cycles": 26385.4,
+            "fit_residual_cycles": -50.400000000001455
+          },
+          {
+            "groups": 32,
+            "repeat": 3,
+            "gpc__cycles_elapsed.max": 26607.0,
+            "gpu__time_duration.sum": 17120.0,
+            "sm__cycles_active.max": 24325.0,
+            "sm__inst_executed.sum": 1128.0,
+            "smsp__inst_executed_op_ldgsts.sum": 128.0,
+            "dram__sectors_read.sum": 19584.0,
+            "dram__sectors_write.sum": 28.0,
+            "lts__t_sectors_srcunit_tex.sum": 4097.0,
+            "fit_prediction_cycles": 26385.4,
+            "fit_residual_cycles": 221.59999999999854
+          },
+          {
+            "groups": 32,
+            "repeat": 4,
+            "gpc__cycles_elapsed.max": 26525.0,
+            "gpu__time_duration.sum": 17056.0,
+            "sm__cycles_active.max": 24256.0,
+            "sm__inst_executed.sum": 1128.0,
+            "smsp__inst_executed_op_ldgsts.sum": 128.0,
+            "dram__sectors_read.sum": 4720.0,
+            "dram__sectors_write.sum": 8.0,
+            "lts__t_sectors_srcunit_tex.sum": 4097.0,
+            "fit_prediction_cycles": 26385.4,
+            "fit_residual_cycles": 139.59999999999854
+          }
+        ],
+        "median_cycles": 26339.0
+      }
+    ],
+    "fit": {
+      "family": "OLS gpc cycles vs group count",
+      "intercept_cycles": 3825.800000000003,
+      "slope_cycles_per_group": 704.9875,
+      "max_absolute_calibration_residual_cycles": 264.40000000000146,
+      "residuals_cycles": [
+        79.39999999999782,
+        -115.60000000000218,
+        96.39999999999782,
+        29.399999999997817,
+        -89.60000000000218,
+        -264.40000000000146,
+        -46.400000000001455,
+        -50.400000000001455,
+        221.59999999999854,
+        139.59999999999854
+      ]
+    }
+  },
+  "target_features": {
+    "groups": 64,
+    "depth": 4,
+    "route": "dram",
+    "layout": "compact",
+    "grid": [
+      1,
+      1,
+      1
+    ],
+    "block": [
+      32,
+      1,
+      1
+    ],
+    "trace_records": 2216,
+    "instructions_issued": 2216,
+    "simulator_lower_bound_cycles": 42437,
+    "simulator_gpc_observation_frontier_cycles": 44213,
+    "completion_status": "incomplete_unmodeled_retirement_tails",
+    "unmodeled_tails": {
+      "reduction_read_modify_write": false,
+      "dirty_writeback": true,
+      "coherence": true,
+      "async_copy_shared_visibility": true
+    },
+    "hardware_completion": "not_observed",
+    "native_macro_dispatches": 0
+  },
+  "prediction": {
+    "point_cycles": 48945.0,
+    "interval_lower_cycles": 48680.6,
+    "interval_upper_cycles": 49209.4,
+    "interval_width_cycles": 528.8000000000029,
+    "interval_role": "empirical_observer_prediction_not_semantic_completion_upper",
+    "fit_target_groups": 64
+  },
+  "interpretation": "M5-F1 selects the streaming cp.async.cg route/depth/layout family because it has an executable SM86 source, a distinct DRAM-facing tail surface, and a target group count not used in this prediction. The OLS observer interval uses only five application-replay NCU calibration repeats at groups 16 and 32. The groups-64 target NCU values are intentionally absent here; target trace/replay counters establish identity and modeled lower-bound context only. Async shared visibility, dirty writeback, coherence, physical completion, and native dispatch remain open."
+}

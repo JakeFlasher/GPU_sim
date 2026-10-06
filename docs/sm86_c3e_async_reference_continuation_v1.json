@@ -1,0 +1,67 @@
+{
+  "attempts": [
+    {
+      "max_records": 10000,
+      "reference_trace": "results/alpha/c3e_async_reference_continuation_20261004/reference.jsonl",
+      "result": "record_limit_reached",
+      "return_code": 1,
+      "stderr": "results/alpha/c3e_async_reference_continuation_20261004/replay.stderr"
+    },
+    {
+      "max_records": 100000,
+      "reference_lines": 33292,
+      "reference_summary": "results/alpha/c3e_async_reference_continuation_20261004/reference_full_summary.json",
+      "reference_trace": "results/alpha/c3e_async_reference_continuation_20261004/reference_full.jsonl",
+      "result": "footer_complete",
+      "return_code": 0
+    }
+  ],
+  "decision": {
+    "async_visibility_tail": "open",
+    "coherence_tail": "open",
+    "dirty_writeback_tail": "open",
+    "exact_fallback_preserved": true,
+    "hardware_completion": "not_observed",
+    "positive_independent_completion_witness": false,
+    "synthetic_witness_used": false
+  },
+  "identity": {
+    "arch_card": "arch_profiles/cards/sm_86.json",
+    "cache_scope": "launch",
+    "control": "results/alpha/c7_s33bb_async_source_20261004/control.json",
+    "mode": "l1-l2",
+    "pchase_card": "data/pchase/sm_86_static_card.json",
+    "reference_feature": true,
+    "simulator_binary": "sim/target/release/sim-run",
+    "trace": "results/alpha/c7_s33bb_async_source_20261004/trace"
+  },
+  "interpretation": "The bounded reference event-loop attempt first retained a record-limit failure, then completed with a footer at 33290 boundary records and 16645 pre/post pairs. No typed boundary or transition was complete; every boundary required exact fallback for the missing typed model-macro region contract. This closes C3-E through its permitted negative branch, not through a physical completion witness.",
+  "phase": "C3-E",
+  "replay": {
+    "completion_frontier": {
+      "lower_bound_cycles": 30905,
+      "status": "incomplete_unmodeled_retirement_tails",
+      "unmodeled_tails": {
+        "async_copy_shared_visibility": true,
+        "coherence": true,
+        "dirty_writeback": true,
+        "reduction_read_modify_write": false
+      }
+    },
+    "instructions_issued": 2088,
+    "native_macro_dispatches": 0,
+    "records_seen": 2088
+  },
+  "schema": "sm86_c3e_async_reference_continuation_v1",
+  "status": "complete_negative_witness_exact_fallback_preserved",
+  "typed_boundary": {
+    "complete_boundary_records": 0,
+    "complete_transition_pairs": 0,
+    "dominant_unknown_count": 33290,
+    "dominant_unknown_reason": "native_reification:summary_structure:model_macro_typed_region_contract_missing",
+    "exact_fallback_boundary_records": 33290,
+    "exact_fallback_required": true,
+    "native_boundary_records": 33290,
+    "transition_boundary_pairs": 16645
+  }
+}

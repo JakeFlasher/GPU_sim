@@ -1,0 +1,10 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://gpu-simulator.local/schemas/sm86_m5j_multiwarp_continuation_boundary_v1.schema.json",
+  "title":"SM86 M5-J multiwarp continuation boundary",
+  "type":"object","additionalProperties":false,
+  "required":["schema","phase","status","selection","host_identity","identity","typed_precheck","attempts","determinism","decision","interpretation"],
+  "properties":{
+    "schema":{"const":"sm86_m5j_multiwarp_continuation_boundary_v1"},"phase":{"const":"M5-J"},"status":{"const":"complete_scoped_negative_multiwarp_continuation_exact_fallback"},"selection":{"type":"object"},"host_identity":{"type":"object"},"identity":{"type":"object"},"typed_precheck":{"type":"object"},"attempts":{"type":"array","minItems":2},"determinism":{"type":"object","properties":{"replay_json_byte_identical":{"const":true},"reference_jsonl_byte_identical":{"const":true}},"required":["replay_json_byte_identical","reference_jsonl_byte_identical"]},"decision":{"type":"object","required":["typed_macro_dispatch","exact_fallback_preserved","physical_completion"],"properties":{"typed_macro_dispatch":{"const":false},"exact_fallback_preserved":{"const":true},"physical_completion":{"const":"unknown"}},"additionalProperties":true},"interpretation":{"type":"string","minLength":1}
+  }
+}

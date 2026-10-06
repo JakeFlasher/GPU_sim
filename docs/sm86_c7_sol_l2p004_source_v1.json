@@ -1,0 +1,40 @@
+{
+  "candidate": "L2/problem_004_fused_residual_rms_mlp/cuda_cpp",
+  "environment": {
+    "cuda_available": true,
+    "torch": "2.12.0+cu130",
+    "torch_cuda_runtime": "13.0",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "capability": "8.6",
+    "permitted_environment": "tools/sol_execbench/.venv",
+    "host_compiler": "/usr/bin/g++-14",
+    "nvcc_expected": "CUDA 13.2"
+  },
+  "phase": "C7-S34BX1",
+  "schema": "sm86_c7_sol_l2p004_source_v1",
+  "source_contract": {
+    "source": "workloads/sol_execbench_baselines/L2/problem_004_fused_residual_rms_mlp/cuda_cpp",
+    "entry_point": "main.cpp::run",
+    "class": "custom_cuda_plus_aten",
+    "sm86_marker": "solution.json compile option arch=compute_86,code=sm_86",
+    "custom_kernels": [
+      "fused_residual_rms_kernel",
+      "swiglu_kernel"
+    ],
+    "aten_surfaces": "three matmul_out projections and per-launch intermediate allocation",
+    "constants": {
+      "hidden_size": 16384,
+      "intermediate_size": 53248,
+      "block_threads": 256,
+      "two_fusion_families": true
+    },
+    "inputs": "hidden_states/residual [B,S,16384] BF16, norm/projection weights BF16, eps scalar",
+    "outputs": "output [B,S,16384] BF16 destination tensor",
+    "math": "BF16 residual add before FP32 RMSNorm, BF16 SwiGLU intermediate rounding, three projection stages",
+    "oracle": "independent L2 definition.json/reference.py",
+    "workload_rows": 16,
+    "resource_risk": "Each 16384x53248 BF16 weight is 1.625 GiB; three weights total 4.875 GiB. Test snapshots/reference outputs can dominate GPU memory and must be separated from workload-only memory."
+  },
+  "selection_basis": "Next remaining L2 custom-CUDA row after decoder problem002 capacity/capture blocker; no timing or NCU values transferred",
+  "status": "complete_source_contract_and_sm86_environment_review"
+}

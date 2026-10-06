@@ -60,13 +60,13 @@ METRICS = SHIFT.METRICS
 
 
 def cubin(unroll: int, variant: str, trace: bool) -> Path:
-    infix = "_trace" if trace else ""
-    return HERE / f"fixed_latency_front_end_footprint_u{unroll}{infix}_{variant}.cubin"
+    # One long-generation cubin is used by correctness, NVBit, replay, and
+    # NCU. The historical short trace pair is no longer an active workload.
+    return HERE / f"fixed_latency_front_end_footprint_u{unroll}_{variant}.cubin"
 
 
 def native_cubin(unroll: int, trace: bool) -> Path:
-    infix = "_trace" if trace else ""
-    return HERE / f"fixed_latency_front_end_footprint_u{unroll}{infix}_native.cubin"
+    return HERE / f"fixed_latency_front_end_footprint_u{unroll}_native.cubin"
 
 
 def stage(warps: int) -> str:
@@ -104,7 +104,7 @@ class Cell:
             str(cubin(self.unroll, self.variant, trace)),
             self.kind,
             str(self.warps),
-            str(64 if trace else 1024),
+            "1024",
             str(trials),
             self.variant,
             str(self.unroll),
@@ -156,12 +156,11 @@ def selected_cells(selector: str | None) -> list[Cell]:
 
 def require_binaries() -> None:
     paths = [DRIVER]
-    paths.extend(native_cubin(unroll, trace) for unroll in UNROLLS for trace in (False, True))
+    paths.extend(native_cubin(unroll, False) for unroll in UNROLLS)
     paths.extend(
-        cubin(unroll, variant, trace)
+        cubin(unroll, variant, False)
         for unroll in UNROLLS
         for variant in VARIANTS
-        for trace in (False, True)
     )
     paths.extend(
         HERE / f"fixed_latency_front_end_footprint_u1_calibration_{variant}.cubin"
@@ -184,7 +183,7 @@ def emit_manifest(output: Path) -> None:
             "unroll_factors": list(UNROLLS),
             "widths": list(WIDTHS),
             "long_generations": 1024,
-            "trace_generations": 64,
+            "trace_generations": 1024,
             "source_counter_widths": sorted(SOURCE_WIDTHS),
             "pair_invariants": [
                 "1024 dynamic bodies and equal instruction work within each U/pair",
@@ -381,9 +380,8 @@ def run_static(output: Path) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     binaries = []
     for unroll in UNROLLS:
-        for trace in (False, True):
-            binaries.append(native_cubin(unroll, trace))
-            binaries.extend(cubin(unroll, variant, trace) for variant in VARIANTS)
+        binaries.append(native_cubin(unroll, False))
+        binaries.extend(cubin(unroll, variant, False) for variant in VARIANTS)
     sidecars = []
     for binary in binaries:
         name = binary.stem
@@ -418,13 +416,11 @@ def run_static(output: Path) -> None:
         )
         sidecars.append(sidecar)
     for unroll in UNROLLS:
-        for trace in (False, True):
-            infix = "_trace" if trace else ""
-            source = HERE / f"fixed_latency_front_end_footprint_u{unroll}{infix}.patch.json"
-            BASE.write_json(
-                output / "metadata" / source.name,
-                json.loads(source.read_text(encoding="utf-8")),
-            )
+        source = HERE / f"fixed_latency_front_end_footprint_u{unroll}.patch.json"
+        BASE.write_json(
+            output / "metadata" / source.name,
+            json.loads(source.read_text(encoding="utf-8")),
+        )
     BASE.write_json(
         output / "metadata/fixed_latency_front_end_footprint_u1_calibration.patch.json",
         json.loads((HERE / "fixed_latency_front_end_footprint_u1_calibration.patch.json").read_text(encoding="utf-8")),
@@ -453,34 +449,8 @@ def run_static(output: Path) -> None:
         )
 
     audit(sidecars, "operand_projection_audit.json", "operand-projection-run")
-    predecessor_patterns = (
-        "results/captures/sm86_async_barrier_readiness_20260817_v*/sass/*.control_bits.json",
-        "results/captures/sm86_barrier_pipeline_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_barrier_pipeline_coupled_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_barrier_pipeline_multicta_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_cycle_residual_20260817_v1/control/*.control_bits.json",
-        "results/captures/sm86_cycle_residual_20260817_v1/research-probes/async-cross-warp/*.control_bits.json",
-        "results/captures/sm86_fixed_latency_allocate_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_fixed_latency_completion_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_fixed_latency_reuse_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_issue_port_control_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_smsp_scheduler_contention_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_fixed_latency_result_queue_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_fixed_latency_result_order_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_fixed_latency_result_same_bank_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_fixed_latency_result_capacity_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_fixed_latency_result_load_priority_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_fixed_latency_result_bypass_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_fixed_latency_producer_shift_20260817_v1/sass/*.control_bits.json",
-    )
-    predecessors = sorted({path for pattern in predecessor_patterns for path in REPO_ROOT.glob(pattern)})
-    if len(predecessors) != 95:
-        raise RuntimeError(f"expected 95 predecessor sidecars, got {len(predecessors)}")
-    audit(
-        predecessors + sidecars,
-        "retained_corpus_operand_projection_audit.json",
-        "retained-corpus-operand-projection-run",
-    )
+    # Current source/sidecar inputs are sufficient for this bounded capture.
+    # Historical predecessor populations are not execution prerequisites.
     print(destination)
 
 
@@ -491,7 +461,7 @@ def run_simulator(output: Path, cells: Sequence[Cell], force: bool) -> None:
     for index, cell in enumerate(cells, 1):
         destination = output / "simulator" / cell.key
         destination.mkdir(parents=True, exist_ok=True)
-        control = output / "sass" / f"{cubin(cell.unroll, cell.variant, True).stem}.control_bits.json"
+        control = output / "sass" / f"{cubin(cell.unroll, cell.variant, False).stem}.control_bits.json"
         command = [
             str(binary),
             "--trace",

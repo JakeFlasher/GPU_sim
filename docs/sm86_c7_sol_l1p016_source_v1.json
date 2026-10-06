@@ -1,0 +1,30 @@
+{
+  "candidate": "L1/problem_016_rope_inverse_frequency_computation/cuda_cpp",
+  "environment": {
+    "cuda_available": true,
+    "torch": "2.12.0+cu130",
+    "torch_cuda_runtime": "13.0",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "capability": "8.6",
+    "permitted_environment": "tools/sol_execbench/.venv",
+    "host_compiler": "/usr/bin/g++-14",
+    "nvcc_expected": "CUDA 13.2"
+  },
+  "phase": "C7-S34U1",
+  "schema": "sm86_c7_sol_l1p016_source_v1",
+  "source_contract": {
+    "source": "workloads/sol_execbench_baselines/L1/problem_016_rope_inverse_frequency_computation/cuda_cpp",
+    "entry_point": "main.cpp::run",
+    "class": "custom_cuda",
+    "sm86_marker": "solution.json compile option arch=compute_86,code=sm_86",
+    "custom_kernel": "problem_016_rope_inverse_frequency_computation_kernel",
+    "constants": {"head_dim": 128, "half_head_dim": 64, "threads_per_cta": 64, "grid": "one CTA"},
+    "input": "rope_theta scalar FP32",
+    "output": "inv_freq [64] FP32 destination",
+    "math": "inv_freq[i] = 1 / powf(rope_theta, 2*i/128)",
+    "oracle": "independent definition.json arange/pow/inverse reference",
+    "workload_values": [4000000.0, 2000000.0, 10000000.0, 100000.0, 312500.0, 200000.0, 1000000.0]
+  },
+  "selection_basis": "Next executable L1 custom-CUDA row after RMSNorm backward; no timing or NCU values transferred",
+  "status": "complete_source_contract_and_sm86_environment_review"
+}

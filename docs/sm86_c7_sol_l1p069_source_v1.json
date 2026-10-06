@@ -1,0 +1,30 @@
+{
+  "candidate": "L1/problem_069_rms_norm/cuda_cpp",
+  "environment": {
+    "cuda_available": true,
+    "torch": "2.12.0+cu130",
+    "torch_cuda_runtime": "13.0",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "capability": "8.6",
+    "permitted_environment": "tools/sol_execbench/.venv",
+    "host_compiler": "/usr/bin/g++-14",
+    "nvcc_expected": "CUDA 13.2"
+  },
+  "phase": "C7-S34AY1",
+  "schema": "sm86_c7_sol_l1p069_source_v1",
+  "source_contract": {
+    "source": "workloads/sol_execbench_baselines/L1/problem_069_rms_norm/cuda_cpp",
+    "entry_point": "main.cpp::run",
+    "class": "custom_cuda",
+    "sm86_marker": "solution.json compile option arch=compute_86,code=sm_86",
+    "custom_kernel": "problem_069_rms_norm_kernel",
+    "constants": {"hidden_size":8192,"block_threads":1024,"bf16x2_vector_access":true,"one_cta_per_batch_seq_row":true},
+    "inputs": "hidden_states/residual [B,S,8192] contiguous BF16; weight [8192] BF16; eps host FP32 scalar",
+    "outputs": "output [B,S,8192] contiguous BF16 destination tensor",
+    "math": "FP32 residual addition, row RMS reduction/rsqrt, FP32 weight multiply, BF16 output",
+    "oracle": "independent definition.json/reference.py residual + RMSNorm reference",
+    "workload_shapes": [[1,8192],[1,131],[16,256],[4,128],[4,541],[1,2048],[2,293],[4,2048],[8,128],[8,512],[4,256],[2,2048],[1,4096],[1,256],[2,1024],[1,1024]]
+  },
+  "selection_basis": "Next genuine L1 custom-CUDA row after the problem068 vertical; no timing or NCU values transferred",
+  "status": "complete_source_contract_and_sm86_environment_review"
+}

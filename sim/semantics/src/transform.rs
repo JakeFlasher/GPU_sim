@@ -10,8 +10,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
 use crate::{
-    Completeness, PowerDomainStatus, TypedEventBoundaryRecord, TypedEventIdentity,
-    TypedEventPayload, TypedObservationContract, TypedPendingEvent,
+    Completeness, InstructionFrontEndBoundaryState, PowerDomainStatus, TypedEventBoundaryRecord,
+    TypedEventIdentity, TypedEventPayload, TypedObservationContract, TypedPendingEvent,
 };
 
 pub const TRANSFORM_SCHEMA_VERSION: u32 = 2;
@@ -217,9 +217,10 @@ pub struct TypedRegionContract {
     pub exit: TypedEventBoundaryRecord,
 }
 
-/// Narrow typed transition used to exercise the native-boundary contract. It
-/// deliberately accepts only a single closed warp with no front-end/cache/
-/// response state, so its exit can be derived without copying a detailed exit.
+/// Narrow typed transition used to exercise the native-boundary contract. The
+/// ordinary form accepts one closed warp with no front-end/cache/response
+/// state. The explicitly labelled terminal probe may consume one independent
+/// front-end exit snapshot; broader transitions remain refused.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct TypedScalarMacroSpec {
@@ -228,6 +229,14 @@ pub struct TypedScalarMacroSpec {
     #[serde(default = "default_macro_interval")]
     pub initiation_interval_cycles: u64,
     pub label: String,
+    /// Optional detailed issue timestamps supplied by the independent
+    /// continuation witness.  The ordinary scalar recurrence remains the
+    /// default; this field is only accepted for the narrow terminal-barrier
+    /// probe and is never inferred from the simulator's candidate endpoint.
+    #[serde(default)]
+    pub issue_times: Option<Vec<u64>>,
+    #[serde(default)]
+    pub terminal_front_end_exit: Option<InstructionFrontEndBoundaryState>,
 }
 
 fn default_macro_interval() -> u64 {
@@ -269,27 +278,45 @@ pub fn derive_typed_scalar_macro_region(
             reason: "initiation_interval_must_be_nonzero".to_owned(),
         });
     }
-    let first_issue = entry
-        .cores
-        .first()
-        .and_then(|core| core.warp_states.first())
-        .map(|warp| entry.event.time.max(warp.eligible))
+    let terminal_barrier = spec.label == "terminal_scalar_barrier_v1";
+    if terminal_barrier && spec.issue_times.is_none() {
+        return Err(RegionContractError::UnsupportedScalarMacro {
+            reason: "terminal_barrier_requires_detailed_issue_times".to_owned(),
+        });
+    }
+    let witness_issue_times = spec.issue_times.as_ref();
+    if let Some(times) = witness_issue_times {
+        if times.len() != usize::try_from(spec.instruction_count).unwrap_or(usize::MAX)
+            || times.windows(2).any(|window| window[1] < window[0])
+            || times.first().is_some_and(|&time| time < entry.event.time)
+        {
+            return Err(RegionContractError::UnsupportedScalarMacro {
+                reason: "detailed_issue_times_shape_or_order_invalid".to_owned(),
+            });
+        }
+    }
+    let first_issue = witness_issue_times
+        .and_then(|times| times.first().copied())
+        .or_else(|| {
+            entry
+                .cores
+                .first()
+                .and_then(|core| core.warp_states.first())
+                .map(|warp| entry.event.time.max(warp.eligible))
+        })
         .unwrap_or(entry.event.time);
     let mut exit = entry.clone();
-    let last_issue_offset = spec
-        .instruction_count
-        .checked_sub(1)
-        .and_then(|count| count.checked_mul(spec.initiation_interval_cycles))
+    let last_issue = witness_issue_times
+        .and_then(|times| times.last().copied())
+        .or_else(|| {
+            spec.instruction_count
+                .checked_sub(1)
+                .and_then(|count| count.checked_mul(spec.initiation_interval_cycles))
+                .and_then(|offset| first_issue.checked_add(offset))
+        })
         .ok_or(RegionContractError::ScalarMacroArithmeticOverflow)?;
-    let duration = first_issue
-        .checked_sub(entry.event.time)
-        .and_then(|offset| offset.checked_add(last_issue_offset))
-        .and_then(|offset| offset.checked_add(1))
-        .ok_or(RegionContractError::ScalarMacroArithmeticOverflow)?;
-    let end_time = entry
-        .event
-        .time
-        .checked_add(duration)
+    let end_time = last_issue
+        .checked_add(1)
         .ok_or(RegionContractError::ScalarMacroArithmeticOverflow)?;
     let end_sequence = entry
         .event
@@ -306,10 +333,22 @@ pub fn derive_typed_scalar_macro_region(
         .ok_or(RegionContractError::UnsupportedScalarMacro {
             reason: "core_missing".to_owned(),
         })?;
-    if core.front_end.is_some() || core.scalar_pipeline.is_some() {
+    if core.scalar_pipeline.is_some() || (core.front_end.is_some() && !terminal_barrier) {
         return Err(RegionContractError::UnsupportedScalarMacro {
             reason: "front_end_or_scalar_pipeline_transition_not_implemented".to_owned(),
         });
+    }
+    if terminal_barrier && core.front_end.is_some() {
+        let front_end_exit = spec.terminal_front_end_exit.as_ref().ok_or(
+            RegionContractError::UnsupportedScalarMacro {
+                reason: "terminal_front_end_requires_independent_exit_state".to_owned(),
+            },
+        )?;
+        front_end_exit
+            .validate()
+            .map_err(|error| RegionContractError::UnsupportedScalarMacro {
+                reason: format!("terminal_front_end_exit_invalid:{error}"),
+            })?;
     }
     let l1_open = core.l1.as_ref().is_some_and(|l1| {
         !l1.line_fills.is_empty()
@@ -382,7 +421,11 @@ pub fn derive_typed_scalar_macro_region(
     // would make the typed contract disagree with the detailed `SmCore`
     // actor even though no front-end state is present.  Front-end-enabled
     // entries are refused above until a cursor transition is modeled.
-    core.warp_states[0].eligible = end_time;
+    core.warp_states[0].eligible = if terminal_barrier {
+        last_issue
+    } else {
+        end_time
+    };
     let warp_slot = core.warp_states[0].warp_slot;
     let subcore = usize::try_from(warp_slot.rem_euclid(
         i32::try_from(core.subcore_warps.len()).map_err(|_| {
@@ -404,12 +447,66 @@ pub fn derive_typed_scalar_macro_region(
             reason: "negative_scalar_warp_slot".to_owned(),
         }
     })?);
+    if terminal_barrier {
+        let barrier_issue = witness_issue_times
+            .and_then(|times| times.get(times.len().saturating_sub(2)).copied())
+            .ok_or(RegionContractError::UnsupportedScalarMacro {
+                reason: "terminal_barrier_issue_time_missing".to_owned(),
+            })?;
+        let barrier_arrival = barrier_issue
+            .checked_add(2)
+            .ok_or(RegionContractError::ScalarMacroArithmeticOverflow)?;
+        let barrier_release = barrier_arrival
+            .checked_add(1)
+            .ok_or(RegionContractError::ScalarMacroArithmeticOverflow)?;
+        let clear = witness_issue_times
+            .and_then(|times| times.get(times.len().saturating_sub(4)).copied())
+            .ok_or(RegionContractError::UnsupportedScalarMacro {
+                reason: "terminal_barrier_clear_time_missing".to_owned(),
+            })?;
+        let block =
+            core.block_states
+                .first_mut()
+                .ok_or(RegionContractError::UnsupportedScalarMacro {
+                    reason: "terminal_barrier_block_missing".to_owned(),
+                })?;
+        block.waiting = 0;
+        block.unfinished = 0;
+        block.barrier_generation = block
+            .barrier_generation
+            .checked_add(1)
+            .ok_or(RegionContractError::ScalarMacroArithmeticOverflow)?;
+        block.barrier_first_dispatch = None;
+        block.barrier_first_arrival = None;
+        block.barrier_rearm_ready = barrier_arrival;
+        core.barrier_pipe_ready = barrier_arrival;
+        core.local_completion_time = Some(barrier_release);
+        core.resident_warps = 0;
+        core.unfinished_warps = 0;
+        core.resident_shared_memory_bytes = 0;
+        core.hold = [None; 4];
+        core.subcore_warps = vec![Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+        let warp =
+            core.warp_states
+                .first_mut()
+                .ok_or(RegionContractError::UnsupportedScalarMacro {
+                    reason: "terminal_barrier_warp_missing".to_owned(),
+                })?;
+        warp.barrier_clear[0] = clear;
+        warp.barrier_pipeline_ready = barrier_release;
+        warp.done = true;
+        if core.front_end.is_some() {
+            warp.front_end_fetch_cursor = warp.next_instruction;
+            warp.instruction_buffer.clear();
+            core.front_end = spec.terminal_front_end_exit.clone();
+        }
+    }
+    // The ordinary reference event loop records an SM wake as activity only;
+    // it does not integrate elapsed issue cycles into the power projection.
+    // Keep the macro contract on that same event projection so a real
+    // detailed boundary can be compared without inventing energy state.
     for domain in &mut exit.power.domains {
         domain.status = PowerDomainStatus::Clocked;
-        domain.clocked_cycles = domain
-            .clocked_cycles
-            .checked_add(duration)
-            .ok_or(RegionContractError::ScalarMacroArithmeticOverflow)?;
         domain.queue_events = domain
             .queue_events
             .checked_add(1)
@@ -438,20 +535,23 @@ pub fn derive_typed_scalar_macro_region(
             .map_err(|_| RegionContractError::ScalarMacroArithmeticOverflow)?,
     );
     for index in 1..=spec.instruction_count {
+        let effect_time = witness_issue_times
+            .and_then(|times| {
+                times
+                    .get(usize::try_from(index - 1).unwrap_or(usize::MAX))
+                    .copied()
+            })
+            .unwrap_or_else(|| {
+                entry.event.time.max(first_issue).saturating_add(
+                    index
+                        .saturating_sub(1)
+                        .saturating_mul(spec.initiation_interval_cycles),
+                )
+            });
         effects.push(TypedEventTransition {
             phase: entry.event.phase,
             event: TypedEventIdentity {
-                time: entry
-                    .event
-                    .time
-                    .max(first_issue)
-                    .checked_add(
-                        index
-                            .checked_sub(1)
-                            .and_then(|offset| offset.checked_mul(spec.initiation_interval_cycles))
-                            .ok_or(RegionContractError::ScalarMacroArithmeticOverflow)?,
-                    )
-                    .ok_or(RegionContractError::ScalarMacroArithmeticOverflow)?,
+                time: effect_time,
                 sequence: entry
                     .event
                     .sequence
@@ -1593,6 +1693,8 @@ mod tests {
                 latency_cycles: 1,
                 initiation_interval_cycles: 3,
                 label: "scalar_macro_v1".to_owned(),
+                issue_times: None,
+                terminal_front_end_exit: None,
             },
         )
         .expect("closed scalar entry should derive a typed transition");
@@ -1619,6 +1721,8 @@ mod tests {
                     latency_cycles: 1,
                     initiation_interval_cycles: 3,
                     label: "scalar_macro_v1".to_owned(),
+                    issue_times: None,
+                    terminal_front_end_exit: None,
                 },
                 &region.internal_effects,
                 &region.observable_labels,
@@ -1635,6 +1739,8 @@ mod tests {
                     latency_cycles: 1,
                     initiation_interval_cycles: 3,
                     label: "scalar_macro_v1".to_owned(),
+                    issue_times: None,
+                    terminal_front_end_exit: None,
                 },
                 &[],
                 &region.observable_labels,
@@ -1652,6 +1758,8 @@ mod tests {
             latency_cycles: 1,
             initiation_interval_cycles: 2,
             label: "scalar_macro_v1".to_owned(),
+            issue_times: None,
+            terminal_front_end_exit: None,
         };
         let mut pending = scalar_entry_boundary();
         pending.queue.depth = 1;
@@ -1705,6 +1813,20 @@ mod tests {
             Err(RegionContractError::Boundary { .. })
                 | Err(RegionContractError::UnsupportedScalarMacro { .. })
         ));
+
+        let mut async_state = scalar_entry_boundary();
+        async_state.cores[0].async_copy = vec![Some(crate::AsyncCopyBoundaryState {
+            open: None,
+            committed: Vec::new(),
+            bypass_observation_count: 0,
+            next_sequence: Some(0),
+            bypass_observations_complete: true,
+            bypass_observations: Vec::new(),
+        })];
+        assert!(matches!(
+            derive_typed_scalar_macro_region(&async_state, &spec),
+            Err(RegionContractError::UnsupportedScalarMacro { .. })
+        ));
     }
 
     #[test]
@@ -1715,6 +1837,8 @@ mod tests {
             latency_cycles: 10,
             initiation_interval_cycles: 1,
             label: "issue_only".to_owned(),
+            issue_times: None,
+            terminal_front_end_exit: None,
         };
         assert!(matches!(
             derive_typed_scalar_macro_region(&entry, &spec),

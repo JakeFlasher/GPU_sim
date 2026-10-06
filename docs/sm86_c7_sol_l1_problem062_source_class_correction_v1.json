@@ -1,0 +1,22 @@
+{
+  "candidate": "L1/problem_062_kv_cache_update_with_rope_backward/cuda_cpp",
+  "phase": "C7-S34AU1",
+  "schema": "sm86_c7_sol_l1_problem062_source_class_correction_v1",
+  "source_observation": {
+    "declared_class": "custom_cuda (prior marker census)",
+    "effective_class": "pure_aten",
+    "kernel_cu": "stub translation unit only; no custom __global__ definition",
+    "main_cpp": "ATen index_select, BF16 tensor algebra, reductions, clone/index_fill, and destination copies; no custom CUDA launcher",
+    "solution_marker_false_positive": "the only __global__ marker is stub/comment or embedded source text",
+    "sm86_compile_marker": true,
+    "entry_point": "main.cpp::run",
+    "reference_contract": "KV-cache RoPE backward analytic tensor algebra in BF16"
+  },
+  "disposition": {
+    "build_attempted": false,
+    "native_trace_admitted": false,
+    "reason": "source-class correction; pure-ATen row retained without duplicate tracing",
+    "timing_or_ncu_claimed": false
+  },
+  "status": "complete_source_class_correction_pure_aten_blocker"
+}

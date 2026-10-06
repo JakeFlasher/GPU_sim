@@ -1,0 +1,49 @@
+{
+  "schema": "sm86_c4b_sfu_warp_observer_reconciliation_v1",
+  "status": "complete_scoped_sfu_observer_holdout_semantic_upper_open",
+  "phase": "C4-B",
+  "checks": {
+    "prediction_precedes_target_ncu": true,
+    "target_ncu_not_simulator_input": true,
+    "calibration_target_disjoint": true,
+    "trace_replay_target_identity": true,
+    "interval_role_nonsemantic": true,
+    "interval_coverage_recorded": true,
+    "hardware_completion_open": true,
+    "native_dispatch_open": true,
+    "referenced_documents_present": true
+  },
+  "evidence": {
+    "prediction": "docs/sm86_c4b_sfu_warp_observer_prediction_pre_ncu_v1.json",
+    "holdout": "docs/sm86_c4b_sfu_warp_observer_holdout_v1.json",
+    "target_trace": "results/alpha/c4b_sfu_observer_20261004/target_trace",
+    "target_simulator": "results/alpha/c4b_sfu_observer_20261004/target_sim.json",
+    "calibration_ncu_root": "results/alpha/c4b_sfu_observer_20261004/ncu",
+    "target_ncu_root": "results/alpha/c4b_sfu_observer_20261004/ncu"
+  },
+  "result": {
+    "calibration_warps": [
+      1,
+      2,
+      4
+    ],
+    "holdout_warp": 8,
+    "prediction_interval_cycles": [
+      34205.428571428565,
+      34521.34285714285
+    ],
+    "holdout_values": [
+      34374.0,
+      34312.0,
+      34319.0,
+      34295.0,
+      34282.0
+    ],
+    "holdout_median_cycles": 34312.0,
+    "interval_coverage": 1.0,
+    "point_ape": 0.0014976018385902505,
+    "simulator_lower_bound_cycles": 38126,
+    "native_macro_dispatches": 0
+  },
+  "interpretation": "C4-B adds one disjoint SFU warp-count observer slice. A calibration-only OLS interval from warp counts 1/2/4 was materialized before the warp-8 target NCU run; all five target repeats were covered and point APE was 0.150%. This is one controlled observer holdout, not family-wide accuracy: the simulator lower bound remains separate, physical completion and semantic upper remain unknown, and target NCU values did not enter simulator execution or model selection."
+}

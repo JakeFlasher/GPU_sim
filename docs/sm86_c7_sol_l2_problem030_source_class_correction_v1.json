@@ -1,0 +1,10 @@
+{
+  "candidate": "L2/problem_030_flux_concatenated_sequence_processing_with_split/cuda_cpp",
+  "phase": "C7-S34CB1",
+  "schema": "sm86_c7_sol_l2_problem030_source_class_correction_v1",
+  "source": "workloads/sol_execbench_baselines/L2/problem_030_flux_concatenated_sequence_processing_with_split/cuda_cpp",
+  "before": {"class": "custom_cuda", "reason": "marker-only source census"},
+  "review": {"kernel_cu":"contains only an ATen launcher and no __global__ definition","main_cpp":"two at::matmul_out calls; no custom CUDA launcher","official_reference":"definition.json/reference.py concatenates, matmuls, splits","native_capture_disposition":"pure ATen/cuBLAS-style row; no custom vertical admitted"},
+  "after": {"class":"pure_aten","custom_kernel":false,"counts_after_correction":{"custom_cuda":52,"cutlass_cuda":14,"pure_aten":137,"total":203}},
+  "status":"complete_source_class_correction_no_custom_vertical"
+}

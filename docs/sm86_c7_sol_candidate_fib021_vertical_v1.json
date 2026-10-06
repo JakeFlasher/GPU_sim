@@ -1,0 +1,90 @@
+{
+  "candidate": "FIB/problem_021_rmsnorm_h128/cuda_cpp",
+  "correctness_and_sanitizer": {
+    "build_smoke": "results/alpha/c7_s34j_sol_fib021_20261005/smoke.json",
+    "correctness_passed": true,
+    "sanitizer": "results/alpha/c7_s34j_sol_fib021_20261005/compute_sanitizer.stderr",
+    "sanitizer_errors": 0
+  },
+  "crosswalk": {
+    "native_hardware_scheduling_claimed": false,
+    "ncu_values_used_to_change_simulator": false,
+    "nvbit_raw_stat_unit_is_separate": true,
+    "physical_completion_upper_closed": false,
+    "simulator_lower_vs_ncu_median_cycles": {
+      "delta": -1842,
+      "lower": 2499,
+      "median": 4341
+    },
+    "simulator_ncu_instruction_count_equal": true
+  },
+  "identity": {
+    "arch": "sm_86",
+    "binary_extension": "results/alpha/c7_s34j_sol_fib021_20261005/build/sol_fib021_sm86.so",
+    "cuda_toolkit": "13.2",
+    "environment": "tools/sol_execbench/.venv",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "hidden_size": 128,
+    "host_compiler": "/usr/bin/g++-14",
+    "profiler_protocol": "cudaProfilerStart/Stop; NCU profile-from-start off; application replay; clock none; cache all",
+    "source": "workloads/sol_execbench_baselines/FIB/problem_021_rmsnorm_h128/cuda_cpp",
+    "torch": "2.12.0+cu130"
+  },
+  "interpretation": "C7-S34J completes a fourth custom CUDA SOL-derived SM86 vertical through build, correctness, memcheck, NVBit/control extraction, deterministic replay, and five target NCU repetitions. Simulator and NCU instruction counts match at 154; raw tracer statistics remain a separate unit. The lower frontier remains open-tail and no native macro dispatch or NCU fitting is claimed.",
+  "ncu": {
+    "instruction_values": [
+      154.0,
+      154.0,
+      154.0,
+      154.0,
+      154.0
+    ],
+    "kernel": "<unnamed>::problem_021_rmsnorm_h128_kernel(const __nv_bfloat16 *, const __nv_bfloat16 *, __nv_bfloat16 *, int)",
+    "median": 4341.0,
+    "metric": "gpc__cycles_elapsed.max",
+    "paths": "results/alpha/c7_s34j_sol_fib021_20261005/ncu/repeat-*/ncu.csv",
+    "sm_active_median": 2704.0,
+    "sm_active_values": [
+      2704.0,
+      2713.0,
+      2694.0,
+      2717.0,
+      2692.0
+    ],
+    "values": [
+      4333.0,
+      4341.0,
+      4341.0,
+      4381.0,
+      4322.0
+    ]
+  },
+  "nvbit": {
+    "accepted_launches": 1,
+    "control_sidecar": "results/alpha/c7_s34j_sol_fib021_20261005/control_bits.json",
+    "decoded_static_instructions": 128,
+    "enhanced_parser_limitation": "cuobjdump failed for the JIT .so; independent control-sidecar extraction succeeded",
+    "raw_stats_total_insts": 432,
+    "raw_stats_total_reported_insts": 432,
+    "trace": "results/alpha/c7_s34j_sol_fib021_20261005/nvbit",
+    "unknown_control_encodings": 0
+  },
+  "phase": "C7-S34J",
+  "schema": "sm86_c7_sol_candidate_fib021_vertical_v1",
+  "simulator": {
+    "completion_status": "incomplete_unmodeled_retirement_tails",
+    "instructions_issued": 154,
+    "lower_bound_cycles": 2499,
+    "mode": "l1-l2",
+    "native_macro_dispatches": 0,
+    "records_seen": 154,
+    "replay": "results/alpha/c7_s34j_sol_fib021_20261005/replay.json",
+    "unmodeled_tails": {
+      "async_copy_shared_visibility": false,
+      "coherence": true,
+      "dirty_writeback": true,
+      "reduction_read_modify_write": false
+    }
+  },
+  "status": "complete_native_vertical_ncu_simulator_crosswalk_with_parser_limitation"
+}

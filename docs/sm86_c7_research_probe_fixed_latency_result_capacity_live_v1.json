@@ -15,6 +15,7 @@
     "source": "workloads/research_probes/fixed_latency_result_capacity",
     "driver": "workloads/research_probes/fixed_latency_result_capacity/fixed_latency_result_capacity_driver",
     "binary": "workloads/research_probes/fixed_latency_result_capacity/fixed_latency_result_capacity_b9.cubin",
+    "control": "results/alpha/c7_s33ao_capacity_20261004/sass/fixed_latency_result_capacity_b9.control_bits.json",
     "binary_used_for_correctness_trace_replay_ncu": "same rebuilt 8192-generation cubin",
     "trace": "results/alpha/c7_s33ao_capacity_20261004/nvbit/w8_b9/dynamic_trace.pb",
     "arch_card": "arch_profiles/cards/sm_86.json",
@@ -39,6 +40,7 @@
   },
   "trace": {
     "launches": 1,
+    "target_kernel_id": 1,
     "target_kernel": "result_capacity_search",
     "target_records_replayed": 1573144,
     "target_coverage": {

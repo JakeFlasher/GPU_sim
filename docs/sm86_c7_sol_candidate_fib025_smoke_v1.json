@@ -1,0 +1,38 @@
+{
+  "build": {
+    "compiler": "/usr/bin/g++-14",
+    "cuda_arch": "sm_86",
+    "status": "passed",
+    "stdout": "results/alpha/c7_s34n_sol_fib025_20261005/build_and_smoke.stdout",
+    "stderr": "results/alpha/c7_s34n_sol_fib025_20261005/build_and_smoke.stderr"
+  },
+  "candidate": "FIB/problem_025_rmsnorm_h4096/cuda_cpp",
+  "correctness": {
+    "batches": [1, 16],
+    "max_abs_errors": [0.025290489196777344, 0.02952098846435547],
+    "mean_abs_errors": [0.0009325859136879444, 0.0009006031905300915],
+    "finite": true,
+    "status": "passed",
+    "oracle": "independent FP32 RMSNorm reference with EPS 1e-5; BF16 output comparison; tolerance 0.08"
+  },
+  "identity": {
+    "arch": "sm_86",
+    "cuda_toolkit": "13.2",
+    "torch": "2.12.0+cu130",
+    "environment": "tools/sol_execbench/.venv",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "capability": "8.6",
+    "source": "workloads/sol_execbench_baselines/FIB/problem_025_rmsnorm_h4096/cuda_cpp",
+    "extension": "results/alpha/c7_s34n_sol_fib025_20261005/build/sol_fib025_sm86.so"
+  },
+  "phase": "C7-S34N2",
+  "sanitizer": {
+    "tool": "compute-sanitizer memcheck",
+    "errors": 0,
+    "status": "passed",
+    "stdout": "results/alpha/c7_s34n_sol_fib025_20261005/compute_sanitizer.stdout",
+    "stderr": "results/alpha/c7_s34n_sol_fib025_20261005/compute_sanitizer.stderr"
+  },
+  "schema": "sm86_c7_sol_candidate_fib025_smoke_v1",
+  "status": "complete_sm86_build_correctness_memcheck"
+}

@@ -286,7 +286,7 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaMemcpy(source, host_source.data(),
                           host_source.size() * sizeof(std::uint32_t),
                           cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemset(device_result, 0, sizeof(PhaseResult)));
+    CUDA_CHECK(cudaMemset(device_result, 0xff, sizeof(PhaseResult)));
     CUDA_CHECK(cudaDeviceSynchronize());
 
     if (profiler_marked) CUDA_CHECK(cudaProfilerStart());
@@ -298,7 +298,9 @@ int main(int argc, char** argv) {
                           cudaMemcpyDeviceToHost));
 
     const bool sum_consistent =
-        host_result.issue_cycles + host_result.wait_cycles == host_result.total_cycles;
+        host_result.total_cycles != UINT64_MAX && host_result.issue_cycles > 0 &&
+        host_result.wait_cycles > 0 && host_result.issue_cycles <= host_result.total_cycles &&
+        host_result.wait_cycles == host_result.total_cycles - host_result.issue_cycles;
     const std::uint32_t expected_token =
         expected_lane_zero_token(groups, depth, streaming);
     const bool token_correct = host_result.token == expected_token;

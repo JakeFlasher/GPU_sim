@@ -1,0 +1,72 @@
+{
+  "schema": "sm86_c7_sol_l1p036_smoke_v1",
+  "status": "complete_build_memcheck_with_correctness_blocker",
+  "phase": "C7-S34AE2",
+  "candidate": "L1/problem_036_flux_output_norm_projection_chain/cuda_cpp",
+  "identity": {
+    "arch": "sm_86",
+    "cuda_toolkit": "13.2",
+    "torch": "2.12.0+cu130",
+    "environment": "tools/sol_execbench/.venv",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "capability": "8.6",
+    "source": "workloads/sol_execbench_baselines/L1/problem_036_flux_output_norm_projection_chain/cuda_cpp",
+    "extension": "results/alpha/c7_s34ae_sol_l1p036_20261005/build/sol_l1p036_sm86.so"
+  },
+  "build": {
+    "compiler": "/usr/bin/g++-14",
+    "cuda_arch": "sm_86",
+    "status": "passed",
+    "stdout": "results/alpha/c7_s34ae_sol_l1p036_20261005/build_correctness.stdout",
+    "stderr": "results/alpha/c7_s34ae_sol_l1p036_20261005/build_correctness.stderr"
+  },
+  "correctness": {
+    "shapes": [
+      [
+        1,
+        128
+      ],
+      [
+        2,
+        293
+      ]
+    ],
+    "max_abs_errors": [
+      0.00439453125,
+      0.0045166015625
+    ],
+    "official_atol": [
+      0.0031,
+      0.0031
+    ],
+    "rows": [
+      {
+        "batch": 1,
+        "correct_at_official_tolerance": true,
+        "finite": true,
+        "max_abs_error": 0.00439453125,
+        "mean_abs_error": 0.0007482033688575029,
+        "official_atol": 0.0031,
+        "seq_len": 128
+      },
+      {
+        "batch": 2,
+        "correct_at_official_tolerance": false,
+        "finite": true,
+        "max_abs_error": 0.0045166015625,
+        "mean_abs_error": 0.0008632589015178382,
+        "official_atol": 0.0031,
+        "seq_len": 293
+      }
+    ],
+    "status": "failed_official_tolerance",
+    "failure": "B=2,S=293 row fails declared 1e-5 relative/0.0031 absolute allclose; no native vertical admitted"
+  },
+  "sanitizer": {
+    "tool": "compute-sanitizer memcheck",
+    "errors": 0,
+    "status": "passed_runtime_no_memcheck_errors",
+    "stdout": "results/alpha/c7_s34ae_sol_l1p036_20261005/compute_sanitizer.stdout",
+    "stderr": "results/alpha/c7_s34ae_sol_l1p036_20261005/compute_sanitizer.stderr"
+  }
+}

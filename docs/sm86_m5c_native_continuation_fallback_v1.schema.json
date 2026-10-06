@@ -1,0 +1,111 @@
+{
+  "$id": "https://gpu-simulator.local/schemas/sm86_m5c_native_continuation_fallback_v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "bounded_run": {
+      "additionalProperties": true,
+      "required": [
+        "root",
+        "return_code",
+        "max_records",
+        "reference_trace",
+        "records_before_footer",
+        "queue_events_popped",
+        "native_macro_dispatches",
+        "state_projection_complete",
+        "native_macro_witness"
+      ],
+      "type": "object"
+    },
+    "decision": {
+      "additionalProperties": true,
+      "required": [
+        "selection",
+        "real_native_continuation_witness",
+        "synthetic_witness_used",
+        "fallback_preserved",
+        "positive_native_dispatch_claim",
+        "hardware_completion"
+      ],
+      "type": "object"
+    },
+    "host_identity": {
+      "additionalProperties": true,
+      "required": [
+        "device_index",
+        "name",
+        "uuid",
+        "compute_capability",
+        "driver"
+      ],
+      "type": "object"
+    },
+    "identity": {
+      "additionalProperties": true,
+      "required": [
+        "trace",
+        "control",
+        "arch_card",
+        "pchase_card",
+        "simulator_binary",
+        "reference_feature",
+        "mode",
+        "cache_scope"
+      ],
+      "type": "object"
+    },
+    "interpretation": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "phase": {
+      "const": "M5-C"
+    },
+    "replay": {
+      "additionalProperties": true,
+      "required": [
+        "records_seen",
+        "instructions_issued",
+        "completion_frontier",
+        "gpc_observation_frontier",
+        "native_macro_dispatches"
+      ],
+      "type": "object"
+    },
+    "schema": {
+      "const": "sm86_m5c_native_continuation_fallback_v1"
+    },
+    "status": {
+      "type": "string"
+    },
+    "typed_boundary": {
+      "additionalProperties": true,
+      "required": [
+        "native_boundary_records",
+        "complete_boundary_records",
+        "exact_fallback_boundary_records",
+        "exact_fallback_required",
+        "transition_boundary_pairs",
+        "complete_transition_pairs",
+        "dominant_unknown_reason",
+        "dominant_unknown_count"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema",
+    "status",
+    "phase",
+    "host_identity",
+    "identity",
+    "bounded_run",
+    "typed_boundary",
+    "replay",
+    "decision",
+    "interpretation"
+  ],
+  "title": "sm86_m5c_native_continuation_fallback_v1",
+  "type": "object"
+}

@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schema": {"const": "sm86_c7_sol_l2p066_smoke_v1"},
+    "phase": {"const": "C7-S34CD2"},
+    "status": {"type": "string"},
+    "candidate": {"type": "string"},
+    "identity": {"type": "object", "additionalProperties": true},
+    "build": {"type": "object", "additionalProperties": true},
+    "correctness": {"type": "object", "additionalProperties": true},
+    "sanitizer": {"type": "object", "additionalProperties": true},
+    "metadata_correction": {"type": "string"}
+  },
+  "required": ["schema", "phase", "status", "candidate", "identity", "build", "correctness", "sanitizer"]
+}

@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpu-simulator.local/schemas/sm86_m5g_tf32_pipeline_replay_v1.schema.json",
+  "title": "SM86 M5-G TF32 replay and post-fix NCU record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "phase", "status", "host_identity", "basis", "identity", "implementation", "focused_tests", "standalone_probe_replay", "c7_s34co_replay", "postfix_ncu", "frontier_claims", "interpretation"],
+  "properties": {
+    "schema": {"const": "sm86_m5g_tf32_pipeline_replay_v1"},
+    "phase": {"const": "M5-G"},
+    "status": {"const": "complete_sm86_tf32_replay_and_postfix_ncu_scoped"},
+    "host_identity": {"type": "object"},
+    "basis": {"const": "docs/sm86_m5g1_tf32_pipeline_probe_v1.json"},
+    "identity": {"type": "object"},
+    "implementation": {"type": "object"},
+    "focused_tests": {"type": "object"},
+    "standalone_probe_replay": {"type": "object"},
+    "c7_s34co_replay": {"type": "object"},
+    "postfix_ncu": {"type": "object"},
+    "frontier_claims": {"type": "object", "required": ["native_macro_dispatches", "hardware_completion", "completion_status"], "properties": {"native_macro_dispatches": {"const": 0}, "hardware_completion": {"const": "not_observed"}, "completion_status": {"const": "incomplete_unmodeled_retirement_tails"}}, "additionalProperties": true},
+    "interpretation": {"type": "string", "minLength": 1}
+  }
+}

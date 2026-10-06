@@ -1,0 +1,165 @@
+{
+  "schema": "sm86_c7_research_probe_front_end_ibuffer_depth_live_v1",
+  "status": "corrected_same_binary_correctness_trace_replay_ncu_complete_observational",
+  "host_identity": {
+    "device_index": 0,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "compute_capability": "8.6",
+    "driver": "615.71.09",
+    "pstate": "P0",
+    "graphics_clock_mhz": 1350,
+    "memory_clock_mhz": 10501
+  },
+  "identity": {
+    "source": "workloads/research_probes/front_end_ibuffer_depth",
+    "driver": "workloads/research_probes/front_end_ibuffer_depth/front_end_ibuffer_depth_driver",
+    "binary": "workloads/research_probes/front_end_ibuffer_depth/front_end_ibuffer_depth_baseline_s1.cubin",
+    "binary_used_for_correctness_trace_replay_ncu": "same rebuilt baseline_s1 cubin",
+    "trace": "results/alpha/c7_s33az_ibuffer_20261004/nvbit/w16_baseline_s1/dynamic_trace.pb",
+    "control": "results/alpha/c7_s33az_ibuffer_20261004/sass/front_end_ibuffer_depth_baseline_s1.control_bits.json",
+    "arch_card": "arch_profiles/cards/sm_86.json",
+    "args": [
+      "16",
+      "7",
+      "baseline_s1"
+    ],
+    "variant": "baseline_s1",
+    "warps": 16,
+    "instructions": 32,
+    "timestamps_per_warp": 9,
+    "ncu_repeats": 5,
+    "ncu_metric": "gpc__cycles_elapsed.max",
+    "ncu_replay_mode": "application",
+    "ncu_clock_control": "base",
+    "ncu_cache_control": "none",
+    "ncu_launch_count": 1,
+    "static_control_decoded_instructions": 72,
+    "static_control_unknown_encodings": 0
+  },
+  "correctness": {
+    "status": "passed",
+    "correct": true,
+    "timeline_valid": true,
+    "sink_valid": true,
+    "trials": 7,
+    "compute_sanitizer": "one full-shape trial; zero errors",
+    "checksum": 7592333985645405640,
+    "native_stdout": "results/alpha/c7_s33az_ibuffer_20261004/correctness/w16_baseline_s1/result.json"
+  },
+  "trace": {
+    "launches": 1,
+    "target_kernel": "_Z22ibuffer_timeline_probePyPj___0",
+    "target_grid": [
+      1,
+      1,
+      1
+    ],
+    "target_block": [
+      512,
+      1,
+      1
+    ],
+    "target_records_replayed": 944,
+    "target_coverage": {
+      "kind": "full",
+      "blocks_observed": 1,
+      "population_blocks": 1
+    },
+    "tracer_total_insts": 1328,
+    "tracer_total_reported_insts": 1328,
+    "dynamic_trace_bytes": 200,
+    "stats": "results/alpha/c7_s33az_ibuffer_20261004/nvbit/w16_baseline_s1/stats.csv"
+  },
+  "simulator": {
+    "records": 944,
+    "instructions_issued": 944,
+    "completion_frontier": {
+      "status": "incomplete_unmodeled_retirement_tails",
+      "lower_bound_cycles": 818,
+      "unmodeled_tails": {
+        "reduction_read_modify_write": false,
+        "dirty_writeback": true,
+        "coherence": true,
+        "async_copy_shared_visibility": false
+      }
+    },
+    "native_macro_dispatches": 0
+  },
+  "ncu": {
+    "metric": "gpc__cycles_elapsed.max",
+    "values": [
+      3812.0,
+      3818.0,
+      3663.0,
+      3668.0,
+      3678.0
+    ],
+    "median": 3678.0,
+    "min": 3663.0,
+    "max": 3818.0,
+    "stdev": 79.8135326871327,
+    "instruction_count": [
+      944.0,
+      944.0,
+      944.0,
+      944.0,
+      944.0
+    ],
+    "gpu_time_us": [
+      2.464,
+      2.496,
+      2.4,
+      2.4,
+      2.4
+    ],
+    "rows": [
+      {
+        "rep": "ncu_0",
+        "gpc__cycles_elapsed.max": 3812.0,
+        "smsp__inst_executed.sum": 944.0,
+        "gpu__time_duration.sum": 2.464
+      },
+      {
+        "rep": "ncu_1",
+        "gpc__cycles_elapsed.max": 3818.0,
+        "smsp__inst_executed.sum": 944.0,
+        "gpu__time_duration.sum": 2.496
+      },
+      {
+        "rep": "ncu_2",
+        "gpc__cycles_elapsed.max": 3663.0,
+        "smsp__inst_executed.sum": 944.0,
+        "gpu__time_duration.sum": 2.4
+      },
+      {
+        "rep": "ncu_3",
+        "gpc__cycles_elapsed.max": 3668.0,
+        "smsp__inst_executed.sum": 944.0,
+        "gpu__time_duration.sum": 2.4
+      },
+      {
+        "rep": "ncu_4",
+        "gpc__cycles_elapsed.max": 3678.0,
+        "smsp__inst_executed.sum": 944.0,
+        "gpu__time_duration.sum": 2.4
+      }
+    ],
+    "kernel": "ibuffer_timeline_probe(unsigned long long *, unsigned int *)",
+    "clock_control": "base",
+    "cache_control": "none",
+    "launch_skip": 0,
+    "launch_count": 1
+  },
+  "comparison": {
+    "instruction_count_match": true,
+    "lower_bound_consistency": true,
+    "lower_bound_cycles": 818,
+    "ncu_median_cycles": 3678.0,
+    "gap_cycles": 2860.0,
+    "gap_fraction": 0.7775965198477434,
+    "hardware_completion": "not_observed",
+    "point_estimator": "not_claimed"
+  },
+  "interpretation": "One rebuilt baseline_s1 cubin served seven timeline/sink-oracle correctness trials, full-shape Compute Sanitizer, NVBit, deterministic replay, and five application-replay NCU profiles. Replay and NCU match at 944 target warp instructions; simulator lower is 818 cycles and NCU median is 3,678. This is a bounded front-end observation only: no instruction-buffer depth is fitted, and completion tails remain open."
+}

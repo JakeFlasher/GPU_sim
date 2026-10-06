@@ -1351,6 +1351,8 @@ fn typed_scalar_macro_spec_from_env() -> Option<TypedScalarMacroSpec> {
         latency_cycles,
         initiation_interval_cycles,
         label,
+        issue_times: None,
+        terminal_front_end_exit: None,
     })
 }
 
@@ -5930,6 +5932,8 @@ mod tests {
             latency_cycles: 1,
             initiation_interval_cycles: 1,
             label: "scalar_macro_v1".to_owned(),
+            issue_times: None,
+            terminal_front_end_exit: None,
         };
         let contract = sim_semantics::derive_typed_scalar_macro_region(&entry, &spec).unwrap();
         assert_eq!(contract.exit.event.time, 2);
@@ -6042,6 +6046,8 @@ mod tests {
             latency_cycles: 1,
             initiation_interval_cycles: 1,
             label: "scalar_macro_v1".to_owned(),
+            issue_times: None,
+            terminal_front_end_exit: None,
         };
         let mut detailed_witness_core = SmCore::new_with_residency(
             &blocks,
@@ -6089,15 +6095,16 @@ mod tests {
             detailed_labels: vec![spec.label.clone()],
             detailed_exit,
         };
+        let candidate = execute_typed_scalar_macro(
+            &entry,
+            &witness.spec,
+            &witness.detailed_internal_effects,
+            &witness.detailed_labels,
+            &witness.detailed_exit,
+        )
+        .unwrap();
         assert!(matches!(
-            execute_typed_scalar_macro(
-                &entry,
-                &witness.spec,
-                &witness.detailed_internal_effects,
-                &witness.detailed_labels,
-                &witness.detailed_exit,
-            )
-            .unwrap(),
+            candidate,
             NativeBoundaryExecutionResult::TypedMacro { .. }
         ));
         let trace_file = tempfile::NamedTempFile::new().unwrap();
@@ -6541,7 +6548,17 @@ mod tests {
 
         let sm = &result.per_sm[&0];
         assert_eq!(sm.cycles, 2, "the issuing warp exits before its ack");
+        assert!(
+            result
+                .sm_active_terminal_event_time
+                .is_some_and(|active| active < 20),
+            "a post-exit write acknowledgement must not extend the SM-active frontier"
+        );
         assert_eq!(result.terminal_event_time, Some(20));
+        assert!(
+            result.terminal_event_time > result.sm_active_terminal_event_time,
+            "the full terminal frontier must retain the drained acknowledgement"
+        );
         let ack = sm
             .readiness
             .memory_write_ack

@@ -1,0 +1,93 @@
+{
+  "fixes": [
+    {
+      "change": "completion_ready_at now checks unpriced writes for the issuing warp only; global unpriced state still blocks terminal event drain",
+      "path": "sim/sm/src/issue.rs",
+      "reason": "a different warp must not park this warp\u2019s MEMBAR completion frontier"
+    },
+    {
+      "change": "feedback write-ack regression asserts post-exit acknowledgement extends full terminal frontier but not SM-active frontier",
+      "path": "sim/sm/src/system.rs",
+      "reason": "preserve separate observation/completion domains"
+    }
+  ],
+  "interpretation": "C3-A found and fixed one concrete model-local defect: completion_ready_at previously blocked every warp when any other warp had an unpriced write. The implementation now scopes that readiness refusal to the issuing warp; global unpriced state remains a terminal-drain condition. Focused regression passed 13 tests total (10 feedback, 2 dirty-store system, 1 async refusal). The model still keeps dirty-writeback/coherence tails open and makes no hardware-completion claim.",
+  "invariants": [
+    {
+      "name": "completion_work_requires_membar_feedback",
+      "result": "enforced"
+    },
+    {
+      "name": "completion_arithmetic_checked",
+      "result": "enforced for request/region/lane work and cycle additions"
+    },
+    {
+      "name": "write_ack_identity_and_due_time",
+      "result": "enforced before state mutation"
+    },
+    {
+      "name": "pending_ack_and_event_drain",
+      "result": "unit-tested; terminal pending acknowledgements reject"
+    },
+    {
+      "name": "dirty_writeback_coherence_tails",
+      "result": "retained after model-local service; not cleared by aggregate counts"
+    },
+    {
+      "name": "async_completion_mismatch",
+      "result": "refuses before mutation"
+    }
+  ],
+  "limits": {
+    "async_shared_visibility_tail": "open where present",
+    "coherence_tail": "open",
+    "dirty_writeback_tail": "open",
+    "hardware_completion": "not_observed",
+    "native_macro_dispatches": 0,
+    "positive_native_continuation": false,
+    "timing_parameter_fit": false
+  },
+  "phase": "C3-A",
+  "regression": [
+    {
+      "command": "cargo test --release -p sim-sm feedback_ -- --nocapture",
+      "failed": 0,
+      "passed": 10
+    },
+    {
+      "command": "cargo test --release -p sim-sm system::tests::dirty_store_eviction_topology_is_timing_neutral_and_keeps_tails",
+      "failed": 0,
+      "passed": 1
+    },
+    {
+      "command": "cargo test --release -p sim-sm system::tests::dirty_store_eviction_writeback_path_schedules_and_completes",
+      "failed": 0,
+      "passed": 1
+    },
+    {
+      "command": "cargo test --release -p sim-sm issue::tests::async_copy_completion_work_mismatch_rejects_issue_before_mutation",
+      "failed": 0,
+      "passed": 1
+    }
+  ],
+  "schema": "sm86_c3a_completion_obligation_reconciliation_v1",
+  "source_seams": [
+    {
+      "path": "sim/sm/src/issue.rs",
+      "surface": "MemoryAdmissionCandidate validation, feedback reservations, checked completion arithmetic, MemoryWriteAck identity/time"
+    },
+    {
+      "path": "sim/sm/src/system.rs",
+      "surface": "MemoryWriteAck event scheduling/acknowledgement, explicit writeback/coherence services, async response handling"
+    },
+    {
+      "path": "sim/sm/src/replay.rs",
+      "surface": "typed completion frontier and tail propagation"
+    },
+    {
+      "path": "sim/direct_run/src/lib.rs",
+      "surface": "separate completion, observation, and unknown-tail projections"
+    }
+  ],
+  "status": "complete_model_local_obligation_checks_physical_tails_open"
+}

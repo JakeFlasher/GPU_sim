@@ -1,0 +1,59 @@
+{
+  "decision": {
+    "aggregate_only_evidence_promoted": false,
+    "exact_fallback_preserved": true,
+    "independent_owner_generation_witness": "absent",
+    "native_hardware_scheduling_claimed": false,
+    "next_required": "independent owner/read-from and generation relation with closed fence scope, or continued exact replay",
+    "physical_completion_upper_closed": false,
+    "self_derived_witness_used": false
+  },
+  "host_identity": {
+    "compute_capability": "8.6",
+    "device_index": 0,
+    "driver": "615.71.09",
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c"
+  },
+  "identity": {
+    "cell": "b1_store_device_line_stream_d16_l32",
+    "control": "results/alpha/c6h_store_probe_20261004/sass/memory_retirement_service_trace.control_bits.json",
+    "extractor": "tools/extract_sm86_tail_facts.py",
+    "reference": "results/alpha/c6h_store_probe_20261004/visibility_reference_full.jsonl",
+    "simulator_binary": "sim/target/release/sim-run",
+    "tail_facts": "results/alpha/c6h_store_probe_20261004/tail_facts.json",
+    "trace": "results/alpha/c6h_store_probe_20261004/nvbit/b1_store_device_line_stream_d16_l32"
+  },
+  "independent_observation": {
+    "coverage_complete": true,
+    "fence_opcodes": [
+      "ERRBAR",
+      "MEMBAR.SC.GPU"
+    ],
+    "fence_scope_semantics_closed": false,
+    "global_event_order_observed": false,
+    "hardware_completion_token_observed": false,
+    "line_generation_observed": false,
+    "memory_records": 17,
+    "ncu_used_for_extraction": false,
+    "owner_read_from_observed": false,
+    "records": 1565,
+    "simulator_used_for_extraction": false,
+    "source": "raw protobuf launch/function/PC join plus decoded static SASS and lane addresses",
+    "stores": 17
+  },
+  "interpretation": "The independent trace/static extractor confirms observed store and fence facts but cannot supply the durable owner/read-from, line-generation, global-order, or hardware-completion relations required by a typed continuation. The reference visibility run therefore remains exact fallback for all 1130 boundaries. This closes C3-I/C6-K through its negative branch only; it does not close physical completion or native scheduling.",
+  "phase": "C3-I/C6-K",
+  "reference_boundary": {
+    "complete_typed_boundaries": 0,
+    "dominant_unknown": "unmodeled_completion_tails",
+    "event_records": 1130,
+    "exact_replay_boundaries": 1130,
+    "footer_complete": true,
+    "native_macro_dispatches": 0,
+    "pre_post_pairs": 565,
+    "witness_supplied": false
+  },
+  "schema": "sm86_c3i_owner_generation_negative_v1",
+  "status": "complete_negative_independent_owner_generation_witness_absent"
+}

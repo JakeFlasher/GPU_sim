@@ -1,0 +1,30 @@
+{
+  "candidate": "L1/problem_033_post_norm_residual/cuda_cpp",
+  "environment": {
+    "cuda_available": true,
+    "torch": "2.12.0+cu130",
+    "torch_cuda_runtime": "13.0",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "capability": "8.6",
+    "permitted_environment": "tools/sol_execbench/.venv",
+    "host_compiler": "/usr/bin/g++-14",
+    "nvcc_expected": "CUDA 13.2"
+  },
+  "phase": "C7-S34AB1",
+  "schema": "sm86_c7_sol_l1p033_source_v1",
+  "source_contract": {
+    "source": "workloads/sol_execbench_baselines/L1/problem_033_post_norm_residual/cuda_cpp",
+    "entry_point": "main.cpp::run",
+    "class": "custom_cuda",
+    "sm86_marker": "solution.json compile option arch=compute_86,code=sm_86",
+    "custom_kernel": "problem_033_post_norm_residual_kernel",
+    "constants": {"hidden_size": 4096, "block_threads": 256, "one_cta_per_row": true},
+    "inputs": "sublayer_output/residual [B,S,4096] BF16; weight [4096] BF16; eps scalar FP32",
+    "output": "output [B,S,4096] BF16 destination",
+    "math": "FP32 RMSNorm of sublayer output, BF16 downcast, then BF16 residual add",
+    "oracle": "independent definition.json post-norm residual reference",
+    "workload_shapes": [[16,1024],[8,2048],[32,256],[8,997],[16,512]]
+  },
+  "selection_basis": "Next executable L1 custom-CUDA row after correcting problem029 marker false positive; no timing or NCU values transferred",
+  "status": "complete_source_contract_and_sm86_environment_review"
+}

@@ -35,6 +35,7 @@ void problem_061_grad_hidden_launcher(
     const torch::Tensor& hidden_states,
     const torch::Tensor& mask,
     float tanh_g,
+    torch::Tensor& grad_residual,
     torch::Tensor& grad_hidden_states,
     torch::Tensor& row_partials,
     cudaStream_t stream);

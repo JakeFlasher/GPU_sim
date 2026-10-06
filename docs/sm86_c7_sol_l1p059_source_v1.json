@@ -1,0 +1,39 @@
+{
+  "candidate": "L1/problem_059_moe_group_score_aggregation_and_masking/cuda_cpp",
+  "environment": {
+    "cuda_available": true,
+    "torch": "2.12.0+cu130",
+    "torch_cuda_runtime": "13.0",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "capability": "8.6",
+    "permitted_environment": "tools/sol_execbench/.venv",
+    "host_compiler": "/usr/bin/g++-14",
+    "nvcc_expected": "CUDA 13.2"
+  },
+  "phase": "C7-S34AS1",
+  "schema": "sm86_c7_sol_l1p059_source_v1",
+  "source_contract": {
+    "source": "workloads/sol_execbench_baselines/L1/problem_059_moe_group_score_aggregation_and_masking/cuda_cpp",
+    "entry_point": "main.cpp::run",
+    "class": "custom_cuda",
+    "sm86_marker": "solution.json compile option arch=compute_86,code=sm_86",
+    "custom_kernel": "problem_059_moe_group_score_kernel",
+    "constants": {
+      "num_experts": 256,
+      "num_groups": 8,
+      "experts_per_group": 32,
+      "topk_per_group": 2,
+      "topk_groups": 4,
+      "block_threads": 256,
+      "one_cta_per_token": true
+    },
+    "inputs": "scores [num_tokens,256] contiguous FP32",
+    "outputs": "masked_scores [num_tokens,256] and group_mask [num_tokens,8] contiguous FP32 destination tensors",
+    "math": "per-group top-2 sum, top-4 group selection, group mask, and -inf expert masking",
+    "oracle": "independent definition.json/reference.py torch.topk group aggregation and masked_fill",
+    "workload_num_tokens": [1163,8192,2521,997,64,2048,1024,256,4096,1973,1087,128,773,512,16384,32768],
+    "tolerance": {"max_atol": 1e-5, "max_rtol": 1e-5, "allow_negative_inf": true}
+  },
+  "selection_basis": "Next genuine L1 custom-CUDA row after the problem058 source correction; no timing or NCU values transferred",
+  "status": "complete_source_contract_and_sm86_environment_review"
+}

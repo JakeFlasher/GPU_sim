@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpu-simulator.local/schemas/sm86_c6d_default_frontend_refusal_v1.schema.json",
+  "title": "SM86 C6-D default front-end refusal",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "status",
+    "phase",
+    "identity",
+    "observation",
+    "decision",
+    "interpretation"
+  ],
+  "properties": {
+    "schema": {
+      "const": "sm86_c6d_default_frontend_refusal_v1"
+    },
+    "status": {
+      "type": "string"
+    },
+    "phase": {
+      "const": "C6-D"
+    },
+    "identity": {
+      "type": "object"
+    },
+    "observation": {
+      "type": "object",
+      "required": [
+        "default_frontend_enabled",
+        "native_macro_dispatches",
+        "native_macro_fallbacks",
+        "footer_complete",
+        "refusal_reason"
+      ],
+      "properties": {
+        "default_frontend_enabled": {
+          "const": true
+        },
+        "native_macro_dispatches": {
+          "const": 0
+        },
+        "native_macro_fallbacks": {
+          "const": 0
+        },
+        "footer_complete": {
+          "const": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "decision": {
+      "type": "object",
+      "required": [
+        "positive_default_frontend_witness",
+        "front_end_state_transition_modeled",
+        "exact_fallback_preserved",
+        "physical_completion",
+        "semantic_upper"
+      ],
+      "properties": {
+        "positive_default_frontend_witness": {
+          "const": false
+        },
+        "front_end_state_transition_modeled": {
+          "const": false
+        },
+        "exact_fallback_preserved": {
+          "const": true
+        },
+        "physical_completion": {
+          "const": "unknown"
+        },
+        "semantic_upper": {
+          "const": "open"
+        }
+      },
+      "additionalProperties": true
+    },
+    "interpretation": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

@@ -21,7 +21,10 @@ DEFAULT_OUTPUT = (
     REPO_ROOT / "results/captures/sm86_l1tex_admission_backpressure_20260818_v1"
 )
 LONG_BINARY = HERE / "l1tex_admission_backpressure"
-TRACE_BINARY = HERE / "l1tex_admission_backpressure_trace"
+# Correctness, tracing, replay, and NCU must consume one rebuilt workload.
+# Keep the alias for the historical campaign API, but do not build or invoke a
+# trace-only executable.
+TRACE_BINARY = LONG_BINARY
 CANDIDATE_FILE = HERE.parent / "l1tex_arrival_replay_service/memory_service_candidates.json"
 ADMISSION_CANDIDATE_FILE = HERE / "memory_admission_candidates.json"
 FEEDBACK_CANDIDATE_FILES = {
@@ -533,7 +536,7 @@ def selected_cells(selector: str | None) -> list[Cell]:
 
 
 def require_binaries() -> None:
-    for path in (LONG_BINARY, TRACE_BINARY):
+    for path in (LONG_BINARY,):
         if not path.is_file() or path.stat().st_size == 0:
             raise RuntimeError(f"required binary missing: {path}")
 
@@ -901,7 +904,7 @@ def run_nvbit(output: Path, cells: Sequence[Cell], force: bool) -> None:
 def run_static(output: Path) -> None:
     destination = output / "sass"
     destination.mkdir(parents=True, exist_ok=True)
-    for binary in (LONG_BINARY, TRACE_BINARY):
+    for binary in (LONG_BINARY,):
         for suffix, option in (("sass", "--dump-sass"), ("resources", "--dump-resource-usage")):
             completed = subprocess.run(
                 ["/usr/local/cuda-13.2/bin/cuobjdump", option, str(binary)],
@@ -935,7 +938,7 @@ def run_static(output: Path) -> None:
 
 def run_simulator(output: Path, cells: Sequence[Cell], force: bool) -> None:
     binary = HELPERS.ensure_release_simulator()
-    control = output / "sass/l1tex_admission_backpressure_trace.control_bits.json"
+    control = output / "sass/l1tex_admission_backpressure.control_bits.json"
     arch_card = REPO_ROOT / "arch_profiles/cards/sm_86.json"
     pchase_card = REPO_ROOT / "data/pchase/sm_86_static_card.json"
     for index, cell in enumerate(cells, 1):
@@ -1001,7 +1004,7 @@ def run_simulator(output: Path, cells: Sequence[Cell], force: bool) -> None:
 
 def run_memory_service_candidates(output: Path, cells: Sequence[Cell], force: bool) -> None:
     binary = HELPERS.ensure_release_simulator()
-    control = output / "sass/l1tex_admission_backpressure_trace.control_bits.json"
+    control = output / "sass/l1tex_admission_backpressure.control_bits.json"
     arch_card = REPO_ROOT / "arch_profiles/cards/sm_86.json"
     pchase_card = REPO_ROOT / "data/pchase/sm_86_static_card.json"
     candidates = REPLAY.candidate_configurations(CANDIDATE_FILE)
@@ -1073,7 +1076,7 @@ def run_memory_service_candidates(output: Path, cells: Sequence[Cell], force: bo
 
 def run_memory_admission_candidates(output: Path, cells: Sequence[Cell], force: bool) -> None:
     binary = HELPERS.ensure_release_simulator()
-    control = output / "sass/l1tex_admission_backpressure_trace.control_bits.json"
+    control = output / "sass/l1tex_admission_backpressure.control_bits.json"
     arch_card = REPO_ROOT / "arch_profiles/cards/sm_86.json"
     pchase_card = REPO_ROOT / "data/pchase/sm_86_static_card.json"
     candidates = REPLAY.candidate_configurations(ADMISSION_CANDIDATE_FILE)
@@ -1201,7 +1204,7 @@ def run_memory_admission_feedback(
     feedback_ids: Sequence[int],
 ) -> None:
     binary = HELPERS.ensure_release_simulator()
-    control = output / "sass/l1tex_admission_backpressure_trace.control_bits.json"
+    control = output / "sass/l1tex_admission_backpressure.control_bits.json"
     arch_card = REPO_ROOT / "arch_profiles/cards/sm_86.json"
     pchase_card = REPO_ROOT / "data/pchase/sm_86_static_card.json"
     total = len(cells) * len(feedback_ids)
@@ -1292,7 +1295,7 @@ def run_memory_admission_feedback_service_sweep(
     candidate_ids: Sequence[int],
 ) -> None:
     binary = HELPERS.ensure_release_simulator()
-    control = output / "sass/l1tex_admission_backpressure_trace.control_bits.json"
+    control = output / "sass/l1tex_admission_backpressure.control_bits.json"
     arch_card = REPO_ROOT / "arch_profiles/cards/sm_86.json"
     pchase_card = REPO_ROOT / "data/pchase/sm_86_static_card.json"
     candidates = validated_feedback_service_sweep()
@@ -1386,7 +1389,7 @@ def run_memory_write_completion_feedback(
     candidate_ids: Sequence[int],
 ) -> None:
     binary = HELPERS.ensure_release_simulator()
-    control = output / "sass/l1tex_admission_backpressure_trace.control_bits.json"
+    control = output / "sass/l1tex_admission_backpressure.control_bits.json"
     arch_card = REPO_ROOT / "arch_profiles/cards/sm_86.json"
     pchase_card = REPO_ROOT / "data/pchase/sm_86_static_card.json"
     candidates = validated_write_completion_feedback()
@@ -1475,7 +1478,7 @@ def run_red_rmw_completion_sweep(
     candidate_ids: Sequence[int],
 ) -> None:
     binary = HELPERS.ensure_release_simulator()
-    control = output / "sass/l1tex_admission_backpressure_trace.control_bits.json"
+    control = output / "sass/l1tex_admission_backpressure.control_bits.json"
     arch_card = REPO_ROOT / "arch_profiles/cards/sm_86.json"
     pchase_card = REPO_ROOT / "data/pchase/sm_86_static_card.json"
     candidates = validated_red_rmw_completion_sweep()

@@ -1,0 +1,94 @@
+{
+  "$id": "https://gpu-simulator.local/schemas/sm86_c1r_store_fence_scope_reconciliation_live_v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "arms": {
+      "items": {
+        "additionalProperties": true,
+        "required": [
+          "cell",
+          "tail",
+          "fence",
+          "args",
+          "correctness",
+          "sanitizer_return_code",
+          "trace",
+          "simulator",
+          "ncu"
+        ],
+        "type": "object"
+      },
+      "minItems": 6,
+      "type": "array"
+    },
+    "comparisons": {
+      "additionalProperties": true,
+      "minProperties": 4,
+      "type": "object"
+    },
+    "host_identity": {
+      "additionalProperties": true,
+      "required": [
+        "device_index",
+        "name",
+        "uuid",
+        "compute_capability",
+        "driver"
+      ],
+      "type": "object"
+    },
+    "identity": {
+      "additionalProperties": true,
+      "required": [
+        "source",
+        "binary",
+        "trace_binary",
+        "capture_root",
+        "shape",
+        "ncu_metric",
+        "ncu_repeats_per_arm"
+      ],
+      "type": "object"
+    },
+    "interpretation": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "phase": {
+      "const": "C1-R-B"
+    },
+    "reconciliation": {
+      "additionalProperties": true,
+      "required": [
+        "all_host_oracles_passed",
+        "all_sanitizer_passed",
+        "all_replays_deterministic",
+        "native_macro_dispatches",
+        "system_scope_instruction_crosswalk_failed",
+        "system_scope_replay_status",
+        "hardware_completion"
+      ],
+      "type": "object"
+    },
+    "schema": {
+      "const": "sm86_c1r_store_fence_scope_reconciliation_live_v1"
+    },
+    "status": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "status",
+    "phase",
+    "host_identity",
+    "identity",
+    "arms",
+    "comparisons",
+    "reconciliation",
+    "interpretation"
+  ],
+  "title": "sm86_c1r_store_fence_scope_reconciliation_live_v1",
+  "type": "object"
+}

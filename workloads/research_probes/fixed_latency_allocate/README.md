@@ -45,3 +45,13 @@ The frozen 28-cell campaign is resumable by stage:
 .venv/bin/python workloads/research_probes/fixed_latency_allocate/campaign.py simulator
 .venv/bin/python workloads/research_probes/fixed_latency_allocate/analyze.py
 ```
+
+## C7-S33AU live same-binary refresh (2026-10-04)
+
+The active Makefile/campaign interface now uses one 8,192-generation cubin for
+correctness, NVBit, replay, and NCU; the historical 64-generation trace cubin
+is not an active input. The host driver now parses numeric arguments strictly,
+initializes elapsed/sink buffers with sentinels, and reports elapsed/sink
+validity separately from its functional oracle. The selected `w8_r10_native`
+cell is the current live vertical target; no register-bank or allocation
+latency is fitted before its matched capture is complete.

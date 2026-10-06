@@ -1,0 +1,103 @@
+{
+  "calibration": {
+    "medians": {
+      "16": 13807.0,
+      "32": 13835.0,
+      "8": 13843.0
+    },
+    "metric": "gpc__cycles_elapsed.max",
+    "prediction_interval": [
+      13805.285714285716,
+      13848.142857142857
+    ],
+    "repeats": 5,
+    "target_values_collected_after_prediction": true
+  },
+  "decision": {
+    "coverage_claim": "none; designed extrapolation with zero target coverage",
+    "family_transfer": "falsified_at_declared_64_block_extrapolation",
+    "interval_widened_after_target": false,
+    "next": "retain C4-G domain boundary and do not promote constant-load observer across this extrapolation",
+    "refit_after_target": false
+  },
+  "host_identity": {
+    "compute_capability": "8.6",
+    "device_index": 0,
+    "driver": "615.71.09",
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c"
+  },
+  "identity": {
+    "arch_card": "arch_profiles/cards/sm_86.json",
+    "binary": "workloads/research_probes/constant_load_path/constant_load_path",
+    "calibration_blocks": [
+      8,
+      16,
+      32
+    ],
+    "calibration_ncu": "results/alpha/c4h_constant_load_20261004/ncu",
+    "control": "results/alpha/c4h_constant_load_20261004/static/constant_load_path.control_bits.json",
+    "environment": "results/alpha/c4h_constant_load_20261004/metadata/environment.json",
+    "iterations": 128,
+    "mode": 0,
+    "pchase_card": "data/pchase/sm_86_static_card.json",
+    "prediction": "docs/sm86_c4h_constant_load_prediction_pre_ncu_v1.json",
+    "target_blocks": 64,
+    "target_ncu": "results/alpha/c4h_constant_load_20261004/ncu/b64_m0_t256_i128",
+    "target_replay": "results/alpha/c4h_constant_load_20261004/simulator/b64_m0_t256_i128/replay-1.json",
+    "target_trace": "results/alpha/c4h_constant_load_20261004/nvbit/b64_m0_t256_i128",
+    "threads": 256,
+    "warmups": 0
+  },
+  "interpretation": "The constant-load dependent-chain observer was fit only on blocks 8/16/32 and materialized before the untouched 64-block NCU target. All five target repeats missed the frozen interval, with a 0.434% point APE. The result is an independent-family transfer falsifier; simulator lower and semantic tails remain separate, and no NCU value was used to alter replay or fitting after observation.",
+  "phase": "C4-H",
+  "schema": "sm86_c4h_constant_load_reconciliation_v1",
+  "simulator_frontier": {
+    "native_macro_dispatches": 0,
+    "observer_interval_not_completion_upper": true,
+    "target_completion_status": "incomplete_unmodeled_retirement_tails",
+    "target_instructions_issued": 734208,
+    "target_lower_bound_cycles": 62287,
+    "target_records_seen": 734208,
+    "target_tails": {
+      "async_copy_shared_visibility": false,
+      "coherence": true,
+      "dirty_writeback": true,
+      "reduction_read_modify_write": false
+    }
+  },
+  "status": "complete_independent_family_transfer_falsifier",
+  "target": {
+    "instruction_count": [
+      734208.0,
+      734208.0,
+      734208.0,
+      734208.0,
+      734208.0
+    ],
+    "interval_coverage": 0.0,
+    "max": 14019.0,
+    "median": 13887.0,
+    "metric": "gpc__cycles_elapsed.max",
+    "min": 13855.0,
+    "ncu_used_in_simulator": false,
+    "point_ape_percent": 0.4341161826579806,
+    "point_prediction": 13826.714285714286,
+    "prediction_target_miss_min_cycles": 6.857142857142,
+    "repeats": 5,
+    "target_ncu_paths": [
+      "results/alpha/c4h_constant_load_20261004/ncu/b64_m0_t256_i128/repeat-0/ncu.csv",
+      "results/alpha/c4h_constant_load_20261004/ncu/b64_m0_t256_i128/repeat-1/ncu.csv",
+      "results/alpha/c4h_constant_load_20261004/ncu/b64_m0_t256_i128/repeat-2/ncu.csv",
+      "results/alpha/c4h_constant_load_20261004/ncu/b64_m0_t256_i128/repeat-3/ncu.csv",
+      "results/alpha/c4h_constant_load_20261004/ncu/b64_m0_t256_i128/repeat-4/ncu.csv"
+    ],
+    "values": [
+      14019.0,
+      13887.0,
+      13855.0,
+      13896.0,
+      13876.0
+    ]
+  }
+}

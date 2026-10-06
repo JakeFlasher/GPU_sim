@@ -1,0 +1,79 @@
+{
+  "identity": {
+    "binary": "workloads/research_probes/constant_load_path/constant_load_path",
+    "calibration_blocks": [
+      8,
+      16
+    ],
+    "calibration_replays": "results/alpha/c5b_constant_load_mode1_20261004/simulator",
+    "control": "results/alpha/c5b_constant_load_mode1_20261004/static/constant_load_path.control_bits.json",
+    "environment": "results/alpha/c5b_constant_load_mode1_20261004/metadata/selection.json",
+    "family": "constant_load_path independent mode 1",
+    "iterations": 64,
+    "mode": 1,
+    "target_blocks": 32,
+    "target_replay": "results/alpha/c5b_constant_load_mode1_20261004/simulator/b32_m1_t256_i64/replay-1.json",
+    "threads": 256,
+    "warmups": 0
+  },
+  "interpretation": "This prediction uses the disjoint independent-load mode-1 family, not the mode-0 dependent-chain interval. The interval is a calibration-only observer projection and remains separate from the simulator lower frontier and physical completion.",
+  "observer": {
+    "calibration_medians": {
+      "16": 11172.0,
+      "8": 11184.0
+    },
+    "calibration_repeat_values": {
+      "16": [
+        11203.0,
+        11233.0,
+        11172.0,
+        11027.0,
+        11066.0
+      ],
+      "8": [
+        11262.0,
+        11062.0,
+        11205.0,
+        11184.0,
+        11060.0
+      ]
+    },
+    "feature": "grid blocks",
+    "fit": "affine through calibration medians",
+    "intercept": 11196.0,
+    "interval_rule": "point plus/minus maximum absolute repeat residual around fitted calibration medians; designed extrapolation, no coverage guarantee",
+    "maximum_calibration_repeat_residual": 145.0,
+    "metric": "gpc__cycles_elapsed.max",
+    "ncu_values_used_in_simulator": false,
+    "slope_cycles_per_block": -1.5,
+    "target_interval": [
+      11003.0,
+      11293.0
+    ],
+    "target_ncu_collected": false,
+    "target_point_prediction": 11148.0
+  },
+  "phase": "C5-B",
+  "schema": "sm86_c5b_constant_load_mode1_prediction_pre_ncu_v1",
+  "simulator_frontier_separation": {
+    "calibration_lower_bounds": {
+      "16": 33507,
+      "8": 33507
+    },
+    "native_macro_dispatches": 0,
+    "observer_not_a_completion_upper": true,
+    "target_completion_status": "incomplete_unmodeled_retirement_tails",
+    "target_lower_bound": 33507,
+    "target_unmodeled_tails": {
+      "async_copy_shared_visibility": false,
+      "coherence": true,
+      "dirty_writeback": true,
+      "reduction_read_modify_write": false
+    }
+  },
+  "status": "complete_prediction_materialized_before_target_ncu",
+  "target_gate": {
+    "next": "collect five application-replay target NCU repetitions for mode=1 blocks=32; do not refit after observation",
+    "prediction_before_target_ncu": true
+  }
+}

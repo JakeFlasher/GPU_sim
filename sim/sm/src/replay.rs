@@ -1598,7 +1598,12 @@ impl FullKernelReplayResult {
             return None;
         }
         let issue_cycles = issue_lower_bound_cycles.checked_add(envelope_cycles)?;
-        let terminal_lower_bound_cycles = self.modeled_terminal_lower_bound_cycles();
+        // The SM-active observation domain excludes post-issue write
+        // acknowledgements and service-only writeback/coherence events.  The
+        // full modeled terminal frontier remains available through
+        // `terminal_modeled_event_time` and the GPC projection; using it here
+        // would let a post-exit acknowledgement move an SM-active endpoint.
+        let terminal_lower_bound_cycles = self.sm_active_terminal_event_time();
         let terminal_cycles =
             terminal_lower_bound_cycles.and_then(|cycles| cycles.checked_add(envelope_cycles));
         Some(SmActiveObservationFrontier {
@@ -4504,6 +4509,30 @@ mod stream_l2_session_tests {
 
     fn full(outcome: KernelReplayOutcome) -> FullKernelReplayResult {
         outcome.into_full().expect("synthetic trace is complete")
+    }
+
+    #[test]
+    fn sm_active_observation_uses_sm_active_terminal_not_full_ack_frontier() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_trace(tmp.path(), &[(1, 1, vec![load(1, BASE, 4)])]);
+        let trace = TraceDir::open_direct(tmp.path()).unwrap();
+        let loc = trace.kernels().next().unwrap();
+        let schedules = schedules(&[1]);
+        let card = sm86_test_card();
+        let params = params();
+        let mode = shared_mode(2, 256);
+        let mut result =
+            full(replay_trace_kernel(&trace, &loc, &schedules, &card, &params, mode).unwrap());
+        // Model the post-exit acknowledgement distinction directly: the
+        // full event frontier is later, while the SM-active frontier remains
+        // at the last causal SM event.
+        result.replay.terminal_modeled_event_time = Some(100);
+        result.replay.sm_active_terminal_event_time = Some(10);
+        let frontier = result
+            .sm_active_observation_frontier()
+            .expect("shared replay exposes SM-active observation frontier");
+        assert_eq!(frontier.terminal_lower_bound_cycles, Some(10));
+        assert_eq!(frontier.terminal_cycles, Some(10));
     }
 
     #[test]

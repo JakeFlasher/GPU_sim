@@ -23,9 +23,10 @@ DRIVER = HERE / "fixed_latency_reuse_driver"
 LONG_NATIVE = HERE / "fixed_latency_reuse_native.cubin"
 LONG_A = HERE / "fixed_latency_reuse_a.cubin"
 LONG_B = HERE / "fixed_latency_reuse_b.cubin"
-TRACE_NATIVE = HERE / "fixed_latency_reuse_trace_native.cubin"
-TRACE_A = HERE / "fixed_latency_reuse_trace_a.cubin"
-TRACE_B = HERE / "fixed_latency_reuse_trace_b.cubin"
+# One 8,192-generation cubin per variant serves every active stage.
+TRACE_NATIVE = LONG_NATIVE
+TRACE_A = LONG_A
+TRACE_B = LONG_B
 
 
 def load_base_campaign():
@@ -89,7 +90,7 @@ class Cell:
             self.protocol,
             self.variant,
             str(self.warps),
-            str(64 if trace else 8192),
+            "8192",
             str(trials),
         ]
 
@@ -124,7 +125,7 @@ def selected_cells(selector: str | None) -> list[Cell]:
 
 
 def require_binaries() -> None:
-    for path in (DRIVER, LONG_NATIVE, LONG_A, LONG_B, TRACE_NATIVE, TRACE_A, TRACE_B):
+    for path in (DRIVER, LONG_NATIVE, LONG_A, LONG_B):
         if not path.is_file() or path.stat().st_size == 0:
             raise RuntimeError(f"required binary is missing: {path}")
 
@@ -138,7 +139,7 @@ def emit_manifest(output: Path) -> None:
             "cells": [{**asdict(cell), "key": cell.key} for cell in configured_cells()],
             "ncu_metrics": list(METRICS),
             "long_generations": 8192,
-            "trace_generations": 64,
+            "trace_generations": 8192,
             "identification_protocols": ["u10", "u11", "u12"],
             "held_out_policy_protocols": ["u20", "u22"],
             "identification_widths": [4, 8],
@@ -359,9 +360,6 @@ def run_static(output: Path) -> None:
         "fixed_latency_reuse_native": LONG_NATIVE,
         "fixed_latency_reuse_a": LONG_A,
         "fixed_latency_reuse_b": LONG_B,
-        "fixed_latency_reuse_trace_native": TRACE_NATIVE,
-        "fixed_latency_reuse_trace_a": TRACE_A,
-        "fixed_latency_reuse_trace_b": TRACE_B,
     }
     sidecars = []
     for name, binary in binaries.items():
@@ -397,7 +395,6 @@ def run_static(output: Path) -> None:
         sidecars.append(sidecar)
     for source, name in (
         (HERE / "fixed_latency_reuse.patch.json", "long_reuse_patch.json"),
-        (HERE / "fixed_latency_reuse_trace.patch.json", "trace_reuse_patch.json"),
     ):
         BASE.write_json(output / "metadata" / name, json.loads(source.read_text(encoding="utf-8")))
     BASE.run_captured(
@@ -443,7 +440,7 @@ def run_simulator(
             "--trace",
             str(output / "nvbit" / cell.key),
             "--control",
-            str(output / "sass" / f"fixed_latency_reuse_trace_{cell.variant}.control_bits.json"),
+            str(output / "sass" / f"fixed_latency_reuse_{cell.variant}.control_bits.json"),
             "--arch-card",
             str(REPO_ROOT / "arch_profiles" / "cards" / "sm_86.json"),
             "--mode",

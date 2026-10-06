@@ -1,0 +1,98 @@
+{
+  "candidate": "L1/problem_028_hybrid_attention_mask_preparation/cuda_cpp",
+  "environment": {
+    "cuda_available": true,
+    "torch": "2.12.0+cu130",
+    "torch_cuda_runtime": "13.0",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "capability": "8.6",
+    "permitted_environment": "tools/sol_execbench/.venv",
+    "host_compiler": "/usr/bin/g++-14",
+    "nvcc_expected": "CUDA 13.2"
+  },
+  "phase": "C7-S34BS1",
+  "schema": "sm86_c7_sol_l1p028_source_v1",
+  "source_contract": {
+    "source": "workloads/sol_execbench_baselines/L1/problem_028_hybrid_attention_mask_preparation/cuda_cpp",
+    "entry_point": "main.cpp::run",
+    "class": "custom_cuda",
+    "sm86_marker": "solution.json compile option arch=compute_86,code=sm_86",
+    "custom_kernel": "k_hybrid_attention_mask_preparation",
+    "constants": {
+      "num_attention_heads": 64,
+      "swa_num_attention_heads": 64,
+      "sliding_window": 128,
+      "block_threads": 256,
+      "one_launch": true,
+      "bool_outputs": true
+    },
+    "inputs": "three int64 host scalars: batch_size, seq_length, past_key_values_length",
+    "outputs": "full_attention_mask and sliding_window_attention_mask contiguous bool [B,64,T,T+past] destination tensors",
+    "math": "full mask emits !(t >= j - past); sliding-window output emits false everywhere because the official reference's zeros.masked_fill(..., False) is a no-op",
+    "oracle": "independent definition.json/reference.py canonical bool masks",
+    "workload_shapes": [
+      [
+        4,
+        16,
+        240
+      ],
+      [
+        1,
+        128,
+        0
+      ],
+      [
+        8,
+        1024,
+        1024
+      ],
+      [
+        2,
+        32,
+        96
+      ],
+      [
+        2,
+        4096,
+        4096
+      ],
+      [
+        8,
+        997,
+        0
+      ],
+      [
+        1,
+        131,
+        0
+      ],
+      [
+        32,
+        256,
+        128
+      ],
+      [
+        16,
+        2048,
+        0
+      ],
+      [
+        4,
+        1571,
+        1024
+      ],
+      [
+        64,
+        128,
+        0
+      ],
+      [
+        8,
+        3089,
+        0
+      ]
+    ]
+  },
+  "selection_basis": "Next genuine L1 custom-CUDA row after problem017 source correction; no timing or NCU values transferred",
+  "status": "complete_source_contract_and_sm86_environment_review"
+}

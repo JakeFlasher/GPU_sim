@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpu-simulator.local/schemas/sm86_c4a_observer_contract_reconciliation_v1.schema.json",
+  "title": "SM86 C4-A observer contract reconciliation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "status",
+    "phase",
+    "checks",
+    "evidence",
+    "observer_contract",
+    "interpretation"
+  ],
+  "properties": {
+    "schema": {
+      "const": "sm86_c4a_observer_contract_reconciliation_v1"
+    },
+    "status": {
+      "type": "string"
+    },
+    "phase": {
+      "const": "C4-A"
+    },
+    "checks": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "boolean"
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "observer_contract": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "interpretation": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

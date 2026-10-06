@@ -1,0 +1,65 @@
+{
+  "candidate": "L1/problem_034_flux_multi_axis_rope_frequency_computation/cuda_cpp",
+  "correctness_and_sanitizer": {
+    "build_smoke": "docs/sm86_c7_sol_l1p034_smoke_v1.json",
+    "correctness_passed": true,
+    "sanitizer_errors": 0,
+    "capture_correctness": "results/alpha/c7_s34ac_sol_l1p034_20261005/capture_correctness.json",
+    "all_declared_shape_rows": 48
+  },
+  "crosswalk": {
+    "native_hardware_scheduling_claimed": false,
+    "ncu_values_used_to_change_simulator": false,
+    "nvbit_raw_stat_unit_is_separate": true,
+    "physical_completion_upper_closed": false,
+    "simulator_lower_vs_ncu_median_cycles": {"delta": -2552, "lower": 2107, "median": 4659},
+    "simulator_ncu_instruction_count_equal": true
+  },
+  "identity": {
+    "arch": "sm_86",
+    "binary_extension": "results/alpha/c7_s34ac_sol_l1p034_20261005/build/sol_l1p034_sm86.so",
+    "cuda_toolkit": "13.2",
+    "environment": "tools/sol_execbench/.venv",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "host_compiler": "/usr/bin/g++-14",
+    "capture_selection": "ACTIVE_FROM_START=0; MAX_ACCEPTED_ACTIVE_LAUNCHES=1; row-0 seq_len=997 profiler-delimited launch",
+    "profiler_protocol": "cudaProfilerStart/Stop; NCU profile-from-start off; application replay; clock none; cache all",
+    "source": "workloads/sol_execbench_baselines/L1/problem_034_flux_multi_axis_rope_frequency_computation/cuda_cpp",
+    "torch": "2.12.0+cu130",
+    "representative_capture_shape": {"seq_len": 997, "theta": 10000.0}
+  },
+  "interpretation": "C7-S34AC completes the Flux multi-axis RoPE frequency custom-CUDA vertical through all-shape source/build/correctness/memcheck screening, a live row-0 NVBit/control capture, deterministic replay, and five target NCU repetitions. Simulator and NCU instruction counts match at 160517. The all-shape smoke used the retained upstream reference at unchanged tolerances; completion tails, parser limitation, raw tracer units, and zero native macro dispatch remain explicit.",
+  "ncu": {
+    "instruction_values": [160517.0,160517.0,160517.0,160517.0,160517.0],
+    "kernel": "<unnamed>::problem_034_rope_freq_kernel(const float *, float, float *, float *, int)",
+    "median": 4659.0,
+    "median_instructions": 160517.0,
+    "metric": "gpc__cycles_elapsed.max",
+    "paths": "results/alpha/c7_s34ac_sol_l1p034_20261005/ncu/repeat-*/ncu.csv",
+    "sm_active_median": 2579.0,
+    "sm_active_values": [2556.0,2656.0,2571.0,2598.0,2579.0],
+    "values": [4635.0,4703.0,4637.0,4692.0,4659.0]
+  },
+  "nvbit": {
+    "accepted_launches": 1,
+    "control_sidecar": "results/alpha/c7_s34ac_sol_l1p034_20261005/control_bits.json",
+    "decoded_static_instructions": 56,
+    "enhanced_parser_limitation": "cuobjdump failed for the JIT .so; independent control-sidecar extraction succeeded",
+    "raw_stats_total_insts": 351941,
+    "raw_stats_total_reported_insts": 351941,
+    "trace": "results/alpha/c7_s34ac_sol_l1p034_20261005/nvbit",
+    "unknown_control_encodings": 0
+  },
+  "phase": "C7-S34AC",
+  "schema": "sm86_c7_sol_l1p034_vertical_v1",
+  "simulator": {
+    "completion_status": "incomplete_unmodeled_retirement_tails",
+    "instructions_issued": 160517,
+    "lower_bound_cycles": 2107,
+    "native_macro_dispatches": 0,
+    "records_seen": 160517,
+    "replay": "results/alpha/c7_s34ac_sol_l1p034_20261005/replay.json",
+    "unmodeled_tails": {"async_copy_shared_visibility": false,"coherence": true,"dirty_writeback": true,"reduction_read_modify_write": false}
+  },
+  "status": "complete_native_vertical_all_shape_screen_ncu_simulator_crosswalk_with_parser_limitation"
+}

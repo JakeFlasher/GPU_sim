@@ -1,0 +1,27 @@
+{
+  "candidate": "L1/problem_017_moe_expert_swiglu_with_down_projection_backward/cuda_cpp",
+  "phase": "C7-S34BR1",
+  "schema": "sm86_c7_sol_l1_problem017_source_class_correction_v1",
+  "source": "workloads/sol_execbench_baselines/L1/problem_017_moe_expert_swiglu_with_down_projection_backward/cuda_cpp",
+  "before": {
+    "class": "custom_cuda",
+    "reason": "marker-only source census"
+  },
+  "review": {
+    "kernel_cu": "stub translation unit containing only cuda_runtime.h and explanatory comments; no __global__ definition",
+    "main_cpp": "ATen/cuBLAS-only analytic backward with casts, mm, elementwise algebra consuming the precomputed sigmoid, and destination copies",
+    "official_reference": "definition.json/reference.py uses the same custom-input backward algebra",
+    "native_capture_disposition": "no custom-CUDA build/capture admitted; pure ATen/cuBLAS-style row retained"
+  },
+  "after": {
+    "class": "pure_aten",
+    "custom_kernel": false,
+    "counts_after_correction": {
+      "custom_cuda": 53,
+      "cutlass_cuda": 14,
+      "pure_aten": 136,
+      "total": 203
+    }
+  },
+  "status": "complete_source_class_correction_no_custom_vertical"
+}

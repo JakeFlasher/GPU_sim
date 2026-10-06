@@ -1,0 +1,68 @@
+{
+  "$id": "https://gpu-simulator.local/schemas/sm86_c3g_optin_writeback_coherence_tail_audit_v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "conclusion": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "default_replay": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "differential": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "host_identity": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "identity": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "interpretation": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "optin_replay": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "phase": {
+      "const": "C3-G/C6-I"
+    },
+    "schema": {
+      "const": "sm86_c3g_optin_writeback_coherence_tail_audit_v1"
+    },
+    "source_review": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "status": {
+      "type": "string"
+    },
+    "visibility_optin_replay": {
+      "additionalProperties": true,
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema",
+    "status",
+    "phase",
+    "host_identity",
+    "source_review",
+    "identity",
+    "default_replay",
+    "optin_replay",
+    "visibility_optin_replay",
+    "differential",
+    "conclusion",
+    "interpretation"
+  ],
+  "title": "SM86 C3-G/C6-I opt-in writeback/coherence tail audit",
+  "type": "object"
+}

@@ -39,6 +39,7 @@ problem_061_grad_hidden_kernel(
     const __nv_bfloat16* __restrict__ grad_output,
     const __nv_bfloat16* __restrict__ hidden_states,
     const __nv_bfloat16* __restrict__ mask,
+    __nv_bfloat16* __restrict__ grad_residual,
     __nv_bfloat16* __restrict__ grad_hidden_states,
     float* __restrict__ row_partials,
     float tanh_g) {
@@ -72,6 +73,7 @@ problem_061_grad_hidden_kernel(
         // mask` before the final bf16 store).
         const float y0 = g_f2.x * gate_mask;
         const float y1 = g_f2.y * gate_mask;
+        reinterpret_cast<__nv_bfloat162*>(grad_residual + row_offset)[i] = g_pair;
         ghs_row_vec[i] = __float22bfloat162_rn(make_float2(y0, y1));
 
         // Accumulator for grad_gate:
@@ -148,6 +150,7 @@ void problem_061_grad_hidden_launcher(
     const torch::Tensor& hidden_states,
     const torch::Tensor& mask,
     float tanh_g,
+    torch::Tensor& grad_residual,
     torch::Tensor& grad_hidden_states,
     torch::Tensor& row_partials,
     cudaStream_t stream) {
@@ -166,6 +169,8 @@ void problem_061_grad_hidden_launcher(
             hidden_states.data_ptr<at::BFloat16>()),
         reinterpret_cast<const __nv_bfloat16*>(
             mask.data_ptr<at::BFloat16>()),
+        reinterpret_cast<__nv_bfloat16*>(
+            grad_residual.data_ptr<at::BFloat16>()),
         reinterpret_cast<__nv_bfloat16*>(
             grad_hidden_states.data_ptr<at::BFloat16>()),
         row_partials.data_ptr<float>(),

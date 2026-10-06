@@ -1,0 +1,88 @@
+{
+  "bounded_attempt": {
+    "footer": false,
+    "max_records": 256,
+    "result": "record_limit_reached",
+    "return_code": 1,
+    "trace": "results/alpha/c6h_store_probe_20261004/visibility_reference.jsonl"
+  },
+  "host_identity": {
+    "compute_capability": "8.6",
+    "device_index": 0,
+    "driver": "615.71.09",
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c"
+  },
+  "identity": {
+    "arch_card": "arch_profiles/cards/sm_86.json",
+    "cache_scope": "launch",
+    "cell": "b1_store_device_line_stream_d16_l32",
+    "control": "results/alpha/c6h_store_probe_20261004/sass/memory_retirement_service_trace.control_bits.json",
+    "mode": "l1-l2",
+    "pchase_card": "data/pchase/sm_86_static_card.json",
+    "reference_features": true,
+    "simulator_binary": "sim/target/release/sim-run",
+    "trace": "results/alpha/c6h_store_probe_20261004/nvbit/b1_store_device_line_stream_d16_l32"
+  },
+  "interpretation": "The real store/device-fence trace exercises the model-local visibility protocol and emits fence/access observations, but every reconstructed reference boundary remains incomplete for unmodeled completion tails. The footer proves bounded event-loop termination only. Exact replay is retained for all 1130 boundaries and native macro dispatch remains zero; this is not a physical completion upper, fence-scope proof, or native scheduling claim.",
+  "model_local_visibility_context": {
+    "tails": {
+      "async_copy_shared_visibility": false,
+      "coherence": true,
+      "dirty_writeback": true,
+      "reduction_read_modify_write": false
+    },
+    "visibility_optin_completion_frontier": 11146,
+    "visibility_optin_sm_active_frontier": 11140,
+    "writeback_service_frontier": 11121
+  },
+  "open_surfaces": {
+    "fence_scope_completion": "not_closed",
+    "line_generation": "not_observed",
+    "native_hardware_scheduling": "not_claimed",
+    "next": "independent owner/generation/read-from evidence or preserve exact fallback; do not synthesize a visibility witness",
+    "ownership_read_from": "not_observed",
+    "physical_completion_upper": "unknown"
+  },
+  "phase": "C3-H/C6-J",
+  "reference": {
+    "complete_typed_boundaries": 0,
+    "dominant_completeness_unknown": "unmodeled_completion_tails",
+    "event_records": 1130,
+    "exact_replay_boundaries": 1130,
+    "footer_complete": true,
+    "max_records": 4096,
+    "native_macro_dispatches": 0,
+    "native_macro_fallbacks_reported": 0,
+    "payload_counts": {
+      "l1_invalidate_all": 2,
+      "l1_visibility_access": 1024,
+      "l1_visibility_fence": 2,
+      "l2_access_batch": 32,
+      "sm_wake": 70
+    },
+    "power_projection": "activity_only",
+    "pre_post_pairs": 565,
+    "queue_events_popped": 565,
+    "reference_lines_before_footer": 1131,
+    "state_projection_complete": false,
+    "terminal_reference_event_time": 11124,
+    "trace": "results/alpha/c6h_store_probe_20261004/visibility_reference_full.jsonl",
+    "witness_supplied": false
+  },
+  "schema": "sm86_c3h_visibility_reference_boundary_v1",
+  "source_review": {
+    "durable_unknowns": [
+      "ownership/read_from",
+      "line_generation",
+      "global_issue_order",
+      "hardware_completion",
+      "closed_fence_scope_history"
+    ],
+    "queue_consumer": "sim/sm/src/system.rs::L1VisibilityFence/L1VisibilityAccess event handlers",
+    "result": "fence scope/order are emitted as event observations, not a complete continuation certificate",
+    "typed_macro_guard": "sim/semantics/src/transform.rs and sim/sm/src/issue.rs retain unmodeled_completion_tails as pre-mutation refusal",
+    "visibility_payload": "sim/semantics/src/state.rs::TypedEventPayload::L1VisibilityFence/L1VisibilityAccess"
+  },
+  "status": "complete_negative_visibility_protocol_footer_exact_fallback"
+}

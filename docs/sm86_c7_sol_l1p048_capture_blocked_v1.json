@@ -1,0 +1,54 @@
+{
+  "candidate": "L1/problem_048_fused_gate_up_projection_with_swiglu/cuda_cpp",
+  "phase": "C7-S34AM3",
+  "schema": "sm86_c7_sol_l1p048_capture_blocked_v1",
+  "status": "complete_bounded_nvbit_blocker_no_native_vertical",
+  "source_contract": "docs/sm86_c7_sol_l1p048_source_v1.json",
+  "smoke": "docs/sm86_c7_sol_l1p048_smoke_v1.json",
+  "identity": {
+    "arch": "sm_86",
+    "cuda_toolkit": "13.2",
+    "host_compiler": "/usr/bin/g++-14",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "binary_extension": "results/alpha/c7_s34am_sol_l1p048_20261005/pinned/build/sol_l1p048_sm86.so",
+    "source": "workloads/sol_execbench_baselines/L1/problem_048_fused_gate_up_projection_with_swiglu/cuda_cpp",
+    "representative_shape": [
+      1,
+      128
+    ]
+  },
+  "attempts": [
+    {
+      "trace_root": "results/alpha/c7_s34am_sol_l1p048_20261005/pinned/nvbit_target",
+      "stdout": "results/alpha/c7_s34am_sol_l1p048_20261005/pinned/native_capture.stdout",
+      "stderr": "results/alpha/c7_s34am_sol_l1p048_20261005/pinned/native_capture.stderr",
+      "active_from_start": false,
+      "enhanced_tracer": true,
+      "exit_code": 1,
+      "failure": "FATAL: failed to parse static SASS instruction at PC 0x9380: HMNMX2.BF16_V2 R79 R8 c[0x0][0x2b0].H0_H0 !PT"
+    },
+    {
+      "trace_root": "results/alpha/c7_s34am_sol_l1p048_20261005/pinned/nvbit_target_skip",
+      "stdout": "results/alpha/c7_s34am_sol_l1p048_20261005/pinned/native_capture_skip.stdout",
+      "stderr": "results/alpha/c7_s34am_sol_l1p048_20261005/pinned/native_capture_skip.stderr",
+      "active_from_start": false,
+      "enhanced_tracer": false,
+      "exit_code": 1,
+      "failure": "The same static SASS parser fatal occurs with SKIP_ENHANCED_TRACER=1, so this is a live instrumentation/parser blocker rather than only post-capture enhancement."
+    }
+  ],
+  "mechanism": {
+    "observed": "The first vendor BF16 projection launch reaches HMNMX2.BF16_V2, which the local NVBit tracer decoder cannot parse; the process exits before dynamic trace emission.",
+    "hypothesis": "The instruction is in a vendor cuBLAS JIT module rather than the source extension custom GELU-tanh kernel; the local tracer fails before a stable launch/module map is emitted.",
+    "inference": "A complete native control/replay crosswalk for this three-launch chain cannot be claimed with the current local tracer. This row remains in the coverage denominator; no custom-only or synthetic substitute is admitted."
+  },
+  "disposition": {
+    "native_vertical_admitted": false,
+    "control_sidecar": null,
+    "replay": null,
+    "ncu_repetitions": 0,
+    "ncu_values_used_to_change_simulator": false,
+    "next_supported_check": "A tracer build with the required vendor BF16 SASS decode, or a future traceable replacement preserving the exact two-matmul-plus-custom launch contract; neither is available in this bounded SM86 run."
+  }
+}

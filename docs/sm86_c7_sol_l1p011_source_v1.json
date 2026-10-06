@@ -1,0 +1,30 @@
+{
+  "candidate": "L1/problem_011_rotary_position_embedding/cuda_cpp",
+  "environment": {
+    "cuda_available": true,
+    "torch": "2.12.0+cu130",
+    "torch_cuda_runtime": "13.0",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "capability": "8.6",
+    "permitted_environment": "tools/sol_execbench/.venv",
+    "host_compiler": "/usr/bin/g++-14",
+    "nvcc_expected": "CUDA 13.2"
+  },
+  "phase": "C7-S34R1",
+  "schema": "sm86_c7_sol_l1p011_source_v1",
+  "source_contract": {
+    "source": "workloads/sol_execbench_baselines/L1/problem_011_rotary_position_embedding/cuda_cpp",
+    "entry_point": "main.cpp::run",
+    "class": "custom_cuda",
+    "sm86_marker": "solution.json compile option arch=compute_86,code=sm_86",
+    "custom_kernel": "problem_011_rotary_position_embedding_kernel",
+    "constants": {"head_dim": 128, "half_head_dim": 64, "grid": "one CTA per batch/sequence position", "threads_per_cta": 64},
+    "inputs": "position_ids [batch,seq] int64; inv_freq [64] FP32; attention_scaling scalar FP32",
+    "output": "cos_sin [batch,seq,128,2] BF16 destination",
+    "math": "llama3-scaled frequency multiplied by position, sincos, duplicated across two head-dimension halves, BF16 output",
+    "oracle": "independent definition.json custom-input RoPE reference with frequency construction and BF16 conversion",
+    "workload_shapes": [[16,256],[1,2048],[1,613],[1,1024],[16,373],[16,919]]
+  },
+  "selection_basis": "Next executable L1 custom-CUDA row after multi-kernel Hyena; no timing or NCU values transferred",
+  "status": "complete_source_contract_and_sm86_environment_review"
+}

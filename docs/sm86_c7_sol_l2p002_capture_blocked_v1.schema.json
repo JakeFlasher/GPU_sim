@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": [
+    "schema",
+    "phase",
+    "status",
+    "candidate",
+    "execution",
+    "correctness",
+    "memcheck",
+    "nvbit",
+    "ncu",
+    "limits"
+  ],
+  "properties": {
+    "schema": {
+      "const": "sm86_c7_sol_l2p002_capture_blocked_v1"
+    },
+    "phase": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string"
+    },
+    "candidate": {
+      "type": "string"
+    },
+    "execution": {
+      "type": "object"
+    },
+    "correctness": {
+      "type": "object"
+    },
+    "memcheck": {
+      "type": "object"
+    },
+    "nvbit": {
+      "type": "object"
+    },
+    "ncu": {
+      "type": "object"
+    },
+    "limits": {
+      "type": "array"
+    }
+  },
+  "additionalProperties": false
+}

@@ -282,7 +282,7 @@ def reduce(root: Path) -> dict[str, Any]:
         require(launch["coverage"]["kind"] == "full", f"{key}: coverage")
         require(launch["counters"]["records_seen"] == records, f"{key}: replay records")
         control_pipeline = launch["timing"]["readiness"]["control_pipeline"]
-        expected_trace_branches = (64 // cell["unroll"]) * cell["warps"]
+        expected_trace_branches = (1024 // cell["unroll"]) * cell["warps"]
         require(
             control_pipeline["branch_instructions_issued"] == expected_trace_branches,
             f"{key}: replay branch count",

@@ -1,0 +1,104 @@
+{
+  "schema": "sm86_m5i_async_visibility_ownership_boundary_v1",
+  "phase": "M5-I",
+  "status": "complete_scoped_async_protocol_negative_ownership_boundary_open",
+  "selection": {
+    "source_arm": "store-free async_source_only, l1 compact, depth4 groups64",
+    "visibility_arm": "async_visibility_phase, l1 compact, depth4 groups64, post-interval result store",
+    "contrast_role": "protocol-prefix/visibility-result contrast; binary and terminal-store differences are explicit, so no endpoint delta is interpreted as a causal physical-tail cost",
+    "why_selected": "both arms expose the same 256 async copies, 8192 lane operations, 2048 committed/waited lane groups, and complete logical wait prefix while preserving distinct store/completion frontiers"
+  },
+  "host_identity": {
+    "device_index": 0,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "compute_capability": "8.6",
+    "driver": "615.71.09",
+    "pstate": "P0",
+    "graphics_clock_mhz": 1350,
+    "memory_clock_mhz": 10501
+  },
+  "identity": {
+    "arch_card": "arch_profiles/cards/sm_86.json",
+    "pchase_card": "data/pchase/sm_86_static_card.json",
+    "simulator_binary": "sim/target/release/sim-run",
+    "source_trace": "results/alpha/c3_source_only_20261003/nvbit_fresh",
+    "source_control": "results/alpha/c3_source_only_20261003/control.json",
+    "visibility_trace": "results/alpha/c3_source_phase_repair_20261003/nvbit",
+    "visibility_control": "results/alpha/c3_source_phase_repair_20261003/control.json",
+    "tail_fact_extractor": "tools/extract_sm86_tail_facts.py",
+    "current_replay_root": "results/alpha/m5i_async_visibility_20261006"
+  },
+  "arms": {
+    "source": {
+      "tail_facts": "results/alpha/m5i_async_visibility_20261006/facts/source.json",
+      "replay_1": "results/alpha/m5i_async_visibility_20261006/source/replay-1/replay.json",
+      "replay_2": "results/alpha/m5i_async_visibility_20261006/source/replay-2/replay.json",
+      "replay_byte_identical": true,
+      "records": 1039,
+      "instructions_issued": 1039,
+      "simulator_completion": {
+        "status": "complete",
+        "cycles": 13235
+      },
+      "gpc_observation": 15011,
+      "ncu_median_cycles": 12616.0,
+      "logical_protocol": {
+        "async_copies": 256,
+        "copy_lane_operations": 8192,
+        "committed_lane_groups": 2048,
+        "waited_lane_groups": 2048,
+        "terminal_unwaited_lane_groups": 0
+      }
+    },
+    "visibility": {
+      "tail_facts": "results/alpha/m5i_async_visibility_20261006/facts/phase.json",
+      "replay_1": "results/alpha/m5i_async_visibility_20261006/phase/replay-1/replay.json",
+      "replay_2": "results/alpha/m5i_async_visibility_20261006/phase/replay-2/replay.json",
+      "replay_byte_identical": true,
+      "records": 2088,
+      "instructions_issued": 2088,
+      "simulator_completion": {
+        "status": "incomplete_unmodeled_retirement_tails",
+        "lower_bound_cycles": 18305,
+        "tails": {
+          "dirty_writeback": true,
+          "coherence": true,
+          "async_copy_shared_visibility": false,
+          "reduction_read_modify_write": false
+        }
+      },
+      "gpc_observation": 20081,
+      "ncu_median_cycles": 16658.0,
+      "logical_protocol": {
+        "async_copies": 256,
+        "copy_lane_operations": 8192,
+        "committed_lane_groups": 2048,
+        "waited_lane_groups": 2048,
+        "terminal_unwaited_lane_groups": 0,
+        "stores": 4
+      }
+    }
+  },
+  "ownership_boundary": {
+    "hardware_completion_token_observed": false,
+    "owner_read_from_observed": false,
+    "line_generation_observed": false,
+    "global_event_order_observed": false,
+    "fence_scope_semantics_closed": false,
+    "async_shared_visibility_closed": false,
+    "logical_wait_prefix_complete": true,
+    "physical_completion_upper_closed": false,
+    "native_macro_dispatches": 0
+  },
+  "reconciliation": {
+    "protocol_counts_equal": true,
+    "source_records": 1039,
+    "visibility_records": 2088,
+    "source_and_visibility_ncu_values_are_not_a_matched_timing_delta": true,
+    "ncu_values_used_for_model_selection": false,
+    "observer_endpoint_not_physical_completion": true,
+    "exact_fallback_policy": "retain exact replay whenever typed ownership/generation/completion state is incomplete"
+  },
+  "interpretation": "M5-I closes the scoped async protocol boundary review and negative live rerun. Both current-release replays are byte-identical and independently extracted facts show the same complete logical cp.async commit/wait prefix: 256 copies, 8192 lane operations, 2048 committed and waited lane groups, no terminal unwaited groups. The visibility arm additionally has four result stores and remains lower-only with dirty-writeback/coherence tails. Neither trace observes hardware completion, ownership/read-from, line generation, global execution order, or fence-scope semantics; the complete logical prefix is not a physical completion proof and no native continuation is admitted."
+}

@@ -1,0 +1,116 @@
+{
+  "identity": {
+    "arch_card": "arch_profiles/cards/sm_86.json",
+    "control": "results/alpha/c7_s33bb_async_source_20261004/control.json",
+    "ncu_not_used_for_perturbation": true,
+    "pchase_card": "data/pchase/sm_86_static_card.json",
+    "source": "workloads/research_probes/async_source_only/async_visibility_phase",
+    "tail_fact_extractor": "tools/extract_sm86_tail_facts.py",
+    "trace": "results/alpha/c7_s33bb_async_source_20261004/trace"
+  },
+  "interpretation": "The independent extractor confirms a complete logical copy/commit/wait prefix (8192 lane copies, 2048 committed and waited groups, no terminal unwaited groups), but it does not observe hardware completion or visibility ownership. The bounded uncarded/carded replay is deterministic and unchanged, identifying this model route as destination-local rather than DRAM-limited. Async shared visibility, dirty writeback, and coherence remain open; no completion upper or timing fit is claimed.",
+  "perturbation": {
+    "async_diagnostics_equal": true,
+    "configurations": [
+      "--mode l1-l2 --cache-scope launch",
+      "--mode l1-l2 --cache-scope launch --carded-dram"
+    ],
+    "interpretation": "carded DRAM is inert for this bounded route because the model reports destination-local async limitation and zero destination service observations; this is a mechanism-local negative, not a hardware claim",
+    "records_equal": true,
+    "rows": [
+      {
+        "async_groups": {
+          "completion_hidden_before_wait_cycles": 0,
+          "destination_groups_observed": 0,
+          "destination_local_cycles": 5312,
+          "destination_local_limited_groups": 64,
+          "destination_sm_service_cycles": 0,
+          "destination_sm_service_limited_groups": 0,
+          "destination_wavefronts_observed": 0,
+          "groups_committed": 64,
+          "groups_waited": 64,
+          "source_cycles": 15667,
+          "source_limited_groups": 0
+        },
+        "completion_frontier": {
+          "lower_bound_cycles": 30905,
+          "status": "incomplete_unmodeled_retirement_tails",
+          "unmodeled_tails": {
+            "async_copy_shared_visibility": true,
+            "coherence": true,
+            "dirty_writeback": true,
+            "reduction_read_modify_write": false
+          }
+        },
+        "gpc_lower_bound_cycles": 30905,
+        "instructions_issued": 2088,
+        "mode": "uncarded",
+        "native_macro_dispatches": 0,
+        "path": "results/alpha/c3_async_perturbation_20261004/uncarded.json",
+        "records": 2088,
+        "terminal_modeled_event_time": 30905
+      },
+      {
+        "async_groups": {
+          "completion_hidden_before_wait_cycles": 0,
+          "destination_groups_observed": 0,
+          "destination_local_cycles": 5312,
+          "destination_local_limited_groups": 64,
+          "destination_sm_service_cycles": 0,
+          "destination_sm_service_limited_groups": 0,
+          "destination_wavefronts_observed": 0,
+          "groups_committed": 64,
+          "groups_waited": 64,
+          "source_cycles": 15667,
+          "source_limited_groups": 0
+        },
+        "completion_frontier": {
+          "lower_bound_cycles": 30905,
+          "status": "incomplete_unmodeled_retirement_tails",
+          "unmodeled_tails": {
+            "async_copy_shared_visibility": true,
+            "coherence": true,
+            "dirty_writeback": true,
+            "reduction_read_modify_write": false
+          }
+        },
+        "gpc_lower_bound_cycles": 30905,
+        "instructions_issued": 2088,
+        "mode": "carded",
+        "native_macro_dispatches": 0,
+        "path": "results/alpha/c3_async_perturbation_20261004/carded.json",
+        "records": 2088,
+        "terminal_modeled_event_time": 30905
+      }
+    ],
+    "terminal_equal": true
+  },
+  "phase": "C3-D",
+  "reconciliation": {
+    "async_visibility_tail_remains_open": true,
+    "coherence_tail_remains_open": true,
+    "dirty_writeback_tail_remains_open": true,
+    "native_macro_dispatches": 0,
+    "physical_completion_upper_closed": false,
+    "protocol_prefix_complete": true
+  },
+  "schema": "sm86_c3d_async_visibility_tail_reconciliation_v1",
+  "status": "complete_async_protocol_facts_and_bounded_model_perturbation_tails_open",
+  "tail_facts": {
+    "async_copies": 256,
+    "committed_lane_groups": 2048,
+    "copy_lane_operations": 8192,
+    "fence_scope_semantics_closed": false,
+    "global_event_order_observed": false,
+    "hardware_completion_token_observed": false,
+    "line_generation_observed": false,
+    "memory_records": 708,
+    "owner_read_from_observed": false,
+    "path": "results/alpha/c3_async_tail_facts_20261004/async_visibility_phase.json",
+    "records": 2088,
+    "terminal_uncommitted_lane_copies": 0,
+    "terminal_unwaited_lane_copies": 0,
+    "terminal_unwaited_lane_groups": 0,
+    "waited_lane_groups": 2048
+  }
+}

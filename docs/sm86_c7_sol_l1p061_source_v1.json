@@ -1,0 +1,105 @@
+{
+  "candidate": "L1/problem_061_tanh_gated_residual_add_backward/cuda_cpp",
+  "environment": {
+    "cuda_available": true,
+    "torch": "2.12.0+cu130",
+    "torch_cuda_runtime": "13.0",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "capability": "8.6",
+    "permitted_environment": "tools/sol_execbench/.venv",
+    "host_compiler": "/usr/bin/g++-14",
+    "nvcc_expected": "CUDA 13.2"
+  },
+  "phase": "C7-S34AT1",
+  "schema": "sm86_c7_sol_l1p061_source_v1",
+  "source_contract": {
+    "source": "workloads/sol_execbench_baselines/L1/problem_061_tanh_gated_residual_add_backward/cuda_cpp",
+    "entry_point": "main.cpp::run",
+    "class": "custom_cuda",
+    "sm86_marker": "solution.json compile option arch=compute_86,code=sm_86",
+    "custom_kernels": [
+      "problem_061_grad_hidden_kernel (also writes identity grad_residual)",
+      "problem_061_grad_gate_reduce_kernel"
+    ],
+    "constants": {
+      "hidden_size": 4096,
+      "block_threads": 256,
+      "bf16x2_vector_access": true,
+      "per_row_cta": true,
+      "fp32_row_partial_reduction": true
+    },
+    "inputs": "grad_output, hidden_states [B,S,4096] contiguous BF16; gate scalar BF16; mask [B,S,1] BF16",
+    "outputs": "grad_residual, grad_hidden_states [B,S,4096] and grad_gate scalar contiguous BF16 destination tensors",
+    "math": "identity grad_residual, FP32 grad_output*tanh(gate)*mask to BF16, FP32 masked hidden product reduction times sech2(gate) to BF16",
+    "oracle": "independent definition.json/reference.py tanh-gated residual backward reference",
+    "workload_shapes": [
+      [
+        1,
+        131
+      ],
+      [
+        1,
+        512
+      ],
+      [
+        64,
+        128
+      ],
+      [
+        8,
+        512
+      ],
+      [
+        32,
+        128
+      ],
+      [
+        4,
+        1024
+      ],
+      [
+        4,
+        128
+      ],
+      [
+        2,
+        512
+      ],
+      [
+        1,
+        256
+      ],
+      [
+        4,
+        256
+      ],
+      [
+        1,
+        997
+      ],
+      [
+        2,
+        128
+      ],
+      [
+        2,
+        256
+      ],
+      [
+        8,
+        691
+      ],
+      [
+        16,
+        256
+      ],
+      [
+        2,
+        1571
+      ]
+    ],
+    "implementation_note": "The identity grad_residual write is fused into Kernel A to avoid an otherwise separate ATen copy launch; output semantics remain grad_residual = grad_output and the destination is written on the current stream."
+  },
+  "selection_basis": "Next genuine L1 custom-CUDA row after the problem059 vertical; no timing or NCU values transferred",
+  "status": "complete_source_contract_and_sm86_environment_review"
+}

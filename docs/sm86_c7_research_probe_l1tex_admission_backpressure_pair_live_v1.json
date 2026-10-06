@@ -1,0 +1,234 @@
+{
+  "schema": "sm86_c7_research_probe_l1tex_admission_backpressure_pair_live_v1",
+  "status": "same_binary_control_store_differential_complete_no_parameter_fit",
+  "host_identity": {
+    "device_index": 0,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "compute_capability": "8.6",
+    "driver": "615.71.09",
+    "pstate": "P0",
+    "graphics_clock_mhz": 1350,
+    "memory_clock_mhz": 10501
+  },
+  "identity": {
+    "source": "workloads/research_probes/l1tex_admission_backpressure",
+    "binary_used_for_both_arms": "same rebuilt workloads/research_probes/l1tex_admission_backpressure/l1tex_admission_backpressure",
+    "historical_trace_twin_used": false,
+    "shared_shape": {
+      "blocks": 84,
+      "warps": 8,
+      "depth": 32,
+      "active_lanes": 8,
+      "gap_steps": 0,
+      "layout": "line_unique",
+      "pattern": "all"
+    },
+    "control_sidecar": "results/alpha/c7_s33as_l1tex_pair_20261004/sass/l1tex_admission_backpressure.control_bits.json",
+    "ncu_metric": "gpc__cycles_elapsed.max",
+    "ncu_repeats": 5,
+    "ncu_replay_mode": "application",
+    "ncu_clock_control": "base",
+    "ncu_cache_control": "all"
+  },
+  "arms": [
+    {
+      "key": "b84_w8_control_line_unique_d32_g0_all",
+      "tail": "control",
+      "layout": "line_unique",
+      "correct": true,
+      "trials": 7,
+      "compute_sanitizer": "one full-shape trial; zero errors",
+      "artifact": "results/alpha/c7_s33as_l1tex_pair_20261004",
+      "binary": "workloads/research_probes/l1tex_admission_backpressure/l1tex_admission_backpressure",
+      "args": [
+        "control",
+        "line_unique",
+        "84",
+        "8",
+        "32",
+        "8",
+        "0",
+        "all",
+        "1"
+      ],
+      "tracer_total_insts": 3334464,
+      "target_kernel": "_Z27admission_backpressure_tailILi0EEvPjPyS1_iiiiii___0",
+      "target_records_replayed": 1164576,
+      "target_coverage": {
+        "kind": "full",
+        "blocks_observed": 84,
+        "population_blocks": 84
+      },
+      "simulator_lower_bound_cycles": 12349,
+      "completion_frontier": {
+        "status": "incomplete_unmodeled_retirement_tails",
+        "lower_bound_cycles": 12349,
+        "unmodeled_tails": {
+          "reduction_read_modify_write": false,
+          "dirty_writeback": true,
+          "coherence": true,
+          "async_copy_shared_visibility": false
+        }
+      },
+      "ncu_values": [
+        16973.0,
+        16967.0,
+        16957.0,
+        16982.0,
+        16954.0
+      ],
+      "ncu_median_cycles": 16967.0,
+      "ncu_rows": [
+        {
+          "rep": "ncu_0",
+          "gpc__cycles_elapsed.max": 16973.0,
+          "smsp__inst_executed.sum": 1164576.0,
+          "gpu__time_duration.sum": 10.912,
+          "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": 2688.0,
+          "dram__sectors_write.sum": 252.0
+        },
+        {
+          "rep": "ncu_1",
+          "gpc__cycles_elapsed.max": 16967.0,
+          "smsp__inst_executed.sum": 1164576.0,
+          "gpu__time_duration.sum": 10.912,
+          "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": 2688.0,
+          "dram__sectors_write.sum": 72.0
+        },
+        {
+          "rep": "ncu_2",
+          "gpc__cycles_elapsed.max": 16957.0,
+          "smsp__inst_executed.sum": 1164576.0,
+          "gpu__time_duration.sum": 10.88,
+          "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": 2688.0,
+          "dram__sectors_write.sum": 4.0
+        },
+        {
+          "rep": "ncu_3",
+          "gpc__cycles_elapsed.max": 16982.0,
+          "smsp__inst_executed.sum": 1164576.0,
+          "gpu__time_duration.sum": 10.944,
+          "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": 2688.0,
+          "dram__sectors_write.sum": 12.0
+        },
+        {
+          "rep": "ncu_4",
+          "gpc__cycles_elapsed.max": 16954.0,
+          "smsp__inst_executed.sum": 1164576.0,
+          "gpu__time_duration.sum": 10.88,
+          "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": 2688.0,
+          "dram__sectors_write.sum": 72.0
+        }
+      ],
+      "instruction_count_match": true,
+      "lower_bound_consistency": true,
+      "native_macro_dispatches": 0
+    },
+    {
+      "key": "b84_w8_store_line_unique_d32_g0_all",
+      "tail": "store",
+      "layout": "line_unique",
+      "correct": true,
+      "trials": 7,
+      "compute_sanitizer": "one full-shape trial; zero errors",
+      "artifact": "docs/sm86_c7_research_probe_l1tex_admission_backpressure_live_v2.json",
+      "binary": "workloads/research_probes/l1tex_admission_backpressure/l1tex_admission_backpressure",
+      "args": [
+        "store",
+        "line_unique",
+        "84",
+        "8",
+        "32",
+        "8",
+        "0",
+        "all",
+        "1"
+      ],
+      "tracer_total_insts": 3671808,
+      "target_kernel": "_Z27admission_backpressure_tailILi1EEvPjPyS1_iiiiii___0",
+      "target_records_replayed": 1255968,
+      "target_coverage": {
+        "kind": "full",
+        "blocks_observed": 84,
+        "population_blocks": 84
+      },
+      "simulator_lower_bound_cycles": 12905,
+      "completion_frontier": {
+        "status": "incomplete_unmodeled_retirement_tails",
+        "lower_bound_cycles": 12905,
+        "unmodeled_tails": {
+          "reduction_read_modify_write": false,
+          "dirty_writeback": true,
+          "coherence": true,
+          "async_copy_shared_visibility": false
+        }
+      },
+      "ncu_values": [
+        29673.0,
+        29585.0,
+        30587.0,
+        29790.0,
+        30244.0
+      ],
+      "ncu_median_cycles": 29790.0,
+      "ncu_rows": [
+        {
+          "rep": "ncu_0",
+          "gpc__cycles_elapsed.max": 29673.0,
+          "smsp__inst_executed.sum": 1255968.0,
+          "gpu__time_duration.sum": 19.04,
+          "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": 24192.0,
+          "dram__sectors_write.sum": 215412.0
+        },
+        {
+          "rep": "ncu_1",
+          "gpc__cycles_elapsed.max": 29585.0,
+          "smsp__inst_executed.sum": 1255968.0,
+          "gpu__time_duration.sum": 19.008,
+          "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": 24192.0,
+          "dram__sectors_write.sum": 210940.0
+        },
+        {
+          "rep": "ncu_2",
+          "gpc__cycles_elapsed.max": 30587.0,
+          "smsp__inst_executed.sum": 1255968.0,
+          "gpu__time_duration.sum": 19.648,
+          "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": 24192.0,
+          "dram__sectors_write.sum": 231180.0
+        },
+        {
+          "rep": "ncu_3",
+          "gpc__cycles_elapsed.max": 29790.0,
+          "smsp__inst_executed.sum": 1255968.0,
+          "gpu__time_duration.sum": 19.136,
+          "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": 24192.0,
+          "dram__sectors_write.sum": 210396.0
+        },
+        {
+          "rep": "ncu_4",
+          "gpc__cycles_elapsed.max": 30244.0,
+          "smsp__inst_executed.sum": 1255968.0,
+          "gpu__time_duration.sum": 19.424,
+          "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": 24192.0,
+          "dram__sectors_write.sum": 209892.0
+        }
+      ],
+      "instruction_count_match": true,
+      "lower_bound_consistency": true,
+      "native_macro_dispatches": 0
+    }
+  ],
+  "comparison": {
+    "hardware_delta_cycles": 12823.0,
+    "simulator_lower_bound_delta_cycles": 556,
+    "delta_gap_cycles": 12267.0,
+    "hardware_delta_fraction": 0.7557611834738021,
+    "simulator_lower_bound_consistency": true,
+    "instruction_count_match": true,
+    "hardware_completion": "not_observed",
+    "point_estimator": "not_claimed",
+    "interpretation_class": "mechanism_local_differential_falsifier"
+  },
+  "interpretation": "The predeclared control/store pair uses one rebuilt binary, one static control sidecar, identical shape/launch/cache/clock protocol, seven correctness trials, full-shape Compute Sanitizer, NVBit, deterministic replay, and five application-replay NCU repetitions per arm. Both lower bounds are below their NCU observations and instruction counts match. Hardware adds 12,823 cycles (control median 16,967 to store median 29,790), while the simulator lower-bound delta is 556 cycles (12,349 to 12,905). This is a mechanism-local differential mismatch, not a fitted store or L1TEX latency; completion, dirty-writeback, and coherence remain open."
+}

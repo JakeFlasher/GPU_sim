@@ -25,8 +25,11 @@ DEFAULT_OUTPUT = (
 DRIVER = HERE / "fixed_latency_allocate_driver"
 LONG_NATIVE = HERE / "fixed_latency_allocate.cubin"
 LONG_BANK3 = HERE / "fixed_latency_allocate_same_bank.cubin"
-TRACE_NATIVE = HERE / "fixed_latency_allocate_trace.cubin"
-TRACE_BANK3 = HERE / "fixed_latency_allocate_trace_same_bank.cubin"
+# Correctness, tracing, replay, and NCU use one rebuilt long-generation
+# cubin. The aliases preserve the old campaign shape without invoking a
+# separate 64-generation trace workload.
+TRACE_NATIVE = LONG_NATIVE
+TRACE_BANK3 = LONG_BANK3
 
 
 def load_base_campaign():
@@ -84,7 +87,7 @@ class Cell:
         return TRACE_NATIVE if trace else LONG_NATIVE
 
     def target(self, *, trace: bool, trials: int) -> list[str]:
-        generations = 64 if trace else 8192
+        generations = 8192
         driver_variant = "r11-same-bank" if self.variant == "bank3" else "original"
         return [
             str(DRIVER),
@@ -135,7 +138,7 @@ def selected_cells(selector: str | None) -> list[Cell]:
 
 
 def require_binaries() -> None:
-    for path in (DRIVER, LONG_NATIVE, LONG_BANK3, TRACE_NATIVE, TRACE_BANK3):
+    for path in (DRIVER, LONG_NATIVE, LONG_BANK3):
         if not path.is_file() or path.stat().st_size == 0:
             raise RuntimeError(f"required binary is missing: {path}")
 
@@ -149,7 +152,7 @@ def emit_manifest(output: Path) -> None:
             "cells": [{**asdict(cell), "key": cell.key} for cell in configured_cells()],
             "ncu_metrics": list(METRICS),
             "long_generations": 8192,
-            "trace_generations": 64,
+            "trace_generations": 8192,
             "identification_widths": [4, 8],
             "held_out_widths": [12, 16],
             "exact_binary_pair": {
@@ -368,8 +371,6 @@ def run_static(output: Path) -> None:
     binaries = {
         "fixed_latency_allocate": LONG_NATIVE,
         "fixed_latency_allocate_same_bank": LONG_BANK3,
-        "fixed_latency_allocate_trace": TRACE_NATIVE,
-        "fixed_latency_allocate_trace_same_bank": TRACE_BANK3,
     }
     for name, binary in binaries.items():
         for suffix, option in (("sass", "--dump-sass"), ("resources", "--dump-resource-usage")):
@@ -410,9 +411,9 @@ def run_static(output: Path) -> None:
 
 def control_path(output: Path, cell: Cell) -> Path:
     name = (
-        "fixed_latency_allocate_trace_same_bank.control_bits.json"
+        "fixed_latency_allocate_same_bank.control_bits.json"
         if cell.variant == "bank3"
-        else "fixed_latency_allocate_trace.control_bits.json"
+        else "fixed_latency_allocate.control_bits.json"
     )
     return output / "sass" / name
 

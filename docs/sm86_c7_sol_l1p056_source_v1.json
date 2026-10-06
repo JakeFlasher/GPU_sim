@@ -1,0 +1,42 @@
+{
+  "candidate": "L1/problem_056_mamba_ssm_dt_projection_softplus_clamp_backward/cuda_cpp",
+  "environment": {
+    "cuda_available": true,
+    "torch": "2.12.0+cu130",
+    "torch_cuda_runtime": "13.0",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "capability": "8.6",
+    "permitted_environment": "tools/sol_execbench/.venv",
+    "host_compiler": "/usr/bin/g++-14",
+    "nvcc_expected": "CUDA 13.2"
+  },
+  "phase": "C7-S34AP1",
+  "schema": "sm86_c7_sol_l1p056_source_v1",
+  "source_contract": {
+    "source": "workloads/sol_execbench_baselines/L1/problem_056_mamba_ssm_dt_projection_softplus_clamp_backward/cuda_cpp",
+    "entry_point": "main.cpp::run",
+    "class": "custom_cuda",
+    "sm86_marker": "solution.json compile option arch=compute_86,code=sm_86",
+    "custom_kernel": "problem_056_mamba_softplus_clamp_backward_kernel",
+    "constants": {
+      "num_heads": 40,
+      "block_threads": 256,
+      "one_cta_per_head": true,
+      "statistics_dtype": "FP32",
+      "output_dtype": "BF16"
+    },
+    "inputs": "grad_output, dt_with_bias, dt_activated [B,S,40] contiguous BF16; time_step_min/max host FP32 scalars",
+    "outputs": "grad_dt [B,S,40] and grad_dt_bias [40] contiguous BF16 destination tensors",
+    "math": "strict clamp mask on dt_activated, sigmoid(dt_with_bias), BF16 per-element grad, FP32 sum over B/S then BF16 bias gradient",
+    "oracle": "independent definition.json/reference.py clamp/sigmoid backward reference",
+    "workload_shapes": [
+      [2,1571], [32,4096], [16,1249], [64,853], [4,293], [8,1024],
+      [2,211], [64,1423], [2,256], [4,1657], [8,8192], [4,4096],
+      [4,512], [1,919], [1,131], [64,613]
+    ],
+    "clamp_scalars": {"time_step_min": 0.001, "time_step_max": 0.1},
+    "edge_contract": "strictly interior dt_activated values pass; exact bounds are zero-gradient"
+  },
+  "selection_basis": "Next genuine L1 custom-CUDA row after problem053; no timing or NCU values transferred",
+  "status": "complete_source_contract_and_sm86_environment_review"
+}

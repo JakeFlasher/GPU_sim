@@ -1,0 +1,67 @@
+{
+  "candidate": "L1/problem_013_fused_residual_rms_norm_backward/cuda_cpp",
+  "correctness_and_sanitizer": {
+    "build_smoke": "results/alpha/c7_s34t_sol_l1p013_20261005/smoke.json",
+    "correctness_passed": true,
+    "sanitizer": "results/alpha/c7_s34t_sol_l1p013_20261005/compute_sanitizer.stderr",
+    "sanitizer_errors": 0,
+    "capture_correctness": "results/alpha/c7_s34t_sol_l1p013_20261005/limited.stdout"
+  },
+  "crosswalk": {
+    "native_hardware_scheduling_claimed": false,
+    "ncu_values_used_to_change_simulator": false,
+    "nvbit_raw_stat_unit_is_separate": true,
+    "physical_completion_upper_closed": false,
+    "simulator_ncu_instruction_count_equal": true,
+    "per_kernel_instruction_counts_equal": true,
+    "lower_bound_consistency": {"grad_x": true, "grad_weight": false},
+    "lower_vs_ncu_median_cycles": {"grad_x": {"lower": 14434, "median": 15102, "delta": -668}, "grad_weight": {"lower": 113069, "median": 34972, "delta": 78097}},
+    "lower_bound_falsifier": "grad_weight modeled lower frontier exceeds independent NCU median; no timing value fitted"
+  },
+  "identity": {
+    "arch": "sm_86",
+    "binary_extension": "results/alpha/c7_s34t_sol_l1p013_20261005/build/sol_l1p013_sm86.so",
+    "cuda_toolkit": "13.2",
+    "environment": "tools/sol_execbench/.venv",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "host_compiler": "/usr/bin/g++-14",
+    "capture_selection": "ACTIVE_FROM_START=1; DYNAMIC_KERNEL_LIMIT_START=0; DYNAMIC_KERNEL_LIMIT_END=2; both candidate launches retained",
+    "profiler_protocol": "NCU profile-from-start off; application replay; clock none; cache all",
+    "source": "workloads/sol_execbench_baselines/L1/problem_013_fused_residual_rms_norm_backward/cuda_cpp",
+    "torch": "2.12.0+cu130",
+    "representative_capture_shape": {"batch": 1, "seq_len": 256}
+  },
+  "interpretation": "C7-S34T completes a two-kernel custom CUDA L1 RMSNorm-backward vertical through source review, SM86 build, backward-gradient correctness, memcheck, two-launch NVBit/control capture, deterministic replay, and five per-kernel NCU repetitions. Instruction counts match for both launches. The grad_weight lower-frontier falsifier is retained rather than fitted away; per-kernel tails, parser limitation, raw tracer units, and zero native macro dispatch remain explicit.",
+  "ncu": {
+    "metric": "gpc__cycles_elapsed.max",
+    "paths": "results/alpha/c7_s34t_sol_l1p013_20261005/ncu/repeat-*/ncu.csv",
+    "repetitions": 5,
+    "per_kernel": {
+      "grad_x": {"kernel": "<unnamed>::grad_x_kernel(const __nv_bfloat16 *, const float *, const float *, const float *, __nv_bfloat16 *, __nv_bfloat16 *, int)", "cycles": [15263.0,15102.0,15032.0,15393.0,14959.0], "median_cycles": 15102.0, "sm_active": [13588.0,13456.0,13383.0,13749.0,13306.0], "median_sm_active": 13456.0, "instructions": [985600.0,985600.0,985600.0,985600.0,985600.0], "median_instructions": 985600.0},
+      "grad_weight": {"kernel": "<unnamed>::grad_weight_kernel(const __nv_bfloat16 *, const float *, float *, int)", "cycles": [34972.0,34938.0,35049.0,35220.0,34850.0], "median_cycles": 34972.0, "sm_active": [33326.0,33275.0,33397.0,33489.0,33178.0], "median_sm_active": 33326.0, "instructions": [1472000.0,1472000.0,1472000.0,1472000.0,1472000.0], "median_instructions": 1472000.0}
+    },
+    "total_instructions_per_repeat": [2457600.0,2457600.0,2457600.0,2457600.0,2457600.0]
+  },
+  "nvbit": {
+    "accepted_launches": 2,
+    "control_sidecar": "results/alpha/c7_s34t_sol_l1p013_20261005/control_bits.json",
+    "decoded_static_instructions": 872,
+    "enhanced_parser_limitation": "cuobjdump failed for the JIT .so; independent control-sidecar extraction succeeded",
+    "raw_stats_total_insts": 7442944,
+    "raw_stats_total_reported_insts": 7442944,
+    "trace": "results/alpha/c7_s34t_sol_l1p013_20261005/nvbit_both",
+    "unknown_control_encodings": 0
+  },
+  "phase": "C7-S34T",
+  "schema": "sm86_c7_sol_l1p013_vertical_v1",
+  "simulator": {
+    "completion_status": "incomplete_unmodeled_retirement_tails",
+    "instructions_issued_by_kernel": {"grad_x": 985600, "grad_weight": 1472000},
+    "mode": "l1-l2",
+    "native_macro_dispatches": 0,
+    "records_seen_by_kernel": {"grad_x": 985600, "grad_weight": 1472000},
+    "replay": "results/alpha/c7_s34t_sol_l1p013_20261005/replay.json",
+    "unmodeled_tails": {"grad_x": {"async_copy_shared_visibility": false, "coherence": true, "dirty_writeback": true, "reduction_read_modify_write": false}, "grad_weight": {"async_copy_shared_visibility": false, "coherence": true, "dirty_writeback": true, "reduction_read_modify_write": false}}
+  },
+  "status": "complete_multi_kernel_native_vertical_with_lower_bound_falsifier"
+}

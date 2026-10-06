@@ -1,6 +1,7 @@
 #include <cuda.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -56,6 +57,30 @@ bool parse_u32_csv(const std::string& text, std::vector<std::uint32_t>* values) 
     return !values->empty();
 }
 
+bool parse_size_arg(const char* text, std::size_t* value,
+                    std::size_t maximum) {
+    if (text == nullptr || *text == '\0' || value == nullptr) return false;
+    errno = 0;
+    char* end = nullptr;
+    const unsigned long long parsed = std::strtoull(text, &end, 10);
+    if (errno == ERANGE || end == text || *end != '\0' ||
+        parsed > static_cast<unsigned long long>(maximum)) {
+        return false;
+    }
+    *value = static_cast<std::size_t>(parsed);
+    return true;
+}
+
+bool parse_u32_arg(const char* text, std::uint32_t* value) {
+    std::size_t parsed = 0;
+    if (!parse_size_arg(text, &parsed,
+                        std::numeric_limits<std::uint32_t>::max())) {
+        return false;
+    }
+    *value = static_cast<std::uint32_t>(parsed);
+    return true;
+}
+
 bool load_queries(const std::string& path, std::vector<std::uint32_t>* values) {
     std::ifstream input(path);
     if (!input) {
@@ -86,13 +111,14 @@ int main(int argc, char** argv) {
         !parse_u32_csv(argv[3], &representatives)) {
         return 2;
     }
-    const std::size_t fixed_data_bytes =
-        static_cast<std::size_t>(std::strtoull(argv[4], nullptr, 10));
-    const std::size_t allocation_prefix_bytes =
-        static_cast<std::size_t>(std::strtoull(argv[5], nullptr, 10));
-    const std::uint32_t region_stride_bytes =
-        static_cast<std::uint32_t>(std::strtoul(argv[6], nullptr, 10));
-    if (query_regions.size() > 65535 || representatives.size() != 48 ||
+    std::size_t fixed_data_bytes = 0;
+    std::size_t allocation_prefix_bytes = 0;
+    std::uint32_t region_stride_bytes = 0;
+    if (!parse_size_arg(argv[4], &fixed_data_bytes, std::size_t{512} << 20) ||
+        !parse_size_arg(argv[5], &allocation_prefix_bytes,
+                        std::size_t{512} << 20) ||
+        !parse_u32_arg(argv[6], &region_stride_bytes) ||
+        query_regions.size() > 65535 || representatives.size() != 48 ||
         std::unordered_set<std::uint32_t>(representatives.begin(),
                                           representatives.end()).size() !=
             representatives.size() ||

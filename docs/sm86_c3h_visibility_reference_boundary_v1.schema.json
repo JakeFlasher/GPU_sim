@@ -1,0 +1,63 @@
+{
+  "$id": "https://gpu-simulator.local/schemas/sm86_c3h_visibility_reference_boundary_v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "bounded_attempt": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "host_identity": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "identity": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "interpretation": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "model_local_visibility_context": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "open_surfaces": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "phase": {
+      "const": "C3-H/C6-J"
+    },
+    "reference": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "schema": {
+      "const": "sm86_c3h_visibility_reference_boundary_v1"
+    },
+    "source_review": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "status": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "status",
+    "phase",
+    "host_identity",
+    "source_review",
+    "identity",
+    "bounded_attempt",
+    "reference",
+    "model_local_visibility_context",
+    "open_surfaces",
+    "interpretation"
+  ],
+  "title": "SM86 C3-H/C6-J visibility reference boundary",
+  "type": "object"
+}

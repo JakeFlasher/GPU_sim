@@ -21,7 +21,7 @@ DEFAULT_ROOT = (
     REPO_ROOT / "results" / "captures" / "sm86_fixed_latency_result_order_20260817_v1"
 )
 LONG_GENERATIONS = 8192
-TRACE_GENERATIONS = 64
+TRACE_GENERATIONS = 8192
 WIDTHS = (4, 8, 12, 13, 14, 15, 16)
 ORDERS = ("fh", "hf")
 FUNCTIONS = {
@@ -131,12 +131,7 @@ def source_summary(path: Path) -> dict[str, Any]:
 
 
 def validate_static(root: Path) -> dict[str, Any]:
-    names = (
-        "fixed_latency_result_order_native",
-        "fixed_latency_result_order",
-        "fixed_latency_result_order_trace_native",
-        "fixed_latency_result_order_trace",
-    )
+    names = ("fixed_latency_result_order_native", "fixed_latency_result_order")
     sidecars = {}
     for name in names:
         sidecar = read_json(root / "sass" / f"{name}.control_bits.json")
@@ -148,7 +143,7 @@ def validate_static(root: Path) -> dict[str, Any]:
         require(not re.search(r"STACK:[1-9]|LOCAL:[1-9]", resources), f"{name}: spill/local")
         require(resources.count("REG:15") == 2, f"{name}: register declarations")
 
-    for label in ("long", "trace"):
+    for label in ("long",):
         patch = read_json(root / "metadata" / f"{label}_result_order_patch.json")
         require(patch["changed_bytes"] == 4, f"{label}: changed bytes")
         require(patch["all_changes_inside_producer_control_words"] is True, f"{label}: scope")

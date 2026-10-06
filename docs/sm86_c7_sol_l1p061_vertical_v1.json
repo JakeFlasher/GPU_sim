@@ -1,0 +1,96 @@
+{
+  "candidate": "L1/problem_061_tanh_gated_residual_add_backward/cuda_cpp",
+  "correctness_and_sanitizer": {
+    "build_smoke": "docs/sm86_c7_sol_l1p061_smoke_v1.json",
+    "correctness_passed": true,
+    "sanitizer_errors": 0,
+    "all_declared_shapes_passed": true
+  },
+  "crosswalk": {
+    "native_hardware_scheduling_claimed": false,
+    "ncu_values_used_to_change_simulator": false,
+    "nvbit_raw_stat_unit_is_separate": true,
+    "physical_completion_upper_closed": false,
+    "simulator_ncu_instruction_count_equal": true,
+    "per_kernel_instruction_counts_equal": true,
+    "simulator_lower_frontiers_by_launch": {"grad_hidden": 5799, "grad_gate_reduce": 2380},
+    "gpc_observation_frontiers_by_launch": {"grad_hidden": 7631, "grad_gate_reduce": 4156}
+  },
+  "identity": {
+    "arch": "sm_86",
+    "binary_extension": "results/alpha/c7_s34at_sol_l1p061_20261005/pinned/build/sol_l1p061_sm86.so",
+    "binary_sha256": "4903ac54d892c7a08f615c9c64be5b87532ff72e6e35025ae9a02bbc6b563d77",
+    "cuda_toolkit": "13.2",
+    "environment": "tools/sol_execbench/.venv",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "capability": "8.6",
+    "driver": "615.71.09",
+    "device_index": 0,
+    "host_compiler": "/usr/bin/g++-14",
+    "source": "workloads/sol_execbench_baselines/L1/problem_061_tanh_gated_residual_add_backward/cuda_cpp",
+    "torch": "2.12.0+cu130",
+    "capture_selection": "ACTIVE_FROM_START=0; profiler-gated two target launches; BF16 tensors and scalar gate initialized before gate",
+    "profiler_protocol": "cudaProfilerStart/Stop; NCU profile-from-start off; application replay; clock none; cache all",
+    "representative_capture_shape": {"batch": 1, "seq_len": 131, "hidden_size": 4096},
+    "source_repair": "Identity grad_residual is written inside Kernel A and scalar gate is read with item<float>() to avoid ATen CUDA helper launches inside the target gate."
+  },
+  "interpretation": "C7-S34AT completes a two-launch custom CUDA tanh-gated residual backward SM86 vertical after all 16 declared workload rows were screened across three deterministic seeds (48 rows). The pinned CUDA 13.2/GCC14 extension passed independent BF16 correctness, representative Compute Sanitizer memcheck, two profiler-gated custom launches, independent control-bit extraction, deterministic byte-identical replay, and five application-replay NCU repetitions per kernel. Simulator and NCU instruction counts match. The identity residual and host scalar read are fused into the target path to avoid a libtorch helper launch. Dirty-writeback/coherence tails, parser limitation, raw tracer units, and zero native macro dispatch remain explicit.",
+  "ncu": {
+    "metric": "gpc__cycles_elapsed.max, sm__cycles_active.max, smsp__inst_executed.sum",
+    "paths": "results/alpha/c7_s34at_sol_l1p061_20261005/pinned/ncu/repeat-*/ncu2.csv",
+    "repetitions": 5,
+    "replay_mode": "application",
+    "per_kernel": {
+      "grad_hidden": {
+        "kernel": "<unnamed>::problem_061_grad_hidden_kernel(const __nv_bfloat16 *, const __nv_bfloat16 *, const __nv_bfloat16 *, __nv_bfloat16 *, __nv_bfloat16 *, float *, float)",
+        "cycles": [9628.0, 11424.0, 9795.0, 9620.0, 9862.0],
+        "median_cycles": 9795.0,
+        "sm_active": [7975.0, 9751.0, 8115.0, 7937.0, 8125.0],
+        "median_sm_active": 8115.0,
+        "instructions": [231346.0, 231346.0, 231346.0, 231346.0, 231346.0],
+        "median_instructions": 231346.0
+      },
+      "grad_gate_reduce": {
+        "kernel": "<unnamed>::problem_061_grad_gate_reduce_kernel(const float *, __nv_bfloat16 *, int, float)",
+        "cycles": [3287.0, 3268.0, 3297.0, 3398.0, 3280.0],
+        "median_cycles": 3287.0,
+        "sm_active": [1722.0, 1692.0, 1737.0, 1834.0, 1718.0],
+        "median_sm_active": 1722.0,
+        "instructions": [355.0, 355.0, 355.0, 355.0, 355.0],
+        "median_instructions": 355.0
+      }
+    }
+  },
+  "nvbit": {
+    "accepted_launches": 2,
+    "control_sidecar": "results/alpha/c7_s34at_sol_l1p061_20261005/pinned/control_bits_fused.json",
+    "decoded_static_instructions": {"grad_hidden": 216, "grad_gate_reduce": 168},
+    "sidecar_total_decoded_instructions": 400,
+    "sidecar_helper_function_decoded_instructions": 16,
+    "sidecar_unknown_control_encodings": 0,
+    "raw_stats_total_insts": 725750,
+    "raw_stats_total_reported_insts": 725750,
+    "trace": "results/alpha/c7_s34at_sol_l1p061_20261005/pinned/nvbit_target_fused3",
+    "module_origin": "stable_static_module",
+    "module_sha256": "4903ac54d892c7a08f615c9c64be5b87532ff72e6e35025ae9a02bbc6b563d77",
+    "enhanced_parser_limitation": "cuobjdump failed for the JIT .so; independent control-sidecar extraction succeeded"
+  },
+  "phase": "C7-S34AT",
+  "schema": "sm86_c7_sol_l1p061_vertical_v1",
+  "simulator": {
+    "completion_status": "incomplete_unmodeled_retirement_tails",
+    "instructions_issued_by_launch": {"grad_hidden": 231346, "grad_gate_reduce": 355},
+    "records_seen_by_launch": {"grad_hidden": 231346, "grad_gate_reduce": 355},
+    "mode": "l1-l2",
+    "native_macro_dispatches": 0,
+    "replay": "results/alpha/c7_s34at_sol_l1p061_20261005/pinned/replay_fused.json",
+    "repeat_replay": "results/alpha/c7_s34at_sol_l1p061_20261005/pinned/replay_fused_repeat.json",
+    "replays_byte_equal": true,
+    "unmodeled_tails": {
+      "grad_hidden": {"reduction_read_modify_write": false, "dirty_writeback": true, "coherence": true, "async_copy_shared_visibility": false},
+      "grad_gate_reduce": {"reduction_read_modify_write": false, "dirty_writeback": true, "coherence": true, "async_copy_shared_visibility": false}
+    }
+  },
+  "status": "complete_two_launch_native_vertical_ncu_simulator_crosswalk_with_parser_limitation"
+}

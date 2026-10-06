@@ -550,6 +550,9 @@ int main(int argc, char** argv) {
 
     std::vector<std::vector<unsigned long long>> samples(
         trials, std::vector<unsigned long long>(warps));
+    std::vector<std::uint32_t> values(warps);
+    bool correct = true, sink_valid = true;
+    std::uint64_t checksum = 0;
     bool elapsed_valid = true;
     for (int trial = 0; trial < trials; ++trial) {
         CUDA_CHECK(cudaMemset(elapsed, 0xff, kMaxWarps * sizeof(*elapsed)));
@@ -562,20 +565,14 @@ int main(int argc, char** argv) {
         CUDA_CHECK(cudaMemcpy(samples[trial].data(), elapsed,
                               warps * sizeof(*elapsed),
                               cudaMemcpyDeviceToHost));
-        for (int warp = 0; warp < warps; ++warp)
+        CUDA_CHECK(cudaMemcpy(values.data(), sink, warps * sizeof(*sink),
+                              cudaMemcpyDeviceToHost));
+        for (int warp = 0; warp < warps; ++warp) {
             elapsed_valid = elapsed_valid && samples[trial][warp] != UINT64_MAX && samples[trial][warp] > 0;
-    }
-
-    std::vector<std::uint32_t> values(warps);
-    CUDA_CHECK(cudaMemcpy(values.data(), sink, warps * sizeof(*sink),
-                          cudaMemcpyDeviceToHost));
-    bool correct = true;
-    bool sink_valid = true;
-    std::uint64_t checksum = 0;
-    for (int warp = 0; warp < warps; ++warp) {
-        correct = correct && values[warp] == expected(protocol, phase, warp, 0);
-        sink_valid = sink_valid && values[warp] != 0xa5a5a5a5u;
-        checksum = checksum * 131u + values[warp];
+            correct = correct && values[warp] == expected(protocol, phase, warp, 0);
+            sink_valid = sink_valid && values[warp] != 0xa5a5a5a5u;
+            checksum = checksum * 131u + values[warp];
+        }
     }
     correct = correct && elapsed_valid && sink_valid;
 
@@ -601,9 +598,9 @@ int main(int argc, char** argv) {
     }
     std::printf(
         "],\"checksum\":%llu,\"correct\":%s,\"elapsed_samples_valid\":%s,"
-        "\"sink_valid\":%s}\n",
+        "\"sink_valid\":%s,\"trials\":%d,\"all_trials_checked\":true}\n",
         static_cast<unsigned long long>(checksum), correct ? "true" : "false",
-        elapsed_valid ? "true" : "false", sink_valid ? "true" : "false");
+        elapsed_valid ? "true" : "false", sink_valid ? "true" : "false", trials);
 
     CUDA_CHECK(cudaFree(sink));
     CUDA_CHECK(cudaFree(elapsed));

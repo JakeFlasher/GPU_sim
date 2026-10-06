@@ -1,6 +1,6 @@
 # Current status
 
-Updated 2026-10-02. The project develops analytical/statistical GPU performance
+Updated 2026-10-06. The project develops analytical/statistical GPU performance
 models and a runnable native SM86 replay path, with NCU as independent ground
 truth for the declared measurement protocol.
 
@@ -15,6 +15,30 @@ commits; only local runtime safeguards needed for meaningful execution remain.
 The obsolete M5/M6 and CUTLASS-successor campaign surfaces and dedicated tests
 are deleted rather than skipped.
 
+## Latest representative SOL slices — 2026-10-06
+
+Problems084/085/088/090/028, FIB/problems001/005/007/008/009/012, and
+Quant/problem014 have representative screens/memcheck, NVBit/control, replay
+and five NCU repeats. FIB006 has M=6 L1-L2 evidence plus a larger-row timeout;
+L1/003 and L1/037 retain bounded capture timeouts; Quant/problem020 is an
+explicit SM120-only disposition. L1/022 now replays all seven TF32 launches in
+L1-L2 and flat modes after the exact SM86 HMMA.1688.F32.TF32 capability repair;
+the retained INT8 IMMA row now replays after the exact IMMA.16832 capability repair;
+five post-fix NCU sets preserve instruction/HMMA counts. Physical tails remain
+open.
+
+## Current M5 frontier — 2026-10-06
+
+M5-F is a scoped async observer holdout (5/5 target coverage, point APE
+0.0634%, empirical only). M5-H/I reconcile store-tail and async protocol
+negatives without hardware completion tokens. M5-J preserves exact fallback for
+the real two-warp continuation boundary. M5-K is a negative FIB005 M=80
+within-family holdout (0/5 coverage, point APE 0.155%, no refit). M5-L/M
+reconcile frontiers and blockers; the post-TF32 L1/037 retry reproduces the
+capture timeout before `dynamic_trace.pb`; M5-N4 found no additional local SM86 seam. **Next: M5-N3**, retain the objective open until external-evidence
+residuals change; no broad accuracy, physical completion, broad native continuation,
+or hardware scheduling claim is made.
+
 ## Implemented and remaining work
 
 | Surface | Current state |
@@ -27,11 +51,831 @@ are deleted rather than skipped.
 | Reification | Typed region contract and native-boundary comparator preserve only complete exact projections; incomplete canary boundaries fall back to replay |
 | Selective coverage | Multi-warp/order and completion-multiplicity guards refuse conservatively; fast-frontier output includes full-trace candidate/reified/uncovered counts |
 | Model macro seam | `sim-sm::ModelExecutor` consumes a certified scalar `MacroTransition`, emits explicit effects/pending completions, and resumes detailed descriptors; this is model-local |
-| Native refinement | A closed two-instruction `SmCore` helper seam and a synthetic reference-feature event-loop fixture consume a complete scalar witness, reserve effect sequences, and resume a detailed suffix; latency/completion/front-end/pending/barrier/cache-tail classes refuse before mutation; real front-end/cache SM86 traces remain exact fallback after the canary's unresolved queue/response join |
+| Native refinement | Narrow real-trace scalar continuation dispatch now works for a hand-authored SM86 probe, including a typed front-end/cache snapshot; broader front-end/readiness classes still refuse conservatively and hardware completion/native scheduling remain open |
 | Service composition | Typed residual/replacement/independent-post-replay roles and a serial queue projection are explicit; grouped unknown tails keep queue uppers open and replacement admission is validated; full-trace demand is currently independent post-replay, so it does not silently alter the observer endpoint |
 | Cache candidates | Warp-local instrumentation order can be observed when decoded identities are complete; exact history additionally requires temporal order, fence scope, line generation, owner/read-from, and hardware completion, while unresolved domains remain lower-only/unknown |
 | Design evaluation | Fifteen-workload, six-family calibration/development/held-out NCU join runs post-prediction; v2 target contracts check metric/endpoint/clock/cache/launch/repetition and declared GPU identity plus family split semantics; predictions and manifest-built observations bind trace/control/card/launch identities when available; observations are labeled manifest-historical unless metadata is independently parsed; finite intervals, open refusals, accepted/refused coverage, model-local partial-order ties, and model-only step reduction are reported, while native front-end traces remain exact/refused |
 | Payload/value work | Bounded model-local identity, ordering, and conservation checks |
+
+## M4 / C7-S33BB closure — 2026-10-04
+
+The remaining declared research-probe population is reconciled in
+`docs/sm86_c7_research_probe_inventory_v1.json`, whose status is
+`48_live_probe_stages_reconciled_m4c_verticals_complete`. Seven previously
+uncaptured Makefile families and five source/preserved-binary families now have
+same-binary correctness, Compute Sanitizer, NVBit, deterministic replay, and
+five independent NCU vertical records. The load-priority and corrected LDGSTS
+records are explicit lower-bound falsifiers; no timing parameter was fitted.
+The LDGSTS process-start timeout and wrong-launch NCU attempts remain retained.
+Python-only/host-only wrappers have explicit non-native dispositions rather
+than synthetic native rows. M4 is complete; M5 remains open for completion-tail
+semantics, calibration-only accuracy, and a real native continuation
+differential.
+
+The independent M4-E closeout recheck repaired three reproducibility gaps
+without rerunning retained matrix workloads: it regenerated the missing
+barrier/L1TEX declarative manifests (33/33 and 100/100 cell-key crosswalks),
+corrected one stale bypass stdout path, and pinned the SFU Makefile to
+`/usr/bin/g++-14` for CUDA 13.2 despite the ambient GCC 16. The fresh SFU v2
+vertical passed seven correctness trials, full-shape Compute Sanitizer, NVBit,
+tail-fact extraction, replay, and five NCU repetitions; its `38099` simulator
+lower bound versus `34257` NCU median remains a falsifier, not a fitted timing
+result. All 37 Makefile targets return success under the bounded rebuild loop,
+all 42 inventory directories resolve, every live result path resolves, and 135
+document/schema pairs validate. This confirms M4 population closure while
+keeping completion tails and native dispatch open.
+
+C7-S33BD then synchronized the retained build matrix with the current
+inventory. Six current Makefile families missing from the old 31-row matrix
+received bounded make checks returning zero; the matrix now covers all 37
+Makefile probes, with five analysis-only rows and no separate source/preserved
+rows. This repairs bookkeeping drift only.
+
+C7-S34A then inventoried the 203 SOL baseline problem directories without
+execution: FIB 25, L1 94, L2 82, Quant 2; all have CUDA/host source and
+`solution.json`, 201 have an SM86 marker, two do not, and none has a local
+prebuilt artifact. This is source inventory only.
+
+C7-S34B source-reviewed one SM86-marked FIB candidate. The existing
+`tools/sol_execbench/.venv` supplies Torch 2.12.0+cu130 and SM86 CUDA; explicit
+`nvcc -ccbin=/usr/bin/g++-14` produced the extension, BF16 correctness batches
+1/2 passed, and Compute Sanitizer reported zero errors. A profiler-delimited
+NVBit/control/replay/NCU vertical then passed with 3824 simulator/NCU warp
+instructions and a 5374-cycle NCU median; raw tracer units and the enhanced
+JIT parser limitation remain explicit. Evidence:
+`docs/sm86_c7_sol_candidate_vertical_v1.json`.
+
+C7-S34D repeated the vertical on FIB/problem_002 at hidden size 4096. The
+SM86 build/correctness/memcheck smoke, NVBit/control extraction, deterministic
+4562-record replay, and five corrected NCU runs passed; NCU median was 7922
+cycles with 4562 instructions matching simulator records. Dirty-writeback and
+coherence tails remain open. Evidence:
+`docs/sm86_c7_sol_candidate_fib002_vertical_v1.json`.
+
+C7-S34F repeated the custom CUDA vertical on FIB/problem_003 at hidden size
+7168. Build/correctness/memcheck, NVBit/control extraction, deterministic
+7202-record replay, and five corrected NCU runs passed; NCU median was 10966
+cycles with 7202 instructions matching simulator records. Dirty-writeback and
+coherence tails remain open. Evidence:
+`docs/sm86_c7_sol_candidate_fib003_vertical_v1.json`.
+
+C7-S34J repeated the custom CUDA vertical on FIB/problem_021 at hidden size
+128. Build/correctness/memcheck, NVBit/control extraction, deterministic
+154-record replay, and five corrected NCU runs passed; NCU median was 4341
+cycles with 154 instructions matching simulator records. Dirty-writeback and
+coherence tails remain open. Evidence:
+`docs/sm86_c7_sol_candidate_fib021_vertical_v1.json`.
+
+C7-S34K repeated the custom CUDA vertical on FIB/problem_022 at hidden size
+512. Build/correctness/memcheck, NVBit/control extraction, deterministic
+562-record replay, and five corrected NCU runs passed; NCU median was 4433
+cycles with 562 instructions matching simulator records. Dirty-writeback and
+coherence tails remain open. Evidence:
+`docs/sm86_c7_sol_candidate_fib022_vertical_v1.json`.
+
+C7-S34L repeated the custom CUDA vertical on FIB/problem_023 at hidden size
+1536. Build/correctness/memcheck, NVBit/control extraction, deterministic
+1442-record replay, and five corrected NCU runs passed; NCU median was 6365
+cycles with 1442 instructions matching simulator records. Dirty-writeback and
+coherence tails remain open, and the enhanced JIT parser limitation plus raw
+tracer unit remain explicit. Evidence:
+`docs/sm86_c7_sol_candidate_fib023_vertical_v1.json`.
+
+C7-S34M1 completed the source review for FIB/problem_024 RMSNorm at hidden
+size 2048. The source contains an SM86 compile marker, a bounded
+`main.cpp::run` entry point, explicit BF16/FP32/EPS contracts, and a separate
+FP32 reference; the permitted Torch 2.12.0+cu130/GCC14 environment sees the
+RTX 3090 Ti at SM86. Evidence:
+`docs/sm86_c7_sol_candidate_fib024_source_v1.json`.
+
+C7-S34M2 then passed the fresh SM86 build, batch-1/16 correctness smoke, and
+Compute Sanitizer memcheck with zero errors. Evidence:
+`docs/sm86_c7_sol_candidate_fib024_smoke_v1.json`. C7-S34M3 then completed
+the bounded profiler-delimited capture, independent 152-instruction control
+sidecar, deterministic 1762-record replay, and five target NCU repetitions.
+The NCU median was 7413 cycles with 1762 instructions matching replay; tails
+remain open. Evidence: `docs/sm86_c7_sol_candidate_fib024_vertical_v1.json`.
+
+C7-S34N is now active for source review of FIB/problem_025 RMSNorm at hidden
+size 4096. C7-S34N1 verified the SM86 marker, bounded entry point, distinct
+EPS `1e-5`/shape contract, independent FP32 reference, and permitted
+Torch/GCC14 runtime; evidence is
+`docs/sm86_c7_sol_candidate_fib025_source_v1.json`. C7-S34N2 then passed the
+fresh SM86 build, batch-1/16 correctness smoke, and Compute Sanitizer memcheck
+with zero errors; evidence is
+`docs/sm86_c7_sol_candidate_fib025_smoke_v1.json`. C7-S34N3 then completed
+the bounded profiler-delimited capture, independent 152-instruction control
+sidecar, deterministic 3042-record replay, and five target NCU repetitions.
+The NCU median was 11164 cycles with 3042 instructions matching replay; tails
+remain open. Evidence: `docs/sm86_c7_sol_candidate_fib025_vertical_v1.json`.
+
+C7-S34O is now active for source review of FIB/problem_026 RMSNorm at hidden
+size 7168, the final listed FIB RMSNorm shape. C7-S34O1 verified the SM86
+marker, bounded entry point, 512-thread/shape contract, independent FP32
+reference, and permitted Torch/GCC14 runtime; evidence is
+`docs/sm86_c7_sol_candidate_fib026_source_v1.json`. C7-S34O2 then passed the
+fresh SM86 build, batch-1/16 correctness smoke, and Compute Sanitizer memcheck
+with zero errors; evidence is
+`docs/sm86_c7_sol_candidate_fib026_smoke_v1.json`. C7-S34O3 then completed
+the bounded profiler-delimited capture, independent 152-instruction control
+sidecar, deterministic 5426-record replay, and five target NCU repetitions.
+The NCU median was 10537 cycles with 5426 instructions matching replay; tails
+remain open. Evidence: `docs/sm86_c7_sol_candidate_fib026_vertical_v1.json`.
+
+C7-S34P is now active for a distinct unexecuted L1 custom-CUDA family,
+`problem_002_vae_conv3x3_groupnorm_silu_residual_fused`. Source review found
+that row is actually pure ATen: `kernel.cu` is a stub and the only `__global__`
+token is comment text. C7-S34P corrected the census from 73/116 to 72 custom
+CUDA / 117 pure ATen and retained the row as an explicit source blocker
+without duplicate tracing. Evidence:
+`docs/sm86_c7_sol_l1_problem002_source_class_correction_v1.json`. C7-S34Q is
+now active for the next L1 row with an actual custom CUDA kernel,
+`problem_006_hyena_depthwise_conv1d_split_gate`. C7-S34Q1 verified its two
+custom kernels, FP32 shape/oracle contract, and permitted Torch/GCC14 runtime;
+evidence is `docs/sm86_c7_sol_l1p006_source_v1.json`. C7-S34Q2 is active for a
+fresh build/correctness/memcheck smoke. That smoke passed batch/sequence
+shapes `[1,512]` and `[4,2048]` exactly against the independent reference and
+Compute Sanitizer reported zero errors; evidence is
+`docs/sm86_c7_sol_l1p006_smoke_v1.json`. C7-S34Q3 then completed the bounded
+profiler-delimited capture: both kernels were retained, 72 static instructions
+per kernel decoded, and replay produced 679936 records total. Five NCU
+repetitions selected both target kernels with matching per-kernel instruction
+counts; per-kernel lower frontiers were 5242 and 4359 cycles, with tails open.
+Evidence: `docs/sm86_c7_sol_l1p006_vertical_v1.json`. C7-S34R1 then verified
+the custom RoPE kernel, custom position/frequency input contract, and permitted
+Torch/GCC14 runtime; evidence is
+`docs/sm86_c7_sol_l1p011_source_v1.json`. C7-S34R2 then passed custom-input
+RoPE shapes `[1,256]` and `[4,1024]` with max BF16 errors `0.00098` and
+`0.00391`; Compute Sanitizer reported zero errors. Evidence is
+`docs/sm86_c7_sol_l1p011_smoke_v1.json`. C7-S34R3 then completed the bounded
+profiler-delimited capture, independent 56-instruction control sidecar,
+deterministic 22016-record replay, and five target NCU repetitions. The NCU
+median was 4432 cycles with 22016 instructions matching replay; tails remain
+open. Evidence: `docs/sm86_c7_sol_l1p011_vertical_v1.json`. C7-S34S1 then
+verified the custom cos/sin kernel, FP32/BF16 shape contract, and permitted
+Torch/GCC14 runtime; evidence is `docs/sm86_c7_sol_l1p012_source_v1.json`.
+C7-S34S2 then passed scaled cos/sin shapes `[1,512]` and `[4,1024]` with max
+errors up to `0.0078125`; Compute Sanitizer reported zero errors. Evidence is
+`docs/sm86_c7_sol_l1p012_smoke_v1.json`. C7-S34S3 then completed the bounded
+profiler-delimited capture, independent 40-instruction control sidecar,
+deterministic 61440-record replay, and five target NCU repetitions. The NCU
+median was 4172 cycles with 61440 instructions matching replay; tails remain
+open. Evidence: `docs/sm86_c7_sol_l1p012_vertical_v1.json`. C7-S34T is now
+active for `problem_013_fused_residual_rms_norm_backward`; no timing or NCU
+value is transferred from prior rows. C7-S34T1 verified the two custom
+backward kernels, hidden-size/shape contract, independent RMSNorm backward
+oracle, and permitted Torch/GCC14 runtime; evidence is
+`docs/sm86_c7_sol_l1p013_source_v1.json`. C7-S34T2 is active for a fresh
+build/correctness/memcheck smoke. That smoke passed backward-gradient shapes
+`[1,256]` and `[2,512]` against the independent reference, with BF16 max
+error `0.0078125` and Compute Sanitizer reporting zero errors; evidence is
+`docs/sm86_c7_sol_l1p013_smoke_v1.json`. C7-S34T3 is active for a bounded
+profiler-delimited capture; no timing or NCU value is transferred from prior
+rows. C7-S34T3 then completed the two-launch capture, independent 552/320
+instruction control sidecars, deterministic 2457600-record replay, and five
+per-kernel NCU repetitions. The `grad_weight` lower-frontier falsifier is
+retained (`113069` modeled versus `34972` NCU median); evidence is
+`docs/sm86_c7_sol_l1p013_vertical_v1.json`. C7-S34U is now active for
+`problem_016_rope_inverse_frequency_computation`; no timing or NCU value is
+transferred from prior rows. C7-S34U1 verified its custom inverse-frequency
+kernel, scalar/oracle contract, and permitted Torch/GCC14 runtime; evidence is
+`docs/sm86_c7_sol_l1p016_source_v1.json`. C7-S34U2 is active for a fresh
+build/correctness/memcheck smoke. That smoke passed all seven declared
+`rope_theta` values with sub-`1e-7` max FP32 error and Compute Sanitizer
+reported zero errors; evidence is
+`docs/sm86_c7_sol_l1p016_smoke_v1.json`. C7-S34U3 then completed the bounded
+capture, independent 24-instruction sidecar, deterministic 30-record replay,
+and five target NCU repetitions. The NCU median was 2995 cycles with 30
+instructions matching replay; tails remain open. Evidence:
+`docs/sm86_c7_sol_l1p016_vertical_v1.json`. C7-S34V is now active for
+`problem_018_fused_rope_with_qk_norm_and_kv_cache_update`. C7-S34V1 verified
+the four custom kernels, cache/shape contract, independent custom-input
+oracle, and permitted Torch/GCC14 runtime; evidence is
+`docs/sm86_c7_sol_l1p018_source_v1.json`. C7-S34V2 is active for a fresh
+build/correctness/memcheck smoke. That smoke passed the bounded
+`[B=1,S=1,cache_len=0]` custom-input case with zero output error and zero
+Compute Sanitizer errors; evidence is
+`docs/sm86_c7_sol_l1p018_smoke_v1.json`. C7-S34V3 then completed the
+four-launch capture, independent 304-instruction sidecar, deterministic
+48592-record replay, and five per-launch NCU repetitions; per-launch
+instruction counts matched. Evidence:
+`docs/sm86_c7_sol_l1p018_vertical_v1.json`. C7-S34W is now active for
+`problem_019_vision_3d_rotary_embedding_with_spatial_merge_indexing_backward`.
+C7-S34W1 verified the two custom kernels, FP32 Vision-RoPE backward contract,
+independent oracle, and permitted Torch/GCC14 runtime; evidence is
+`docs/sm86_c7_sol_l1p019_source_v1.json`. C7-S34W2 is active for a fresh
+build/correctness/memcheck smoke. That smoke passed Vision-RoPE backward
+sequence lengths `[128,449]` against the independent oracle with FP32 errors
+below `1e-5`, and Compute Sanitizer reported zero errors; evidence is
+`docs/sm86_c7_sol_l1p019_smoke_v1.json`. C7-S34W3 then completed the
+three-launch capture, independent 336-instruction sidecar, deterministic
+764928-record replay, and five per-launch NCU repetitions; all per-launch
+instruction counts matched. Evidence:
+`docs/sm86_c7_sol_l1p019_vertical_v1.json`. C7-S34X is now active for
+`problem_022_vision_mlp_gelu_backward`. C7-S34X1 verified the CUTLASS/Sm80
+TensorOp source, MLP/GELU backward contract, independent oracle, and permitted
+Torch/GCC14 runtime; evidence is
+`docs/sm86_c7_sol_l1p022_source_v1.json`. C7-S34X2 is active for a fresh
+build/correctness/memcheck smoke; replay may retain a CUTLASS-specific
+crosswalk blocker rather than silently falling back. The repository CUTLASS
+include path was required; build and memcheck passed, but independent FP32
+correctness failed materially in TF32 GEMM-derived gradients, so no native
+vertical was admitted. Evidence:
+`docs/sm86_c7_sol_l1p022_smoke_v1.json`. C7-S34Y is now active for
+`problem_024_vision_rotary_position_embedding_generation_backward`. Source
+review corrected this row from marker-only custom CUDA to pure ATen: its `.cu`
+is a stub and `__global__` is comment text. Evidence:
+`docs/sm86_c7_sol_l1_problem024_source_class_correction_v1.json`. The census
+is now 71 custom CUDA / 14 CUTLASS / 118 pure ATen; C7-S34Z is active for
+`problem_025_video_latent_gelu_activation`. C7-S34Z1 verified its vectorized
+and scalar-tail custom kernels, FP32 GELU contract, independent oracle, and
+permitted Torch/GCC14 runtime; evidence is
+`docs/sm86_c7_sol_l1p025_source_v1.json`. C7-S34Z2 is active for a fresh
+build/correctness/memcheck smoke. That smoke passed vectorized/tail GELU
+shapes `[2,128]` and `[4,541]` with max error `5.60e-6`; Compute Sanitizer
+reported zero errors. Evidence is
+`docs/sm86_c7_sol_l1p025_smoke_v1.json`. C7-S34Z3 then completed the bounded
+vector-kernel capture, independent 88-instruction sidecar, deterministic
+368640-record replay, and five target NCU repetitions. The scalar tail kernel
+is source-present but unreachable for fixed intermediate size 4096; evidence is
+`docs/sm86_c7_sol_l1p025_vertical_v1.json`. C7-S34AA is now active for
+`problem_029_mamba_conv1d_with_gating`. Source review corrected this row from
+marker-only custom CUDA to pure ATen: its `.cu` is a stub and `__global__` is
+comment text. Evidence:
+`docs/sm86_c7_sol_l1_problem029_source_class_correction_v1.json`. The census
+is now 70 custom CUDA / 14 CUTLASS / 119 pure ATen; C7-S34AB is active for
+`problem_033_post_norm_residual`. C7-S34AB1 verified the custom post-norm
+RMSNorm kernel, BF16/FP32 shape
+contract, independent oracle, and permitted Torch/GCC14 runtime; evidence is
+`docs/sm86_c7_sol_l1p033_source_v1.json`. C7-S34AB2 is active for a fresh
+build/correctness/memcheck smoke. That smoke passed post-norm residual shapes
+`[1,128]` and `[2,512]` with max BF16 error `0.00390625`; Compute Sanitizer
+reported zero errors. Evidence is
+`docs/sm86_c7_sol_l1p033_smoke_v1.json`. C7-S34AB3 is active for a bounded
+profiler-delimited capture. That capture completed with an independent
+160-instruction sidecar, deterministic 440576-record replay, and five target
+NCU repetitions; instruction counts matched. Evidence:
+`docs/sm86_c7_sol_l1p033_vertical_v1.json`. C7-S34AC is now active for
+`problem_034_flux_multi_axis_rope_frequency_computation`. C7-S34AC2 passed all
+16 declared workload shapes across three deterministic seeds (48 correctness
+rows) at unchanged 1e-5 tolerances; max absolute error was `5.96e-7`, and
+Compute Sanitizer reported zero errors. Evidence is
+`docs/sm86_c7_sol_l1p034_smoke_v1.json`. C7-S34AC3 then completed the row-0
+capture, independent 56-instruction sidecar, deterministic 160517-record
+replay, and five target NCU repetitions. The NCU median was 4659 cycles with
+160517 instructions matching replay; tails remain open. Evidence:
+`docs/sm86_c7_sol_l1p034_vertical_v1.json`. C7-S34AD is now active for
+`problem_035_flux_ada_layer_norm_zero_modulation_extraction`. C7-S34AD1
+verified the custom AdaLN modulation kernel, 3072/18432 chunk contract,
+independent matmul/chunk oracle, and permitted Torch/GCC14 runtime; evidence is
+`docs/sm86_c7_sol_l1p035_source_v1.json`. C7-S34AD2 is active for a fresh
+build/correctness/memcheck smoke. That smoke passed B=1/16 AdaLN matmul/chunk
+correctness at the declared 0.0021 tolerance with max error `7.25e-5`; Compute
+Sanitizer reported zero errors. Evidence is
+`docs/sm86_c7_sol_l1p035_smoke_v1.json`. C7-S34AD3 is active for a bounded
+profiler-delimited capture. That capture completed with an independent
+232-instruction sidecar, deterministic 8607744-record replay, and five target
+NCU repetitions; instruction counts matched. The typed unsupported-memory-path
+count (18432) remains explicit. Evidence:
+`docs/sm86_c7_sol_l1p035_vertical_v1.json`. C7-S34AE is now active for
+`problem_036_flux_output_norm_projection_chain`. Source/build/memcheck passed,
+but the independent FP32 smoke failed the declared tolerance on B=2/S=293
+(max error `0.0045166` versus absolute `0.0031`); no native vertical was
+admitted. Evidence:
+`docs/sm86_c7_sol_l1p036_smoke_v1.json`. C7-S34AF is now active for
+`problem_038_flux_multi_head_rmsnorm_qk`.
+ C7-S34AF1 verified the custom per-head Q/K RMSNorm kernel and 48×128
+contract; evidence is `docs/sm86_c7_sol_l1p038_source_v1.json`. C7-S34AF2
+passed all five declared shapes against the independent FP32 reference with
+max Q/K error `1.91e-6`; Compute Sanitizer reported zero errors. Evidence is
+`docs/sm86_c7_sol_l1p038_smoke_v1.json`. C7-S34AF3 is active for bounded
+profiler/control/replay/NCU capture. That capture used the pinned CUDA 13.2 /
+GCC14 extension, retained both launches, and produced a 64-target-instruction
+sidecar, 5013504 replay instructions, and five per-kernel NCU repetitions;
+instruction counts matched. Evidence:
+`docs/sm86_c7_sol_l1p038_vertical_v1.json`. C7-S34AG is now active for
+`problem_039_adaptive_instance_normalization_2d_backward`. Source review
+corrected this row from marker-only custom CUDA to pure ATen: its `.cu` is a
+stub and `__global__` is comment text. Evidence:
+`docs/sm86_c7_sol_l1_problem039_source_class_correction_v1.json`. The census
+is now 69 custom CUDA / 14 CUTLASS / 120 pure ATen; C7-S34AH is active for
+`problem_040_conv2d_residual_block`.
+ C7-S34AH1 verified the two custom convolution kernels and 3/32/3 residual
+contract; evidence is `docs/sm86_c7_sol_l1p040_source_v1.json`. C7-S34AH2
+passed all five declared shapes with max error `0.00042725`; Compute Sanitizer
+reported zero errors. Evidence is `docs/sm86_c7_sol_l1p040_smoke_v1.json`. C7-S34AH3 then completed the pinned
+two-launch capture, independent 3024-instruction sidecar, deterministic
+10155520-record replay, and five per-kernel NCU repetitions; instruction counts
+matched. Evidence: `docs/sm86_c7_sol_l1p040_vertical_v1.json`. C7-S34AI is now
+active for `problem_041_strided_conv2d_downsampling`. Source review corrected
+this row from marker-only custom CUDA to pure ATen: its `.cu` is an explicit
+stub and `__global__` is comment text. Evidence:
+`docs/sm86_c7_sol_l1_problem041_source_class_correction_v1.json`. The census
+is now 68 custom CUDA / 14 CUTLASS / 121 pure ATen; C7-S34AJ is active for
+`problem_042_moe_expert_load_balancing_and_token_capacity_backward`.
+ Source review corrected this row from marker-only custom CUDA to pure ATen:
+its `.cu` is a stub and `__global__` is comment text. Evidence:
+`docs/sm86_c7_sol_l1_problem042_source_class_correction_v1.json`. The census
+is now 67 custom CUDA / 14 CUTLASS / 122 pure ATen; C7-S34AK is active for
+`problem_043_mla_fused_qkv_rope_split`.
+ Source review corrected this row from marker-only custom CUDA to pure ATen:
+its `.cu` is a stub and `__global__` is comment text. Evidence:
+`docs/sm86_c7_sol_l1_problem043_source_class_correction_v1.json`. The census
+is now 66 custom CUDA / 14 CUTLASS / 123 pure ATen; C7-S34AL is active for
+`problem_046_attention_softmax_with_softcapping_and_dropout`.
+
+C7-S34AL completed the next genuine L1 custom-CUDA row. Source review recorded
+the BF16 `[B,8,Q,K]` softcap/softmax contract and 16 declared workload shapes;
+the pinned CUDA 13.2/GCC14 extension passed all 16 rows across three
+deterministic seeds (48 correctness rows), with maximum absolute error
+`0.005859375` and zero tolerance violations. Representative Compute
+Sanitizer memcheck reported zero errors. A profiler-gated `[1,8,293,293]`
+launch then produced 8,159,464 raw tracer instructions, an independent
+248-instruction sidecar (232 target instructions plus a 16-instruction inert
+CUB helper), deterministic `l1-l2` replay with 2,894,840 records/instructions,
+and five NCU repetitions (cycle median `19158`, SM-active median `17492`,
+2,894,840 instructions each). Simulator and NCU instruction counts match;
+dirty-writeback/coherence tails and zero native macro dispatch remain explicit.
+Evidence: `docs/sm86_c7_sol_l1p046_source_v1.json`,
+`docs/sm86_c7_sol_l1p046_smoke_v1.json`, and
+`docs/sm86_c7_sol_l1p046_vertical_v1.json`. C7-S34AM is now active for
+`problem_048_fused_gate_up_projection_with_swiglu`; no timing or NCU value is
+transferred from prior rows.
+
+C7-S34AM completed source review and a repaired build/smoke for
+`problem_048_fused_gate_up_projection_with_swiglu`. The row is a genuine
+custom elementwise kernel chained after two vendor cuBLAS BF16 matmuls. The
+first independent smoke exposed that `--use_fast_math`'s float tanh saturated
+the GELU tail. A multiply-only diagnostic did not repair the error and was
+reverted; the source now calls double libdevice tanh for the narrow saturated
+tail while retaining the BF16 activation and product path. The pinned build passed all 16 declared
+rows across three deterministic seeds (48 rows), with exact output equality
+in this run, and representative Compute Sanitizer reported zero errors.
+Two bounded NVBit attempts then failed before trace emission on vendor
+`HMNMX2.BF16_V2` static-SASS decoding; the same fatal remained with
+`SKIP_ENHANCED_TRACER=1`, so this is not merely an enhanced-parser failure.
+No control sidecar, replay, NCU repetition, custom-only substitute, or timing
+claim is admitted. Evidence: `docs/sm86_c7_sol_l1p048_source_v1.json`,
+`docs/sm86_c7_sol_l1p048_smoke_v1.json`, and
+`docs/sm86_c7_sol_l1p048_capture_blocked_v1.json`. C7-S34AN is now active for
+`problem_052_altup_hidden_state_collapse_with_magnitude_normalization`.
+
+C7-S34AN corrected the source census for `problem_052` from marker-only
+custom CUDA to pure ATen: `kernel.cu` is a stub and `main.cpp::run` delegates
+to ATen/cuBLAS with no custom launcher. The corrected population is now
+65 custom CUDA / 14 CUTLASS / 124 pure ATen. No build, trace, replay, or NCU
+vertical was admitted for this row. Evidence:
+`docs/sm86_c7_sol_l1_problem052_source_class_correction_v1.json`. C7-S34AO is
+now active for `problem_053_gaussian_topk_sparse_activation`.
+
+C7-S34AO completed the genuine L1 Gaussian top-k sparse activation row. The
+pinned CUDA 13.2/GCC14 build passed all 12 declared shapes across three
+deterministic seeds (36 rows; maximum absolute error `0.03125`, with zero
+declared-tolerance violations), and representative Compute Sanitizer reported
+zero errors. The `[1,512,12288]`, target-sparsity `0.2` capture passed the
+profiler-gated NVBit path, independent 488-instruction control sidecar
+(472 target plus 16 inert CUB helper), deterministic byte-identical replay,
+and five application-replay NCU repetitions. Replay and NCU instruction
+counts match (`2354176`); NCU cycle median is `58369`, SM-active median
+`56623`; dirty-writeback/coherence tails, host-side `ndtri`, parser limitation,
+raw tracer units, and zero native macro dispatch remain explicit. Evidence:
+`docs/sm86_c7_sol_l1p053_source_v1.json`,
+`docs/sm86_c7_sol_l1p053_smoke_v1.json`, and
+`docs/sm86_c7_sol_l1p053_vertical_v1.json`. C7-S34AP is now active for
+`problem_056_mamba_ssm_dt_projection_softplus_clamp_backward`.
+
+C7-S34AP completed the genuine L1 Mamba softplus/clamp backward row. The
+pinned CUDA 13.2/GCC14 build passed all 16 declared shapes across three
+deterministic seeds (48 rows; maximum `grad_dt` absolute error
+`0.0009765625`, with zero declared-tolerance violations), and representative
+Compute Sanitizer reported zero errors. The `[2,1571,40]` capture passed the
+profiler-gated NVBit path, independent 224-instruction control sidecar
+(208 target plus 16 inert CUB helper), deterministic byte-identical replay,
+and five application-replay NCU repetitions. Replay and NCU instruction
+counts match (`111840`); NCU cycle median is `15654`, SM-active median
+`13997`; the raw tracer unit (`310400`), FP32 bias reduction, parser
+limitation, dirty-writeback/coherence tails, and zero native macro dispatch
+remain explicit. Evidence: `docs/sm86_c7_sol_l1p056_source_v1.json`,
+`docs/sm86_c7_sol_l1p056_smoke_v1.json`, and
+`docs/sm86_c7_sol_l1p056_vertical_v1.json`. C7-S34AQ is now active for
+`problem_057_mtp_shifted_embedding_with_dual_rms_norm_fusion`.
+
+C7-S34AQ corrected the source census for `problem_057` from marker-only
+custom CUDA to pure ATen: `kernel.cu` is a stub and `main.cpp::run` delegates
+to ATen roll/embedding/RMSNorm/concatenation/cuBLAS with no custom launcher.
+The corrected population is now 64 custom CUDA / 14 CUTLASS / 125 pure ATen;
+no build, trace, replay, or NCU vertical was admitted. Evidence:
+`docs/sm86_c7_sol_l1_problem057_source_class_correction_v1.json`. C7-S34AR is
+now active for `problem_058_moe_expert_token_radix_sort_with_prefix_sum`.
+
+C7-S34AR corrected the source census for `problem_058` from marker-only custom
+CUDA to pure ATen: `kernel.cu` is a stub and `main.cpp::run` delegates to
+stable argsort, bincount, cumsum, and destination copies with no custom
+launcher. The corrected population is now 63 custom CUDA / 14 CUTLASS / 126
+pure ATen; no build, trace, replay, or NCU vertical was admitted. Evidence:
+`docs/sm86_c7_sol_l1_problem058_source_class_correction_v1.json`. C7-S34AS is
+now active for `problem_059_moe_group_score_aggregation_and_masking`.
+
+C7-S34AS completed the genuine L1 MoE group-score aggregation/masking row.
+The pinned CUDA 13.2/GCC14 build passed all 16 declared token counts across
+three deterministic seeds (48 rows), with the declared matching-negative-
+infinity exception explicit, and representative Compute Sanitizer reported
+zero errors. The checked `[1163,256]` capture passed the profiler-gated NVBit
+path, independent 312-instruction control sidecar (296 target plus 16 inert
+CUB helper), deterministic byte-identical replay, and five application-replay
+NCU repetitions. Replay and NCU instruction counts match (`711756`); NCU
+cycle median is `11294`, SM-active median `9582`; the superseded inline-oracle
+attempt is retained separately, while the checked official-reference capture
+is authoritative. Dirty-writeback/coherence tails, parser limitation, raw
+tracer units, and zero native macro dispatch remain explicit. Evidence:
+`docs/sm86_c7_sol_l1p059_source_v1.json`,
+`docs/sm86_c7_sol_l1p059_smoke_v1.json`, and
+`docs/sm86_c7_sol_l1p059_vertical_v1.json`. C7-S34AT is now active for
+`problem_061_tanh_gated_residual_add_backward`.
+
+C7-S34AT completed the genuine L1 tanh-gated residual backward row. The
+pinned CUDA 13.2/GCC14 build passed all 16 declared shapes across three
+deterministic seeds (48 rows; maximum `grad_hidden_states` absolute error
+`0.0625`, with zero declared-tolerance violations), and representative
+Compute Sanitizer reported zero errors. The checked capture passed two
+profiler-gated custom launches after fusing the identity residual write into
+Kernel A and replacing the scalar `gate.to(float)` helper launch with a direct
+`item<float>()` read. Independent control extraction decoded 400 instructions
+(216 + 168 target plus 16 inert CUB helper), replay was byte-identical on a
+repeat, and five application-replay NCU repetitions ran per kernel. Replay and
+NCU instruction counts match (`231346` and `355`); cycle medians are `9795`
+and `3287`, with SM-active medians `8115` and `1722`. Dirty-writeback/coherence
+tails, parser limitation, raw tracer units, and zero native macro dispatch
+remain explicit. Evidence: `docs/sm86_c7_sol_l1p061_source_v1.json`,
+`docs/sm86_c7_sol_l1p061_smoke_v1.json`, and
+`docs/sm86_c7_sol_l1p061_vertical_v1.json`. C7-S34AU is now active for
+`problem_062_kv_cache_update_with_rope_backward`.
+
+C7-S34AU corrected the source census for `problem_062` from marker-only
+custom CUDA to pure ATen: `kernel.cu` is a stub and `main.cpp::run` delegates
+to ATen index selection, BF16 RoPE algebra, reductions, clone/index-fill, and
+destination copies with no custom launcher. The corrected population is now
+62 custom CUDA / 14 CUTLASS / 127 pure ATen; no build, trace, replay, or NCU
+vertical was admitted. Evidence:
+`docs/sm86_c7_sol_l1_problem062_source_class_correction_v1.json`. C7-S34AV is
+now active for `problem_064_latent_kv_expansion_with_split`.
+
+C7-S34AV corrected the source census for `problem_064` from marker-only
+custom CUDA to pure ATen: `kernel.cu` is a stub and `main.cpp::run` delegates
+to ATen RMSNorm, cuBLAS projection, view/transpose/split, and destination
+copies with no custom launcher. The corrected population is now 61 custom CUDA
+/ 14 CUTLASS / 128 pure ATen; no build, trace, replay, or NCU vertical was
+admitted. Evidence:
+`docs/sm86_c7_sol_l1_problem064_source_class_correction_v1.json`. C7-S34AW is
+now active for `problem_066_masked_softmax_with_attention_dropout_backward`.
+
+C7-S34AW initially retained `problem_066` as a correctness blocker from a
+custom-input/all-elements diagnostic. C7-S34BB corrected that disposition:
+the actual SOL generator, reference, negative-infinity handling, and
+`required_matched_ratio=0.99` criterion pass all 16 declared rows at seed 223
+(minimum matched ratio 1.0; maximum absolute error `5.96e-8`). The raw
+diagnostic remains retained but is explicitly superseded; no NCU value entered
+the audit. Evidence: `docs/sm86_c7_sol_l1p066_correctness_recheck_v1.json` and
+the superseded raw record `docs/sm86_c7_sol_l1p066_smoke_v1.json`. C7-S34AX is
+now active for `problem_068_fused_rope_application_backward`.
+
+C7-S34BB3 then completed a corrected problem066 native vertical using the
+official generator/reference path. One profiler-gated custom launch produced
+592 decoded control instructions (576 target + 16 CUB helper), 24,707,072
+replay/NCU instructions, byte-identical replay repeat, and five application-
+replay NCU repetitions (cycle median `174414`, SM-active median `172696`).
+The modeled GPC lower (`173682`) exceeds two measured repeats; that is retained
+as a lower-bound falsifier, not fitted or called completion. Evidence:
+`docs/sm86_c7_sol_l1p066_vertical_v1.json`. C7-S34BC is now the active
+remaining-population/source-execution seam.
+
+C7-S34AX completed the genuine L1 FP32 RoPE backward row. The pinned CUDA
+13.2/GCC14 build passed all 14 declared shapes across three deterministic
+seeds (48 rows; maximum absolute error `0.0000190735`, with zero declared-
+tolerance violations), and representative Compute Sanitizer reported zero
+errors. The `[1,32,8,293]` capture passed three profiler-gated custom launches,
+independent 768-instruction control extraction (40 + 712 target plus 16 inert
+CUB helper), deterministic byte-identical replay, and five application-replay
+NCU repetitions per launch. Replay and NCU instruction counts match; cycle
+medians are `17355`, `6081`, and `20834`; SM-active medians are `15611`,
+`4392`, and `19181`. Dirty-writeback/coherence tails, parser limitation, raw
+tracer units, and zero native macro dispatch remain explicit. Evidence:
+`docs/sm86_c7_sol_l1p068_source_v1.json`,
+`docs/sm86_c7_sol_l1p068_smoke_v1.json`, and
+`docs/sm86_c7_sol_l1p068_vertical_v1.json`. C7-S34AY is now active for
+`problem_069_rms_norm`.
+
+C7-S34AY completed the genuine L1 1024-thread BF16x2 RMSNorm row. The pinned
+CUDA 13.2/GCC14 build passed all 16 declared shapes across three deterministic
+seeds (48 rows; maximum absolute error `0.125`, with zero declared-tolerance
+violations), and representative Compute Sanitizer reported zero errors. The
+`[1,131,8192]` capture passed one profiler-gated launch, independent
+192-instruction control extraction (176 target plus 16 inert CUB helper),
+deterministic byte-identical replay, and five application-replay NCU
+repetitions. Replay and NCU instruction counts match (`1192624`); NCU cycle
+median is `17285`, SM-active median `15399`; dirty-writeback/coherence tails,
+parser limitation, raw tracer units, and zero native macro dispatch remain
+explicit. Evidence: `docs/sm86_c7_sol_l1p069_source_v1.json`,
+`docs/sm86_c7_sol_l1p069_smoke_v1.json`, and
+`docs/sm86_c7_sol_l1p069_vertical_v1.json`. C7-S34AZ is now active for
+`problem_071_kv_cache_update_with_rope`.
+
+C7-S34AZ completed the genuine L1 KV-cache update with RoPE row. The pinned
+CUDA 13.2/GCC14 build passed all 16 declared shapes across three deterministic
+seeds (48 rows; exact output equality), and representative Compute Sanitizer
+reported zero errors. The `[B=2,H=10,new=512,current=0]` capture passed one
+profiler-gated launch, independent 152-instruction control extraction (136
+target plus 16 inert CUB helper), deterministic byte-identical replay, and
+five application-replay NCU repetitions. Replay and NCU instruction counts
+match (`4136960`); NCU cycle median is `21576`, SM-active median `19847`;
+dirty-writeback/coherence tails, parser limitation, raw tracer units, and zero
+native macro dispatch remain explicit. Evidence:
+`docs/sm86_c7_sol_l1p068_source_v1.json`,
+`docs/sm86_c7_sol_l1p068_smoke_v1.json`, and
+`docs/sm86_c7_sol_l1p068_vertical_v1.json`. C7-S34BA is now active for
+`problem_073_fused_encoder_final_norm_to_decoder_cross_attention_kv_projection`.
+
+C7-S34BA completed the problem073 source/build/correctness bar but retained a
+full-chain NVBit blocker. The pinned CUDA 13.2/GCC14 mixed custom-RMSNorm plus
+cuBLAS/layout implementation passed all 16 declared rows × 3 seeds using the
+actual SOL generator and `required_matched_ratio=0.99`; strict all-element
+diagnostics retain small mismatches, and representative memcheck reported zero errors.
+The full profiler-gated chain then failed before trace emission on vendor/ATen
+`DEPBAR.LE SB0 0x0 {2 1}` decoding. No RMSNorm-only substitute, replay, or
+NCU vertical was admitted. Evidence:
+`docs/sm86_c7_sol_l1p073_source_v1.json`,
+`docs/sm86_c7_sol_l1p073_smoke_v1.json`, and
+`docs/sm86_c7_sol_l1p073_capture_blocked_v1.json`. The BA blocker is retained;
+BB is complete and BC is now the active remaining-population/source-execution
+seam.
+
+C7-S34BC1 source-reviewed problem075 and corrected the prior marker census:
+its `.cu` is a stub and `main.cpp` delegates the full grouped-query attention
+chain to ATen/cuBLAS; no custom launcher exists. No build or native vertical
+was admitted. The corrected population is now 60 custom CUDA / 14 CUTLASS /
+129 pure ATen. Evidence:
+`docs/sm86_c7_sol_l1_problem075_source_class_correction_v1.json`. C7-S34BD
+is now active for `problem_078_group_norm_fusion`.
+
+C7-S34BD1 source-reviewed problem078 as a genuine 32-group FP32 custom
+GroupNorm kernel (not an ATen marker). The source contract and 16 declared
+shape rows are recorded; build/correctness/memcheck is the next seam. Evidence:
+`docs/sm86_c7_sol_l1p078_source_v1.json`.
+
+C7-S34BD completed problem078. All 16 declared shapes × 3 seeds (48 rows)
+passed the pinned CUDA 13.2/GCC14 build and independent FP32 reference
+(`max_abs_error=2.861e-6`); representative memcheck reported zero errors.
+The `[B=4,C=320,H=64,W=64]` capture passed one profiler-gated launch,
+independent 448-instruction control extraction (432 target + 16 CUB helper),
+byte-identical replay repeat, and five application-replay NCU runs. Replay and
+NCU instruction counts match (`5542528`); NCU cycle median is `97482`,
+SM-active median `95960`; retirement tails remain open. Evidence:
+`docs/sm86_c7_sol_l1p078_source_v1.json`,
+`docs/sm86_c7_sol_l1p078_smoke_v1.json`, and
+`docs/sm86_c7_sol_l1p078_vertical_v1.json`. C7-S34BE is now active for
+`problem_080_adaptive_layernorm_continuous_with_modulation`.
+
+C7-S34BF1 source-reviewed problem081 and corrected the marker census: its
+`.cu` is a stub and its full grouped-query attention chain is ATen/cuBLAS, with
+no custom launcher. No build or native vertical was admitted. The corrected
+population is now 59 custom CUDA / 14 CUTLASS / 130 pure ATen. Evidence:
+`docs/sm86_c7_sol_l1_problem081_source_class_correction_v1.json`. C7-S34BG
+is now active for `problem_082_qk_norm_scaled_dot_product_attention`.
+
+C7-S34BG1 source-reviewed problem082 and corrected the marker census: its
+`.cu` is a stub and the full QK-normalized scaled attention chain is
+ATen/cuBLAS with no custom launcher. No build or native vertical was admitted.
+The corrected population is now 58 custom CUDA / 14 CUTLASS / 131 pure ATen.
+Evidence: `docs/sm86_c7_sol_l1_problem082_source_class_correction_v1.json`.
+C7-S34BH is now active for `problem_084_silu_activation_backward`.
+
+C7-S34BE1 source-reviewed problem080 as a genuine two-kernel FP32 adaptive
+LayerNorm/modulation path. The contract and 16 declared shape rows are
+recorded; build/correctness/memcheck is the next seam. Evidence:
+`docs/sm86_c7_sol_l1p080_source_v1.json`.
+
+C7-S34BE completed problem080. All 16 declared shapes × 3 seeds (48 rows)
+passed the pinned CUDA 13.2/GCC14 build and independent FP32 reference
+(`max_abs_error=0.00036621`); representative memcheck reported zero errors.
+The `[B=1,S=128]` capture passed two profiler-gated launches, independent
+576-instruction control extraction (216 + 344 target plus 16 inert CUB helper),
+byte-identical replay repeat, and five application-replay NCU runs per kernel.
+Replay and NCU instruction counts match; cycle medians are `77856` and `9787`,
+SM-active medians `76128` and `8109`; retirement tails remain open. Evidence:
+`docs/sm86_c7_sol_l1p080_source_v1.json`,
+`docs/sm86_c7_sol_l1p080_smoke_v1.json`, and
+`docs/sm86_c7_sol_l1p080_vertical_v1.json`. C7-S34BF is now active for
+`problem_081_joint_attention_context_projection`.
+
+C7-S34G source-reviewed an L2 pure-ATen/cuBLAS candidate. It has an explicit
+SM86/shape contract but delegates to multiple GEMM and elementwise kernels; no
+duplicate NVBit attempt was made after the adjacent L1 pure-ATen bounded hang.
+The row remains an explicit source blocker with no native replay/NCU claim.
+Evidence: `docs/sm86_c7_sol_l2_pure_aten_source_blocked_v1.json`.
+
+C7-S34H then built and sanitizer-checked a CUTLASS TensorOp FIB candidate and
+captured a real NVBit/control sidecar. The `l1-l2` replay refused on an
+invalid inferred bypass-copy cohort projection; flat-mode replay completed and
+five independent NCU runs measured a 73800-cycle median with a retained
+four-instruction simulator/NCU crosswalk difference. Async/writeback/coherence
+tails remain open. Evidence:
+`docs/sm86_c7_sol_candidate_fib004_flat_fallback_v1.json`.
+
+C7-S34I initially classified the remaining 203 SOL rows from source markers;
+C7-S34P1 corrected one comment-only `__global__` false positive, leaving 72
+custom CUDA, 14 CUTLASS, and 117 pure ATen/cuBLAS-style rows. This census
+changes candidate selection only; it does not claim compilation, replayability,
+completion, timing, or SOL score. Evidence:
+`docs/sm86_c7_sol_source_class_census_v1.json`.
+
+C7-S34E source-reviewed an L1 pure-ATen candidate. It built and passed exact
+analytic correctness plus memcheck, but a profiler-delimited NVBit attempt
+hung before trace emission and was terminated after a bounded observation. No
+replay/NCU vertical was admitted; the multi-kernel/static-module blocker is
+retained explicitly. Evidence: `docs/sm86_c7_sol_l1_candidate_blocked_v1.json`.
+
+C1-R-C/C6-M added a focused semantics regression: a structurally valid live
+async-copy boundary is refused before scalar macro derivation/mutation. This
+strengthens exact fallback; async visibility and hardware completion remain
+open.
+
+C3-F is closed only as a boundary-selection phase: the physical completion
+upper remains unknown, and C4-A is the selected independent seam. The existing
+async-group and destination-layout observer contracts are reconciled; the
+endpoint remains model-local rather than physical completion.
+
+C4-B is complete as one controlled observer slice: the dependent SFU warp
+observer interval `34205.4..34521.3` covered all five warp-8 target repeats
+with `0.150%` point APE, while its simulator lower bound remained separate at
+`38126` cycles. C4-C, C4-D, and C4-E retain negative quad transfer, shape, and
+block-count intervention results. C4-F's empirical batch feature covered four
+of five 210-block target repeats, with one 12-cycle interval miss and
+`0.028%` point APE; no designed-extrapolation coverage guarantee is claimed.
+C4-G fixes the observer-domain boundary: broad hardware accuracy, semantic
+completion, and native dispatch remain open.
+
+C6-A made one fresh real-trace reference-feature attempt with a 10,000-record
+bound. It reached the bound without a footer and returned the retained limit
+error; this is not labeled complete fallback or a native witness. C6-B
+preserves the prior footer-terminated exact fallback; C6-D/E now cover a
+narrow default-front-end snapshot transition. C6-F preserves the multi-warp
+boundary, and C6-G closes that boundary explicitly. C6-H now closes the
+scoped real store/fence negative branch; broader completion remains open. The next implementation seam is C1-R/C3/C6: preserve the store/fence mismatch,
+retain exact fallback, and seek independently typed ownership/visibility state
+without synthetic promotion. The scoped C3-G/C6-I writeback audit is complete; C3-H/C6-J preserves the visibility exact-fallback boundary.
+
+C6-B closes only the footer-terminated negative branch: a real reference run
+has 33,290 typed boundaries, zero complete transitions, and 33,290 exact
+fallbacks with zero native dispatch. C6-C now closes a narrow reference-only
+positive real-trace dispatch; physical completion is still unknown.
+
+C6-C now closes a narrow reference-only positive real-trace dispatch. The
+memory-free scalar cubin produced a complete typed boundary after disabling
+the reference-only front end; a separate detailed replay supplied six issue
+effects and a terminal barrier/exit state, and the witness run dispatched one
+typed macro with zero fallbacks while matching detailed counters, cycles,
+frontiers, and SM activity. Readiness diagnostics differ because compressed
+execution does not replay every issue-causal diagnostic increment. The same
+witness falls back without the typed front-end snapshot; C6-D/E now provide a
+narrow positive default-front-end snapshot transition.
+
+C6-D/E now also have a narrow positive default-front-end transition: a typed
+instruction-cache/stream exit snapshot enables one dispatch with zero
+fallbacks, matching detailed counters, cycles, frontiers, terminal time, and
+SM activity. Readiness diagnostics remain separate and differ by design. C6-F preserves the multi-warp boundary; C6-G closes the broader state
+decision. C6-H now closes the scoped real store/fence negative branch. The snapshot
+transition is not a general cache/front-end proof.
+Hardware completion and native hardware scheduling remain open.
+
+C6-H closes a scoped real store/device-fence negative branch. The one-block
+SM86 probe passed correctness, NVBit capture, static control extraction, and
+deterministic replay; tail extraction observed 17 stores and `MEMBAR.SC.GPU`
+/ `ERRBAR` while fence scope and hardware completion remained unknown. The
+reference-feature trace terminated with a footer after 34 reconstructed
+boundaries (17 pre/post pairs); every boundary was incomplete for
+`unmodeled_completion_tails`, exact replay was selected throughout, and native
+macro dispatch remained zero. This is not a physical completion upper or a
+native scheduling claim. Evidence: `docs/sm86_c6h_store_fence_completion_boundary_v1.json`.
+
+C3-G/C6-I then audited the existing opt-in writeback/coherence service on the
+same real probe. The writeback arm modeled completion for 512 dirty sectors
+(16,384 bytes) at cycle 11,121; enabling the model-local L1 visibility/
+resident-writeback path moved the modeled completion frontier to 11,146 while
+the separate SM-active frontier stayed 11,140. `dirty_writeback`/`coherence`
+remained unknown in both arms, so the typed boundary and native macro guards
+retain exact fallback for incomplete tails. This is model-local service
+progress, not a physical completion upper or NCU fit. Evidence:
+`docs/sm86_c3g_optin_writeback_coherence_tail_audit_v1.json`.
+
+C3-H/C6-J then ran the same visibility/resident-writeback path in reference
+mode. A 256-record bound was retained as a limit failure; the 4096-record
+run reached a footer with 1130 boundaries (565 pre/post pairs), including
+1024 visibility accesses, two fences, two invalidations, and 32 L2 batches.
+All boundaries remained incomplete for `unmodeled_completion_tails`, exact
+replay was selected, and native dispatch stayed zero. Fence scope/order are
+event observations, not a complete owner/generation/read-from witness.
+Evidence: `docs/sm86_c3h_visibility_reference_boundary_v1.json`.
+
+C3-I/C6-K then ran the independent raw-protobuf/static-SASS tail extractor
+without simulator or NCU inputs. It confirmed the observed store/fence prefix
+but found no owner/read-from, line-generation, global-order, fence-scope, or
+hardware-completion relation. The visibility reference stream remains exact
+fallback for all 1130 boundaries with zero native dispatch. This closes the
+negative witness branch only; independent ownership/generation evidence remains
+open. Evidence: `docs/sm86_c3i_owner_generation_negative_v1.json`.
+
+C4-H then ran an independent constant-load dependent-chain observer protocol:
+calibration blocks 8/16/32 produced a frozen `13805.3..13848.1` interval
+before an untouched 64-block target. All five target repeats missed the
+interval (`0/5`, point APE `0.434%`), so no refit or widening was performed.
+C4-I synchronizes the domain: the positive SFU slice remains mechanism-local;
+constant-load and quad transfers are falsified or partial, and broad accuracy
+remains open. Evidence: `docs/sm86_c4i_observer_domain_reconciliation_v1.json`.
+
+C5-A reports the corresponding held-out statistics: the frozen constant-load
+interval covered `0/5` target repeats, width was `42.86` cycles, point APE was
+`0.434%`, and target stdev was `64.67` cycles. The simulator lower bound
+(`62287`) and open writeback/coherence tails remain separate. Broad C5
+accuracy is still open. Evidence:
+`docs/sm86_c5a_constant_load_holdout_evaluation_v1.json`.
+
+C5-B then evaluated the disjoint independent-load mode-1 family. Calibration
+blocks 8/16 produced a frozen `11003..11293` interval before an untouched
+32-block target; all five target repeats missed (`0/5`, point APE `2.578%`).
+The miss is retained without refit or widening, and simulator frontiers stay
+separate. C5-C now synthesizes the positive/negative observer slices; broad
+accuracy remains open. Evidence:
+`docs/sm86_c5b_constant_load_mode1_reconciliation_v1.json`.
+
+C5-C synthesizes the positive SFU slice with both constant-load transfer
+falsifiers while keeping coverage, width, signed error, semantic lower bounds,
+and completion status separate. No broad accuracy or completion claim is made.
+The narrow scalar actor also gained a pre-mutation detailed-effect-span guard:
+truncated or non-monotone supplied effects now refuse, while the model-local
+empty-effect recurrence remains compatible.
+
+M5-A through M5-D have now been executed as scoped phases. The matched
+control/reduction-tail differential is in
+`docs/sm86_m5a_native_tail_differential_launch_cycle_v1.json`: simulator GPC
+lower-bound delta `671` cycles versus independent NCU median delta `740`, with
+matching instruction counts, deterministic replay, and zero native macro
+dispatches. The reduction arm retains reduction-RMW, dirty-writeback, and
+coherence tails. The calibration-only async observer holdout is reconciled in
+`docs/sm86_m5b_calibration_holdout_reconciliation_v1.json`: its pre-NCU
+`37737..38655` interval covers five group-128 repeats and has 0.396% point APE,
+but is not a semantic upper. The fresh bounded real-corpus continuation run
+(`docs/sm86_m5c_native_continuation_fallback_v1.json`) has 10,032 exact
+fallback boundaries, zero complete transitions, and zero native macro
+dispatches. Claim synchronization and focused regressions are recorded in
+`docs/sm86_m5d_claim_synchronization_v1.json`.
+
+These phases close their scoped bars, not the physical program: C1/C3/C4/C5,
+the positive C6 continuation witness, broader C7 coverage, and physical C8
+mechanism closeout remain open.
+No scored NCU value became a model feature or tuning input.
+
+C8-A is now complete: `docs/sm86_c8a_interface_reconciliation_v1.json`
+records clean active `sim-run`/workload-runner help surfaces, no retired
+`--enable-cupti-activity` token in active source, resolved links for all 42
+inventory entries and 48 retained stages, and retained historical SimBench
+references. C8-B is complete for corrected-workload failure dispositions;
+historical material is not deleted and no unfinished mechanism is relabeled.
+The C8-B disposition record now retains six concrete blockers (external
+tracer contract, no currently unresolved tensor-pipeline rows, and three vendor
+static-module rows) without shape substitution; see
+`docs/sm86_c8b_corrected_failure_dispositions_v1.json`. C8-C is complete as a
+scoped final runbook synchronization. `docs/sm86_c8c_runbook_synchronization_v1.json`
+now links the M5/C8 records from `docs/README.md` and confirms that the open
+C1/C3/C4/C5/C6/C7 surfaces remain visible; C8 is complete as a scoped
+runbook/claim phase, not as physical mechanism completion.
+
+The residual **C1-R matched resident-memory fence/visibility suite** now has a
+fresh four-arm capture in
+`docs/sm86_c1r_store_fence_differential_live_v1.json`. Control/store ×
+no/device-fence arms passed seven host oracles, sanitizer, NVBit, deterministic
+replay, and five NCU repetitions. Simulator store deltas are `2886` cycles;
+NCU medians are `6080`/`6228`, and the simulator's 12-cycle fence increment
+misses NCU's 177/325-cycle increments. This is a retained fence-model
+mismatch, not a fitted parameter; store completion tails remain open and C1-R
+stays active for repair. The follow-up system-fence arms reproduce the prior
+crosswalk blocker (`756` extra NCU instructions per system arm), so those rows
+are retained but not scored. C1-R-B is complete as a negative reconciliation;
+the next technical seam is C3-F physical-upper/accuracy boundary. C3-A's
+focused model-local regression passed 13 targeted tests
+covering feedback acknowledgements, checked completion arithmetic, async
+refusal, and explicit writeback-tail propagation; C3-B then fixed the per-warp
+acknowledgement readiness bug and
+the SM-active projection bug, and the retained traces passed the `0` versus
+`4096` model-only perturbation. C3-C independently extracted 1428 store facts
+per arm and the device-fence opcode while retaining hardware completion,
+ownership, generation, order, and fence scope as unknown. C3-D is complete
+for async-copy/visibility tail reconciliation and records 8192 async lane
+copies with 2048 committed/waited groups plus an unchanged carded-DRAM
+negative perturbation. C3-E is complete for an independently witnessed
+completion/visibility continuation and has now completed the async reference
+branch with 33290 exact-fallback boundaries and zero complete transitions.
+C3-F remains active because the physical completion upper is still unknown;
+none of these local results close hardware completion.
 
 Native replay is unchanged by the predictive flag. Service demand now yields an
 explicit model-local service/queue composition; the live full-trace role is
@@ -284,9 +1128,8 @@ capture passes Compute Sanitizer; NVBit/replay cover 1,024 blocks with
 so lower-bound consistency is true; dirty-writeback/coherence and native
 dispatch remain open.
 
-Two tensor rows (INT8 IMMA and TF32 HMMA) pass host correctness, NVBit, and NCU
-but are blocked before simulator timing because their SM86 pipeline models are
-missing. Ten memory/control rows remain real lower-bound falsifiers; three L2
+TF32 HMMA and INT8 IMMA rows now pass host correctness, NVBit, NCU, and exact
+SM86 replay at their shape-specific capability seams; physical tails remain open. Ten memory/control rows remain real lower-bound falsifiers; three L2
 examples are pointer chase (59,545 vs NCU median 49,580), persisting window
 (31,173 vs 29,846 after the sink repair), and prefetch hint (46,874 vs
 40,598). The prefetch binary emits
@@ -295,7 +1138,7 @@ unobservable. The corrected shared-bank shape uses SM86 dynamic shared-memory
 opt-in (65,536 bytes against default 49,152 and opt-in 101,376), superseding
 its old false OOD disposition.
 
-The research-probe population was re-enumerated from the current tree: 42 directories are present (31 Makefile CUDA probes, 6 source/preserved-binary rows, and 5 analysis-only rows). The bounded inventory is `docs/sm86_c7_research_probe_inventory_v1.json`; all 31 Makefile probes build successfully with the pinned CUDA 13.2/GCC 14/sm_86 matrix in `docs/sm86_c7_research_probe_build_matrix_v1.json`. Matrix campaigns are complete for issue_port_control (68), async_barrier_overlap (36), store_ack_frontier (30 arms), memory_retirement_service (102 with eight crosswalk exclusions), barrier_pipeline (33), and l1tex_admission_backpressure (100, all lower-bound-consistent). An explicit warmup/target l2_queue_frontier vertical cell also passes correctness/NVBit/replay/five-NCU with lower-bound consistency in `docs/sm86_c7_research_probe_l2_queue_frontier_live_v1.json`; remaining probe families are not yet claimed.
+The research-probe population was re-enumerated from the current tree: 42 directories are present (37 Makefile-backed probes, no separate source/preserved-binary rows, and 5 analysis-only rows). The bounded inventory is `docs/sm86_c7_research_probe_inventory_v1.json`; the synchronized 37-row build matrix is `docs/sm86_c7_research_probe_build_matrix_v1.json`; all 37 Makefile probes build successfully with the pinned CUDA 13.2/GCC 14/sm_86 matrix in `docs/sm86_c7_research_probe_build_matrix_v1.json`. Matrix campaigns are complete for issue_port_control (68), async_barrier_overlap (36), store_ack_frontier (30 arms), memory_retirement_service (102 with eight crosswalk exclusions), barrier_pipeline (33), and l1tex_admission_backpressure (100, all lower-bound-consistent). An explicit warmup/target l2_queue_frontier vertical cell also passes correctness/NVBit/replay/five-NCU with lower-bound consistency in `docs/sm86_c7_research_probe_l2_queue_frontier_live_v1.json`; remaining probe families are not yet claimed.
 
 The remaining BF16 cuBLAS control row is now also dispositioned in
 `docs/sm86_c7_simbench_vendor_gemm_cublas_blocked_live_v1.json`: host BF16
@@ -572,8 +1415,10 @@ replay, and five NCU runs. Replay/NCU agree at 28,788 instructions; NCU median
 canary was excluded. Artifact:
 `docs/sm86_c7_research_probe_fixed_latency_result_bypass_live_v1.json`.
 
-The next active plan milestone is C7-S33AO: select the next uncaptured
-non-memory probe after source review.
+The active continuation is tracked in
+`plans/sm86_completion_frontier_and_native_dispatch_20261002.md`; the old
+C7-S33AO selection note is superseded by the completed AO/AP refreshes and the
+AQ/AR stages below.
 
 ## Retained measurements
 
@@ -599,12 +1444,142 @@ trials, NVBit, deterministic replay, and five NCU runs. Replay/NCU match at
 590,830. Capacity/pop width remain unidentified; no timing model is enabled.
 Artifact: `docs/sm86_c7_research_probe_fixed_latency_result_capacity_live_v1.json`.
 
-C7-S33AP is active: review `immediate_constant_frontier` next.
-
 C7-S33AP completed an immediate-constant live anchor. The hand-authored PTX
 cubin passed direct correctness, NVBit, sim-run replay, and one independent NCU
 profile; 151,872 instructions match, simulator lower is 6,037 cycles, and NCU
 is 10,709 GPC cycles. No IMC timing model is enabled.
 Artifact: `docs/sm86_c7_research_probe_immediate_constant_frontier_live_v1.json`.
 
-C7-S33AQ is active: review constant-load and L1TEX admission seams next.
+C7-S33AQ completed a hardened `constant_load_path` vertical slice. The source
+now has strict parsing, bounded input sizing, sentinel result buffers, and a
+separate functional output oracle. The same rebuilt binary passed seven
+full-shape correctness runs, reduced Compute Sanitizer, NVBit, deterministic
+replay, and five application-replay NCU captures. Replay and NCU match at
+1,909,824 target warp instructions; the simulator lower bound is 123,727
+cycles versus NCU median 24,016, a retained lower-bound falsifier. No
+constant-load/cache parameter is fitted and dirty-writeback/coherence tails
+remain open. Artifact:
+`docs/sm86_c7_research_probe_constant_load_path_live_v1.json`.
+
+C7-S33AR completed the L1TEX admission same-binary refresh. The campaign's
+stale trace-only executable interface was removed; one rebuilt
+`l1tex_admission_backpressure` binary served correctness, full-shape Compute
+Sanitizer, NVBit, deterministic replay, and five application-replay NCU runs
+for `store,line_unique,b84,w8,d32,l8,g0,all`. Replay and NCU match at
+1,255,968 target warp instructions; simulator lower is 12,905 cycles and NCU
+median is 29,879. No L1TEX/cache parameter is fitted and dirty-writeback/
+coherence tails remain open. Artifact:
+`docs/sm86_c7_research_probe_l1tex_admission_backpressure_live_v2.json`.
+
+C7-S33AS was active: capture the predeclared same-binary `control` versus
+`store` contrast at the same 84-block/8-warp/depth-32 shape. Compare deltas
+only as mechanism-local evidence; preserve falsifiers and do not fit a scalar
+store or L1TEX latency from the pair.
+
+C7-S33AS completed that pair. One rebuilt binary served both arms with seven
+correctness trials, full-shape Compute Sanitizer, NVBit, deterministic replay,
+and five NCU repetitions per arm. Hardware adds 12,823 cycles while the
+simulator lower-bound delta is 556; this mismatch is retained without fitting.
+Artifact:
+`docs/sm86_c7_research_probe_l1tex_admission_backpressure_pair_live_v1.json`.
+
+C7-S33AT was active: reconcile the live-probe inventory and stale-interface
+claims, then select one uncaptured non-memory source with a bounded oracle and
+native replay path. Do not count preserved binaries or old matrix rows as new
+live stages until the current same-binary contract passes.
+
+C7-S33AT completed that reconciliation. The inventory records the current
+same-binary L1TEX refresh and control/store differential, and the active L1TEX
+and Allocate interfaces no longer require their historical trace-only
+executables. Historical matrix rows remain explicitly historical.
+
+C7-S33AU completed a hardened fixed-Allocate same-binary slice. One rebuilt
+8,192-generation cubin served seven correctness trials with elapsed/sink
+oracles, full-shape Compute Sanitizer, NVBit, deterministic replay, and five
+application-replay NCU runs for `w8_r10_native`. Replay and NCU match at
+1,245,536 target warp instructions; simulator lower is 336,374 cycles and NCU
+median is 593,194. No allocation/register-bank timing is fitted and
+dirty-writeback/coherence tails remain open. Artifact:
+`docs/sm86_c7_research_probe_fixed_latency_allocate_live_v1.json`.
+
+C7-S33AV was active: review `fixed_latency_front_end_footprint` next. Prefer a
+bounded U1 same-binary cell; repair any short trace-twin interface before
+capture and do not fit front-end timing from one cell.
+
+C7-S33AV completed the front-end footprint same-binary refresh. The active
+Makefile/campaign no longer requires the historical short trace pair; one
+rebuilt 1,024-generation U1 fixed_retired cubin served seven correctness
+trials with elapsed/sink oracles, full-shape Compute Sanitizer, NVBit,
+deterministic replay, and five application-replay NCU runs. Replay and NCU
+match at 32,852 target warp instructions; simulator lower is 32,403 cycles and
+NCU median is 38,629. No front-end timing is fitted and dirty-writeback/
+coherence tails remain open. Artifact:
+`docs/sm86_c7_research_probe_fixed_latency_front_end_footprint_live_v1.json`.
+
+C7-S33AW was active: review `fixed_latency_result_order` as the next
+same-binary non-memory source; preserve falsifiers and do not fit result-order
+or issue-queue timing from one cell.
+
+C7-S33AW completed the result-order same-binary refresh. The active interface
+uses one rebuilt 8,192-generation cubin rather than the historical short trace
+pair. The `w8_hf` cell passed seven correctness trials with elapsed/sink
+oracles, full-shape Compute Sanitizer, NVBit, deterministic replay, and five
+application-replay NCU runs. Replay and NCU match at 458,968 target warp
+instructions; simulator lower is 197,490 cycles and NCU median is 257,751. No
+result-order/issue-queue timing is fitted and dirty-writeback/coherence tails
+remain open. Artifact:
+`docs/sm86_c7_research_probe_fixed_latency_result_order_live_v1.json`.
+
+C7-S33AX was active: review `fixed_latency_result_same_bank` next. Preserve
+falsifiers and do not infer physical bank mapping or latency from one contrast.
+
+C7-S33AX completed the same-bank result-order same-binary refresh. One rebuilt
+8,192-generation cubin served the W8 HF cell through seven correctness trials
+with elapsed/sink oracles, full-shape Compute Sanitizer, NVBit, deterministic
+replay, and five application-replay NCU runs. Replay and NCU match at 458,960
+target warp instructions; simulator lower is 197,489 cycles and NCU median is
+233,169. No physical bank mapping or latency is inferred and dirty-writeback/
+coherence tails remain open. Artifact:
+`docs/sm86_c7_research_probe_fixed_latency_result_same_bank_live_v1.json`.
+
+C7-S33AY was active: review `fixed_latency_reuse` next; preserve falsifiers and
+do not fit register-reuse or scoreboard timing from one cell.
+
+C7-S33AY completed the register-reuse same-binary refresh. One rebuilt
+8,192-generation variant-A cubin served the W8/U11-A cell through seven
+correctness trials with elapsed/sink oracles, full-shape Compute Sanitizer,
+NVBit, deterministic replay, and five application-replay NCU runs. Replay and
+NCU match at 1,245,824 target warp instructions; simulator lower is 336,953
+cycles and NCU median is 635,271. No reuse/scoreboard timing is fitted and
+dirty-writeback/coherence tails remain open. Artifact:
+`docs/sm86_c7_research_probe_fixed_latency_reuse_live_v1.json`.
+
+C7-S33AZ completed a corrected front-end IBuffer same-binary slice. One rebuilt
+baseline_s1 cubin passed seven timeline/sink-oracle trials, full-shape Compute
+Sanitizer, NVBit, deterministic replay, and five application-replay NCU runs.
+Replay and NCU match at 944 target warp instructions; simulator lower is 818
+cycles and NCU median is 3,678. No IBuffer depth is fitted. Artifact:
+`docs/sm86_c7_research_probe_front_end_ibuffer_depth_live_v1.json`.
+
+C7-S33BA is historical and superseded: its stale analyzer/link reconciliation
+was incorporated into the completed M3/M4 ledger without making historical
+outputs execution prerequisites.
+
+M1 correction completed: `docs/sm86_c7_research_probe_fixed_latency_result_capacity_live_v2.json` records strict parsing, initialized per-trial buffers, elapsed validation, seven correctness trials, Compute Sanitizer, same-binary NVBit/replay, and five NCU captures. Replay/NCU match at 1,573,144 instructions; simulator lower 590,830 and NCU median 851,446. Capacity remains unidentified.
+
+M2 correction completed: `docs/sm86_c7_research_probe_immediate_constant_frontier_live_v2.json` records an independent modulo-u32 output oracle, timestamp bounds, correct 2,688 thread/84 warp accounting, executable-relative cubin lookup, seven correctness trials, reduced Compute Sanitizer, same-cubin NVBit/replay, and five NCU captures. Replay/NCU match at 151,872 instructions; simulator lower 6,037 and NCU median 10,315. IMC timing remains observational only.
+
+C7-S33AZ completed a corrected front-end IBuffer same-binary slice. One rebuilt
+`baseline_s1` cubin passed seven timeline/sink-oracle trials, full-shape
+Compute Sanitizer, NVBit, deterministic replay, and five application-replay
+NCU runs. Replay and NCU match at 944 target warp instructions; simulator lower
+is 818 cycles and NCU median is 3,678. No IBuffer depth is fitted. Artifact:
+`docs/sm86_c7_research_probe_front_end_ibuffer_depth_live_v1.json`.
+
+M3 is complete: touched campaign analyzers use the active long-generation
+populations, historical short-trace names are no longer execution prerequisites,
+and inventory latest-artifact links point to corrected M1/M2 and AQ–AZ records.
+
+C7-S33BB is complete after the M4-E independent closeout recheck: all current
+source families have a live vertical or an explicit non-native disposition;
+failing, unsupported, and physically unobservable rows remain preserved.

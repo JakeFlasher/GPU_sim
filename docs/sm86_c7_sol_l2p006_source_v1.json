@@ -1,0 +1,22 @@
+{
+  "candidate": "L2/problem_006_multimodal_rope_position_calculation/cuda_cpp",
+  "environment": {"cuda_available": true, "torch": "2.12.0+cu130", "torch_cuda_runtime": "13.0", "gpu": "NVIDIA GeForce RTX 3090 Ti", "capability": "8.6", "permitted_environment": "tools/sol_execbench/.venv", "host_compiler": "/usr/bin/g++-14", "nvcc_expected": "CUDA 13.2"},
+  "phase": "C7-S34BZ1",
+  "schema": "sm86_c7_sol_l2p006_source_v1",
+  "source_contract": {
+    "source": "workloads/sol_execbench_baselines/L2/problem_006_multimodal_rope_position_calculation/cuda_cpp",
+    "entry_point": "main.cpp::run",
+    "class": "custom_cuda_plus_aten",
+    "sm86_marker": "solution.json compile option arch=compute_86,code=sm_86",
+    "custom_kernel": "mrope_position_kernel; one thread per batch walks multimodal sequence",
+    "aten_surfaces": "host-side per-batch event counting/prefix offsets and no-vision branch",
+    "constants": {"spatial_merge_size": 2, "image_token_id": 151655, "video_token_id": 151656, "vision_start_token_id": 151652, "tokens_per_second": 2.0},
+    "inputs": "custom input_ids/attention mask/int64 image/video grids and FP32 video timing arrays",
+    "outputs": "position_ids [3,B,S] int64 and mrope_position_deltas [B,1] int64 destination tensors",
+    "math": "multimodal text/image/video 3D position generation with global image/video offsets",
+    "oracle": "independent L2 definition.json/reference.py custom get_inputs/run",
+    "workload_rows": 16
+  },
+  "selection_basis": "Next remaining L2 custom-CUDA row after problem004/005 parser blockers; no timing or NCU values transferred",
+  "status": "complete_source_contract_and_sm86_environment_review"
+}

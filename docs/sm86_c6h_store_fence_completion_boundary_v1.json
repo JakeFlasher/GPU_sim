@@ -1,0 +1,128 @@
+{
+  "completion_boundary": {
+    "coherence": "open",
+    "dirty_writeback": "open",
+    "fence_scope": "not_closed",
+    "global_issue_order": "not_observed",
+    "hardware_completion": "not_observed",
+    "line_generation": "not_observed",
+    "owner_read_from": "not_observed",
+    "typed_completeness": "incomplete at every reconstructed boundary",
+    "unknowns": [
+      "unmodeled_completion_tails"
+    ]
+  },
+  "host_identity": {
+    "compute_capability": "8.6",
+    "device_index": 0,
+    "driver": "615.71.09",
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c"
+  },
+  "identity": {
+    "arch_card": "arch_profiles/cards/sm_86.json",
+    "binary": "workloads/research_probes/memory_retirement_service/memory_retirement_service",
+    "cache_scope": "launch",
+    "cell": "b1_store_device_line_stream_d16_l32",
+    "control": "results/alpha/c6h_store_probe_20261004/sass/memory_retirement_service_trace.control_bits.json",
+    "mode": "l1-l2",
+    "pchase_card": "data/pchase/sm_86_static_card.json",
+    "reference_environment": {
+      "SIM_SM_REFERENCE_MAX_RECORDS": "256",
+      "SIM_SM_REFERENCE_MODE": "event"
+    },
+    "simulator_binary": "sim/target/release/sim-run",
+    "trace": "results/alpha/c6h_store_probe_20261004/nvbit/b1_store_device_line_stream_d16_l32",
+    "trace_binary": "workloads/research_probes/memory_retirement_service/memory_retirement_service_trace"
+  },
+  "interpretation": "C6-H closes the real store/device-fence negative branch. The same-binary SM86 probe contains an observed MEMBAR.SC.GPU and store records, but the typed replay retains dirty-writeback/coherence completion tails as unknown. All 34 reconstructed reference boundaries select exact replay and no macro dispatch occurs. The footer proves bounded reference termination, not physical completion, a semantic upper, or native hardware scheduling.",
+  "live_probe": {
+    "compute_sanitizer": "not_run_for_bounded_reference_probe",
+    "correctness": {
+      "result": "results/alpha/c6h_store_probe_20261004/correctness/b1_store_device_line_stream_d16_l32/result.json",
+      "status": "passed",
+      "trials": 1
+    },
+    "ncu": "not_used; no scored measurement entered replay or fitting",
+    "normal_replay": {
+      "replay_pair": "results/alpha/c6h_store_probe_20261004/simulator/b1_store_device_line_stream_d16_l32",
+      "status": "passed",
+      "unmodeled_tails": {
+        "async_copy_shared_visibility": false,
+        "coherence": true,
+        "dirty_writeback": true,
+        "reduction_read_modify_write": false
+      }
+    },
+    "nvbit": {
+      "records": 4363,
+      "status": "passed",
+      "trace": "results/alpha/c6h_store_probe_20261004/nvbit/b1_store_device_line_stream_d16_l32"
+    },
+    "tail_facts": {
+      "facts": "results/alpha/c6h_store_probe_20261004/tail_facts.json",
+      "fence_opcodes": [
+        "ERRBAR",
+        "MEMBAR.SC.GPU"
+      ],
+      "fence_scope_semantics_closed": false,
+      "hardware_completion_observed": false,
+      "memory_records": 17,
+      "records": 1565,
+      "status": "passed",
+      "stores": 17
+    }
+  },
+  "milestones": {
+    "C6-H1": {
+      "guards": [
+        "incomplete typed completeness refuses before macro derivation",
+        "unmodeled completion tails are retained in typed unprojected timing state",
+        "memory-admission feedback is an explicit refusal domain",
+        "open memory/scalar pipelines, responses, barriers, and front-end transitions refuse before mutation"
+      ],
+      "result": "typed boundary and actor source review found no safe store/fence promotion path",
+      "status": "complete"
+    },
+    "C6-H2": {
+      "result": "real one-block store/device-fence trace reached a footer under a bounded reference run",
+      "status": "complete"
+    },
+    "C6-H3": {
+      "result": "no complete typed boundary or independent continuation witness exists; exact replay is retained",
+      "status": "complete_negative_branch"
+    },
+    "C6-H4": {
+      "result": "documentation synchronized; physical completion and native hardware scheduling remain open",
+      "status": "complete_scoped"
+    }
+  },
+  "open_surfaces": {
+    "broader_frontend_transition": "open",
+    "native_hardware_scheduling": "not_claimed",
+    "next": "independently typed completion/visibility state; do not synthesize a witness from this run",
+    "physical_completion_upper": "unknown",
+    "positive_store_fence_continuation": "not_observed"
+  },
+  "phase": "C6-H",
+  "reference": {
+    "complete_typed_boundaries": 0,
+    "dominant_refusal": "model_macro_typed_region_contract_missing",
+    "event_records": 34,
+    "exact_replay_boundaries": 34,
+    "footer_complete": true,
+    "native_macro_dispatches": 0,
+    "native_macro_fallbacks_reported": 0,
+    "power_projection": "activity_only",
+    "pre_post_pairs": 17,
+    "queue_clock_gap_cycles": 11099,
+    "queue_events_popped": 17,
+    "reference_lines_before_footer": 35,
+    "state_projection_complete": false,
+    "terminal_reference_event_time": 11099,
+    "trace": "results/alpha/c6h_store_probe_20261004/reference.jsonl",
+    "witness_supplied": false
+  },
+  "schema": "sm86_c6h_store_fence_completion_boundary_v1",
+  "status": "complete_negative_real_store_fence_footer_exact_fallback"
+}

@@ -41,7 +41,13 @@ __global__ void __launch_bounds__(kBlockThreads, 4) k_fused_gelu_tanh_mul(
         const float g2 = g * g;
         const float g3 = g2 * g;
         const float arg = sqrt_2_over_pi * (g + c * g3);
-        const float t = tanhf(arg);
+        // Keep the tanh tail accurate even when the baseline's
+        // --use_fast_math compile option is present.  The reference's
+        // tolerance reaches the saturated-GELU region, where tanh.approx
+        // rounds 1+tanh(arg) to zero while the FP32 reference retains a
+        // small nonzero value. Evaluate tanh in double, then round to FP32
+        // before the original BF16 activation/product rounding steps.
+        const float t = static_cast<float>(tanh(static_cast<double>(arg)));
         const float act_fp32 = 0.5f * g * (1.0f + t);
         const __nv_bfloat16 act_bf16 = __float2bfloat16(act_fp32);
         const __nv_bfloat16 up_bf16 = up_output[idx];

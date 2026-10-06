@@ -1,0 +1,186 @@
+{
+  "comparison": {
+    "gap_cycles": -860.0,
+    "gap_fraction": -0.027014292445421705,
+    "hardware_completion": "not_observed",
+    "instruction_count_match": true,
+    "lower_bound_consistency": false,
+    "lower_bound_cycles": 32695,
+    "ncu_median_cycles": 31835.0,
+    "point_estimator": "not_claimed"
+  },
+  "correctness": {
+    "all_trials_checked": true,
+    "correct": true,
+    "oracle": "shared-destination source-word oracle and per-warp error mask; seven correctness trials",
+    "status": "passed",
+    "stdout": "results/alpha/c7_s33bb_ldgsts_20261004_v2/correctness_0.stdout",
+    "trials": 7
+  },
+  "host_identity": {
+    "compute_capability": "8.6",
+    "device_index": 0,
+    "driver": "615.71.09",
+    "graphics_clock_mhz": 1350,
+    "memory_clock_mhz": 10501,
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "pstate": "P0",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c"
+  },
+  "identity": {
+    "args": [
+      "--mode",
+      "ncu",
+      "--assay",
+      "ldgsts",
+      "--cells",
+      "ldgsts_w1_l1_d4_g0",
+      "--bursts",
+      "16",
+      "--warmup",
+      "0",
+      "--repetition",
+      "1"
+    ],
+    "binary": "workloads/research_probes/ldgsts_burst_release/ldgsts_burst_release",
+    "binary_used_for_correctness_trace_replay_ncu": "same rebuilt vertical input (loaded cubin sidecar recorded separately when applicable)",
+    "control": "results/alpha/c7_s33bb_ldgsts_20261004_v2/control.json",
+    "failed_attempts": [
+      {
+        "disposition": "stopped after 4.5 minutes while tracing 256-MiB source initialization; no target trace accepted",
+        "kind": "nvbit_process_start",
+        "output_root": "results/alpha/c7_s33bb_ldgsts_20261004",
+        "timeout_seconds": 270
+      },
+      {
+        "disposition": "retained under results/alpha/c7_s33bb_ldgsts_20261004_v2/ncu_failed_launch0_*",
+        "kind": "ncu_wrong_launch",
+        "launch_skip": 0,
+        "profiled": "initialize_source"
+      },
+      {
+        "disposition": "retained under results/alpha/c7_s33bb_ldgsts_20261004_v2/ncu_failed_launch1_*",
+        "kind": "ncu_wrong_launch",
+        "launch_skip": 1,
+        "profiled": "prewarm_source"
+      }
+    ],
+    "ncu_cache_control": "all",
+    "ncu_clock_control": "base",
+    "ncu_launch_count": 1,
+    "ncu_launch_skip": 0,
+    "ncu_metric": "gpc__cycles_elapsed.max",
+    "ncu_repeats": 5,
+    "ncu_replay_mode": "application",
+    "source": "workloads/research_probes/ldgsts_burst_release",
+    "target_block": [
+      128,
+      1,
+      1
+    ],
+    "target_grid": [
+      1,
+      1,
+      1
+    ],
+    "target_kernel": "_Z9run_cellsILb1ELi0ELi4ELi0EEvPKcPK8CellSpecS2_iiiiiP12DirectRecordP9WarpState",
+    "target_kernel_id": 1,
+    "trace": "results/alpha/c7_s33bb_ldgsts_20261004_v2/trace"
+  },
+  "interpretation": "Marker-scoped recapture avoided the process-start initialization kernel. The same binary passed correctness, Compute Sanitizer, NVBit, replay, and five corrected marker-scoped NCU captures. Two earlier bounded failures are retained: process-start tracing did not terminate and launch-skip 0/1 profiled initialization/prewarm rather than run_cells. The corrected simulator lower bound is above the NCU median; no LDGSTS timing fit is made.",
+  "ncu": {
+    "instruction_count": [
+      9922.0,
+      9922.0,
+      9922.0,
+      9922.0,
+      9922.0
+    ],
+    "max": 31863.0,
+    "median": 31835.0,
+    "metric": "gpc__cycles_elapsed.max",
+    "min": 31801.0,
+    "rows": [
+      {
+        "dram__sectors_read.sum": 1236.0,
+        "gpc__cycles_elapsed.max": 31835.0,
+        "sm__cycles_active.max": 29331.0,
+        "smsp__inst_executed.sum": 9922.0,
+        "smsp__inst_executed_pipe_lsu.sum": 1412.0,
+        "smsp__inst_issued.sum": 9944.0
+      },
+      {
+        "dram__sectors_read.sum": 724.0,
+        "gpc__cycles_elapsed.max": 31801.0,
+        "sm__cycles_active.max": 29307.0,
+        "smsp__inst_executed.sum": 9922.0,
+        "smsp__inst_executed_pipe_lsu.sum": 1412.0,
+        "smsp__inst_issued.sum": 9944.0
+      },
+      {
+        "dram__sectors_read.sum": 512.0,
+        "gpc__cycles_elapsed.max": 31863.0,
+        "sm__cycles_active.max": 29367.0,
+        "smsp__inst_executed.sum": 9922.0,
+        "smsp__inst_executed_pipe_lsu.sum": 1412.0,
+        "smsp__inst_issued.sum": 9944.0
+      },
+      {
+        "dram__sectors_read.sum": 15524.0,
+        "gpc__cycles_elapsed.max": 31847.0,
+        "sm__cycles_active.max": 29371.0,
+        "smsp__inst_executed.sum": 9922.0,
+        "smsp__inst_executed_pipe_lsu.sum": 1412.0,
+        "smsp__inst_issued.sum": 9944.0
+      },
+      {
+        "dram__sectors_read.sum": 644.0,
+        "gpc__cycles_elapsed.max": 31832.0,
+        "sm__cycles_active.max": 29346.0,
+        "smsp__inst_executed.sum": 9922.0,
+        "smsp__inst_executed_pipe_lsu.sum": 1412.0,
+        "smsp__inst_issued.sum": 9944.0
+      }
+    ],
+    "stdev": 20.450916849862747,
+    "values": [
+      31835.0,
+      31801.0,
+      31863.0,
+      31847.0,
+      31832.0
+    ]
+  },
+  "schema": "sm86_c7_research_probe_ldgsts_burst_release_live_v2",
+  "simulator": {
+    "completion_frontier": {
+      "lower_bound_cycles": 32695,
+      "status": "incomplete_unmodeled_retirement_tails",
+      "unmodeled_tails": {
+        "async_copy_shared_visibility": false,
+        "coherence": true,
+        "dirty_writeback": true,
+        "reduction_read_modify_write": false
+      }
+    },
+    "instructions_issued": 9922,
+    "native_macro_dispatches": 0,
+    "records": 9922,
+    "runtime_measurement": "sim-run output retained; no speedup/compression comparison"
+  },
+  "status": "corrected_marker_ncu_lower_bound_falsifier_with_retained_failed_attempts",
+  "trace": {
+    "launches": 1,
+    "static_control_decoded_instructions": 14168,
+    "static_control_functions": 19,
+    "static_control_unknown_encodings": 0,
+    "target_coverage": {
+      "blocks_observed": 1,
+      "kind": "full",
+      "population_blocks": 1
+    },
+    "target_records_replayed": 9922,
+    "tracer_total_insts": 33233,
+    "tracer_total_reported_insts": 33233
+  }
+}

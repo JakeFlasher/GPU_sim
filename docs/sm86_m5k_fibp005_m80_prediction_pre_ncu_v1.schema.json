@@ -1,0 +1,10 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema",
+  "$id":"https://gpu-simulator.local/schemas/sm86_m5k_fibp005_m80_prediction_pre_ncu_v1.schema.json",
+  "title":"SM86 M5-K FIB005 M80 prediction before target NCU",
+  "type":"object","additionalProperties":false,
+  "required":["schema","phase","status","protocol","host_identity","identity","calibration","target_features","prediction","interpretation"],
+  "properties":{
+    "schema":{"const":"sm86_m5k_fibp005_m80_prediction_pre_ncu_v1"},"phase":{"const":"M5-K"},"status":{"const":"prediction_materialized_before_target_ncu"},"protocol":{"type":"object","properties":{"target_ncu_values_collected":{"const":false},"target_ncu_values_used_by_simulator":{"const":false},"prediction_before_target_collection":{"const":true}},"required":["target_ncu_values_collected","target_ncu_values_used_by_simulator","prediction_before_target_collection"],"additionalProperties":true},"host_identity":{"type":"object"},"identity":{"type":"object"},"calibration":{"type":"object"},"target_features":{"type":"object","properties":{"hardware_completion":{"const":"not_observed"},"native_macro_dispatches":{"const":0}},"required":["trace_records","simulator_lower_bound_cycles","hardware_completion","native_macro_dispatches"],"additionalProperties":true},"prediction":{"type":"object","properties":{"interval_role":{"const":"empirical_observer_prediction_not_semantic_completion_upper"}},"required":["point_cycles","interval_lower_cycles","interval_upper_cycles","interval_width_cycles","interval_role"],"additionalProperties":true},"interpretation":{"type":"string","minLength":1}
+  }
+}

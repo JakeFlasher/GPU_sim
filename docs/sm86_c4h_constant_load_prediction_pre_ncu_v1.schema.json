@@ -1,0 +1,53 @@
+{
+  "$id": "https://gpu-simulator.local/schemas/sm86_c4h_constant_load_prediction_pre_ncu_v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "host_identity": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "identity": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "interpretation": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "observer": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "phase": {
+      "const": "C4-H"
+    },
+    "schema": {
+      "const": "sm86_c4h_constant_load_prediction_pre_ncu_v1"
+    },
+    "simulator_frontier_separation": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "status": {
+      "type": "string"
+    },
+    "target_gate": {
+      "additionalProperties": true,
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema",
+    "status",
+    "phase",
+    "host_identity",
+    "identity",
+    "observer",
+    "simulator_frontier_separation",
+    "target_gate",
+    "interpretation"
+  ],
+  "title": "SM86 C4-H constant-load observer prediction before target NCU",
+  "type": "object"
+}

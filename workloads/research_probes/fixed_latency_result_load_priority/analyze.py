@@ -33,7 +33,7 @@ VARIANTS = (
     "opposite_shifted",
 )
 LONG_GENERATIONS = 1024
-TRACE_GENERATIONS = 64
+TRACE_GENERATIONS = 1024
 REQUIRED_METRICS = (
     "sm__cycles_active.max",
     "smsp__inst_issued.sum",
@@ -87,21 +87,14 @@ expected_physical_slots = ORDER.expected_physical_slots
 
 
 def static_name(variant: str | None, trace: bool) -> str:
-    prefix = (
-        "fixed_latency_result_load_priority_trace"
-        if trace
-        else "fixed_latency_result_load_priority"
-    )
+    del trace
+    prefix = "fixed_latency_result_load_priority"
     return f"{prefix}_{variant}" if variant is not None else f"{prefix}_native"
 
 
 def validate_static(root: Path) -> dict[str, Any]:
-    names = [static_name(None, False), static_name(None, True)]
-    names.extend(
-        static_name(variant, trace)
-        for trace in (False, True)
-        for variant in VARIANTS
-    )
+    names = [static_name(None, False)]
+    names.extend(static_name(variant, False) for variant in VARIANTS)
     sidecars = {}
     for name in names:
         sidecar = read_json(root / "sass" / f"{name}.control_bits.json")
@@ -121,7 +114,7 @@ def validate_static(root: Path) -> dict[str, Any]:
             f"{name}: spill/local",
         )
 
-    for label in ("long", "trace"):
+    for label in ("long",):
         patch = read_json(
             root / "metadata" / f"{label}_result_load_priority_patch.json"
         )
@@ -153,7 +146,7 @@ def validate_static(root: Path) -> dict[str, Any]:
             f"{label}: pair byte count",
         )
 
-    for trace in (False, True):
+    for trace in (False,):
         rows = {
             variant: sidecars[static_name(variant, trace)]["functions"][FUNCTION]
             for variant in VARIANTS

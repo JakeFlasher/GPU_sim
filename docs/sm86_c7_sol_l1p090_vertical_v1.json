@@ -1,0 +1,155 @@
+{
+  "schema": "sm86_c7_sol_l1p090_vertical_v1",
+  "phase": "C7-S34BL",
+  "status": "complete_one_launch_native_vertical_lower_bound_falsifier",
+  "candidate": "L1/problem_090_batched_2d_rope_position_encoding_backward/cuda_cpp",
+  "identity": {
+    "arch": "sm_86",
+    "capability": "8.6",
+    "cuda_toolkit": "13.2",
+    "device_index": 0,
+    "environment": "tools/sol_execbench/.venv",
+    "extension": "results/alpha/c7_s34bl_sol_l1p090_20261005/pinned/official_build/sol_l1p090_sm86.so",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "gpu_uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "host_compiler": "/usr/bin/g++-14",
+    "nvcc": "/usr/local/cuda-13.2/bin/nvcc",
+    "source": "workloads/sol_execbench_baselines/L1/problem_090_batched_2d_rope_position_encoding_backward/cuda_cpp",
+    "torch": "2.12.0+cu130",
+    "torch_cuda_runtime": "13.0",
+    "driver": "615.71.09",
+    "independent_host_query": "results/alpha/c7_s34bl_sol_l1p090_20261005/pinned/host.csv",
+    "representative_workload_index": 0,
+    "representative_axes": {
+      "batch_size": 2,
+      "seq_len": 773,
+      "head_dim": 128
+    },
+    "seed": 223,
+    "runner": "results/alpha/c7_s34bl_sol_l1p090_20261005_run.py"
+  },
+  "correctness_and_sanitizer": {
+    "build_smoke": "docs/sm86_c7_sol_l1p090_smoke_v1.json",
+    "official_result": "results/alpha/c7_s34bl_sol_l1p090_20261005/pinned/official_full.json",
+    "official_rows": 48,
+    "official_min_matched_ratio": 1.0,
+    "official_max_abs_error": 2.3245811462402344e-06,
+    "sanitizer_errors": 0,
+    "representative_result": "results/alpha/c7_s34bl_sol_l1p090_20261005/pinned/trace_correctness.json"
+  },
+  "nvbit": {
+    "trace": "results/alpha/c7_s34bl_sol_l1p090_20261005/pinned/trace",
+    "accepted_launches": 1,
+    "raw_stats_total_insts": 1137856,
+    "raw_stats_total_reported_insts": 1137856,
+    "control_sidecar": "results/alpha/c7_s34bl_sol_l1p090_20261005/pinned/control_bits.json",
+    "target_decoded_instructions": 144,
+    "helper_decoded_instructions": 16,
+    "sidecar_total_decoded_instructions": 160,
+    "unknown_control_encodings": 0,
+    "module_mapping": "results/alpha/c7_s34bl_sol_l1p090_20261005/pinned/trace/extra_info/traced_kernel_modules.json",
+    "enhanced_parser_limitation": "JIT cuobjdump parse unavailable; independent extension control sidecar used."
+  },
+  "simulator": {
+    "binary": "sim/target/release/sim-run",
+    "arch_card": "arch_profiles/cards/sm_86.json",
+    "pchase_card": "data/pchase/sm_86_static_card.json",
+    "mode": "l1-l2",
+    "replay": "results/alpha/c7_s34bl_sol_l1p090_20261005/pinned/replay.json",
+    "repeat_replay": "results/alpha/c7_s34bl_sol_l1p090_20261005/pinned/replay_repeat.json",
+    "replays_byte_equal": true,
+    "native_macro_dispatches": 0,
+    "instructions_issued": 401960,
+    "records_seen": 401960,
+    "grid": [
+      773,
+      2,
+      1
+    ],
+    "block": [
+      256,
+      1,
+      1
+    ],
+    "frontiers": {
+      "sm_active_terminal_frontier": {
+        "cycles": 8957,
+        "role": "causal_sm_active_terminal_lower_bound_excludes_write_ack_and_service_only_events"
+      },
+      "sm_active_observation_frontier": {
+        "issue_lower_bound_cycles": 8957,
+        "issue_cycles": 8957,
+        "terminal_lower_bound_cycles": 8957,
+        "terminal_cycles": 8957,
+        "envelope_cycles": 0,
+        "role": "architecture_scoped_sm_active_observation_boundary_not_raw_lower_bound"
+      },
+      "gpc_observation_frontier": {
+        "lower_bound_cycles": 8957,
+        "envelope_cycles": 1856,
+        "grid_blocks": 1546,
+        "grid_log2": 10,
+        "cycles": 10813,
+        "role": "architecture_scoped_gpc_observation_boundary_not_timing_crosswalk"
+      },
+      "completion_frontier": {
+        "status": "incomplete_unmodeled_retirement_tails",
+        "lower_bound_cycles": 8957,
+        "unmodeled_tails": {
+          "reduction_read_modify_write": false,
+          "dirty_writeback": true,
+          "coherence": true,
+          "async_copy_shared_visibility": false
+        }
+      }
+    }
+  },
+  "ncu": {
+    "metric": "gpc__cycles_elapsed.max, sm__cycles_active.max, smsp__inst_executed.sum",
+    "paths": "results/alpha/c7_s34bl_sol_l1p090_20261005/pinned/ncu/repeat-*/ncu.csv",
+    "repetitions": 5,
+    "replay_mode": "application",
+    "observations": [
+      {
+        "gpc_cycles": 7228.0,
+        "sm_active_cycles": 5538.0,
+        "warp_instructions": 401960.0
+      },
+      {
+        "gpc_cycles": 7283.0,
+        "sm_active_cycles": 5608.0,
+        "warp_instructions": 401960.0
+      },
+      {
+        "gpc_cycles": 7148.0,
+        "sm_active_cycles": 5461.0,
+        "warp_instructions": 401960.0
+      },
+      {
+        "gpc_cycles": 7044.0,
+        "sm_active_cycles": 5369.0,
+        "warp_instructions": 401960.0
+      },
+      {
+        "gpc_cycles": 7069.0,
+        "sm_active_cycles": 5390.0,
+        "warp_instructions": 401960.0
+      }
+    ],
+    "medians": {
+      "gpc_cycles": 7148.0,
+      "sm_active_cycles": 5461.0,
+      "warp_instructions": 401960.0
+    }
+  },
+  "crosswalk": {
+    "per_kernel_instruction_counts_equal": true,
+    "raw_tracer_stats_are_separate_unit": true,
+    "ncu_values_used_to_change_simulator": false,
+    "physical_completion_upper_closed": false,
+    "hardware_scheduling_claimed": false,
+    "gpc_lower_bound_below_ncu_median": false,
+    "lower_bound_falsifier": true
+  },
+  "interpretation": "All 16 official SOL shapes pass across three seeds and representative memcheck. The same official extension produces one profiler-gated per-row BF16/FP32 SFU launch, independent control extraction, byte-identical replay, and five application-replay NCU repetitions. Replay/NCU instruction counts match at 401960. The modeled GPC lower bound 8957 exceeds the NCU median 7148 and is retained as a lower-bound falsifier; no timing parameter is fitted. Dirty-writeback/coherence tails remain open and fast-math SFU values are not treated as a general timing/accuracy certificate."
+}

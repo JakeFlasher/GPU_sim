@@ -22,17 +22,22 @@
       "84",
       "256"
     ],
+    "ncu_repeats": 1,
     "blocks": 84,
     "iterations": 256
   },
   "correctness": {
     "status": "passed",
+    "correct": true,
+    "elapsed_samples_valid": true,
+    "sink_valid": true,
     "min_cycles": 7218,
     "max_cycles": 7266,
     "oracle": "driver completed and returned 2688 warp records"
   },
   "trace": {
     "launches": 1,
+    "target_kernel_id": 1,
     "target_kernel": "imc_kernel",
     "target_records_replayed": 151872,
     "target_coverage": {

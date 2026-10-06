@@ -1,0 +1,43 @@
+{
+  "$id": "https://gpu-simulator.local/schemas/sm86_c8a_interface_reconciliation_v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "checks": {
+      "additionalProperties": true,
+      "required": [
+        "sim_run_help",
+        "workload_runner_help",
+        "retired_interface_active_source_matches",
+        "retired_interface_absent_from_active_sources",
+        "historical_references_retained",
+        "inventory",
+        "m5_claim_links",
+        "schema_pairs_checked"
+      ],
+      "type": "object"
+    },
+    "interpretation": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "phase": {
+      "const": "C8-A"
+    },
+    "schema": {
+      "const": "sm86_c8a_interface_reconciliation_v1"
+    },
+    "status": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "status",
+    "phase",
+    "checks",
+    "interpretation"
+  ],
+  "title": "sm86_c8a_interface_reconciliation_v1",
+  "type": "object"
+}

@@ -1305,7 +1305,7 @@ int main(int argc, char** argv) {
     CUDA_CHECK(cudaMalloc(&device_states,
                           host_specs.size() * kMaxWarps *
                               sizeof(WarpState)));
-    CUDA_CHECK(cudaMemset(device_states, 0,
+    CUDA_CHECK(cudaMemset(device_states, 0xff,
                           host_specs.size() * kMaxWarps *
                               sizeof(WarpState)));
     const std::size_t record_capacity =
@@ -1325,7 +1325,7 @@ int main(int argc, char** argv) {
                 device_states);
             CUDA_CHECK(cudaGetLastError());
             CUDA_CHECK(cudaDeviceSynchronize());
-            CUDA_CHECK(cudaMemset(device_states, 0,
+            CUDA_CHECK(cudaMemset(device_states, 0xff,
                                   kMaxWarps * sizeof(WarpState)));
         }
         if (cells[0].spec.route != kDram) {

@@ -1,0 +1,22 @@
+{
+  "candidate": "L1/problem_052_altup_hidden_state_collapse_with_magnitude_normalization/cuda_cpp",
+  "phase": "C7-S34AN1",
+  "schema": "sm86_c7_sol_l1_problem052_source_class_correction_v1",
+  "source_observation": {
+    "declared_class": "custom_cuda (prior marker census)",
+    "effective_class": "pure_aten",
+    "kernel_cu": "stub translation unit only; no custom __global__ definition",
+    "main_cpp": "ATen/cuBLAS matmul, casts, reductions, stack/mean, and destination copy; no custom CUDA launcher",
+    "solution_marker_false_positive": "the only __global__ marker is stub/comment or embedded source text",
+    "sm86_compile_marker": true,
+    "entry_point": "main.cpp::run",
+    "reference_contract": "three-stream AltUp projection, magnitude normalization, and BF16 final mean"
+  },
+  "disposition": {
+    "build_attempted": false,
+    "native_trace_admitted": false,
+    "reason": "source-class correction; pure-ATen row retained without duplicate tracing",
+    "timing_or_ncu_claimed": false
+  },
+  "status": "complete_source_class_correction_pure_aten_blocker"
+}

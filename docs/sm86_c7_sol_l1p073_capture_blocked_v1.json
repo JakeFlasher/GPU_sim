@@ -1,0 +1,12 @@
+{
+  "candidate":"L1/problem_073_fused_encoder_final_norm_to_decoder_cross_attention_kv_projection/cuda_cpp",
+  "phase":"C7-S34BA3",
+  "schema":"sm86_c7_sol_l1p073_capture_blocked_v1",
+  "status":"complete_bounded_nvbit_blocker_no_native_vertical",
+  "source_contract":"docs/sm86_c7_sol_l1p073_source_v1.json",
+  "smoke":"docs/sm86_c7_sol_l1p073_smoke_v1.json",
+  "identity":{"arch":"sm_86","cuda_toolkit":"13.2","host_compiler":"/usr/bin/g++-14","gpu":"NVIDIA GeForce RTX 3090 Ti","gpu_uuid":"GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c","source":"workloads/sol_execbench_baselines/L1/problem_073_fused_encoder_final_norm_to_decoder_cross_attention_kv_projection/cuda_cpp","extension":"results/alpha/c7_s34ba_sol_l1p073_20261005/build/sol_l1p073_sm86.so","representative_row":13},
+  "attempt":{"trace_root":"results/alpha/c7_s34ba_sol_l1p073_20261005/pinned/nvbit_target","stdout":"results/alpha/c7_s34ba_sol_l1p073_20261005/pinned/native_capture.stdout","stderr":"results/alpha/c7_s34ba_sol_l1p073_20261005/pinned/native_capture.stderr","active_from_start":false,"enhanced_tracer":true,"exit_code":1,"failure":"FATAL: failed to parse static SASS instruction at PC 0x370: DEPBAR.LE SB0 0x0 {2 1}"},
+  "mechanism":{"observed":"The first vendor/ATen helper launch reached a static SASS DEPBAR.LE instruction that the local NVBit SM86 decoder could not parse; the process exited before dynamic trace emission.","hypothesis":"The instruction belongs to a libtorch/ATen JIT helper in the full mixed-module chain, not the extension custom RMSNorm kernel; extension-only control bits cannot close the whole chain.","inference":"A complete native control/replay crosswalk for problem073 is unavailable with this tracer. No RMSNorm-only substitute or timing/NCU vertical is admitted."},
+  "disposition":{"native_vertical_admitted":false,"control_sidecar":null,"replay":null,"ncu_repetitions":0,"ncu_values_used_to_change_simulator":false,"next_supported_check":"A tracer decoder accepting this vendor DEPBAR form, or a full-chain traceable replacement; neither is available in this bounded run."}
+}

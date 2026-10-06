@@ -1,0 +1,40 @@
+{
+  "checks": {
+    "historical_references_retained": [
+      "workloads/portable_lcd/README.md",
+      "workloads/simbench_bw/README.md",
+      "workloads/simbench_bw/DEPENDENCIES.md",
+      "workloads/simbench_bw/golden/cupti_dual_source_tolerance.json",
+      "workloads/simbench_bw/schemas/historical/cupti_activity_sidecar.v1.schema.json"
+    ],
+    "inventory": {
+      "directory_count": 42,
+      "live_stage_records": 48,
+      "path": "docs/sm86_c7_research_probe_inventory_v1.json",
+      "unassigned_entries": 0
+    },
+    "m5_claim_links": {
+      "m5a": "docs/sm86_m5a_native_tail_differential_launch_cycle_v1.json",
+      "m5b": "docs/sm86_m5b_calibration_holdout_reconciliation_v1.json",
+      "m5c": "docs/sm86_m5c_native_continuation_fallback_v1.json",
+      "m5d": "docs/sm86_m5d_claim_synchronization_v1.json"
+    },
+    "retired_interface_absent_from_active_sources": true,
+    "retired_interface_active_source_matches": [],
+    "schema_pairs_checked": 123,
+    "sim_run_help": {
+      "command": "sim/target/release/sim-run --help",
+      "obsolete_flag_present": false,
+      "return_code": 0
+    },
+    "workload_runner_help": {
+      "command": ".venv/bin/python tools/run_sm86_workload.py --help",
+      "obsolete_flag_present": false,
+      "return_code": 0
+    }
+  },
+  "interpretation": "Active simulator and workload-runner CLI surfaces do not expose the retired cupti-activity flag; historical SimBench documentation/schema references remain intentionally retained as historical material. The 42-directory inventory has 48 retained stage records with no unassigned entry, and the M5 claim links resolve. C8-A does not delete historical evidence or claim C8 workload closeout.",
+  "phase": "C8-A",
+  "schema": "sm86_c8a_interface_reconciliation_v1",
+  "status": "complete_active_source_interface_reconciled_historical_docs_retained"
+}

@@ -22,8 +22,10 @@ DEFAULT_OUTPUT = (
 DRIVER = HERE / "fixed_latency_result_same_bank_driver"
 LONG_NATIVE = HERE / "fixed_latency_result_same_bank_native.cubin"
 LONG_CANONICAL = HERE / "fixed_latency_result_same_bank.cubin"
-TRACE_NATIVE = HERE / "fixed_latency_result_same_bank_trace_native.cubin"
-TRACE_CANONICAL = HERE / "fixed_latency_result_same_bank_trace.cubin"
+# One 8,192-generation cubin serves all active stages; short trace twins are
+# historical and are not execution inputs.
+TRACE_NATIVE = LONG_NATIVE
+TRACE_CANONICAL = LONG_CANONICAL
 
 
 def load_order_campaign():
@@ -60,7 +62,7 @@ class Cell:
             str(TRACE_CANONICAL if trace else LONG_CANONICAL),
             self.order,
             str(self.warps),
-            str(64 if trace else 8192),
+            "8192",
             str(trials),
         ]
 
@@ -89,7 +91,7 @@ def selected_cells(selector: str | None) -> list[Cell]:
 
 
 def require_binaries() -> None:
-    for path in (DRIVER, LONG_NATIVE, LONG_CANONICAL, TRACE_NATIVE, TRACE_CANONICAL):
+    for path in (DRIVER, LONG_NATIVE, LONG_CANONICAL):
         if not path.is_file() or path.stat().st_size == 0:
             raise RuntimeError(f"required binary is missing: {path}")
 
@@ -103,7 +105,7 @@ def emit_manifest(output: Path) -> None:
             "cells": [{**asdict(cell), "key": cell.key} for cell in configured_cells()],
             "ncu_metrics": list(METRICS),
             "long_generations": 8192,
-            "trace_generations": 64,
+            "trace_generations": 8192,
             "identification_widths": [4, 8],
             "held_out_widths": [12, 16],
             "destination_bank": 0,
@@ -180,8 +182,6 @@ def run_static(output: Path) -> None:
     binaries = {
         "fixed_latency_result_same_bank_native": LONG_NATIVE,
         "fixed_latency_result_same_bank": LONG_CANONICAL,
-        "fixed_latency_result_same_bank_trace_native": TRACE_NATIVE,
-        "fixed_latency_result_same_bank_trace": TRACE_CANONICAL,
     }
     sidecars = []
     for name, binary in binaries.items():
@@ -207,7 +207,6 @@ def run_static(output: Path) -> None:
         sidecars.append(sidecar)
     for source, name in (
         (HERE / "fixed_latency_result_same_bank.patch.json", "long_same_bank_patch.json"),
-        (HERE / "fixed_latency_result_same_bank_trace.patch.json", "trace_same_bank_patch.json"),
     ):
         BASE.write_json(output / "metadata" / name, json.loads(source.read_text(encoding="utf-8")))
 
@@ -224,29 +223,8 @@ def run_static(output: Path) -> None:
         )
 
     audit(sidecars, "operand_projection_audit.json", "operand-projection-run")
-    predecessor_patterns = (
-        "results/captures/sm86_async_barrier_readiness_20260817_v*/sass/*.control_bits.json",
-        "results/captures/sm86_barrier_pipeline_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_barrier_pipeline_coupled_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_barrier_pipeline_multicta_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_cycle_residual_20260817_v1/control/*.control_bits.json",
-        "results/captures/sm86_cycle_residual_20260817_v1/research-probes/async-cross-warp/*.control_bits.json",
-        "results/captures/sm86_fixed_latency_allocate_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_fixed_latency_completion_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_fixed_latency_reuse_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_issue_port_control_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_smsp_scheduler_contention_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_fixed_latency_result_queue_20260817_v1/sass/*.control_bits.json",
-        "results/captures/sm86_fixed_latency_result_order_20260817_v1/sass/*.control_bits.json",
-    )
-    predecessors = sorted({path for pattern in predecessor_patterns for path in REPO_ROOT.glob(pattern)})
-    if len(predecessors) != 52:
-        raise RuntimeError(f"expected 52 retained predecessor sidecars, got {len(predecessors)}")
-    audit(
-        predecessors + sidecars,
-        "retained_corpus_operand_projection_audit.json",
-        "retained-corpus-operand-projection-run",
-    )
+    # Historical predecessor sidecars are not prerequisites for this current
+    # same-binary vertical capture.
     print(f"static artifacts: {destination}")
 
 
@@ -259,7 +237,7 @@ def run_simulator(output: Path, cells: Sequence[Cell], force: bool, simulator_bi
         destination.mkdir(parents=True, exist_ok=True)
         command = [
             str(binary), "--trace", str(output / "nvbit" / cell.key),
-            "--control", str(output / "sass" / "fixed_latency_result_same_bank_trace.control_bits.json"),
+            "--control", str(output / "sass" / "fixed_latency_result_same_bank.control_bits.json"),
             "--arch-card", str(REPO_ROOT / "arch_profiles" / "cards" / "sm_86.json"),
             "--mode", "flat",
         ]

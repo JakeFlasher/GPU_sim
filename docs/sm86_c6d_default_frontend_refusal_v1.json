@@ -1,0 +1,36 @@
+{
+  "schema": "sm86_c6d_default_frontend_refusal_v1",
+  "status": "complete_negative_default_frontend_boundary_explicit",
+  "phase": "C6-D",
+  "identity": {
+    "binary": "workloads/c6_native_scalar/scalar_driver",
+    "cubin": "workloads/c6_native_scalar/scalar_kernel.cubin",
+    "trace": "results/alpha/c6c_scalar_native_20261004/trace3",
+    "control": "results/alpha/c6c_scalar_native_20261004/control3.json",
+    "arch_card": "arch_profiles/cards/sm_86.json",
+    "pchase_card": "data/pchase/sm_86_static_card.json",
+    "witness": "results/alpha/c6c_scalar_native_20261004/real_witness_candidate.json",
+    "reference_run": "results/alpha/c6c_scalar_native_20261004/ref_candidate_final/frontend_reference.jsonl",
+    "replay": "results/alpha/c6c_scalar_native_20261004/ref_candidate_final/frontend_replay.json"
+  },
+  "observation": {
+    "default_frontend_enabled": true,
+    "typed_entry_complete": true,
+    "native_macro_dispatches": 0,
+    "native_macro_fallbacks": 0,
+    "footer_complete": true,
+    "refusal_reason": "typed scalar macro is unsupported: front_end_or_scalar_pipeline_transition_not_implemented",
+    "reference_local_cycle_steps": 21,
+    "reference_idle_jumps": 6,
+    "reference_skipped_cycles": 598
+  },
+  "decision": {
+    "positive_default_frontend_witness": false,
+    "front_end_state_transition_modeled": false,
+    "exact_fallback_preserved": true,
+    "physical_completion": "unknown",
+    "semantic_upper": "open",
+    "hardware_scheduling": "not_claimed"
+  },
+  "interpretation": "The same real SM86 witness that dispatches in the reference-only no-front-end mode explicitly refuses with the default front end enabled. The refusal is retained before mutation; no readiness or front-end state is treated as exact by renaming it diagnostic. The positive C6-D/E snapshot transition is recorded separately; this artifact remains the no-snapshot negative control."
+}

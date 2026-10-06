@@ -1,0 +1,211 @@
+{
+  "schema": "sm86_c4e_sfu_quad_occupancy_prediction_pre_ncu_v1",
+  "status": "prediction_materialized_before_target_ncu",
+  "phase": "C4-E",
+  "protocol": {
+    "calibration_cells": [
+      "42x8x512 quad",
+      "63x8x512 quad",
+      "126x8x512 quad"
+    ],
+    "holdout_cell": "168x8x512 quad",
+    "target_metric": "gpc__cycles_elapsed.max",
+    "target_ncu_values_collected": false,
+    "ncu_values_used_by_simulator": false,
+    "prediction_before_target_collection": true,
+    "interval_method": "OLS gpc cycles vs block count within warp-8 quad regime plus maximum absolute calibration residual",
+    "prior_misses_excluded": true
+  },
+  "identity": {
+    "binary": "workloads/research_probes/sfu_frontier/sfu_frontier",
+    "target_args": [
+      "168",
+      "8",
+      "512",
+      "quad"
+    ],
+    "target_trace": "results/alpha/c4e_sfu_quad_occupancy_20261004/target_trace",
+    "target_control": "results/alpha/c4e_sfu_quad_occupancy_20261004/target_control.json",
+    "target_tail_facts": "results/alpha/c4e_sfu_quad_occupancy_20261004/target_tail_facts.json",
+    "target_simulator": "results/alpha/c4e_sfu_quad_occupancy_20261004/target_sim.json",
+    "arch_card": "arch_profiles/cards/sm_86.json",
+    "pchase_card": "data/pchase/sm_86_static_card.json",
+    "ncu_repeats": 5
+  },
+  "calibration": {
+    "blocks": [
+      42,
+      63,
+      126
+    ],
+    "warp_count": 8,
+    "iterations": 512,
+    "mode": "quad",
+    "raw_repetitions": [
+      {
+        "blocks": 42,
+        "repeat": 0,
+        "gpc__cycles_elapsed.max": 36124.0,
+        "smsp__inst_executed.sum": 1216320.0,
+        "smsp__inst_issued.sum": 1218168.0,
+        "gpu__time_duration.sum": 23200.0
+      },
+      {
+        "blocks": 42,
+        "repeat": 1,
+        "gpc__cycles_elapsed.max": 36110.0,
+        "smsp__inst_executed.sum": 1216320.0,
+        "smsp__inst_issued.sum": 1218168.0,
+        "gpu__time_duration.sum": 23168.0
+      },
+      {
+        "blocks": 42,
+        "repeat": 2,
+        "gpc__cycles_elapsed.max": 36125.0,
+        "smsp__inst_executed.sum": 1216320.0,
+        "smsp__inst_issued.sum": 1218168.0,
+        "gpu__time_duration.sum": 23200.0
+      },
+      {
+        "blocks": 42,
+        "repeat": 3,
+        "gpc__cycles_elapsed.max": 36116.0,
+        "smsp__inst_executed.sum": 1216320.0,
+        "smsp__inst_issued.sum": 1218168.0,
+        "gpu__time_duration.sum": 23200.0
+      },
+      {
+        "blocks": 42,
+        "repeat": 4,
+        "gpc__cycles_elapsed.max": 36129.0,
+        "smsp__inst_executed.sum": 1216320.0,
+        "smsp__inst_issued.sum": 1218168.0,
+        "gpu__time_duration.sum": 23200.0
+      },
+      {
+        "blocks": 63,
+        "repeat": 0,
+        "gpc__cycles_elapsed.max": 36135.0,
+        "smsp__inst_executed.sum": 1824480.0,
+        "smsp__inst_issued.sum": 1827252.0,
+        "gpu__time_duration.sum": 23200.0
+      },
+      {
+        "blocks": 63,
+        "repeat": 1,
+        "gpc__cycles_elapsed.max": 36163.0,
+        "smsp__inst_executed.sum": 1824480.0,
+        "smsp__inst_issued.sum": 1827252.0,
+        "gpu__time_duration.sum": 23200.0
+      },
+      {
+        "blocks": 63,
+        "repeat": 2,
+        "gpc__cycles_elapsed.max": 36168.0,
+        "smsp__inst_executed.sum": 1824480.0,
+        "smsp__inst_issued.sum": 1827252.0,
+        "gpu__time_duration.sum": 23232.0
+      },
+      {
+        "blocks": 63,
+        "repeat": 3,
+        "gpc__cycles_elapsed.max": 36142.0,
+        "smsp__inst_executed.sum": 1824480.0,
+        "smsp__inst_issued.sum": 1827252.0,
+        "gpu__time_duration.sum": 23200.0
+      },
+      {
+        "blocks": 63,
+        "repeat": 4,
+        "gpc__cycles_elapsed.max": 36147.0,
+        "smsp__inst_executed.sum": 1824480.0,
+        "smsp__inst_issued.sum": 1827252.0,
+        "gpu__time_duration.sum": 23200.0
+      },
+      {
+        "blocks": 126,
+        "repeat": 0,
+        "gpc__cycles_elapsed.max": 68901.0,
+        "smsp__inst_executed.sum": 3648960.0,
+        "smsp__inst_issued.sum": 3654000.0,
+        "gpu__time_duration.sum": 44224.0
+      },
+      {
+        "blocks": 126,
+        "repeat": 1,
+        "gpc__cycles_elapsed.max": 68883.0,
+        "smsp__inst_executed.sum": 3648960.0,
+        "smsp__inst_issued.sum": 3654000.0,
+        "gpu__time_duration.sum": 44192.0
+      },
+      {
+        "blocks": 126,
+        "repeat": 2,
+        "gpc__cycles_elapsed.max": 68879.0,
+        "smsp__inst_executed.sum": 3648960.0,
+        "smsp__inst_issued.sum": 3654000.0,
+        "gpu__time_duration.sum": 44192.0
+      },
+      {
+        "blocks": 126,
+        "repeat": 3,
+        "gpc__cycles_elapsed.max": 68889.0,
+        "smsp__inst_executed.sum": 3648960.0,
+        "smsp__inst_issued.sum": 3654000.0,
+        "gpu__time_duration.sum": 44192.0
+      },
+      {
+        "blocks": 126,
+        "repeat": 4,
+        "gpc__cycles_elapsed.max": 68899.0,
+        "smsp__inst_executed.sum": 3648960.0,
+        "smsp__inst_issued.sum": 3654000.0,
+        "gpu__time_duration.sum": 44224.0
+      }
+    ],
+    "fit": {
+      "family": "OLS gpc cycles vs grid block count within fixed warp-8 quad family",
+      "intercept_cycles": 14713.238461538458,
+      "slope_cycles_per_block": 420.00989010989014,
+      "max_absolute_calibration_residual_cycles": 5038.8615384615405,
+      "residuals_cycles": [
+        3770.346153846156,
+        3756.346153846156,
+        3771.346153846156,
+        3762.346153846156,
+        3775.346153846156,
+        -5038.8615384615405,
+        -5010.8615384615405,
+        -5005.8615384615405,
+        -5031.8615384615405,
+        -5026.8615384615405,
+        1266.5153846153844,
+        1248.5153846153844,
+        1244.5153846153844,
+        1254.5153846153844,
+        1264.5153846153844
+      ]
+    }
+  },
+  "target_features": {
+    "blocks": 168,
+    "warp_count": 8,
+    "iterations": 512,
+    "mode": "quad",
+    "trace_records": 4865280,
+    "tail_fact_records": 19461120,
+    "simulator_lower_bound_cycles": 36881,
+    "simulator_gpc_observation_frontier_cycles": 38713,
+    "completion_status": "incomplete_unmodeled_retirement_tails",
+    "hardware_completion": "not_observed",
+    "native_macro_dispatches": 0
+  },
+  "prediction": {
+    "point_cycles": 85274.9,
+    "interval_lower_cycles": 80236.03846153845,
+    "interval_upper_cycles": 90313.76153846153,
+    "interval_width_cycles": 10077.723076923081,
+    "interval_role": "empirical_observer_prediction_not_semantic_completion_upper"
+  },
+  "interpretation": "C4-E freezes a block-count observer inside the warp-8 quad regime after excluding earlier warp-shape misses. The 168-block target NCU values were not collected when this document was materialized; target trace/replay counters remain separate and do not alter simulator execution. This is a mechanism-local intervention, not a semantic completion upper or a global accuracy claim."
+}

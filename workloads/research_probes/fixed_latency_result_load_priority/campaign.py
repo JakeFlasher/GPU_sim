@@ -24,7 +24,7 @@ DEFAULT_OUTPUT = (
 )
 DRIVER = HERE / "fixed_latency_result_load_priority_driver"
 LONG_NATIVE = HERE / "fixed_latency_result_load_priority_native.cubin"
-TRACE_NATIVE = HERE / "fixed_latency_result_load_priority_trace_native.cubin"
+TRACE_NATIVE = LONG_NATIVE
 VARIANTS = (
     "same_noncollision",
     "same_collision",
@@ -58,12 +58,7 @@ METRICS = ORDER.METRICS + (
 
 
 def cubin(variant: str, trace: bool) -> Path:
-    prefix = (
-        "fixed_latency_result_load_priority_trace"
-        if trace
-        else "fixed_latency_result_load_priority"
-    )
-    return HERE / f"{prefix}_{variant}.cubin"
+    return HERE / f"fixed_latency_result_load_priority_{variant}.cubin"
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,7 +79,7 @@ class Cell:
             str(cubin(self.variant, trace)),
             self.variant,
             str(self.warps),
-            str(64 if trace else 1024),
+            str(1024),
             str(trials),
         ]
 
@@ -153,7 +148,7 @@ def emit_manifest(output: Path) -> None:
             ],
             "ncu_metrics": list(METRICS),
             "long_generations": 1024,
-            "trace_generations": 64,
+            "trace_generations": 1024,
             "identification_widths": [1, 4],
             "held_out_widths": [8, 12, 16],
             "load_consumer_cycle": 29,
@@ -322,17 +317,11 @@ def run_source(output: Path, cells: Sequence[Cell], force: bool) -> None:
 def run_static(output: Path) -> None:
     destination = output / "sass"
     destination.mkdir(parents=True, exist_ok=True)
-    binaries = {
-        "fixed_latency_result_load_priority_native": LONG_NATIVE,
-        "fixed_latency_result_load_priority_trace_native": TRACE_NATIVE,
-    }
-    for variant in VARIANTS:
-        binaries[f"fixed_latency_result_load_priority_{variant}"] = cubin(
-            variant, False
-        )
-        binaries[f"fixed_latency_result_load_priority_trace_{variant}"] = cubin(
-            variant, True
-        )
+    binaries = {"fixed_latency_result_load_priority_native": LONG_NATIVE}
+    binaries.update(
+        {f"fixed_latency_result_load_priority_{v}": cubin(v, False)
+         for v in VARIANTS}
+    )
     sidecars = []
     for name, binary in binaries.items():
         for suffix, option in (
@@ -378,20 +367,13 @@ def run_static(output: Path) -> None:
         )
         sidecars.append(sidecar)
 
-    for source, name in (
-        (
-            HERE / "fixed_latency_result_load_priority.patch.json",
-            "long_result_load_priority_patch.json",
+    BASE.write_json(
+        output / "metadata" / "long_result_load_priority_patch.json",
+        json.loads(
+            (HERE / "fixed_latency_result_load_priority.patch.json")
+            .read_text(encoding="utf-8")
         ),
-        (
-            HERE / "fixed_latency_result_load_priority_trace.patch.json",
-            "trace_result_load_priority_patch.json",
-        ),
-    ):
-        BASE.write_json(
-            output / "metadata" / name,
-            json.loads(source.read_text(encoding="utf-8")),
-        )
+    )
 
     def audit(paths: list[Path], out_name: str, run_name: str) -> None:
         BASE.run_captured(
@@ -473,7 +455,7 @@ def run_simulator(
         control = (
             output
             / "sass"
-            / f"fixed_latency_result_load_priority_trace_{cell.variant}.control_bits.json"
+            / f"fixed_latency_result_load_priority_{cell.variant}.control_bits.json"
         )
         command = [
             str(binary),

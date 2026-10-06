@@ -78,7 +78,7 @@ class Cell:
             str(cubin(self.variant, trace)),
             self.kind,
             str(self.warps),
-            str(65 if trace else 1025),
+            str(1025),
             str(trials),
             self.variant,
         ]

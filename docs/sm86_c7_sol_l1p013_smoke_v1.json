@@ -1,0 +1,37 @@
+{
+  "build": {
+    "compiler": "/usr/bin/g++-14",
+    "cuda_arch": "sm_86",
+    "status": "passed",
+    "stdout": "results/alpha/c7_s34t_sol_l1p013_20261005/build_and_smoke.stdout",
+    "stderr": "results/alpha/c7_s34t_sol_l1p013_20261005/build_and_smoke.stderr"
+  },
+  "candidate": "L1/problem_013_fused_residual_rms_norm_backward/cuda_cpp",
+  "correctness": {
+    "shapes": [[1, 256], [2, 512]],
+    "max_abs_errors": {"grad_hidden": [0.0000152587890625, 0.0078125], "grad_residual": [0.0000152587890625, 0.0078125], "grad_weight": [0.00000762939453125, 0.0000152587890625]},
+    "finite": true,
+    "status": "passed",
+    "oracle": "independent definition.json RMSNorm backward reference; BF16 gradient outputs and FP32 grad_weight; tolerance 0.02"
+  },
+  "identity": {
+    "arch": "sm_86",
+    "cuda_toolkit": "13.2",
+    "torch": "2.12.0+cu130",
+    "environment": "tools/sol_execbench/.venv",
+    "gpu": "NVIDIA GeForce RTX 3090 Ti",
+    "capability": "8.6",
+    "source": "workloads/sol_execbench_baselines/L1/problem_013_fused_residual_rms_norm_backward/cuda_cpp",
+    "extension": "results/alpha/c7_s34t_sol_l1p013_20261005/build/sol_l1p013_sm86.so"
+  },
+  "phase": "C7-S34T2",
+  "sanitizer": {
+    "tool": "compute-sanitizer memcheck",
+    "errors": 0,
+    "status": "passed",
+    "stdout": "results/alpha/c7_s34t_sol_l1p013_20261005/compute_sanitizer.stdout",
+    "stderr": "results/alpha/c7_s34t_sol_l1p013_20261005/compute_sanitizer.stderr"
+  },
+  "schema": "sm86_c7_sol_l1p013_smoke_v1",
+  "status": "complete_sm86_build_correctness_memcheck"
+}
