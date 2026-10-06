@@ -1,5 +1,12 @@
 # `tools/sol_baselines_harness/`
 
+> **SM120 target note (2026-10-06):** the active CC 12.0 live target is the
+> NVIDIA RTX PRO 6000 Blackwell Workstation Edition. Historical `5060`
+> fields and artifacts remain backward-compatible labels for the older laptop
+> lane; they must not be used as a Pro 6000 roofline or card. The dedicated
+> cloud capture/replay workspace is `/home/jakeshea/sm120_rtx_pro_6000_capture`.
+
+
 Drive *.cu template solutions through the official `sol-execbench`
 evaluator, emit per-workload report rows, score against the SOL Score
 formula (when local arch config is available), aggregate across all
@@ -422,7 +429,7 @@ visible in a clearly-named field. Even when the SOLAR config is
 present, the canonical local SOL Score is **NOT comparable to the
 leaderboard SOL Score**:
 
-- Local `t_k` is taken on RTX 5060 Laptop (sm_120), not B200 (sm_100a).
+- Local/cloud `t_k` for the active SM120 route is taken on the RTX PRO 6000 Workstation, not B200 (sm_100a); retained 5060 rows remain historical.
 - Local `t_b` is our PyTorch reference, not the benchmark-internal
   scoring baseline `T_b` (which is a paper-specific calibration we
   don't have).
@@ -434,7 +441,7 @@ fall back to the sentinel `"unknown_t_sol"`.
 
 ## Architecture-portability discipline
 
-The local RTX 5060 is **sm_120**; B200 scoring is **sm_100a**. A
+The active RTX PRO 6000 Workstation is **sm_120**; B200 scoring is **sm_100a**. Historical 5060 artifacts retain their original labels. A
 local `PASSED` on sm_120 proves compile and smoke-run viability
 only — it does NOT validate TCGen05 / TMEM codegen, TMA descriptor
 shapes, cluster + DSMEM behaviour, register pressure, L2 partitioning

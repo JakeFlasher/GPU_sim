@@ -106,7 +106,8 @@ _FORBIDDEN_FACTOR_KWARGS: frozenset[str] = frozenset({
 
 _SM_COUNT_BY_ARCH: dict[str, int] = {
     "sm_86": 84,
-    "sm_120": 26,  # measured on the live 5060 laptop (arch card); was a guessed 50
+    "sm_120": 188,  # active RTX PRO 6000 Workstation vendor card
+    "sm_120-laptop": 26,  # historical RTX 5060 laptop card
 }
 
 

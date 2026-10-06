@@ -35,7 +35,7 @@ existing per-workload ``trace.json``.
 
 Per CLAUDE.md §"Counter-Free Analytics Framework", the framework is
 designed to migrate intact from the local RTX 3090 Ti (sm_86) to a
-non-root B200 provider VM (sm_100a), with a future RTX 5060
+non-root B200 provider VM (sm_100a), with the active RTX PRO 6000 Workstation
 (sm_120) cross-arch calibration host. Dispatch is single-shape and
 native end-to-end — the upstream evaluator runs as a host subprocess
 with no container runtime in the loop.

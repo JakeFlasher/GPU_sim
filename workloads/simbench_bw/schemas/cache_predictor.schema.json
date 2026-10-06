@@ -87,7 +87,7 @@
     "device": {
       "type": "string",
       "minLength": 1,
-      "description": "Device name (e.g., 'NVIDIA GeForce RTX 5060 Laptop GPU' or 'NVIDIA GeForce RTX 3090 Ti'). Per-arch covariate; used by the cross-arch transfer-learning evaluation when admitted on both arches."
+      "description": "Device name (e.g., 'NVIDIA RTX PRO 6000 Blackwell Workstation Edition', 'NVIDIA GeForce RTX 5060 Laptop GPU', or 'NVIDIA GeForce RTX 3090 Ti'). Per-arch covariate; used by the cross-arch transfer-learning evaluation when admitted on both arches."
     },
     "cache_model_capacity_bytes": {
       "type": "integer",

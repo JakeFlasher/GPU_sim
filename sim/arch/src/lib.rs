@@ -710,6 +710,7 @@ impl BuildArch {
 pub enum Sku {
     Rtx3090Ti,
     Rtx5060Laptop,
+    RtxPro6000Workstation,
 }
 
 impl Sku {
@@ -717,6 +718,7 @@ impl Sku {
         match token {
             "rtx_3090_ti" => Ok(Self::Rtx3090Ti),
             "rtx_5060_laptop" => Ok(Self::Rtx5060Laptop),
+            "rtx_pro_6000_ws" => Ok(Self::RtxPro6000Workstation),
             other => Err(ArchError::UnknownSku {
                 token: other.to_owned(),
             }),
@@ -727,6 +729,7 @@ impl Sku {
         match self {
             Self::Rtx3090Ti => "rtx_3090_ti",
             Self::Rtx5060Laptop => "rtx_5060_laptop",
+            Self::RtxPro6000Workstation => "rtx_pro_6000_ws",
         }
     }
 
@@ -734,6 +737,7 @@ impl Sku {
         match self {
             Self::Rtx3090Ti => ArchId::Sm86,
             Self::Rtx5060Laptop => ArchId::Sm120,
+            Self::RtxPro6000Workstation => ArchId::Sm120,
         }
     }
 }

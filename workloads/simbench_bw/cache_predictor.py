@@ -2789,6 +2789,7 @@ _GRIDDIM_PENALTY_ALPHA: float = 0.110
 # to produce byte-stable bundles.
 _GRID_DIM_ALPHA_DEVICE_MAP: tuple[tuple[str, str], ...] = (
     ("NVIDIA GeForce RTX 3090 Ti", "sm_86_calibrated"),
+    ("NVIDIA RTX PRO 6000 Blackwell Workstation Edition", "sm120_uncalibrated"),
     ("NVIDIA GeForce RTX 5060 Laptop GPU", "sm120_uncalibrated"),
 )
 
@@ -2799,6 +2800,7 @@ _GRID_DIM_ALPHA_DEVICE_MAP: tuple[tuple[str, str], ...] = (
 # (no penalty applied; the decoupling principle forbids carrying the
 # sm_86 calibration value into the sm_120 active path).
 _GRID_DIM_ALPHA_BY_DEVICE: dict[str, float] = {
+    "NVIDIA RTX PRO 6000 Blackwell Workstation Edition": 0.0,
     "NVIDIA GeForce RTX 5060 Laptop GPU": 0.0,
 }
 
@@ -3809,7 +3811,8 @@ class ArchitectureIdentityUnavailable(ValueError):
 
 _SM_COUNT_BY_ARCH: dict[str, int] = {
     "sm_86": 84,
-    "sm_120": 26,
+    "sm_120": 188,  # active RTX PRO 6000 Workstation card
+    "sm_120-laptop": 26,  # retained RTX 5060 laptop card
 }
 
 

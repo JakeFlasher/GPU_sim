@@ -76,7 +76,7 @@
   },
   "notes": [
     "Every field above equals the value hardcoded in the live source today; test_arch_profile_lockstep.py asserts byte-identity so this card introduces ZERO behaviour change for the validated sm_86 lane.",
-    "num_l2_slices=6, l1 geometry, and NVML op-point are the only fully-populated cards in the suite; the sm_120-laptop card leaves several as research_gap."
+    "num_l2_slices=6, l1 geometry, and NVML op-point are the only fully-populated cards in the suite; both SM120 cards leave several fields as research_gap."
   ],
   "latencies_cycles": {
     "l1_hit": {

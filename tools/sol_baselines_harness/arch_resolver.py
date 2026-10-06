@@ -1,4 +1,4 @@
-"""Resolve the live host's compute capability to a SOLAR arch yaml.
+"""Resolve the live host's device identity to a SOLAR arch yaml.
 
 Before this module landed, ``score.py`` and ``solar_analysis.py``
 hardcoded ``SOLAR/configs/arch/5060.yaml`` regardless of the live
@@ -6,9 +6,10 @@ device. On a 3090 Ti (sm_86 / GA102) that produced numerically
 plausible but architecturally wrong ``local_sol_score`` values
 against a non-matching roofline.
 
-The resolver maps a probed compute capability to the right yaml under
-``SOLAR/configs/arch/`` and exposes the arch_tag used for manifest /
-report evidence labels. Unknown / malformed / MIG inputs return
+The resolver first distinguishes CC 12.0 device tiers. The RTX PRO 6000
+Workstation Edition is the active cloud target, but it has no checked-in SOLAR
+roofline yet, so it intentionally returns ``None`` rather than selecting the
+historical RTX 5060 laptop yaml. Unknown / malformed / MIG inputs return
 ``None`` from ``resolve_local_arch_yaml`` and ``"sm_unknown"`` (with
 a diagnostic when applicable) from ``arch_tag_from_host_kind``; the
 caller is responsible for short-circuiting numeric scoring to
@@ -29,7 +30,9 @@ from typing import Mapping, Optional
 _THIS_DIR = Path(__file__).resolve().parent
 _SCRIPTS_DIR = _THIS_DIR.parent
 _REPO_ROOT = _SCRIPTS_DIR.parent
-_ARCH_ROOT = _REPO_ROOT / "SOLAR" / "configs" / "arch"
+_ARCH_ROOT = _REPO_ROOT / "tools" / "solar" / "configs" / "arch"
+if not _ARCH_ROOT.is_dir():
+    _ARCH_ROOT = _REPO_ROOT / "SOLAR" / "configs" / "arch"
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -43,7 +46,6 @@ _CC_TO_YAML: Mapping[str, str] = {
     "9.0": "H100_PCIe.yaml",
     "10.0": "B200.yaml",
     "10.0a": "B200.yaml",
-    "12.0": "5060.yaml",
 }
 
 
@@ -114,10 +116,13 @@ def resolve_local_arch_yaml(host_info: object) -> Optional[Path]:
     scoring path.
     """
     cc_raw = None
+    device_name = ""
     if isinstance(host_info, dict):
         cc_raw = host_info.get("compute_capability")
+        device_name = str(host_info.get("device_name", ""))
     else:
         cc_raw = getattr(host_info, "compute_capability", None)
+        device_name = str(getattr(host_info, "device_name", ""))
 
     if _is_mig_or_partitioned(host_info):
         _LOGGER.warning(
@@ -128,6 +133,21 @@ def resolve_local_arch_yaml(host_info: object) -> Optional[Path]:
 
     cc = _normalise_cc(cc_raw if isinstance(cc_raw, str) else None)
     if cc is None:
+        return None
+    if cc == "12.0":
+        lowered = device_name.lower()
+        if "rtx pro 6000" in lowered:
+            _LOGGER.info(
+                "SM120 RTX PRO 6000 Workstation detected; no Pro-specific SOLAR yaml is installed"
+            )
+            return None
+        if "5060" in lowered:
+            legacy_yaml = _ARCH_ROOT / "5060.yaml"
+            return legacy_yaml if legacy_yaml.is_file() else None
+        _LOGGER.warning(
+            "CC 12.0 device %r is not a known card tier; SOL Score is unknown_t_sol",
+            device_name,
+        )
         return None
     yaml_name = _CC_TO_YAML.get(cc)
     if yaml_name is None:
@@ -195,15 +215,25 @@ def arch_resolution_reason(host_info: object) -> str:
     trace which yaml a numeric score was computed against.
     """
     cc_raw = None
+    device_name = ""
     if isinstance(host_info, dict):
         cc_raw = host_info.get("compute_capability")
+        device_name = str(host_info.get("device_name", ""))
     else:
         cc_raw = getattr(host_info, "compute_capability", None)
+        device_name = str(getattr(host_info, "device_name", ""))
     if _is_mig_or_partitioned(host_info):
         return "MIG/partitioned device; arch yaml unsupported"
     cc = _normalise_cc(cc_raw if isinstance(cc_raw, str) else None)
     if cc is None:
         return f"compute_capability={cc_raw!r} unrecognised"
+    if cc == "12.0":
+        lowered = device_name.lower()
+        if "rtx pro 6000" in lowered:
+            return "compute_capability=12.0; RTX PRO 6000 Workstation has no SOLAR yaml"
+        if "5060" in lowered:
+            return "compute_capability=12.0; historical RTX 5060 yaml"
+        return f"compute_capability=12.0; unknown device tier {device_name!r}"
     if cc not in _CC_TO_YAML:
         return f"compute_capability={cc} unrecognised"
     return f"compute_capability={cc}"

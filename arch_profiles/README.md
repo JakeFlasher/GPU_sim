@@ -3,7 +3,8 @@
 | Input | Consumer | Contract |
 | --- | --- | --- |
 | `cards/sm_86.json` | Native Rust/Python profile loaders | SM86 identity/geometry/resources and dated calibration provenance; not an all-hardware truth claim |
-| `cards/sm_120-laptop.json` | Retained exploratory loaders | Unavailable fields stay gaps; no SM86 fallback or new validation claim |
+| `cards/sm_120-laptop.json` | Retained 5060-laptop exploratory loader | Unavailable fields stay gaps; no SM86 fallback or new validation claim |
+| `cards/sm_120-rtx-pro-6000-ws.json` | Cloud RTX PRO 6000 SM120 target | Vendor facts only; live cache/issue/timing fields stay typed gaps until the cloud campaign |
 | `aliases.json`, `build_arch_families.json` | Python loader | Runtime/deployment tokens differ from compile targets |
 | `../data/pchase/sm_86_static_card.json` | Native L1/L1-L2 replay | Measured latency plus declared geometry/MSHR hypotheses |
 | `specs/*.json` | `sim-arch::spec` | Hypothetical named resources; see [specs](specs/README.md) |

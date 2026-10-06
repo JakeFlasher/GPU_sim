@@ -131,10 +131,10 @@ require_both_arches_for_cross_arch = true  # cross-arch transfer evaluation is g
 # discipline documented in plans/cache_hit_rate_predictor_first_plan.md.
 
 [scope]
-arch_set = ["sm_86", "sm_120"]   # local-only; cloud / server arches out of scope per Rule 1
+arch_set = ["sm_86", "sm_120"]   # local replay plus cloud RTX PRO 6000 Workstation collection
 cache_layers = ["L1", "L2"]        # L1 promoted to load-bearing. Contract-side labels are "L1"/"L2"; the runner maps bundle-side "L1TEX"->"L1" via _BUNDLE_TO_CONTRACT_CACHE_LAYER, so the contract value is "L1" (writing "L1TEX" here would drift-exclude every L1 bundle). The driver emits L1TEX predictor bundles in lockstep with this widening: tools/local_labels/run_headline_cohort_predict_compare.py appends per-cell L1TEX bundles built by tools/local_labels/emit_l1_closure_artifacts.build_l1tex_bundles_from_predictions (sourced from the committed per-cell L1 walker predictions). Cells whose L1 walker emitted a scalar prediction score in the L1 geomean; cells whose L1 prediction is typed_unavailable (predictor_l1_sass_provenance_missing) score as predictor_typed_unavailable, NOT join_key_unmatched. On the current cohort the live L1 headline count is below the smoke floor (5); the coverage gate reports meets_floor=false honestly until the cohort grows.
 metric_target = "hit_rate"         # hit rate, not miss rate or sector counts
-device_set = ["RTX 3090 Ti", "RTX 5060 Laptop GPU"]  # local-only; cloud sm_120 GB202 deferred
+device_set = ["RTX 3090 Ti", "NVIDIA RTX PRO 6000 Blackwell Workstation Edition"]  # local replay + cloud SM120 collection
 prior_art_handling = "contextual_only"  # head-to-head requires normalized workloads/metrics; deferred
 
 # ---------------------------------------------------------------------

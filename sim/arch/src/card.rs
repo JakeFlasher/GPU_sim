@@ -8,7 +8,7 @@
 //! Fail-closed discipline: a card field recorded as a `research_gap` is a
 //! typed error when the simulator requires it — there are no silent default
 //! latencies. The schema's `objOrGap` pattern applies at BLOCK level too
-//! (the sm_120-laptop card ships `l1_geometry` itself as a research_gap
+//! SM120 cards ship `l1_geometry` itself as a research_gap
 //! object), so gap-able blocks deserialize through [`Carded`]. An object
 //! carrying BOTH a payload and a `status` key is rejected outright rather
 //! than silently admitted as either arm. The Python side enforces
@@ -637,7 +637,7 @@ pub struct L2Geometry {
     pub sector_bytes: u32,
     pub num_slices: u32,
     pub line_bytes: u32,
-    /// `null` on partial cards (sm_120-laptop ships capacity/slices with the
+    /// `null` on partial cards (an exploratory SM120 card may ship capacity/slices with the
     /// write policy still unmeasured) — consumers requiring the policy must
     /// treat `None` as a typed gap, never assume write-allocate.
     pub policy: Option<String>,
@@ -1424,6 +1424,19 @@ mod tests {
         assert_eq!(identity.deploy(), ArchId::Sm120);
         assert_eq!(identity.sku(), Sku::Rtx5060Laptop);
 
+        let pro = ArchCard::load(&card_path("sm_120-rtx-pro-6000-ws.json"))
+            .expect("load sm_120 Pro 6000 card");
+        let identity = pro
+            .identity(BuildArch::Sm120)
+            .expect("valid Pro 6000 sm_120 build identity");
+        assert_eq!(identity.deploy(), ArchId::Sm120);
+        assert_eq!(identity.sku(), Sku::RtxPro6000Workstation);
+        assert_eq!(pro.require_occupancy_resources().unwrap().max_blocks, 32);
+        assert!(matches!(
+            pro.require_l2_geometry(),
+            Err(CalibError::BlockResearchGap { .. })
+        ));
+
         assert!(matches!(
             load_mutated_card("sm_86.json", |card| {
                 card["compute_capability"] = serde_json::json!([12, 0]);
@@ -1647,7 +1660,11 @@ mod tests {
 
     #[test]
     fn production_cards_expose_consumed_sm86_resources_and_keep_sm120_typed() {
-        for name in ["sm_86.json", "sm_120-laptop.json"] {
+        for name in [
+            "sm_86.json",
+            "sm_120-laptop.json",
+            "sm_120-rtx-pro-6000-ws.json",
+        ] {
             let value: serde_json::Value =
                 serde_json::from_slice(&std::fs::read(card_path(name)).unwrap()).unwrap();
             let blocks = [
@@ -2024,7 +2041,7 @@ mod tests {
         }
     }
 
-    /// The PARTIAL sm_120-laptop card must load: its gap blocks surface as
+    /// A partial SM120 card must load: its gap blocks surface as
     /// typed BlockResearchGap on access, never as an opaque parse failure.
     #[test]
     fn sm120_partial_card_loads_with_typed_block_gaps() {

@@ -54,8 +54,9 @@ DEFAULT_SECTORS_PER_LINE: int = (
 #
 # sm_86 (RTX 3090 Ti GA102) is the historical Ampere host — kept
 # as a legacy compatibility entry for the landed evidence trail
-# under ``.harness_traces/``. sm_120 (RTX 5060 Laptop GB206) is
-# the live local dev host. Undocumented fields are explicitly
+# under ``.harness_traces/``. sm_120-laptop (RTX 5060 Laptop GB206) is
+# retained historical data; the active sm_120 card is the RTX PRO 6000
+# Workstation and intentionally has typed gaps below. Undocumented fields are explicitly
 # ``None`` rather than guessed; ``resolve_cache_geometry`` routes
 # those to per-field ``typed_unavailable`` instead of falling
 # through to another arch's defaults.
@@ -76,7 +77,7 @@ _STATIC_DEVICE_CARDS: dict[str, dict[str, Any]] = {
         # the historical behavior byte-for-byte.
         "l2_constant_memory_counts_for_read_score": False,
     },
-    "sm_120": {
+    "sm_120-laptop": {
         "arch": "sm_120",
         "sku": "rtx_5060_laptop",
         # L1 + shared unified cache: NVIDIA Blackwell consumer
@@ -143,6 +144,20 @@ _STATIC_DEVICE_CARDS: dict[str, dict[str, Any]] = {
         # changes.
         "l2_constant_memory_counts_for_read_score": False,
     },
+    "sm_120": {
+        "arch": "sm_120",
+        "sku": "rtx_pro_6000_ws",
+        # Pro 6000 cache geometry is intentionally typed unavailable until
+        # the cloud host supplies a live device/NCU probe. Never reuse the
+        # historical GB206 laptop values above.
+        "l1_kb_per_sm": None,
+        "l2_capacity_bytes": None,
+        "num_l2_slices": None,
+        "sector_size_bytes": None,
+        "line_size_bytes": None,
+        "associativity_l2": None,
+        "l2_constant_memory_counts_for_read_score": None,
+    },
     # sm_100a (B200 GB100) — populate when B200 access is
     # available (256 KB L1/SM with carveout, 126 MB L2 in 2 die-
     # partitions ~63 MB each per the Blackwell tuning guide).
@@ -190,7 +205,7 @@ _STATIC_DEVICE_CARD_PROVENANCE: dict[str, dict[str, str]] = {
             "the simulator's class matches the label's class."
         ),
     },
-    "sm_120": {
+    "sm_120-laptop": {
         "l1_kb_per_sm": (
             "NVIDIA Blackwell-consumer compute-capability spec (CC "
             "12.0): 128 KB unified L1/texture/shared cache per SM with "

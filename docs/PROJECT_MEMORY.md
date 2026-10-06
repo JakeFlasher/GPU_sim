@@ -34,11 +34,26 @@ contract/source needed for the task.
 - Native capture needs `.toolchain/pb/lib` in `LD_LIBRARY_PATH`; profiler-gated
   runners use `--profile-from-start off --launch-skip 0`. Retain parse warnings
   and actual failures; process exit alone is not capture evidence.
-- Local checks: 495 sim-sm + 134 sim-semantics tests, format/diff checks,
+- Local checks: 496 sim-sm + 134 sim-semantics tests, format/diff checks,
   corrected TF32 oracle/memcheck, live M5-F/M5-K replays, and 40 focused Python tests / 703 subtests. Physical completion,
   broad accuracy, broad native continuation, two capture timeouts, and SM120
   execution remain open. Active plan:
   `plans/sm86_completion_frontier_and_native_dispatch_20261002.md`.
+
+## New active SM120 route — RTX PRO 6000 Workstation (2026-10-06)
+
+The active CC 12.0 live target is now the cloud NVIDIA RTX PRO 6000 Blackwell
+Workstation Edition (`sku=rtx_pro_6000_ws`), not the historical RTX 5060
+laptop card. The independent capture/replay workspace is
+`/home/jakeshea/sm120_rtx_pro_6000_capture`; it collects cloud host identity,
+full-set NCU reports/raw CSV, and NVBit traces, then transfers them to this
+local SM86 host for replay. The new repository card is
+`arch_profiles/cards/sm_120-rtx-pro-6000-ws.json`; vendor-known fields are
+kept separate from typed live-measurement gaps. Historical 5060 artifacts stay
+labeled as that SKU and are not substituted for Pro 6000 facts.
+
+Current workspace milestone: P3 — run cloud identity/toolchain preflight, then build
+the tracer and one bounded SM120 vertical before expanding the matrix.
 
 ## Research scope
 

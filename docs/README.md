@@ -1,5 +1,13 @@
 # Documentation map
 
+**Active SM120 route (2026-10-06):** the cloud live target is the NVIDIA RTX
+PRO 6000 Blackwell Workstation Edition, not the historical RTX 5060 laptop.
+Use the independent capture/replay workspace at
+`/home/jakeshea/sm120_rtx_pro_6000_capture` and its staged plan before adding
+SM120 simulator assumptions.
+The operator procedure is `/home/jakeshea/sm120_rtx_pro_6000_capture/MANUAL.md`.
+
+
 Start with [PROJECT_MEMORY](PROJECT_MEMORY.md) and [STATUS](STATUS.md), then
 open only the relevant technical page.
 
@@ -25,6 +33,7 @@ physical completion, broad accuracy, and broad native continuation remain open.
 | Accuracy-first NCU protocol | [Declared SM86 NCU accuracy protocol](sm86_ncu_accuracy_protocol_v1.json) · [Protocol schema](sm86_ncu_accuracy_protocol_v1.schema.json) |
 | A8 live-campaign plan | [Accuracy-first A8 plan](../plans/accuracy_first_live_campaign_a8_20261002.md) · [bounded-run schema](sm86_workload_run_v1.schema.json) |
 | Completion frontier program | [Writeback/coherence and native-dispatch plan](../plans/sm86_completion_frontier_and_native_dispatch_20261002.md) |
+| Active SM120 Pro 6000 cloud capture | [Cloud-capture plan](../plans/sm120_rtx_pro_6000_cloud_capture_20261006.md) · operator manual `/home/jakeshea/sm120_rtx_pro_6000_capture/MANUAL.md` |
 | Completion frontier contract | `sm86_completion_frontier_contract_v1.json` · `tools/report_sm86_completion_frontier.py` |
 | Completion frontier C1 live evidence | `sm86_completion_frontier_c1_small_summary_v1.json` · `sm86_completion_frontier_c1_visibility_summary_v1.json` |
 | Completion frontier C3 probe | `sm86_completion_frontier_c3_service_probe_v1.json` |

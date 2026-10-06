@@ -35,7 +35,7 @@ CLI:
 
     python tools/divergence_proxies/bundle_from_trace.py \\
         --trace-dir <PATH> \\
-        [--device sm_86 | sm_120-laptop]
+        [--device sm_86 | sm_120-laptop | sm_120]
 
 The CLI prints a small JSON status record (counts, schema-admit
 result) and writes the bundle to disk.
@@ -338,8 +338,8 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
-        "--device", default="sm_120-laptop",
-        choices=("sm_86", "sm_120-laptop"),
+        "--device", default="sm_120",
+        choices=("sm_86", "sm_120-laptop", "sm_120"),
         help=(
             "Compute capability tag for the device that produced "
             "the trace. Default sm_120-laptop (the R8 live-evidence "

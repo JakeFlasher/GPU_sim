@@ -3802,7 +3802,7 @@ mod tests {
 
     /// Input validation on the carded constructor: an architecture without
     /// documented defaults, and a card whose write policy
-    /// is a gap (sm_120-laptop ships `policy: null`) or an unknown
+    /// is a gap (a partial SM120 card ships `policy: null`) or an unknown
     /// token, must all be typed errors — the store path write-allocates
     /// and must never assume it.
     #[test]

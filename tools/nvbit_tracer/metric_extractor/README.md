@@ -18,7 +18,7 @@ source tools/nvbit_tracer/pinned_build_env.sh  # optional compatibility env
 make -C tools/nvbit_tracer/metric_extractor ARCH=sm_86
 ```
 
-The current source supports `sm_86` and `sm_100a` build targets.
+The current source supports `sm_86`, `sm_120`, and `sm_100a` build targets.
 
 Clean generated files with:
 

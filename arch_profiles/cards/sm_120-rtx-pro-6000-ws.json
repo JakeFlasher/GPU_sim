@@ -1,0 +1,113 @@
+{
+  "arch_id": "sm_120",
+  "sku": "rtx_pro_6000_ws",
+  "display_name": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+  "die": "GB202",
+  "microarchitecture": "Blackwell",
+  "role": "cloud_live_capture_and_validation_reference",
+  "compute_capability": [12, 0],
+  "aliases": ["sm_120-pro-6000-ws", "rtx_pro_6000_ws"],
+  "device_name_substrings": ["RTX PRO 6000 Blackwell Workstation Edition"],
+  "build_arch_family": ["sm_120", "sm_120a", "sm_120f"],
+  "gencode": "compute_120,code=sm_120",
+  "sm_count": 188,
+  "sm_count_provenance": "NVIDIA RTX Blackwell PRO GPU Architecture v1.0, Table 4; validate against the live nvidia-smi device query.",
+  "griddim_penalty_alpha": {
+    "status": "research_gap",
+    "reason": "No Pro 6000 grid-density sweep has been captured.",
+    "challenge": "sm120 cloud capture campaign"
+  },
+  "bare_ldg_e_default": "unknown_typed_unavailable",
+  "cache_layers": ["L2"],
+  "l2_geometry": {
+    "status": "research_gap",
+    "reason": "Vendor documentation supplies a 128 MiB GB202 L2 capacity, but slice mapping, sector policy, replacement, and workstation SKU behavior are not yet measured.",
+    "challenge": "sm120 Pro 6000 cache geometry probe"
+  },
+  "l2_vendor_summary": {
+    "capacity_bytes": 134217728,
+    "sector_bytes": 32,
+    "line_bytes": 128,
+    "provenance": "NVIDIA RTX Blackwell PRO GPU Architecture v1.0, Appendix A/Table 4; capacity is vendor information, not a replay-ready geometry card."
+  },
+  "l1_geometry": {
+    "status": "research_gap",
+    "reason": "The CC 12.0 unified L1/texture/shared geometry and cache carveout behavior have not been measured on this workstation SKU.",
+    "challenge": "sm120 Pro 6000 L1/shared carveout probe"
+  },
+  "nvml_reference_operating_point": {
+    "status": "research_gap",
+    "reason": "No fixed operating-point protocol has been captured on the cloud workstation; the 2617 MHz boost specification is not a locked replay clock.",
+    "challenge": "sm120 cloud clock crosswalk"
+  },
+  "duration_crosswalk": {
+    "status": "research_gap",
+    "reason": "No independent simulator-cycle to wall-clock crosswalk exists for this SKU.",
+    "challenge": "sm120 cloud timing campaign"
+  },
+  "dram_bandwidth": {
+    "status": "research_gap",
+    "reason": "1792 GB/s is a vendor peak specification, not an achieved locked-protocol service rate; no cloud clock/memory sweep is retained yet.",
+    "challenge": "sm120 cloud DRAM bandwidth probe"
+  },
+  "smsp": {
+    "status": "research_gap",
+    "reason": "SMSP count and issue-port topology are not inferred from the 188-SM product count.",
+    "challenge": "sm120 issue-topology probe"
+  },
+  "occupancy": {
+    "max_resident_warps_per_sm": 48,
+    "max_blocks": 32
+  },
+  "occupancy_provenance": "CUDA Blackwell Tuning Guide 12.8, CC 12.0 occupancy limits; validate device attributes on the live host.",
+  "dep_barriers": {
+    "status": "research_gap",
+    "reason": "Dependency-barrier resource count has not been measured on SM120.",
+    "challenge": "sm120 issue-topology probe"
+  },
+  "barrier_latencies": {
+    "status": "research_gap",
+    "reason": "Barrier issue/read/write latencies have not been measured on SM120.",
+    "challenge": "sm120 synchronization probe"
+  },
+  "dual_issue": {
+    "status": "research_gap",
+    "reason": "Dual-issue behavior is not assumed from the Blackwell generation label.",
+    "challenge": "sm120 issue-topology probe"
+  },
+  "vendor_spec": {
+    "gpc_count": 12,
+    "tpc_count": 94,
+    "cuda_cores_per_sm": 128,
+    "cuda_cores": 24064,
+    "tensor_cores_per_sm": 4,
+    "tensor_cores": 752,
+    "memory_bytes": 103079215104,
+    "memory_type": "GDDR7_ECC",
+    "memory_interface_bits": 512,
+    "memory_bandwidth_bytes_per_second": 1792000000000,
+    "boost_clock_mhz": 2617,
+    "shared_memory_per_sm_bytes": 131072,
+    "max_resident_warps_per_sm": 48,
+    "max_blocks_per_sm": 32,
+    "tgp_watts": 600,
+    "provenance": "NVIDIA RTX PRO 6000 Workstation datasheet and RTX Blackwell PRO GPU Architecture v1.0; vendor facts only."
+  },
+  "evidence_status": "Vendor-spec-only-sm_120-rtx_pro_6000_ws",
+  "predictor_state": {
+    "l1tex_sector_hit_rate": "deferred_until_live_sm120_pro6000_capture",
+    "l2_sector_hit_rate": "deferred_until_live_sm120_pro6000_capture",
+    "wall_clock": "deferred_until_live_sm120_pro6000_capture"
+  },
+  "research_gaps": [
+    "sm120 Pro 6000 L1/L2 geometry and cache policy",
+    "sm120 Pro 6000 instruction issue and tensor-pipeline intervals",
+    "sm120 Pro 6000 async/TMA/cluster completion semantics",
+    "sm120 Pro 6000 clock and wall-time crosswalk"
+  ],
+  "notes": [
+    "This card is intentionally separate from sm_120-laptop; a CC 12.0 token alone must not select between SKUs.",
+    "The card is vendor-informed and not a claim that the simulator already supports SM120 replay.",
+    "The 120a/120f build tokens are compile-family vocabulary; each feature requires a live compile and run probe."
+  ]
+}

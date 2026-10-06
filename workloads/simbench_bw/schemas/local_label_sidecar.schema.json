@@ -189,7 +189,7 @@
   "device": {
    "type": "string",
    "minLength": 1,
-   "description": "Compute capability tag of the local device, e.g. `sm_86` for the 3090 Ti or `sm_120` for the 5060 laptop."
+   "description": "Compute capability tag of the local device, e.g. `sm_86` for the 3090 Ti or `sm_120` for the active Blackwell SM120 target."
   },
   "slug": {
    "type": "string",

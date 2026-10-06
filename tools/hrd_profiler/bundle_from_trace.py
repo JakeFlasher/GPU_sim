@@ -22,7 +22,7 @@ CLI:
 
     python tools/hrd_profiler/bundle_from_trace.py \\
         --trace-dir <PATH> \\
-        [--device sm_86 | sm_120-laptop]
+        [--device sm_86 | sm_120-laptop | sm_120]
 """
 
 from __future__ import annotations
@@ -470,10 +470,10 @@ def consume_trace_dir(
         device_block = {
             "device_name": stats.get("kernel mangled name", "unknown"),
             "compute_capability_major": (
-                12 if device_arch == "sm_120-laptop" else 8
+                12 if device_arch in {"sm_120-laptop", "sm_120"} else 8
             ),
             "compute_capability_minor": (
-                0 if device_arch == "sm_120-laptop" else 6
+                0 if device_arch in {"sm_120-laptop", "sm_120"} else 6
             ),
             "sm_count": 0,
             "total_global_mem_bytes": 0,
@@ -506,12 +506,13 @@ def consume_trace_dir(
 
 # Static device-card L2 cache sizes per arch.
 #   sm_86: RTX 3090 Ti has 6 MiB L2 (Ampere consumer card).
-#   sm_120-laptop: RTX 5060 Laptop has 32 MiB L2 (Blackwell GB206
-#     laptop; confirmed via the live `cuDeviceGetAttribute(L2_CACHE_SIZE)`
-#     on driver 595.71.05 + CUDA 13.2).
+#   sm_120-laptop: historical RTX 5060 Laptop has 32 MiB L2.
+#   sm_120: active RTX PRO 6000 Workstation has no static fallback; use a
+#     live CUDA value or retain a typed geometry-unavailable result.
 _STATIC_CARD_L2_BYTES: dict[str, int] = {
     "sm_86": 6 * 1024 * 1024,
     "sm_120-laptop": 32 * 1024 * 1024,
+    # Active RTX PRO 6000 Workstation sm_120 has no static cache fallback.
 }
 
 
@@ -535,7 +536,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--device", required=True,
-        choices=("sm_86", "sm_120-laptop"),
+        choices=("sm_86", "sm_120-laptop", "sm_120"),
     )
     args = parser.parse_args(argv)
     trace_dir = Path(os.path.abspath(os.fspath(args.trace_dir)))

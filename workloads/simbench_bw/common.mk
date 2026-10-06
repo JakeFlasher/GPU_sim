@@ -6,10 +6,11 @@
 #
 #   SM90A  -- Hopper datacenter (H100): wgmma, cp.async.bulk.tensor, clusters,
 #             DSMEM, mbarrier, elect.sync. NOT available on sm_120.
-#   SM120  -- Blackwell workstation baseline (RTX PRO 6000 Blackwell — cloud
-#             target only; no consumer Blackwell exposed locally on this
-#             branch). HMMA FP16/BF16/TF32, QMMA FP8, sparse 2:4, clusters,
-#             DSMEM, TMA. No FP4/FP6/NVFP4 hardware acceleration.
+#   SM120  -- Blackwell workstation baseline (RTX PRO 6000 Blackwell cloud
+#             target). HMMA FP16/BF16/TF32, QMMA FP8, sparse 2:4, clusters,
+#             DSMEM, and TMA are probeable surfaces. FP4/FP6/NVFP4 rows use
+#             explicit sm_120f/sm_120a feature probes and must not be inferred
+#             from a successful baseline sm_120 compile.
 #   SM120F -- Blackwell forward-compatible subset (CUDA 13.0+): adds dense
 #             FP4/FP6/NVFP4 block-scaled MMA via warp-level
 #             mma.sync.kind::{f8f6f4, mxf4, mxf4nvf4} with .block_scale.

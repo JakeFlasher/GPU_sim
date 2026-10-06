@@ -37,11 +37,12 @@ This pattern matches `BL-20260504-runbook-self-reference`: documentation
 and verification target are decoupled, so the operator never re-reads the
 runbook from a stale post-checkout worktree.
 
-All evidence claims produced by this harness are bound by the Two-Device
-Local Development Model evidence statuses per `AGENTS.md`:
+All evidence claims produced by this harness are bound by the declared
+architecture evidence statuses per `AGENTS.md`:
 `Offline-verified`, `Verified-live-sm_86`, `Verified-live-sm_120`, and
-`Cross-arch-verified`. Cross-arch promotion requires matching live evidence
-on both local arches (RTX 3090 Ti sm_86 and RTX 5060 laptop sm_120). The
+`Cross-arch-verified`. The active SM120 live target is the cloud RTX PRO 6000
+Workstation; historical RTX 5060 laptop records remain separate SKU evidence.
+The
 producer-side helpers `dual_workload_pairing_index.py`,
 `cupti_dual_source_live_admission.py`, and `nvml_metadata_verifier.py`
 underwrite AC-15 / AC-16 promotions and enforce strict sidecar identity
@@ -121,10 +122,10 @@ EXACTLY twice (warmup branch + timed branch). Workloads outside this
 2-producer set still lack the hook and will deterministically fail
 dual-source reconciliation; extending the hook to additional roster
 entries remains a queued side issue. The v6+v7 sm_86 leg is
-`Verified-live-sm_86`; the matching sm_120 leg on the 5060 laptop is
-deferred to the v8 plan at
-`plans/ac16_dram_stream_cupti_hook_sm120_plan.md`, which targets the
-`Cross-arch-verified` promotion in a fresh laptop RLCR loop.
+`Verified-live-sm_86`; the matching sm_120 leg on the RTX PRO 6000 Workstation is
+deferred to the step-by-step cloud manual at
+`/home/jakeshea/sm120_rtx_pro_6000_capture/MANUAL.md`. It is a fresh cloud
+vertical, not a 5060-laptop replay or an RLCR workflow.
 
 ## Layout
 

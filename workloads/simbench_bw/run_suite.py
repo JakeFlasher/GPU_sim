@@ -412,9 +412,9 @@ def _infer_gpu_sku(props: DeviceProps) -> str:
 def _divergence_proxies_device_token_for_props(props: DeviceProps) -> str:
     """Map live `DeviceProps` to the divergence-proxies producer's
     device token. The producer at
-    `tools/divergence_proxies/bundle_from_trace.py` accepts only
-    `sm_86` (Ampere desktop, CC 8.6) and `sm_120-laptop` (Blackwell
-    consumer laptop, CC 12.0); any other compute capability raises a
+    `tools/divergence_proxies/bundle_from_trace.py` accepts `sm_86`,
+    historical `sm_120-laptop`, and active Pro 6000 `sm_120`; any other
+    compute capability raises a
     typed `ValueError` so the controller-side `except` records a
     `divergence_proxies_skip_reason` instead of dispatching the wrong
     token. The lockstep partner is the producer's argparse `choices`
@@ -425,6 +425,8 @@ def _divergence_proxies_device_token_for_props(props: DeviceProps) -> str:
     if cc == (8, 6):
         return "sm_86"
     if cc == (12, 0):
+        if "pro 6000" in props.device_name.lower():
+            return "sm_120"
         return "sm_120-laptop"
     raise ValueError(
         f"unknown_target_device_for_divergence_proxies:"
@@ -436,10 +438,11 @@ def _perturbation_target_arch_for_props(props: DeviceProps) -> str:
     """Map live `DeviceProps` to the perturbation-harness producer's
     target_arch token. The producer at
     `tools/perturbation_harness/build.py::run_perturbation_harness`
-    accepts only the values in
-    `tools/perturbation_harness/ledger.py::SUPPORTED_TARGET_ARCHES`
-    (`sm_86` for CC 8.6 Ampere desktop, `sm_120-laptop` for CC 12.0
-    Blackwell consumer laptop); any other compute capability raises
+    accepts only the historical values in
+    `tools/perturbation_harness/ledger.py::SUPPORTED_TARGET_ARCHES`. The
+    active Pro 6000 is intentionally refused by this still-laptop-specific
+    producer rather than mislabeled; historical `sm_120-laptop` records remain
+    supported. Any other compute capability raises
     a typed `ValueError` so the controller-side `except` records a
     `perturbation_run_ledger_skip_reason` instead of building binaries
     with a wrong -gencode flag set. The multi-surface-lockstep
@@ -452,6 +455,11 @@ def _perturbation_target_arch_for_props(props: DeviceProps) -> str:
     if cc == (8, 6):
         return "sm_86"
     if cc == (12, 0):
+        # The perturbation producer still has no Pro-specific target token;
+        # return the historical token only for the laptop and fail closed for
+        # the active Pro 6000 instead of emitting a mislabeled artifact.
+        if "pro 6000" in props.device_name.lower():
+            raise ValueError("Pro 6000 perturbation target is not yet parameterized")
         return "sm_120-laptop"
     raise ValueError(
         f"unknown_target_arch_for_perturbation_harness:"
@@ -1320,12 +1328,16 @@ def _kernel_signature_sha256(executable: Path, slug: str) -> str:
 def _static_card_l2_bytes_for_props(props: "DeviceProps") -> int | None:
     """Static device-card L2 fallback per arch:
     sm_86 → 6 MiB (RTX 3090 Ti, Ampere consumer card);
-    sm_120 (laptop) → 32 MiB (RTX 5060 Laptop GPU, Blackwell GB206;
-    confirmed via the live `cuDeviceGetAttribute(L2_CACHE_SIZE)`
-    on driver 595.71.05 + CUDA 13.2 — 33554432 bytes)."""
+    historical sm_120-laptop → 32 MiB (RTX 5060 Laptop GPU, Blackwell GB206;
+    confirmed via the retained live query). The active RTX PRO 6000 path has
+    no static fallback here; it uses a live CUDA value when available and
+    otherwise stays unresolved.
+    """
     if props.compute_capability_major == 8 and props.compute_capability_minor == 6:
         return 6 * 1024 * 1024
     if props.compute_capability_major == 12:
+        if "pro 6000" in props.device_name.lower():
+            return None
         return 32 * 1024 * 1024
     return None
 
@@ -1345,8 +1357,8 @@ def _static_card_num_l2_slices_for_props(
     documented GA102 partitioning behind the
     `CU_DEVICE_ATTRIBUTE_L2_CACHE_SIZE` value.
 
-    sm_120 (RTX 5060 Laptop, Blackwell GB206) → returns None
-    today; the Blackwell L2 slice count is not yet captured in
+    sm_120 (active RTX PRO 6000 Workstation, Blackwell GB202) → returns None
+    today; the Pro 6000 L2 slice count is not yet captured in
     this static card. Cross-arch sm_120 verification is
     explicitly deferred per CLAUDE.md's
     Two-Device Local Development Model.

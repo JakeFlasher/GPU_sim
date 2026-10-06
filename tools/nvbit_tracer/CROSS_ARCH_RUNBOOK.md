@@ -1,7 +1,8 @@
 # NVBit cross-architecture runbook
 
-Use this when a tracer or trace-consumer change should be exercised on both the
-Ampere `sm_86` and Blackwell `sm_120` development machines.
+Use this when a tracer or trace-consumer change should be exercised on the
+local Ampere `sm_86` host and the cloud RTX PRO 6000 Workstation `sm_120`
+host. Historical RTX 5060 laptop captures are separate SKU artifacts.
 
 This is an experiment checklist, not an approval gate. A result on one GPU is
 still useful while the other GPU is unavailable.

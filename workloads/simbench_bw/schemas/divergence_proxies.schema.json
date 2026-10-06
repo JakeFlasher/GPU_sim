@@ -69,7 +69,7 @@
     "device": {
       "type": "string",
       "minLength": 1,
-      "description": "Compute capability tag of the device that produced the trace this bundle was computed from (e.g. sm_86, sm_120-laptop)."
+      "description": "Compute capability tag of the device that produced the trace this bundle was computed from (e.g. sm_86, sm_120-laptop, or sm_120)."
     },
     "unique_sectors_per_warp_inst": {
       "$ref": "#/$defs/proxy_or_unavailable",

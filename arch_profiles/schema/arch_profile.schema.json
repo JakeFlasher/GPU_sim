@@ -31,7 +31,7 @@
       "then": {
         "properties": {
           "compute_capability": {"const": [12, 0]},
-          "sku": {"const": "rtx_5060_laptop"},
+          "sku": {"enum": ["rtx_5060_laptop", "rtx_pro_6000_ws"]},
           "bare_ldg_e_default": {"const": "unknown_typed_unavailable"},
           "build_arch_family": {
             "items": {"enum": ["sm_120", "sm_120a", "sm_120f"]}
@@ -42,7 +42,7 @@
   ],
   "properties": {
     "arch_id": {"type": "string", "enum": ["sm_86", "sm_120"], "description": "Canonical bare deploy/label arch token."},
-    "sku": {"type": "string", "enum": ["rtx_3090_ti", "rtx_5060_laptop"], "description": "Device-tier SKU. Extend in schema/consumer lockstep before admitting another card."},
+    "sku": {"type": "string", "enum": ["rtx_3090_ti", "rtx_5060_laptop", "rtx_pro_6000_ws"], "description": "Device-tier SKU. Cards sharing sm_120 remain explicit and are never selected from a bare CC token."},
     "display_name": {"type": "string"},
     "die": {"type": "string"},
     "microarchitecture": {"type": "string"},

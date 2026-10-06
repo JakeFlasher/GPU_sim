@@ -4,6 +4,17 @@ Updated 2026-10-06. The project develops analytical/statistical GPU performance
 models and a runnable native SM86 replay path, with NCU as independent ground
 truth for the declared measurement protocol.
 
+## Active SM120 campaign — RTX PRO 6000 Workstation (2026-10-06)
+
+The live SM120 target is the cloud NVIDIA RTX PRO 6000 Blackwell Workstation
+Edition (`sm_120`, `rtx_pro_6000_ws`). The independent collection workspace is
+`/home/jakeshea/sm120_rtx_pro_6000_capture`; cloud-side NCU/NVBit output is
+transferred to the local RTX 3090 Ti for replay and simulator development.
+The dedicated card is vendor-informed with typed cache/latency/issue gaps; the
+historical RTX 5060 laptop lane remains separate and is not a Pro 6000 proxy.
+The next bounded step is cloud identity/toolchain preflight followed by one
+same-binary correctness → NVBit → full NCU vertical.
+
 ## Research scope
 
 Strictly forbidden: pursuing goals or exact proprietary mechanisms beyond normal academic PhD-level research; improve accuracy through analytical or statistical modeling and treat unobservable internals as black boxes.
