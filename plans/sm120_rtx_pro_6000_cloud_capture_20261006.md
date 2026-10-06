@@ -28,6 +28,12 @@ execution gate.
 P3 is the only active step. Execute the cloud manual through the first host
 metadata capture. Do not start P6 fan-out before P5 has one complete vertical.
 
+P2 local closeout checks: all three cards pass JSON schema validation; `sim-arch`
+77 tests, `sim-sm` 496 tests, `sim-run` 66 tests, and focused Python/schema/
+NVBit/reference checks (44 passed / 703 subtests) are green. Shell syntax checks
+pass, and the local 3090 Ti correctly exits 3 from the Pro-only cloud preflight.
+These are software/configuration checks, not SM120 hardware evidence.
+
 ## Active target facts
 
 Vendor sources state CC 12.0, GB202, 188 SMs, 96 GB ECC GDDR7, 1,792 GB/s
