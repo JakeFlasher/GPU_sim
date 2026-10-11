@@ -149,8 +149,6 @@ pub(crate) use candidates::{
     validate_memory_admission_candidates, validate_memory_service_candidates,
     MemoryAdmissionCandidateState,
 };
-#[cfg(test)]
-pub(crate) use candidates::MAX_WRITE_COMPLETION_PARALLEL_LANES;
 use candidates::{MemoryAdmissionFeedbackState, MemoryServiceCandidateState, MemoryAdmissionFeedbackIssue};
 
 /// One dynamic instruction, compacted for replay.
@@ -7797,34 +7795,8 @@ impl<'a> SmCore<'a> {
             .map_or(0, MemoryAdmissionFeedbackState::pending_write_ack_count)
     }
 
-    #[cfg(test)]
-    fn new(
-        blocks: &'a [BlockReplay],
-        schedule: &'a FunctionSchedule,
-        params: &IssueModelParams,
-        mode: SmMemMode,
-    ) -> Result<Self, IssueError> {
-        Self::new_with_residency(
-            blocks,
-            schedule,
-            params,
-            SharedMemoryResidency::unconstrained_fixture(),
-            mode,
-        )
-    }
-
-    #[cfg(test)]
-    fn now(&self) -> u64 {
-        self.t
-    }
-
     pub(crate) fn is_done(&self) -> bool {
         self.unfinished_warps == 0
-    }
-
-    #[cfg(test)]
-    fn l1_counters(&self) -> Option<&L1Counters> {
-        self.mem.l1().map(|cache| &cache.counters)
     }
 
     /// Responses the system still owes this SM (diagnostics).
@@ -13848,22 +13820,3 @@ pub(crate) fn simulate_sm_with_residency(
     Ok(core.result())
 }
 
-#[cfg(test)]
-fn simulate_sm(
-    blocks: &[BlockReplay],
-    schedule: &FunctionSchedule,
-    params: &IssueModelParams,
-    l1_config: Option<L1Config>,
-) -> Result<SmSimResult, IssueError> {
-    simulate_sm_with_residency(
-        blocks,
-        schedule,
-        params,
-        SharedMemoryResidency::unconstrained_fixture(),
-        l1_config,
-    )
-}
-
-#[cfg(test)]
-#[allow(clippy::unwrap_used)]
-mod tests;

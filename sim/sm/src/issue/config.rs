@@ -36,10 +36,6 @@ impl SharedMemoryResidency {
         self.bytes_per_cta
     }
 
-    #[cfg(test)]
-    pub(crate) const fn unconstrained_fixture() -> Self {
-        Self::new(u64::MAX, 0)
-    }
 }
 
 /// Source of scheduler-resource values. Carded SM86 resources are executable
@@ -61,10 +57,6 @@ pub enum IssueResourceSource {
     /// intentionally distinct from both SM86 card defaults and strict carded
     /// resources so reports cannot mistake it for a silicon topology claim.
     Sm120Alpha,
-    /// Unit-test-only lane for boundary tests that need synthetic scheduler
-    /// values. This variant does not exist in production builds.
-    #[cfg(test)]
-    SyntheticTestFixture,
 }
 
 /// Explicit timing/resource inputs for the SM120 alpha lane.
@@ -195,8 +187,6 @@ impl IssueResourceSource {
             Self::Carded(_) => "architecture_card",
             Self::HypotheticalIssuePorts(_) => "hypothetical_issue_ports",
             Self::Sm120Alpha => "sm120_alpha_measured_envelope",
-            #[cfg(test)]
-            Self::SyntheticTestFixture => "synthetic_test_fixture",
         }
     }
 }
@@ -423,8 +413,6 @@ impl IssueModelParams {
             IssueResourceSource::Sm120Alpha => {
                 return Err(IssueError::HypotheticalOverrideAlreadyApplied);
             }
-            #[cfg(test)]
-            IssueResourceSource::SyntheticTestFixture => None,
         };
         self.issue_ports = issue_ports;
         // The override names the complete issue transaction width.  Retaining
@@ -1328,8 +1316,6 @@ impl IssueModelParams {
                 }
                 Ok(())
             }
-            #[cfg(test)]
-            IssueResourceSource::SyntheticTestFixture => Ok(()),
         }
     }
 

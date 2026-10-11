@@ -1303,50 +1303,6 @@ impl MemoryAdmissionFeedbackState {
         }
     }
 
-    #[cfg(test)]
-    pub(super) fn reserve(
-        &mut self,
-        subcore: usize,
-        warp: usize,
-        instruction: usize,
-        kind: AccessKind,
-        now: u64,
-    ) -> Result<(), IssueError> {
-        if !self.matches_kind(kind) {
-            return Ok(());
-        }
-        self.reap(now);
-        let queue_index = self.queue_index(subcore);
-        let queue = &mut self.queues[queue_index];
-        if queue.len() >= usize::from(self.candidate.queue_capacity_instructions) {
-            return Err(IssueError::MemoryAdmissionFeedbackQueueFull { subcore, time: now });
-        }
-        let entry = MemoryAdmissionFeedbackEntry {
-            warp: u32::try_from(warp).map_err(|_| IssueError::CounterOverflow {
-                counter: "feedback admission warp",
-            })?,
-            instruction: u32::try_from(instruction).map_err(|_| IssueError::CounterOverflow {
-                counter: "feedback admission instruction",
-            })?,
-            release_at: None,
-        };
-        let instructions_admitted = checked_u64_counter_add(
-            "feedback admission instructions",
-            self.diagnostics.instructions_admitted,
-            1,
-        )?;
-        let maximum_waiting_instructions = self
-            .diagnostics
-            .maximum_waiting_instructions
-            .max((queue.len() + 1) as u64);
-
-        queue.push_back(entry);
-        self.diagnostics.instructions_admitted = instructions_admitted;
-        self.diagnostics.maximum_waiting_instructions = maximum_waiting_instructions;
-        self.yield_requested = true;
-        Ok(())
-    }
-
     pub(crate) fn complete(
         &mut self,
         witness: AdmissionRequestWitness,
