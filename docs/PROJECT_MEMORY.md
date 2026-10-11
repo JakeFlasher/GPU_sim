@@ -6,7 +6,7 @@
 
 - Branch: `GPUSim_main` in `/root/GPU_simulator_rebase`.
 - Active plan: `/root/gpu_cache_memory_modeling_proposal/PLAN.md`.
-- Live evidence: `/dev/shm/sm120_rtx_5090_work`.
+- Live evidence: `/dev/shm/sm120_rtx_5090_work`; full-workload corpus: `/root/sm120_rtx_5090_capture`.
 - Active target: GeForce RTX 5090, `sm_120`; SM86 remains the compatibility
   baseline and is not a source of SM120 timing constants.
 - Full SM120 replay is primary; the dynamic fast frontier is complementary.
@@ -73,8 +73,11 @@ without claiming native completion timing. Update this memory and
 
 ## Evidence/research directories
 
-- `/dev/shm/sm120_rtx_5090_work`: raw traces, profiles, replay outputs, and
+- `/dev/shm/sm120_rtx_5090_work`: retained raw traces, profiles, replay outputs, and
   summaries; do not rewrite or relabel old rows.
+- `/root/sm120_rtx_5090_capture`: full SOLBench/modern-kernel capture corpus and
+  independent NCU profiles for alpha performance replay; treat NCU as an
+  independent target, never a replay input.
 - `/dev/shm/sm120_literature`, `/dev/shm/sm120_open_source_review`,
   `/dev/shm/sm120_research_literature`, `/dev/shm/sm120_research_src`, and
   `/dev/shm/sm120_research_next`: read-only literature/source study trees.

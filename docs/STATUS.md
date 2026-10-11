@@ -4,6 +4,7 @@
 **Branch:** `GPUSim_main`  
 **Active plan:** `/root/gpu_cache_memory_modeling_proposal/PLAN.md`  
 **Evidence root:** `/dev/shm/sm120_rtx_5090_work`
+**Full-workload corpus:** `/root/sm120_rtx_5090_capture`
 
 ## Permanent alpha evidence policy
 
