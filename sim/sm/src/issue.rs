@@ -2577,11 +2577,11 @@ fn is_u16_global_store_opcode(opcode_text: &str) -> bool {
 pub(crate) fn stateful_write_lookup_observer_enabled(schedule: &FunctionSchedule) -> bool {
     // The stateful tag-window observer is an SM86-specific, independently
     // characterized accounting path. SM120 does not yet have a measured
-    // L1TEX write-lookup geometry, so use the architecture-neutral topology
-    // projection below instead of turning an unmeasured capability into a
-    // replay refusal. This projection affects counters only; physical L1
-    // state and timing remain on their ordinary traced path.
-    if schedule.arch == ArchId::Sm120 {
+    // L1TEX write-lookup geometry. Do not instantiate an Ampere observer on
+    // Blackwell merely because the same SASS shape occurs. Flat replay has
+    // no L1 lookup counters at all; its store timing still follows the normal
+    // traced service path. This does not supply an SM120 cache hypothesis.
+    if schedule.arch != ArchId::Sm86 {
         return false;
     }
     let mut has_constant_load = false;
@@ -6343,7 +6343,10 @@ impl<'a> SmCore<'a> {
             .map(ScalarExecutionPipelineState::new)
             .transpose()?
             .map(Box::new);
-        let stateful_write_lookup_observer = stateful_write_lookup_observer_enabled(schedule);
+        // The observer is consumed only by shared-L2 cache accounting. In
+        // particular, a flat replay must not depend on cache geometry.
+        let stateful_write_lookup_observer = matches!(mode, SmMemMode::L1Shared { .. })
+            && stateful_write_lookup_observer_enabled(schedule);
         let write_lookup_observer = if stateful_write_lookup_observer {
             match write_lookup_observer {
                 Some(observer) => Some(observer),

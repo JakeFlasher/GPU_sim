@@ -428,7 +428,7 @@ pub enum TraceError {
     )]
     AllocationIdMissing { record: String },
     #[error(
-        "{record}: allocation_identity_status={status:?} is not a committed disposition (allocation_identity_status_invalid)"
+        "{record}: allocation_identity_status={status:?} is not replayable (allocation_identity_status_invalid)"
     )]
     AllocationIdentityStatusInvalid { record: String, status: String },
     #[error(
@@ -8120,11 +8120,11 @@ fn validate_address_carrying_shape(
 /// the loaded registry (`None` = no sidecar). The complete memory wire record is
 /// preflighted before the first identity diagnosis, so an unknown enum or malformed
 /// later lane vector cannot be masked by an earlier missing allocation id. A
-/// GLOBAL/GENERIC-space record with active lanes MUST carry a non-zero
-/// `allocation_id` that exists in the registry and whose range contains every
-/// active non-sentinel lane address. SHARED/LOCAL records (e.g. a shared atomic
-/// ATOMS) are exempt. This is the reader-side identity gate — parity with
-/// `import_trace_contract._check_instruction`.
+/// GLOBAL/GENERIC-space record with active lanes must carry a non-zero
+/// `allocation_id` in the registry containing every active lane address, or
+/// the producer's explicit `unresolved_module_global` disposition. The latter
+/// retains captured virtual addresses without claiming allocator bounds or
+/// lifetime identity. SHARED/LOCAL records (e.g. ATOMS) are exempt.
 pub fn check_allocation_identity(
     inst: &pb::Instruction,
     registry: Option<&AllocationRegistry>,
@@ -8247,11 +8247,11 @@ pub fn check_preflighted_allocation_identity(
 
         let access = decode_address_access(addr, meta.and_mask, preflight.inst_width, &record)?;
         let allocation_id = addr.allocation_id.unwrap_or(0);
-        // A module/library-owned device global is a valid global address but
-        // is not necessarily present in the cuMemAlloc callback registry.
-        // The tracer records this disposition explicitly so replay can retain
-        // the address without fabricating an allocation identity. Ordinary
-        // unresolved_global records remain strict and still fail closed below.
+        // Module/library-owned globals need not appear in cuMemAlloc hooks.
+        // Honor the producer's explicit disposition and keep the recorded VA;
+        // it is not proof of symbol bounds or lifetime, and must never become
+        // a fabricated allocator id. Unannotated or unresolved_global records
+        // still fail closed. No scored NCU information enters this decision.
         let module_global = match addr.allocation_identity_status.as_deref() {
             None | Some("resolved") => false,
             Some("unresolved_module_global") => true,

@@ -153,6 +153,8 @@ pub enum MemoryRouteError {
         expected: pb::MemorySpace,
         got: pb::MemorySpace,
     },
+    #[error("generic atomic requires Global or Shared address-space routing, got {got:?}")]
+    StaticGenericAtomicRouteInvalid { got: pb::MemorySpace },
     #[error("joined static opcode requires memory class {expected:?}, got {got:?}")]
     StaticMemoryClassMismatch {
         expected: pb::MemoryOpClass,
@@ -4790,8 +4792,8 @@ fn opcode_has_qualifier(opcode_text: &str, qualifier: &str) -> bool {
 }
 
 /// Space-coded SASS heads whose storage class is part of the mnemonic rather
-/// than inferred from the dynamic record. ATOM and RED are the legacy Global
-/// forms; LDGSTS is routed by its traced Global source operand. Hopper-era REDG,
+/// than inferred from the dynamic record. ATOM and RED are generic, while
+/// ATOMG/ATOMS constrain the route; LDGSTS uses its traced Global source. REDG,
 /// LDGMC, DSMEM, and shared-matrix families are architecture-gated before any
 /// record can borrow a modeled route.
 fn static_memory_route(
@@ -4940,11 +4942,7 @@ fn validate_static_memory_route(
             if matches!(route, ReplayMemoryRoute::Global | ReplayMemoryRoute::Shared) {
                 Ok(())
             } else {
-                Err(contextualize(MemoryRouteError::StaticMemoryRouteMismatch {
-                    // The generic PTX route has two legal concrete targets;
-                    // Global is retained as the canonical diagnostic token
-                    // while the accepted Shared route is handled above.
-                    expected: pb::MemorySpace::Global,
+                Err(contextualize(MemoryRouteError::StaticGenericAtomicRouteInvalid {
                     got: route.canonical_space(),
                 }))
             }

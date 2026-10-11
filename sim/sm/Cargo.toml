@@ -37,10 +37,5 @@ path = "src/bin/custom_program_run.rs"
 name = "phasefuse-scale"
 path = "src/bin/phasefuse_scale.rs"
 
-[[test]]
-name = "launch_evidence"
-path = "tests/launch_evidence.rs"
-required-features = ["campaign"]
-
 [lints]
 workspace = true
