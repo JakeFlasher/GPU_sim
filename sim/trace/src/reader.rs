@@ -428,6 +428,14 @@ pub enum TraceError {
     )]
     AllocationIdMissing { record: String },
     #[error(
+        "{record}: allocation_identity_status={status:?} is not a committed disposition (allocation_identity_status_invalid)"
+    )]
+    AllocationIdentityStatusInvalid { record: String, status: String },
+    #[error(
+        "{record}: unresolved_module_global cannot carry allocation_id {allocation_id} (allocation_identity_status_conflict)"
+    )]
+    AllocationIdentityStatusConflict { record: String, allocation_id: u32 },
+    #[error(
         "{record}: record carries a non-zero allocation_id but \
          <trace_dir>/extra_info/allocations.json is absent (allocations_sidecar_missing)"
     )]
@@ -625,6 +633,12 @@ impl TraceError {
                 Some("address_lane_mask_outside_instruction_mask")
             }
             Self::AllocationIdMissing { .. } => Some("allocation_id_missing"),
+            Self::AllocationIdentityStatusInvalid { .. } => {
+                Some("allocation_identity_status_invalid")
+            }
+            Self::AllocationIdentityStatusConflict { .. } => {
+                Some("allocation_identity_status_conflict")
+            }
             Self::AllocationsSidecarMissing { .. } => Some("allocations_sidecar_missing"),
             Self::AllocationsSidecarMalformed { .. } => Some("allocations_sidecar_malformed"),
             Self::AllocationIdDuplicate { .. } => Some("allocation_id_duplicate"),
@@ -8233,6 +8247,32 @@ pub fn check_preflighted_allocation_identity(
 
         let access = decode_address_access(addr, meta.and_mask, preflight.inst_width, &record)?;
         let allocation_id = addr.allocation_id.unwrap_or(0);
+        // A module/library-owned device global is a valid global address but
+        // is not necessarily present in the cuMemAlloc callback registry.
+        // The tracer records this disposition explicitly so replay can retain
+        // the address without fabricating an allocation identity. Ordinary
+        // unresolved_global records remain strict and still fail closed below.
+        let module_global = match addr.allocation_identity_status.as_deref() {
+            None | Some("resolved") => false,
+            Some("unresolved_module_global") => true,
+            Some(status) => {
+                return Err(TraceError::AllocationIdentityStatusInvalid {
+                    record: record(),
+                    status: status.to_owned(),
+                });
+            }
+        };
+        if module_global {
+            if allocation_id != 0 {
+                return Err(TraceError::AllocationIdentityStatusConflict {
+                    record: record(),
+                    allocation_id,
+                });
+            }
+            if access.lane_mask != 0 {
+                continue;
+            }
+        }
         if allocation_id == 0 {
             if access.lane_mask != 0 {
                 return Err(TraceError::AllocationIdMissing { record: record() });

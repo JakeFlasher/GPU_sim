@@ -2575,6 +2575,15 @@ fn is_u16_global_store_opcode(opcode_text: &str) -> bool {
 /// characterized; this prevents a partial policy from silently changing
 /// unrelated read/write rows.
 pub(crate) fn stateful_write_lookup_observer_enabled(schedule: &FunctionSchedule) -> bool {
+    // The stateful tag-window observer is an SM86-specific, independently
+    // characterized accounting path. SM120 does not yet have a measured
+    // L1TEX write-lookup geometry, so use the architecture-neutral topology
+    // projection below instead of turning an unmeasured capability into a
+    // replay refusal. This projection affects counters only; physical L1
+    // state and timing remain on their ordinary traced path.
+    if schedule.arch == ArchId::Sm120 {
+        return false;
+    }
     let mut has_constant_load = false;
     let mut has_u16_store = false;
     let mut has_other_global_store = false;

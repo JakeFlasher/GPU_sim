@@ -4772,6 +4772,10 @@ enum StaticMemoryRoute {
         route: ReplayMemoryRoute,
         class: pb::MemoryOpClass,
     },
+    /// Unqualified ATOM/RED use PTX generic addressing. Their dynamic address
+    /// operand can resolve to either global or shared memory, so the static
+    /// mnemonic supplies the operation class but not one fixed route.
+    GenericAtomic { class: pb::MemoryOpClass },
     UnsupportedClass(pb::MemoryOpClass),
 }
 
@@ -4820,7 +4824,10 @@ fn static_memory_route(
             route: ReplayMemoryRoute::Global,
             class: pb::MemoryOpClass::AsyncCopy,
         })),
-        "ATOM" | "ATOMG" | "RED" => Ok(Some(StaticMemoryRoute::Modeled {
+        "ATOM" | "RED" => Ok(Some(StaticMemoryRoute::GenericAtomic {
+            class: pb::MemoryOpClass::Atomic,
+        })),
+        "ATOMG" => Ok(Some(StaticMemoryRoute::Modeled {
             route: ReplayMemoryRoute::Global,
             class: pb::MemoryOpClass::Atomic,
         })),
@@ -4922,6 +4929,25 @@ fn validate_static_memory_route(
                 expected,
                 got: meta.op_class,
             }))
+        }
+        Some(StaticMemoryRoute::GenericAtomic { class: expected }) => {
+            if expected != meta.op_class {
+                return Err(contextualize(MemoryRouteError::StaticMemoryClassMismatch {
+                    expected,
+                    got: meta.op_class,
+                }));
+            }
+            if matches!(route, ReplayMemoryRoute::Global | ReplayMemoryRoute::Shared) {
+                Ok(())
+            } else {
+                Err(contextualize(MemoryRouteError::StaticMemoryRouteMismatch {
+                    // The generic PTX route has two legal concrete targets;
+                    // Global is retained as the canonical diagnostic token
+                    // while the accepted Shared route is handled above.
+                    expected: pb::MemorySpace::Global,
+                    got: route.canonical_space(),
+                }))
+            }
         }
         Some(StaticMemoryRoute::UnsupportedClass(expected)) if expected != meta.op_class => {
             Err(contextualize(MemoryRouteError::StaticMemoryClassMismatch {

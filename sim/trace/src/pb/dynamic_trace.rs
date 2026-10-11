@@ -67,6 +67,24 @@ pub struct Address {
     /// mask; consumers reject any widening.
     #[prost(uint32, optional, tag = "9")]
     pub lane_mask: ::core::option::Option<u32>,
+    /// Allocation identity disposition for a retained global address.  A
+    /// missing field is the legacy/not-applicable state; `resolved` means the
+    /// address carries a valid allocation_id, `unresolved_module_global` means
+    /// the explicit SM120 module-global disposition retained an address without
+    /// an allocation id, `unresolved_global` means strict mode retained an
+    /// address while emitting an unmapped sidecar, and `cross_allocation` means
+    /// active lanes span multiple allocation identities. These are typed payload
+    /// states, not silent omissions.
+    #[prost(string, optional, tag = "10")]
+    pub allocation_identity_status: ::core::option::Option<
+        ::prost::alloc::string::String,
+    >,
+    /// Physical/runtime transfer width.  This is distinct from data_width for
+    /// collective matrix operations: PTX ldmatrix documents 16-bit elements and
+    /// group-of-four 16-byte row transfers, so collapsing the two loses the
+    /// operation's transaction semantics.
+    #[prost(int32, optional, tag = "11")]
+    pub transfer_width: ::core::option::Option<i32>,
 }
 /// Effective memory space of an address record's operand. Net-new with the
 /// ASYNC_COPY+ATOM address-carrying contract transition: a single instruction can
@@ -161,8 +179,12 @@ pub struct Kernel {
     pub shared_memory_static_bytes: ::core::option::Option<u32>,
     #[prost(uint32, optional, tag = "12")]
     pub shared_memory_dynamic_bytes: ::core::option::Option<u32>,
+    /// Preferred shared-memory carveout percentage captured from the CUDA
+    /// function/launch attribute. -1 means no preference/attribute was exposed.
     #[prost(int32, optional, tag = "13")]
     pub shared_memory_carveout_preference_pct: ::core::option::Option<i32>,
+    /// Driver-computed occupancy limit for this function/block/shared-memory
+    /// launch shape. This is metadata, not a timing input.
     #[prost(uint32, optional, tag = "14")]
     pub driver_occupancy_limit_blocks: ::core::option::Option<u32>,
 }
@@ -331,6 +353,34 @@ pub struct Instruction {
     /// default-disabled behavior.
     #[prost(uint64, optional, tag = "14")]
     pub instrumentation_order: ::core::option::Option<u64>,
+    /// Dynamic constant-bank offsets/addresses observed by the injected device
+    /// function.  These are deliberately separate from `addresses`: constant
+    /// bank operands are not global/shared allocation addresses and must not be
+    /// passed through the device-allocation identity gate.
+    #[prost(uint64, repeated, tag = "15")]
+    pub constant_memory_addresses: ::prost::alloc::vec::Vec<u64>,
+    #[prost(uint32, optional, tag = "16")]
+    pub constant_memory_bank: ::core::option::Option<u32>,
+    #[prost(uint64, optional, tag = "17")]
+    pub constant_memory_offset: ::core::option::Option<u64>,
+    /// Dynamic CALL/RET target addresses reconstructed from the runtime register
+    /// operands plus the SASS immediate.  The list is lane-indexed over active
+    /// lanes in encounter order; it is not a memory payload.
+    #[prost(uint64, repeated, tag = "18")]
+    pub call_return_targets: ::prost::alloc::vec::Vec<u64>,
+    #[prost(uint64, optional, tag = "19")]
+    pub call_return_immediate: ::core::option::Option<u64>,
+    /// For collective matrix memory operations (LDSM/STSM), `data_width` is
+    /// the logical element width while transfer_width is the runtime group
+    /// transfer reported by NVBit.  For ordinary operations the two are equal.
+    #[prost(int32, optional, tag = "20")]
+    pub transfer_width: ::core::option::Option<i32>,
+    /// CALL/RET target reconstruction flags. Bit 0 means that the runtime
+    /// target includes a register-derived component; bit 1 means the SASS form
+    /// is REL. For SM120 REL forms the immediate is function-relative and is
+    /// added to the runtime register value without adding the current VPC.
+    #[prost(uint32, optional, tag = "21")]
+    pub call_return_flags: ::core::option::Option<u32>,
 }
 /// AC4 enum: memory operation class for each emitted instruction.
 /// MEMORY_OP_CLASS_UNSPECIFIED is the proto3 default zero value and
@@ -562,4 +612,11 @@ pub struct Trace {
     pub trace_contract_id: ::prost::alloc::string::String,
     #[prost(enumeration = "MemoryOpClass", repeated, tag = "8")]
     pub memory_payload_classes: ::prost::alloc::vec::Vec<i32>,
+    /// Additive capability vocabulary for architecture-specific payloads.  These
+    /// strings are descriptive capabilities, not admission gates.  In
+    /// particular an SM120 trace may advertise that TMA transfers live in the
+    /// sidecar, that cache operators are present on ordinary memory records, and
+    /// that register snapshots are intentionally unavailable.
+    #[prost(string, repeated, tag = "9")]
+    pub trace_capabilities: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
 }
