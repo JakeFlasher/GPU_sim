@@ -1362,7 +1362,8 @@ fn map_manifest_snapshot_read_error(
 }
 
 const DIRECT_EXEC_INFO_RELATIVE: &str = "extra_info/enhanced_execution_info.json";
-const DIRECT_EXEC_INFO_MAX_BYTES: u64 = 64 * 1024 * 1024;
+/// Match the exec-info loader bound for full-workload direct replay.
+const DIRECT_EXEC_INFO_MAX_BYTES: u64 = 256 * 1024 * 1024;
 
 fn read_direct_exec_info(
     reader: &AnchoredDir,

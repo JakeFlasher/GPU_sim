@@ -38,7 +38,9 @@ use serde::Deserialize;
 
 /// Path of the exec-info file inside a trace dir.
 const EXEC_INFO_RELPATH: &str = "extra_info/enhanced_execution_info.json";
-const MAX_EXEC_INFO_BYTES: u64 = 64 * 1024 * 1024;
+/// Full modern workload captures may carry >64 MiB of static launch metadata.
+/// Keep the bound finite but large enough for the retained SM120 corpus.
+const MAX_EXEC_INFO_BYTES: u64 = 256 * 1024 * 1024;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ExecInfoError {
