@@ -36,7 +36,8 @@ as an independent dependency/scheduler control evidence slice; Q19.2 is
 complete with a no-change decision against the canonical population. Q19.3 is
 complete as a measured cost slice on the scheduler controls. Q20.1–Q20.3 are
 complete: two new prospective L3 families were captured, replayed full then
-fast, compared without NCU tuning, and cost-measured. The withdrawn 3,900-cycle
+fast, compared without NCU tuning, and cost-measured. Q21.1 is complete and
+Q21.2 is active for final clean-state reconciliation. The withdrawn 3,900-cycle
 P10 post-hoc offset is not reused.
 
 ## Latest evidence
@@ -100,6 +101,12 @@ fast. Full model/NCU GPC ratios are 1.220 and 1.658; fast ratios are 0.651 and
 1.661, so no universal correction was admitted. Q20 replay costs are in
 `/dev/shm/rust_research/q20_replay_cost_20261011.json`; the chunk event
 numerator remains unavailable rather than using NCU duration.
+
+The final whole-corpus reconciliation is
+`/dev/shm/rust_research/q21_final_reconciliation_20261011.{json,md}`. It
+records 327/327 full and fast captures, 11,529 launches per mode, zero route or
+sidecar join residuals, corrected unit-aware NCU joins, and explicit native
+timing/topology gaps.
 
 Artifacts for the newest rows are `q10_scheduler/summary.json`,
 `q11_multiwarp/reconcile.json`, `q12_density/reconcile.json`,

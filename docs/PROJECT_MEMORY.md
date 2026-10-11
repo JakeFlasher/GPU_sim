@@ -99,7 +99,10 @@ dependency and issue-class controls with full-then-fast replay. Q19.2 compared
 them with the canonical population and admitted no portable scheduler/readiness
 term; Q19.3 measured scheduler-control replay cost without an optimization.
 Q20.1–Q20.3 collected two new prospective L3 families, replayed full then fast,
-and admitted no universal correction. No
+and admitted no universal correction. Q21.1 final whole-corpus reconciliation
+is complete; Q21.2 is the active clean-state documentation/commit milestone.
+The aggregate is
+`/dev/shm/rust_research/q21_final_reconciliation_20261011.json`. No
 proprietary scheduler topology is claimed.
 
 ## Evidence/research directories
