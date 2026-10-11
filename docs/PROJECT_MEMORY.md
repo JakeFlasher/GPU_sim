@@ -15,6 +15,21 @@
 - Accel-Sim and procedural approval/audit/admission machinery are outside the
   lane. Do not run tests, verification, hashing, or audit workflows.
 
+## Permanent alpha evidence policy
+
+- Do not add, restore, invoke, or maintain fixture-driven/synthetic simulator
+  tests or small-fixture acceptance gates. Hashing, checking, validation,
+  verification, admission, manifest/schema approval, and equivalent procedural
+  test workflows are permanently banned in the live alpha lane.
+- Keep only real-trace/real-sidecar functionality probes where needed.
+  Production runtime error handling, checked arithmetic, and fail-closed input
+  handling remain implementation behavior, not test gates.
+- Acceptance evidence is generalization/performance on SOLBench plus modern/SOTA
+  traces under `/root/sm120_rtx_5090_capture`, compared to independent NCU
+  ground truth. Full replay is primary; fast replay is complementary.
+- Never treat NCU as a model input or tune the same scored workload to its NCU
+  target. Do not reintroduce deleted fixture-test machinery under another name.
+
 ## Current implementation state
 
 The state-reconciliation commit records one coherent SM120 alpha slice: the RTX 5090 card

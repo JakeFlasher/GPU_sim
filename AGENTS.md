@@ -29,7 +29,7 @@ its real path promptly. Prefer vertical slices over speculative frameworks.
 3. Patch with checked arithmetic, useful errors, and bounded observability.
 4. Run a representative executable/trace with a timeout when it may hang.
    Inspect termination, counters, frontiers, and invariants before broad tests.
-5. Run affected tests/builds or a focused differential; explain unavailable checks.
+5. Run affected builds, real replay, and performance measurements; explain unavailable checks.
 6. Report the outcome, causal mechanism, changed files, evidence, and real gaps.
 
 After normally two probes that add no evidence, stop widening the search;
@@ -94,8 +94,9 @@ Do not require preservation copies of deleted workflow bureaucracy. Historical
 manifests/checksums/receipts are not agent authority and must not be made
 prerequisites again.
 
-Preserve SOL-ExecBench and measurement-campaign source, schemas, tests, datasets,
-environments, knowledge cards, and historical experiments. Use
+Preserve SOL-ExecBench and measurement-campaign source, schemas, datasets,
+environments, knowledge cards, and historical experiments; do not run their
+fixture/checking test workflows in the SM120 alpha lane. Use
 `.claude/skills/run-sol-campaign/SKILL.md` only for requested SOL/campaign work;
 its old workflow language does not override this profile.
 
@@ -103,3 +104,24 @@ Keep this prompt lean. Change rules only for observed failure modes; compare
 representative task correctness, time to useful execution, tool/iteration and
 context cost, and evidence quality. Do not claim behavioral improvements from
 word-count reductions alone.
+
+## Permanent alpha evidence policy (user directive, 2026-10-11)
+
+The SM120 alpha branch is judged only by generalization and performance over
+full real workload suites, not by small self-authored fixtures:
+
+- Do not add, restore, run, or maintain fixture/synthetic simulator tests or
+  fixture-based acceptance gates.
+- Permanently ban test workflows whose purpose is hashing, checking, validation,
+  verification, admission, manifest/schema approval, or similar procedural
+  evidence. Do not hide them behind another name or tool.
+- Keep only real-trace/real-sidecar functionality probes needed for captured
+  workloads. Do not delete production runtime error handling, checked
+  arithmetic, or fail-closed input safeguards; those are implementation
+  behavior, not test gates.
+- The acceptance corpus is SOLBench plus modern/SOTA traces in
+  `/root/sm120_rtx_5090_capture`, compared against independent NCU ground truth.
+  Full replay must precede complementary fast replay.
+- Performance changes are accepted only when the full workload-suite result
+  improves or the mechanism-local residual is explicitly reported; do not claim
+  improvement from labels, fixture counts, or source-size reductions.

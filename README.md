@@ -25,6 +25,15 @@ NCU/CUPTI/CUDA events ---------------------> independent comparison
 5. Use [`docs/README.md`](docs/README.md) to route to the narrow contract or
    source seam required by the task.
 
+## Permanent alpha evidence policy
+
+The live alpha branch does not use fixture-driven/synthetic simulator tests or
+hashing/checking/validation/verification/admission/schema test gates. Keep only
+real-trace/real-sidecar functionality probes. Generalization and performance
+are judged on the full SOLBench plus modern/SOTA capture suites in
+`/root/sm120_rtx_5090_capture` against independent NCU ground truth; full
+replay is primary and fast replay is complementary.
+
 ## Active SM120 paths
 
 - `sim-run --sm120-alpha --mode flat`: primary full replay.

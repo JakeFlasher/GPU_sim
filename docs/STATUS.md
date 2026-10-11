@@ -5,6 +5,14 @@
 **Active plan:** `/root/gpu_cache_memory_modeling_proposal/PLAN.md`  
 **Evidence root:** `/dev/shm/sm120_rtx_5090_work`
 
+## Permanent alpha evidence policy
+
+The live alpha lane rejects fixture/synthetic simulator tests and all
+hashing/checking/validation/verification/admission/schema test gates. Keep only
+real-trace/real-sidecar functionality probes. The acceptance corpus is SOLBench
+plus modern/SOTA traces in `/root/sm120_rtx_5090_capture`, compared with
+independent NCU ground truth; full replay precedes fast replay.
+
 ## Current state
 
 The SM120/RTX 5090 alpha lane is executable. Full trace replay is the primary
