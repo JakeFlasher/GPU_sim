@@ -36,8 +36,10 @@ as an independent dependency/scheduler control evidence slice; Q19.2 is
 complete with a no-change decision against the canonical population. Q19.3 is
 complete as a measured cost slice on the scheduler controls. Q20.1–Q20.3 are
 complete: two new prospective L3 families were captured, replayed full then
-fast, compared without NCU tuning, and cost-measured. Q21.1 is complete and
-Q21.2 is active for final clean-state reconciliation. The withdrawn 3,900-cycle
+fast, compared without NCU tuning, and cost-measured. Q21.1–Q21.2 are complete;
+final reconciliation is in
+`/dev/shm/rust_research/q21_final_reconciliation_20261011.{json,md}` and commit
+`994dd13f` leaves the repository clean. The withdrawn 3,900-cycle
 P10 post-hoc offset is not reused.
 
 ## Latest evidence
