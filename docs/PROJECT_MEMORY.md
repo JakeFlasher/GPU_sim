@@ -94,8 +94,12 @@ as model inputs. Q18.1 has since collected four real CUDA/NVBit/NCU working-set
 controls and full-then-fast replay; Q18.2 compared that mechanism-local
 response with all 327 canonical families and admitted no global service term.
 Q18.3 measured full/fast phase and RSS cost for those captures without a
-scope-changing optimization. Q19.1 is the active dependency/scheduler
-behavior envelope.
+scope-changing optimization. Q19.1 collected three real CUDA/NVBit/NCU
+dependency and issue-class controls with full-then-fast replay. Q19.2 compared
+them with the canonical population and admitted no portable scheduler/readiness
+term; Q19.3 measured scheduler-control replay cost without an optimization.
+Q20.1 is active for prospective family-separated accuracy/timing evidence. No
+proprietary scheduler topology is claimed.
 
 ## Evidence/research directories
 

@@ -31,8 +31,11 @@ launches in each mode. No endpoint coefficient or scored model change was
 admitted. Q18.1 is complete as an independent control evidence slice and Q18.2
 is complete with a no-change decision after comparing its mechanism-local
 response against the complete canonical workload population. Q18.3 is complete
-as a measured cost slice with no scope-changing optimization. Q19.1 is now
-active for an independent dependency/scheduler behavior envelope. The withdrawn 3,900-cycle
+as a measured cost slice with no scope-changing optimization. Q19.1 is complete
+as an independent dependency/scheduler control evidence slice; Q19.2 is
+complete with a no-change decision against the canonical population. Q19.3 is
+complete as a measured cost slice on the scheduler controls. Q20.1 is now
+active for prospective family-separated accuracy/timing. The withdrawn 3,900-cycle
 P10 post-hoc offset is not reused.
 
 ## Latest evidence
@@ -77,6 +80,17 @@ The control model/NCU ratios span 0.123–0.647 and full-suite family medians
 span 0.129–3.199, so no global service term is portable. The comparison is in
 `/dev/shm/rust_research/q18_compare_full_suite_20261011.{json,md}`; Q18.3 now
 measures replay cost on these new captures.
+
+Q19.1 captured three real CUDA modes (long dependency chain, independent
+arithmetic chains, and mixed global-load/ALU) with NVBit and independent NCU;
+each was replayed full first then fast. Evidence is in
+`/dev/shm/rust_research/q19_scheduler_shapes_20261011.json`. It is a
+behavioral readiness/issue envelope only, not proprietary scheduler topology.
+
+Q19.2 comparison found dependency-only underprediction, independent-arithmetic
+near agreement and mixed-memory overprediction; no portable scheduler/readiness
+term was admitted. Evidence is in
+`/dev/shm/rust_research/q19_compare_full_suite_20261011.json`.
 
 Artifacts for the newest rows are `q10_scheduler/summary.json`,
 `q11_multiwarp/reconcile.json`, `q12_density/reconcile.json`,
