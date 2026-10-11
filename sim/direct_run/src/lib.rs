@@ -1257,6 +1257,10 @@ pub struct FastFrontierLaunchReport {
     pub kernel_id: i32,
     pub function_unique_id: i32,
     pub kernel_name: String,
+    /// Captured launch geometry, retained for post-replay association with
+    /// independent profiles. This is not an NCU-derived timing input.
+    pub grid: (u32, u32, u32),
+    pub block: Option<(u32, u32, u32)>,
     pub summary: FastFrontierSummary,
 }
 
@@ -2839,6 +2843,11 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
                 kernel_id: loc.kernel().id,
                 function_unique_id: loc.kernel().function_unique_id,
                 kernel_name: loc.kernel().name.clone(),
+                grid: kernel_grid(loc.kernel()).map_err(at("fast launch geometry"))?,
+                block: loc.kernel().block_dim.as_ref().map(|dim| {
+                    // TraceDir already requires positive launch dimensions.
+                    (dim.x as u32, dim.y as u32, dim.z as u32)
+                }),
                 summary,
             });
         }

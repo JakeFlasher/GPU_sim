@@ -570,7 +570,9 @@ def load_static_metadata(capture: Path) -> dict[str, Any] | None:
     return value if isinstance(value, dict) else None
 
 
-def existing_control_candidates(capture: Path, controls_root: Path | None) -> list[Path]:
+def existing_control_candidates(
+    capture: Path, controls_root: Path | None, relative_name: str | None = None
+) -> list[Path]:
     name = capture.name
     candidates = [
         capture / "extra_info" / f"{name}.control_bits.json",
@@ -578,11 +580,12 @@ def existing_control_candidates(capture: Path, controls_root: Path | None) -> li
         capture / "control" / f"{name}.control_bits.json",
     ]
     if controls_root is not None:
+        key = relative_name or name
         candidates.extend(
             [
-                controls_root / f"{name}.control_bits.json",
-                controls_root / name / f"{name}.control_bits.json",
-                controls_root / f"{name}.json",
+                controls_root / f"{key}.control_bits.json",
+                controls_root / key / f"{name}.control_bits.json",
+                controls_root / f"{key}.json",
             ]
         )
     return [path for path in candidates if path.is_file()]
@@ -698,13 +701,17 @@ def discover_captures(work_root: Path, selected: Iterable[str] | None) -> list[P
         return []
     wanted = set(selected or ())
     output = []
-    for directory in sorted(captures.iterdir()):
-        if not directory.is_dir() or not (directory / "dynamic_trace.pb").is_file():
+    # Stop descending once a trace root is found. Grouping directories such
+    # as flashinfer_attention/ and sol_l1/ are not themselves trace roots.
+    for directory, subdirs, files in os.walk(captures):
+        if "dynamic_trace.pb" not in files:
             continue
-        if wanted and directory.name not in wanted:
-            continue
-        output.append(directory)
-    return output
+        subdirs[:] = []
+        path = Path(directory)
+        identity = path.relative_to(captures).as_posix()
+        if not wanted or identity in wanted:
+            output.append(path)
+    return sorted(output)
 
 
 def extract_sim_cycles(sim_json: dict[str, Any]) -> list[float]:
@@ -835,71 +842,62 @@ def nested_numeric(document: dict[str, Any], *keys: str) -> float | None:
 def join_ncu_rows(
     sim_launches: list[dict[str, Any]], ncu_rows: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    """Join simulator launches to NCU rows using identity and unique shape.
+    """Associate independent launches without using measured timing values.
 
-    The NCU export does not carry the tracer's kernel id.  Mangled-versus-
-    demangled names therefore leave a small but material ordered-join failure
-    surface in captures with library/generated kernels.  A unique
-    ``(grid, block)`` match is an independent structural identity already
-    present in both artifacts. Ambiguous shape matches choose the nearest
-    unused row in launch order and remain explicitly labelled as
-    ``shape_ordered`` rather than being promoted to identity. This is post-replay
-    association only: no NCU value enters simulator execution.
+    TraceDir reports (device, stream, launch) order, whereas NCU uses launch
+    chronology. With equal populations and unique ids on one device, rank
+    the tracer kernel ids and NCU ids separately. This ordinal association is
+    still a diagnostic, not shared run identity. Never use shape alone as
+    kernel identity or force a known-incompatible grid/block pair.
     """
-
-    def shape(value: Any) -> tuple[int, int, int] | None:
+    def shape(value: Any) -> tuple[int, ...] | None:
         if isinstance(value, (list, tuple)) and len(value) == 3:
-            try:
-                return tuple(int(item) for item in value)  # type: ignore[return-value]
-            except (TypeError, ValueError):
-                return None
+            return tuple(int(item) for item in value)
         values = re.findall(r"-?\d+", str(value or ""))
-        if len(values) != 3:
-            return None
-        return tuple(int(item) for item in values)  # type: ignore[return-value]
+        return tuple(int(item) for item in values) if len(values) == 3 else None
 
-    def shape_candidates(launch: dict[str, Any], unused: set[int]) -> list[int]:
-        grid = shape(launch.get("grid"))
-        block = shape(launch.get("block"))
-        if grid is None or block is None:
-            return []
-        return [
-            candidate
-            for candidate in unused
-            if shape(ncu_rows[candidate].get("grid_size")) == grid
-            and shape(ncu_rows[candidate].get("block_size")) == block
-        ]
+    def compatible(launch: dict[str, Any], row: dict[str, Any]) -> bool:
+        for sim_key, ncu_key in (("grid", "grid_size"), ("block", "block_size")):
+            left, right = shape(launch.get(sim_key)), shape(row.get(ncu_key))
+            if left is not None and right is not None and left != right:
+                return False
+        return True
 
+    ordinal = {}
+    sim_ids = [launch.get("kernel_id") for launch in sim_launches]
+    ncu_ids = [row.get("ncu_launch_id") for row in ncu_rows]
+    if (len(sim_launches) == len(ncu_rows)
+        and all(isinstance(i, int) for i in sim_ids + ncu_ids)
+        and len(set(sim_ids)) == len(sim_ids)
+        and len(set(ncu_ids)) == len(ncu_ids)
+        and len({launch.get("device_id") for launch in sim_launches}) <= 1
+        and len({row.get("context") for row in ncu_rows}) <= 1):
+        ordinal = dict(zip(
+            sorted(range(len(sim_ids)), key=lambda i: sim_ids[i]),
+            sorted(range(len(ncu_ids)), key=lambda i: ncu_ids[i]),
+        ))
+
+    names = [normalized_kernel_name(str(row.get("kernel_name", ""))) for row in ncu_rows]
     unused = set(range(len(ncu_rows)))
     joined: list[dict[str, Any]] = []
-    last_candidate = -1
     for index, launch in enumerate(sim_launches):
         sim_name = str(launch.get("kernel_name", ""))
         sim_norm = normalized_kernel_name(sim_name)
-        exact = [
-            candidate
-            for candidate in unused
-            if normalized_kernel_name(str(ncu_rows[candidate].get("kernel_name", ""))) == sim_norm
-        ]
-        status = "identity"
-        if len(exact) == 1:
+        exact = [candidate for candidate in unused
+                 if names[candidate] == sim_norm and compatible(launch, ncu_rows[candidate])]
+        candidate = ordinal.get(index, index)
+        if candidate in unused and compatible(launch, ncu_rows[candidate]) and (
+            not exact or candidate in exact
+        ):
+            status = "identity" if len(exact) == 1 else "ordered_fallback"
+        elif len(exact) == 1:
             candidate = exact[0]
+            status = "identity"
         else:
-            shaped = shape_candidates(launch, unused)
-            if shaped:
-                forward = [item for item in shaped if item > last_candidate]
-                pool = forward or shaped
-                candidate = min(pool, key=lambda item: abs(item - index))
-                status = "shape_identity" if len(shaped) == 1 else "shape_ordered"
-            elif index in unused:
-                candidate = index
-                status = "ordered_fallback"
-            else:
-                candidate = None
-                status = "unmatched"
+            candidate = None
+            status = "unmatched"
         if candidate is not None:
             unused.discard(candidate)
-            last_candidate = candidate
             ncu = ncu_rows[candidate]
             joined.append(
                 {
@@ -907,6 +905,7 @@ def join_ncu_rows(
                     "kernel_id": launch.get("kernel_id"),
                     "kernel_name": sim_name,
                     "join_status": status,
+                    "order_basis": "kernel_id_rank" if ordinal else "reported_launch_order",
                     "ncu_row_index": candidate,
                     "ncu_launch_id": ncu.get("ncu_launch_id"),
                     "ncu_kernel_name": ncu.get("kernel_name"),
@@ -1405,21 +1404,22 @@ def join_one(
     hardware_timing: Path | None,
 ) -> dict[str, Any]:
     capture_started_ns = time.perf_counter_ns()
-    profile = work_root / "profiles" / capture.name
+    relative_name = capture.relative_to(work_root / "captures").as_posix()
+    profile = work_root / "profiles" / relative_name
     stats = parse_stats(capture / "stats.csv")
     ncu = parse_ncu_raw(profile / "raw.csv")
     observation = parse_program_observation(capture / "program.stdout")
-    hardware = parse_hardware_timing(hardware_timing, capture.name)
+    hardware = parse_hardware_timing(hardware_timing, relative_name)
     sm_frequency_ghz = parse_effective_sm_frequency(profile / "effective_frequency_summary.csv")
     metadata = load_static_metadata(capture)
     async_observation = async_sidecar_observation(capture)
     input_ready_ns = time.perf_counter_ns()
-    candidates = existing_control_candidates(capture, controls_root)
+    candidates = existing_control_candidates(capture, controls_root, relative_name)
     control_path = candidates[0] if candidates else None
     control_status = "existing" if control_path else "missing_legacy_control_sidecar"
     generated_path: Path | None = None
     if control_path is None and synthesize_dir is not None and metadata is not None:
-        generated_path = synthesize_dir / f"{capture.name}.control_bits.json"
+        generated_path = synthesize_dir / f"{relative_name}.control_bits.json"
         synthesize_legacy_sidecar(capture, metadata, generated_path)
         control_path = generated_path
         control_status = "derived_transport_sidecar"
@@ -1427,7 +1427,7 @@ def join_one(
     record: dict[str, Any] = {
         "schema_version": 1,
         "evidence_schema_version": 2,
-        "capture_name": capture.name,
+        "capture_name": relative_name,
         "capture_dir": str(capture),
         "profile_dir": str(profile) if profile.is_dir() else None,
         "trace": {
@@ -1764,7 +1764,7 @@ def main(argv: list[str] | None = None) -> int:
             stream.write(json.dumps(record, sort_keys=True) + "\n")
             stream.flush()
             print(
-                f"{capture.name}: control={record['control']['status']} "
+                f"{record['capture_name']}: control={record['control']['status']} "
                 f"ncu_rows={len(record['ncu']['rows'])} "
                 f"runtime_ms={record['baremetal_observation']['runtime_ms_values']}",
                 file=sys.stderr,
