@@ -76,13 +76,16 @@ Fresh release replay now completes **302/302** captures and **10,796/10,796**
 launches in both full and fast modes, with no residual categories. The common
 289-capture full-cycle delta is zero. Raw rows and medians are in
 `/dev/shm/rust_research/full_workload_replay_summary_q17_20261011.json` and
-the adjacent `/dev/shm/sm120_alpha_q17_*` files.
+the adjacent `/dev/shm/sm120_alpha_q17_*` files. A canonical recursive run now
+also completes **327/327** required rows and **11,529/11,529** launches in both
+modes, including nested FlashInfer/SOL/Quant paths; its rows are under
+`/dev/shm/sm120_alpha_q17_canonical_{full,fast}.*`.
 
-**Q17.3 is active:** establish a predeclared SM120 observation endpoint from
-independent control kernels before selecting the next full-suite model change.
-Do not resurrect the withdrawn 3,900-cycle P10 post-hoc offset or use NCU
-values from scored captures as model inputs. Update this memory and
-`docs/STATUS.md` after the next real evidence/code milestone.
+**Q17.3.3 is active:** consume typed TMA/sync sidecars in Rust full replay;
+remove the universal 8-KiB UTMA fallback while retaining lower-bound and native
+completion non-claims. Do not resurrect the withdrawn 3,900-cycle P10 post-hoc
+offset or use NCU values from scored captures as model inputs. Update this
+memory and `docs/STATUS.md` after the next real evidence/code milestone.
 
 ## Evidence/research directories
 

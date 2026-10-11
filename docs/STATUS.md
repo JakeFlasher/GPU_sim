@@ -22,11 +22,11 @@ diagnostic. The state-reconciliation commit contains the coherent card, trace, r
 async-ledger, producer, workload, and reporting changes. The checkout is clean
 relative to that commit.
 
-Q16.1–Q16.3 are historical semantic-ledger slices. **Q17.1–Q17.2 are
-complete:** the three retained-corpus replay seams were closed and the full
-302-capture corpus now completes in both full and fast modes. Q17.3 is the
-next active goal: establish a predeclared SM120 observation endpoint from
-independent control kernels before selecting a full-suite model change. The
+Q16.1–Q16.3 are historical semantic-ledger slices. **Q17.1–Q17.3.6 are
+complete:** the three replay seams were closed, canonical recursive discovery
+now covers all 327 required rows, and both full and fast replay complete 327/327
+captures (11,529 launches each). Q17.3.3 is the next active seam: consume
+typed TMA/sync sidecars without inventing native completion timing. The
 withdrawn 3,900-cycle P10 post-hoc offset is not reused.
 
 ## Latest evidence
@@ -43,6 +43,7 @@ withdrawn 3,900-cycle P10 post-hoc offset is not reused.
 | Q15 cluster2 | NCU 5,528.05; full 80; fast 4,004 cycles | ranks 0/1 observed; internal cluster/TMA timing unknown |
 | Q17 residual closure | 302/302 full and 302/302 fast; 10,796 launches each | no residual categories; common 289-capture full-cycle delta is zero |
 | Q17 corpus medians | full 42,690 / fast 90,320.5 model cycles per capture sum | model-relative baselines, not correctness claims |
+| Q17 canonical replay | 327/327 full and 327/327 fast; 11,529 launches each | recursive nested paths included; no full replay failures |
 
 Artifacts for the newest rows are `q10_scheduler/summary.json`,
 `q11_multiwarp/reconcile.json`, `q12_density/reconcile.json`,
@@ -64,6 +65,6 @@ Artifacts for the newest rows are `q10_scheduler/summary.json`,
 ## Operational entrypoints
 
 Read `docs/PROJECT_MEMORY.md`, then the active plan, then only the source seam
-for Q17.3. Use `docs/runbook_host.md` for commands and keep raw outputs under
+for Q17.3.3. Use `docs/runbook_host.md` for commands and keep raw outputs under
 the evidence root. Update this file and `PROJECT_MEMORY.md` after each real
 milestone; do not replace implementation with a status-only report.
