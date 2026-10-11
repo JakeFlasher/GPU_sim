@@ -8,6 +8,7 @@
 //! targets and never appear here.
 
 pub mod anchored;
+pub mod async_sidecars;
 #[cfg(feature = "campaign")]
 pub mod digest;
 pub mod exec_info;

@@ -34,8 +34,9 @@ response against the complete canonical workload population. Q18.3 is complete
 as a measured cost slice with no scope-changing optimization. Q19.1 is complete
 as an independent dependency/scheduler control evidence slice; Q19.2 is
 complete with a no-change decision against the canonical population. Q19.3 is
-complete as a measured cost slice on the scheduler controls. Q20.1 is now
-active for prospective family-separated accuracy/timing. The withdrawn 3,900-cycle
+complete as a measured cost slice on the scheduler controls. Q20.1–Q20.3 are
+complete: two new prospective L3 families were captured, replayed full then
+fast, compared without NCU tuning, and cost-measured. The withdrawn 3,900-cycle
 P10 post-hoc offset is not reused.
 
 ## Latest evidence
@@ -91,6 +92,14 @@ Q19.2 comparison found dependency-only underprediction, independent-arithmetic
 near agreement and mixed-memory overprediction; no portable scheduler/readiness
 term was admitted. Evidence is in
 `/dev/shm/rust_research/q19_compare_full_suite_20261011.json`.
+
+Q20 prospective family evidence is in
+`/dev/shm/rust_research/q20_prospective_families_20261011.json`: Mamba
+selective-scan and chunk-gated delta-rule were captured and replayed full then
+fast. Full model/NCU GPC ratios are 1.220 and 1.658; fast ratios are 0.651 and
+1.661, so no universal correction was admitted. Q20 replay costs are in
+`/dev/shm/rust_research/q20_replay_cost_20261011.json`; the chunk event
+numerator remains unavailable rather than using NCU duration.
 
 Artifacts for the newest rows are `q10_scheduler/summary.json`,
 `q11_multiwarp/reconcile.json`, `q12_density/reconcile.json`,

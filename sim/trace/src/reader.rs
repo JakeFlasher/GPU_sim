@@ -19,7 +19,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 #[cfg(test)]
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use prost::Message;
 use serde::de::{DeserializeSeed, Error as _, MapAccess, SeqAccess, Visitor};
@@ -3827,6 +3827,9 @@ fn validate_trace_snapshot_semantics(
 }
 
 pub struct TraceDir {
+    async_sidecars: OnceLock<
+        Result<crate::async_sidecars::AsyncSidecars, crate::async_sidecars::AsyncSidecarError>,
+    >,
     lineage: TraceLineage,
     root: PathBuf,
     trace: pb::Trace,
@@ -4124,6 +4127,7 @@ impl TraceDir {
             .transpose()?;
         let trace = Self {
             lineage: TraceLineage::new(),
+            async_sidecars: OnceLock::new(),
             root,
             trace,
             exec_info: exec_info.map(|(info, _)| info),
@@ -4218,6 +4222,7 @@ impl TraceDir {
             .transpose()?;
         Ok(Self {
             lineage: TraceLineage::new(),
+            async_sidecars: OnceLock::new(),
             root,
             trace,
             exec_info,
@@ -4231,6 +4236,28 @@ impl TraceDir {
             raw_payload_retained: true,
             threadblock_by_path,
         })
+    }
+
+    /// Parse native async sidecars once for this loaded trace, then reuse the
+    /// compact per-launch observations. Reopening a trace never reuses a
+    /// process-global path cache. Dropping the trace frees the index.
+    pub fn async_sidecars(
+        &self,
+    ) -> Result<&crate::async_sidecars::AsyncSidecars, crate::async_sidecars::AsyncSidecarError>
+    {
+        self.async_sidecars
+            .get_or_init(|| {
+                let mut streams: BTreeMap<(i64, i32), BTreeSet<i64>> = BTreeMap::new();
+                for loc in self.kernels() {
+                    streams
+                        .entry((loc.device_id(), loc.kernel().id))
+                        .or_default()
+                        .insert(loc.stream_id());
+                }
+                crate::async_sidecars::AsyncSidecars::load(&self.root, &streams)
+            })
+            .as_ref()
+            .map_err(Clone::clone)
     }
 
     /// The loaded allocation registry, if `allocations.json` was present.

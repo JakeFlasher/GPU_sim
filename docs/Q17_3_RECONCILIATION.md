@@ -23,12 +23,13 @@ controls, and 11,529 launches.
 
 ## Q17.3.3 typed sidecar join
 
-`sim/sm/src/replay.rs` streams `extra_info/tma_trace.jsonl` and
-`extra_info/sync_trace.jsonl`, filtering by device and kernel and joining the
-producer records by CTA, warp, instruction ordinal, PC, and function identity.
-The enclosing trace launch supplies stream identity; the sidecar schema does
-not carry a stream column. Process-local maps avoid rescanning a sidecar for
-each launch in one `sim-run` process.
+`sim/trace/src/async_sidecars.rs` streams `extra_info/tma_trace.jsonl` and
+`extra_info/sync_trace.jsonl` once per loaded `TraceDir`, filtering by device,
+stream and kernel and joining producer records by CTA, warp, instruction
+ordinal, PC, and function identity. The enclosing trace launch supplies stream
+identity because the sidecar schema does not carry a stream column. The index
+is owned by that immutable trace snapshot and is dropped with it; no
+process-global path cache can mix captures.
 
 The TMA join uses the observed `byte_count` for the logical async completion
 token. A missing record produces zero logical payload work and an explicit
@@ -59,11 +60,10 @@ from NCU comparison and timing-domain metrics.
 
 ## Q17.3.4 canonical replay
 
-The current full replay is being regenerated after the sidecar cache and
-replay-cost instrumentation change. The prior typed-sidecar run completed
-327/327 captures and 11,529 launches. The matching fast replay is run only
-after that full run completes. Raw rows are retained under `/dev/shm` as
-`sm120_alpha_q17f_canonical_{full,fast}.jsonl`.
+The latest trace-scoped-index full replay completed 327/327 captures and
+11,529 launches, followed by matching fast replay over the same population.
+Raw rows are retained under `/dev/shm` as
+`sm120_alpha_q17h_canonical_{full,fast}.jsonl`.
 
 ## Q17.3.5–Q17.3.6 NCU and timing scope
 
@@ -71,9 +71,9 @@ The canonical NCU comparison has one row per capture profile and zero grid or
 block-shape mismatches. Launch identity is exact for 97 rows; the remaining
 11,432 joins use an explicitly labelled ordered/shape fallback. No rows are
 unmatched. Full and fast timing domains remain model-relative frontiers and
-are not substituted for bare-metal CUDA-event timing. The independent NCU
-comparison is recorded at
-`/dev/shm/rust_research/q17e_canonical_ncu_comparison.json`.
+are not substituted for bare-metal CUDA-event timing. Corrected unit-aware
+post-replay rows are under
+`/dev/shm/sm120_rtx_5090_work/q17h/corrected_q17h/`.
 
 ## Q17.3.7 model decision
 
@@ -89,11 +89,11 @@ the existing model and its typed residuals rather than fit a scored workload.
 also reports setup, trace decode, execution metadata, control, schedule,
 replay, serialization, and process wall phases. `TraceMetrics` records
 `sidecar_join_wall_ns` as a host-side diagnostic. `/usr/bin/time` measurements
-retain RSS separately from simulator timing. The sidecar map cache is a
-bounded process-local optimization: it reduces repeated JSONL scans within one
-capture, while the largest observed non-canonical grouped-GEMM sidecars used
-approximately 280 MiB peak RSS. No model timing or physical interpretation is
-changed by this optimization.
+retain RSS separately from simulator timing. The trace-scoped sidecar index
+removes repeated JSONL scans within one capture; Q17h reports 2.36 seconds
+aggregate sidecar-index wall time across canonical launches, versus 5.34
+seconds in the earlier process-local cache run. No model timing or physical
+interpretation is changed by this optimization.
 
 ## Remaining genuine gaps
 

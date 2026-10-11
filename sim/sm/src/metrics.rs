@@ -359,6 +359,7 @@ pub struct TraceMetrics {
     pub tma_sidecar_records_observed: u64,
     pub tma_sidecar_payload_bytes_observed: u64,
     pub tma_sidecar_records_missing: u64,
+    pub tma_sidecar_payload_bytes_missing: u64,
     pub tma_sidecar_load_records: u64,
     pub tma_sidecar_store_records: u64,
     pub tma_sidecar_zero_byte_records: u64,
@@ -376,6 +377,7 @@ pub struct TraceMetrics {
     pub sync_sidecar_phase_check_records: u64,
     pub sync_sidecar_wait_records: u64,
     pub sync_sidecar_exchange_records: u64,
+    /// Sum of per-instruction distinct addresses, NOT launch-wide unique barriers.
     pub sync_sidecar_barrier_addresses: u64,
 }
 
@@ -604,18 +606,23 @@ fn decoded_sector_stats(kind: AccessKind, sector_arena: &[i64]) -> Option<(u64, 
 impl TraceMetrics {
     pub(crate) fn observe_tma_sidecar_payload(
         &mut self,
-        observation: Option<&crate::replay::TmaObservation>,
+        observation: Option<&sim_trace::async_sidecars::TmaObservation>,
     ) -> Result<(), crate::IssueError> {
         add(
             &mut self.tma_sidecar_records_observed,
             u64::from(observation.is_some()),
         )?;
         let Some(observation) = observation else {
-            return add(&mut self.tma_sidecar_records_missing, 1);
+            add(&mut self.tma_sidecar_records_missing, 1)?;
+            return add(&mut self.tma_sidecar_payload_bytes_missing, 1);
         };
         add(
             &mut self.tma_sidecar_payload_bytes_observed,
             observation.bytes.unwrap_or(0),
+        )?;
+        add(
+            &mut self.tma_sidecar_payload_bytes_missing,
+            u64::from(observation.bytes.is_none()),
         )?;
         add(
             &mut self.tma_sidecar_load_records,
@@ -638,7 +645,7 @@ impl TraceMetrics {
 
     pub(crate) fn observe_sync_sidecar(
         &mut self,
-        observation: Option<&crate::replay::SyncObservation>,
+        observation: Option<&sim_trace::async_sidecars::SyncObservation>,
     ) -> Result<(), crate::IssueError> {
         let Some(observation) = observation else {
             return add(&mut self.sync_sidecar_records_missing, 1);
