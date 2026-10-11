@@ -25,7 +25,9 @@ relative to that commit.
 Q16.1–Q16.3 are historical semantic-ledger slices. **Q17.1–Q17.2 are
 complete:** the three retained-corpus replay seams were closed and the full
 302-capture corpus now completes in both full and fast modes. Q17.3 is the
-next active goal for an independent full-suite model/performance improvement.
+next active goal: establish a predeclared SM120 observation endpoint from
+independent control kernels before selecting a full-suite model change. The
+withdrawn 3,900-cycle P10 post-hoc offset is not reused.
 
 ## Latest evidence
 

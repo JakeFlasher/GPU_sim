@@ -78,10 +78,11 @@ launches in both full and fast modes, with no residual categories. The common
 `/dev/shm/rust_research/full_workload_replay_summary_q17_20261011.json` and
 the adjacent `/dev/shm/sm120_alpha_q17_*` files.
 
-**Q17.3 is active:** select the next independent full-suite model/performance
-improvement, preserving the separation between NCU comparison targets and
-simulator inputs. Update this memory and `docs/STATUS.md` after the next real
-evidence/code milestone.
+**Q17.3 is active:** establish a predeclared SM120 observation endpoint from
+independent control kernels before selecting the next full-suite model change.
+Do not resurrect the withdrawn 3,900-cycle P10 post-hoc offset or use NCU
+values from scored captures as model inputs. Update this memory and
+`docs/STATUS.md` after the next real evidence/code milestone.
 
 ## Evidence/research directories
 
