@@ -835,7 +835,39 @@ def nested_numeric(document: dict[str, Any], *keys: str) -> float | None:
 def join_ncu_rows(
     sim_launches: list[dict[str, Any]], ncu_rows: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    """Join simulator launches to NCU rows by identity before order fallback."""
+    """Join simulator launches to NCU rows using identity and unique shape.
+
+    The NCU export does not carry the tracer's kernel id.  Mangled-versus-
+    demangled names therefore leave a small but material ordered-join failure
+    surface in captures with library/generated kernels.  A unique
+    ``(grid, block)`` match is an independent structural identity already
+    present in both artifacts; ambiguous shape matches still use ordered
+    fallback and remain labelled as diagnostic.  This is post-replay
+    association only: no NCU value enters simulator execution.
+    """
+
+    def shape(value: Any) -> tuple[int, int, int] | None:
+        if isinstance(value, (list, tuple)) and len(value) == 3:
+            try:
+                return tuple(int(item) for item in value)  # type: ignore[return-value]
+            except (TypeError, ValueError):
+                return None
+        values = re.findall(r"-?\d+", str(value or ""))
+        if len(values) != 3:
+            return None
+        return tuple(int(item) for item in values)  # type: ignore[return-value]
+
+    def shape_candidates(launch: dict[str, Any], unused: set[int]) -> list[int]:
+        grid = shape(launch.get("grid"))
+        block = shape(launch.get("block"))
+        if grid is None or block is None:
+            return []
+        return [
+            candidate
+            for candidate in unused
+            if shape(ncu_rows[candidate].get("grid_size")) == grid
+            and shape(ncu_rows[candidate].get("block_size")) == block
+        ]
 
     unused = set(range(len(ncu_rows)))
     joined: list[dict[str, Any]] = []
@@ -850,12 +882,17 @@ def join_ncu_rows(
         status = "identity"
         if len(exact) == 1:
             candidate = exact[0]
-        elif index in unused:
-            candidate = index
-            status = "ordered_fallback"
         else:
-            candidate = None
-            status = "unmatched"
+            shaped = shape_candidates(launch, unused)
+            if len(shaped) == 1:
+                candidate = shaped[0]
+                status = "shape_identity"
+            elif index in unused:
+                candidate = index
+                status = "ordered_fallback"
+            else:
+                candidate = None
+                status = "unmatched"
         if candidate is not None:
             unused.discard(candidate)
             ncu = ncu_rows[candidate]
