@@ -1,16 +1,9 @@
-# Implementation plan index
+# Plans
 
-Use [the active SM86 reification/refactor plan](sm86_reification_refactor_20261001.md).
-[Second-round program](second_round_refinement_20261001.md) records the staged
-R1–R7 implementation evidence; the [third-round rebuttal](third_round_rebuttal_20261002.md)
-maps each reviewer finding to its bounded response and falsifier.
-[Latest-review refinement program](latest_review_refinement_20261002.md) is now
-the active R8 plan. It turns the latest independent panel re-review into
-sequential soundness, production-dispatch, native-closure, service,
-measurement, and synchronization stages; each stage has an acceptance clause
-and a falsifier.
-[STATUS](../docs/STATUS.md) records implementation maturity; the
-[runbook](../docs/runbook_host.md) owns executable commands.
+The active SM120 plan is maintained at
+`/root/gpu_cache_memory_modeling_proposal/PLAN.md`. Read
+`/root/gpu_cache_memory_modeling_proposal/STATUS.md` for the short progress
+record, then use `docs/PROJECT_MEMORY.md` for the simulator checkout context.
 
-No superseded plan files are retained in this directory. Keep future planning
-in the active document above and update the current docs with any scope change.
+This directory is intentionally limited to this pointer and its local scope
+instructions; it is not a second execution queue.

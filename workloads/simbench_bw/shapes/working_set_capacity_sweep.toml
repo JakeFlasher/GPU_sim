@@ -26,7 +26,7 @@ estimator_source = "static"
 
 [[trace_shapes]]
 name = "trace_l2_accuracy_xl"
-axes = { working_set_bytes = 16777216, warps = 64 }
+axes = { working_set_bytes = 4194304, warps = 16 }
 launch_config = { grid = [64, 1, 1], block = [32, 1, 1] }
 predicted_bytes = 10240
 estimator_source = "static"

@@ -1,0 +1,1 @@
+{"uuid": "fb201fb8-2967-58fc-8fab-5912497216ae", "axes": {"M": 64}, "inputs": {"hidden_states": {"type": "custom"}, "gate_weight": {"type": "custom"}, "scale_hidden": {"type": "custom"}, "scale_weight": {"type": "custom"}}, "tolerance": {"max_atol": 0.005, "max_rtol": 0.02, "required_matched_ratio": 0.99}}

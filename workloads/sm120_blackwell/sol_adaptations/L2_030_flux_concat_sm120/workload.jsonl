@@ -1,0 +1,1 @@
+{"uuid": "sm120-adapter-L2-030", "axes": {"batch_size": 1, "text_seq_len": 16, "img_seq_len": 16}, "inputs": {"hidden_states": {"type": "random"}, "encoder_hidden_states": {"type": "random"}, "process_weight": {"type": "random"}}, "tolerance": {"max_atol": 0.002, "max_rtol": 1e-05, "required_match_ratio": 0.98}}

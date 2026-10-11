@@ -5875,7 +5875,7 @@ mod tests {
             };
             slots.push((pc, scalar));
             insts.push(ReplayInst {
-                pc: u32::try_from(pc).unwrap(),
+                lane_mask: u32::MAX, pc: u32::try_from(pc).unwrap(),
                 kind: AccessKind::NonMemory,
             });
         }
@@ -6287,19 +6287,19 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalStore { off: 0, len: 1 },
                     },
                     ReplayInst {
-                        pc: 16,
+                        lane_mask: u32::MAX, pc: 16,
                         kind: AccessKind::GlobalStore { off: 1, len: 1 },
                     },
                     ReplayInst {
-                        pc: 32,
+                        lane_mask: u32::MAX, pc: 32,
                         kind: AccessKind::GlobalStore { off: 2, len: 1 },
                     },
                     ReplayInst {
-                        pc: 48,
+                        lane_mask: u32::MAX, pc: 48,
                         kind: AccessKind::NonMemory,
                     },
                 ],
@@ -6370,27 +6370,27 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::NonMemory,
                     },
                     ReplayInst {
-                        pc: 16,
+                        lane_mask: u32::MAX, pc: 16,
                         kind: AccessKind::GlobalStore { off: 0, len: 1 },
                     },
                     ReplayInst {
-                        pc: 32,
+                        lane_mask: u32::MAX, pc: 32,
                         kind: AccessKind::NonMemory,
                     },
                     ReplayInst {
-                        pc: 48,
+                        lane_mask: u32::MAX, pc: 48,
                         kind: AccessKind::NonMemory,
                     },
                     ReplayInst {
-                        pc: 64,
+                        lane_mask: u32::MAX, pc: 64,
                         kind: AccessKind::NonMemory,
                     },
                     ReplayInst {
-                        pc: 80,
+                        lane_mask: u32::MAX, pc: 80,
                         kind: AccessKind::NonMemory,
                     },
                 ],
@@ -6502,11 +6502,11 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalStore { off: 0, len: 2 },
                     },
                     ReplayInst {
-                        pc: 16,
+                        lane_mask: u32::MAX, pc: 16,
                         kind: AccessKind::NonMemory,
                     },
                 ],
@@ -6627,7 +6627,7 @@ mod tests {
                     async_copy_cohorts: None,
                     warp_slot,
                     insts: vec![ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalStore { off: 0, len: 2 },
                     }],
                     sectors: vec![i64::from(warp_slot) * 8, i64::from(warp_slot) * 8 + 4],
@@ -7039,7 +7039,7 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalEligible {
                             off: 0,
                             len: 1,
@@ -7047,7 +7047,7 @@ mod tests {
                         },
                     },
                     ReplayInst {
-                        pc: 16,
+                        lane_mask: u32::MAX, pc: 16,
                         kind: AccessKind::NonMemory,
                     },
                 ],
@@ -7134,7 +7134,7 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalEligible {
                             off: 0,
                             len: 1,
@@ -7142,11 +7142,11 @@ mod tests {
                         },
                     },
                     ReplayInst {
-                        pc: 16,
+                        lane_mask: u32::MAX, pc: 16,
                         kind: AccessKind::GlobalStore { off: 0, len: 1 },
                     },
                     ReplayInst {
-                        pc: 32,
+                        lane_mask: u32::MAX, pc: 32,
                         kind: AccessKind::NonMemory,
                     },
                 ],
@@ -7230,7 +7230,7 @@ mod tests {
                 warp_slot: 0,
                 insts: (0..instruction_count)
                     .map(|index| ReplayInst {
-                        pc: index * 16,
+                        lane_mask: u32::MAX, pc: index * 16,
                         kind: AccessKind::NonMemory,
                     })
                     .collect(),
@@ -7300,7 +7300,7 @@ mod tests {
                 async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: std::iter::once(ReplayInst {
-                    pc: 0,
+                    lane_mask: u32::MAX, pc: 0,
                     kind: AccessKind::GlobalEligible {
                         off: 0,
                         len: 1,
@@ -7308,7 +7308,7 @@ mod tests {
                     },
                 })
                 .chain((1..instruction_count).map(|index| ReplayInst {
-                    pc: index * 16,
+                    lane_mask: u32::MAX, pc: index * 16,
                     kind: AccessKind::NonMemory,
                 }))
                 .collect(),
@@ -7455,7 +7455,7 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalEligible {
                             off: 0,
                             len,
@@ -7463,7 +7463,7 @@ mod tests {
                         },
                     },
                     ReplayInst {
-                        pc: 16,
+                        lane_mask: u32::MAX, pc: 16,
                         kind: AccessKind::NonMemory,
                     },
                 ],
@@ -7482,7 +7482,7 @@ mod tests {
 
     fn async_copy_blocks(with_wait: bool) -> Vec<BlockReplay> {
         let mut insts = vec![ReplayInst {
-            pc: 0,
+            lane_mask: u32::MAX, pc: 0,
             kind: AccessKind::GlobalAsyncCopy {
                 off: 0,
                 len: 1,
@@ -7493,15 +7493,15 @@ mod tests {
         if with_wait {
             insts.extend([
                 ReplayInst {
-                    pc: 16,
+                    lane_mask: u32::MAX, pc: 16,
                     kind: AccessKind::NonMemory,
                 },
                 ReplayInst {
-                    pc: 32,
+                    lane_mask: u32::MAX, pc: 32,
                     kind: AccessKind::NonMemory,
                 },
                 ReplayInst {
-                    pc: 48,
+                    lane_mask: u32::MAX, pc: 48,
                     kind: AccessKind::NonMemory,
                 },
             ]);
@@ -7998,7 +7998,7 @@ mod tests {
                     async_copy_cohorts: None,
                     warp_slot: 0,
                     insts: vec![ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalEligible {
                             off: 0,
                             len: 1,
@@ -8062,7 +8062,7 @@ mod tests {
                     async_copy_cohorts: None,
                     warp_slot: 0,
                     insts: vec![ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalStore { off: 0, len: 1 },
                     }],
                     sectors: vec![4],
@@ -8071,7 +8071,7 @@ mod tests {
                     async_copy_cohorts: None,
                     warp_slot: 1,
                     insts: vec![ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalStore { off: 0, len: 1 },
                     }],
                     sectors: vec![8],
@@ -8127,11 +8127,11 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalStore { off: 0, len: 1 },
                     },
                     ReplayInst {
-                        pc: 16,
+                        lane_mask: u32::MAX, pc: 16,
                         kind: AccessKind::GlobalEligible {
                             off: 1,
                             len: 1,
@@ -8139,7 +8139,7 @@ mod tests {
                         },
                     },
                     ReplayInst {
-                        pc: 32,
+                        lane_mask: u32::MAX, pc: 32,
                         kind: AccessKind::NonMemory,
                     },
                 ],
@@ -8244,7 +8244,7 @@ mod tests {
                 async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
-                    pc: 0,
+                    lane_mask: u32::MAX, pc: 0,
                     kind: AccessKind::GlobalEligible {
                         off: 0,
                         len: 1,
@@ -8281,7 +8281,7 @@ mod tests {
                 async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
-                    pc: 0,
+                    lane_mask: u32::MAX, pc: 0,
                     kind: AccessKind::GlobalEligible {
                         off: 0,
                         len: 1,
@@ -8324,11 +8324,11 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalStore { off: 0, len: 1 },
                     },
                     ReplayInst {
-                        pc: 16,
+                        lane_mask: u32::MAX, pc: 16,
                         kind: AccessKind::GlobalEligible {
                             off: 1,
                             len: 1,
@@ -8400,7 +8400,7 @@ mod tests {
                     async_copy_cohorts: None,
                     warp_slot: 0,
                     insts: vec![ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::LocalStore { off: 0, len: 1 },
                     }],
                     sectors: vec![40],
@@ -8410,11 +8410,11 @@ mod tests {
                     warp_slot: 1,
                     insts: vec![
                         ReplayInst {
-                            pc: 16,
+                            lane_mask: u32::MAX, pc: 16,
                             kind: AccessKind::NonMemory,
                         },
                         ReplayInst {
-                            pc: 32,
+                            lane_mask: u32::MAX, pc: 32,
                             kind: AccessKind::GlobalEligible {
                                 off: 0,
                                 len: 1,
@@ -8429,11 +8429,11 @@ mod tests {
                     warp_slot: 2,
                     insts: vec![
                         ReplayInst {
-                            pc: 16,
+                            lane_mask: u32::MAX, pc: 16,
                             kind: AccessKind::NonMemory,
                         },
                         ReplayInst {
-                            pc: 48,
+                            lane_mask: u32::MAX, pc: 48,
                             kind: AccessKind::LocalLoad { off: 0, len: 1 },
                         },
                     ],
@@ -8523,7 +8523,7 @@ mod tests {
                 warps: vec![WarpReplay {
                     async_copy_cohorts: None,
                     warp_slot: 0,
-                    insts: vec![ReplayInst { pc: 0, kind }],
+                    insts: vec![ReplayInst { lane_mask: u32::MAX, pc: 0, kind }],
                     sectors: vec![4],
                 }],
             }];
@@ -8825,11 +8825,11 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 64,
+                        lane_mask: u32::MAX, pc: 64,
                         kind: AccessKind::NonMemory,
                     },
                     ReplayInst {
-                        pc: 80,
+                        lane_mask: u32::MAX, pc: 80,
                         kind: AccessKind::GlobalEligible {
                             off: 0,
                             len: 1,
@@ -8837,7 +8837,7 @@ mod tests {
                         },
                     },
                     ReplayInst {
-                        pc: 96,
+                        lane_mask: u32::MAX, pc: 96,
                         kind: AccessKind::NonMemory,
                     },
                 ],
@@ -8907,11 +8907,11 @@ mod tests {
                     warp_slot: 0,
                     insts: vec![
                         ReplayInst {
-                            pc: 32,
+                            lane_mask: u32::MAX, pc: 32,
                             kind: AccessKind::GlobalStore { off: 0, len: 1 },
                         },
                         ReplayInst {
-                            pc: 48,
+                            lane_mask: u32::MAX, pc: 48,
                             kind: AccessKind::NonMemory,
                         },
                     ],
@@ -9133,7 +9133,7 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalEligible {
                             off: 0,
                             len: 1,
@@ -9141,7 +9141,7 @@ mod tests {
                         },
                     },
                     ReplayInst {
-                        pc: 16,
+                        lane_mask: u32::MAX, pc: 16,
                         kind: AccessKind::GlobalEligible {
                             off: 1,
                             len: 1,
@@ -9149,7 +9149,7 @@ mod tests {
                         },
                     },
                     ReplayInst {
-                        pc: 32,
+                        lane_mask: u32::MAX, pc: 32,
                         kind: AccessKind::GlobalEligible {
                             off: 2,
                             len: 1,
@@ -9157,7 +9157,7 @@ mod tests {
                         },
                     },
                     ReplayInst {
-                        pc: 48,
+                        lane_mask: u32::MAX, pc: 48,
                         kind: AccessKind::NonMemory,
                     },
                 ],
@@ -9215,7 +9215,7 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalEligible {
                             off: 0,
                             len: 1,
@@ -9223,7 +9223,7 @@ mod tests {
                         },
                     },
                     ReplayInst {
-                        pc: 16,
+                        lane_mask: u32::MAX, pc: 16,
                         kind: AccessKind::GlobalEligible {
                             off: 1,
                             len: 1,
@@ -9231,7 +9231,7 @@ mod tests {
                         },
                     },
                     ReplayInst {
-                        pc: 32,
+                        lane_mask: u32::MAX, pc: 32,
                         kind: AccessKind::NonMemory,
                     },
                 ],
@@ -9285,7 +9285,7 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalEligible {
                             off: 0,
                             len: 1,
@@ -9293,11 +9293,11 @@ mod tests {
                         },
                     },
                     ReplayInst {
-                        pc: 16,
+                        lane_mask: u32::MAX, pc: 16,
                         kind: AccessKind::NonMemory,
                     },
                     ReplayInst {
-                        pc: 32,
+                        lane_mask: u32::MAX, pc: 32,
                         kind: AccessKind::GlobalEligible {
                             off: 1,
                             len: 1,
@@ -9305,7 +9305,7 @@ mod tests {
                         },
                     },
                     ReplayInst {
-                        pc: 48,
+                        lane_mask: u32::MAX, pc: 48,
                         kind: AccessKind::NonMemory,
                     },
                 ],
@@ -9360,11 +9360,11 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalStore { off: 0, len: 1 },
                     },
                     ReplayInst {
-                        pc: 16,
+                        lane_mask: u32::MAX, pc: 16,
                         kind: AccessKind::NonMemory,
                     },
                 ],
@@ -9378,7 +9378,7 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 32,
+                        lane_mask: u32::MAX, pc: 32,
                         kind: AccessKind::GlobalEligible {
                             off: 0,
                             len: 1,
@@ -9386,7 +9386,7 @@ mod tests {
                         },
                     },
                     ReplayInst {
-                        pc: 48,
+                        lane_mask: u32::MAX, pc: 48,
                         kind: AccessKind::NonMemory,
                     },
                 ],
@@ -9451,11 +9451,11 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalStore { off: 0, len: 1 },
                     },
                     ReplayInst {
-                        pc: 16,
+                        lane_mask: u32::MAX, pc: 16,
                         kind: AccessKind::NonMemory,
                     },
                 ],
@@ -9469,7 +9469,7 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 32,
+                        lane_mask: u32::MAX, pc: 32,
                         kind: AccessKind::GlobalEligible {
                             off: 0,
                             len: 1,
@@ -9477,7 +9477,7 @@ mod tests {
                         },
                     },
                     ReplayInst {
-                        pc: 48,
+                        lane_mask: u32::MAX, pc: 48,
                         kind: AccessKind::NonMemory,
                     },
                 ],
@@ -9530,11 +9530,11 @@ mod tests {
                 warp_slot,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalStore { off: 0, len: 1 },
                     },
                     ReplayInst {
-                        pc: 16,
+                        lane_mask: u32::MAX, pc: 16,
                         kind: AccessKind::NonMemory,
                     },
                 ],
@@ -9579,15 +9579,15 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalStore { off: 0, len: 1 },
                     },
                     ReplayInst {
-                        pc: 16,
+                        lane_mask: u32::MAX, pc: 16,
                         kind: AccessKind::GlobalStore { off: 1, len: 1 },
                     },
                     ReplayInst {
-                        pc: 32,
+                        lane_mask: u32::MAX, pc: 32,
                         kind: AccessKind::NonMemory,
                     },
                 ],
@@ -9634,15 +9634,15 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalStore { off: 0, len: 1 },
                     },
                     ReplayInst {
-                        pc: 16,
+                        lane_mask: u32::MAX, pc: 16,
                         kind: AccessKind::GlobalStore { off: 1, len: 1 },
                     },
                     ReplayInst {
-                        pc: 32,
+                        lane_mask: u32::MAX, pc: 32,
                         kind: AccessKind::NonMemory,
                     },
                 ],
@@ -9689,11 +9689,11 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalStore { off: 0, len: 1 },
                     },
                     ReplayInst {
-                        pc: 16,
+                        lane_mask: u32::MAX, pc: 16,
                         kind: AccessKind::NonMemory,
                     },
                 ],
@@ -9738,15 +9738,15 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalStore { off: 0, len: 1 },
                     },
                     ReplayInst {
-                        pc: 16,
+                        lane_mask: u32::MAX, pc: 16,
                         kind: AccessKind::GlobalStore { off: 1, len: 1 },
                     },
                     ReplayInst {
-                        pc: 32,
+                        lane_mask: u32::MAX, pc: 32,
                         kind: AccessKind::NonMemory,
                     },
                 ],
@@ -9791,7 +9791,7 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalEligible {
                             off: 0,
                             len: 1,
@@ -9799,11 +9799,11 @@ mod tests {
                         },
                     },
                     ReplayInst {
-                        pc: 16,
+                        lane_mask: u32::MAX, pc: 16,
                         kind: AccessKind::GlobalStore { off: 0, len: 1 },
                     },
                     ReplayInst {
-                        pc: 32,
+                        lane_mask: u32::MAX, pc: 32,
                         kind: AccessKind::NonMemory,
                     },
                 ],
@@ -9861,7 +9861,7 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalEligible {
                             off: 0,
                             len: 4,
@@ -9869,11 +9869,11 @@ mod tests {
                         },
                     },
                     ReplayInst {
-                        pc: 16,
+                        lane_mask: u32::MAX, pc: 16,
                         kind: AccessKind::GlobalStore { off: 0, len: 4 },
                     },
                     ReplayInst {
-                        pc: 32,
+                        lane_mask: u32::MAX, pc: 32,
                         kind: AccessKind::NonMemory,
                     },
                 ],
@@ -9928,11 +9928,11 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalStore { off: 0, len: 5 },
                     },
                     ReplayInst {
-                        pc: 16,
+                        lane_mask: u32::MAX, pc: 16,
                         kind: AccessKind::NonMemory,
                     },
                 ],
@@ -9976,11 +9976,11 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalStore { off: 0, len: 1 },
                     },
                     ReplayInst {
-                        pc: 16,
+                        lane_mask: u32::MAX, pc: 16,
                         kind: AccessKind::GlobalBypass {
                             off: 1,
                             len: 1,
@@ -9989,7 +9989,7 @@ mod tests {
                         },
                     },
                     ReplayInst {
-                        pc: 32,
+                        lane_mask: u32::MAX, pc: 32,
                         kind: AccessKind::NonMemory,
                     },
                 ],
@@ -10043,7 +10043,7 @@ mod tests {
                 async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
-                    pc: 0,
+                    lane_mask: u32::MAX, pc: 0,
                     kind: AccessKind::GlobalBypass {
                         off: 0,
                         len: 1,
@@ -10095,7 +10095,7 @@ mod tests {
                 async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
-                    pc: 0,
+                    lane_mask: u32::MAX, pc: 0,
                     kind: AccessKind::GlobalBypass {
                         off: 0,
                         len: 1,
@@ -10140,7 +10140,7 @@ mod tests {
                 async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
-                    pc: 0,
+                    lane_mask: u32::MAX, pc: 0,
                     kind: AccessKind::GlobalReduction {
                         off: 0,
                         len: 1,
@@ -10200,7 +10200,7 @@ mod tests {
                 async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
-                    pc: 0,
+                    lane_mask: u32::MAX, pc: 0,
                     kind: AccessKind::GlobalReduction {
                         off: 0,
                         len: 1,
@@ -10258,11 +10258,11 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalStore { off: 0, len: 1 },
                     },
                     ReplayInst {
-                        pc: 16,
+                        lane_mask: u32::MAX, pc: 16,
                         kind: AccessKind::GlobalEligible {
                             off: 1,
                             len: 2,
@@ -10270,7 +10270,7 @@ mod tests {
                         },
                     },
                     ReplayInst {
-                        pc: 32,
+                        lane_mask: u32::MAX, pc: 32,
                         kind: AccessKind::NonMemory,
                     },
                 ],

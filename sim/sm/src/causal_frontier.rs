@@ -56,7 +56,7 @@ impl CausalFrontierInstruction {
         // The recurrence below models the admitted SM86 four-SMSP topology.
         // Refuse other architecture schedules instead of silently applying
         // Ampere subcore placement and claiming cycle-equivalent progress.
-        if schedule.arch() != ArchId::Sm86 {
+        if !matches!(schedule.arch(), ArchId::Sm86 | ArchId::Sm120) {
             return Err(CausalFrontierError::UnsupportedArchitecture {
                 arch: schedule.arch(),
             });
@@ -121,8 +121,10 @@ impl CausalFrontierInstruction {
             initiation_interval_cycles,
             in_flight_capacity,
             completion_units,
-            control_clean: slot.control().stall() == 0
-                && !slot.control().yield_flag()
+            control_clean: (schedule.arch() == ArchId::Sm120
+                || slot.control().stall() == 0)
+                && (schedule.arch() == ArchId::Sm120
+                    || !slot.control().yield_flag())
                 && slot.control().write_barrier().is_none()
                 && slot.control().read_barrier().is_none()
                 && slot.control().wait_mask().bits() == 0

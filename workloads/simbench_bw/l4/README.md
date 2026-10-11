@@ -104,7 +104,7 @@ publishing placeholder native timing.
 (against a built kernel binary) emits `suite_results.json` with
 `status="native"` + measured `timing_ms` + merged `component_health`
 (Round 33 AC-32 integration). Full AC-32 closure still requires
-reporting-platform promotion (hardware-gated on H100 + RTX PRO 6000
+reporting-platform promotion (hardware-gated on H100 + RTX 5090
 Blackwell); the kernel-source half of AC-32 is complete after Round
 36.
 

@@ -16,7 +16,7 @@ the entire input set is conflict-free.
 Usage:
     python3 merge_evidence.py join-cupti-nvbit \
         --cupti-dir <dir> --nvbit-dir <dir> --output-dir <dir> \
-        --platform {h100|rtx_pro_6000_blackwell|rtx_5060_laptop|rtx_3090_ti}
+        --platform {h100|rtx_5090_blackwell|rtx_5060_laptop|rtx_3090_ti}
 
 Exit codes:
     0  every CUPTI/NVBit launch joined successfully.
@@ -86,7 +86,7 @@ from workloads.simbench_bw.phase_cycle_ledger_consumer import (  # noqa: E402
 SUITE_ROOT = Path(__file__).resolve().parent
 PLATFORM_KEYS: frozenset[str] = frozenset({
     "h100",
-    "rtx_pro_6000_blackwell",
+    "rtx_5090_blackwell",
     "rtx_5060_laptop",
     "rtx_3090_ti",
 })
@@ -3948,7 +3948,7 @@ def _build_parser() -> argparse.ArgumentParser:
                           "joined_<rep>_<launch>.json")
     jcn.add_argument("--platform", required=True,
                      help="Target platform key (one of the schema's allowlist: "
-                          "h100, rtx_pro_6000_blackwell, rtx_3090_ti).")
+                          "h100, rtx_5090_blackwell, rtx_3090_ti).")
     jcn.add_argument("--check", action="store_true",
                      help="Report-only: do NOT write joined files.")
     jcn.add_argument("--strict", action="store_true",

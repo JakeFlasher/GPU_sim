@@ -55,7 +55,7 @@ DEFAULT_SECTORS_PER_LINE: int = (
 # sm_86 (RTX 3090 Ti GA102) is the historical Ampere host — kept
 # as a legacy compatibility entry for the landed evidence trail
 # under ``.harness_traces/``. sm_120-laptop (RTX 5060 Laptop GB206) is
-# retained historical data; the active sm_120 card is the RTX PRO 6000
+# retained historical data; the active sm_120 card is the RTX 5090
 # Workstation and intentionally has typed gaps below. Undocumented fields are explicitly
 # ``None`` rather than guessed; ``resolve_cache_geometry`` routes
 # those to per-field ``typed_unavailable`` instead of falling
@@ -146,8 +146,8 @@ _STATIC_DEVICE_CARDS: dict[str, dict[str, Any]] = {
     },
     "sm_120": {
         "arch": "sm_120",
-        "sku": "rtx_pro_6000_ws",
-        # Pro 6000 cache geometry is intentionally typed unavailable until
+        "sku": "rtx_5090",
+        # RTX 5090 cache geometry is intentionally typed unavailable until
         # the cloud host supplies a live device/NCU probe. Never reuse the
         # historical GB206 laptop values above.
         "l1_kb_per_sm": None,

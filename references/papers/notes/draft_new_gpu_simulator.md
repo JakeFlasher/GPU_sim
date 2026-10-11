@@ -14,7 +14,7 @@ Current SOTA simulators (GPGPU-Sim, Accel-Sim, MICRO 2025 enhanced simulator) ar
 NVArchSim (NVIDIA's internal simulator) achieves 40-250x speedup over GPGPU-Sim through event-based simulation, but it is proprietary and unavailable to the research community. No Blackwell-capable event-driven simulator exists in open-source.
 
 ## Target Hardware
-Cloud RTX PRO 6000 Blackwell (SM120/Blackwell workstation, GB202, compute capability 12.0). Local smoke-test host on this branch is RTX 3090 Ti (GA102/Ampere consumer, sm_86, CC 8.6, 24GB GDDR6X) — used only for non-root protocol smoke testing of sm_86-portable kernels; sm_120-specific paths require the cloud rental. Validation against real hardware via Nsight Compute profiling.
+Cloud GeForce RTX 5090 Blackwell (SM120/Blackwell workstation, GB202, compute capability 12.0). Local smoke-test host on this branch is RTX 3090 Ti (GA102/Ampere consumer, sm_86, CC 8.6, 24GB GDDR6X) — used only for non-root protocol smoke testing of sm_86-portable kernels; sm_120-specific paths require the cloud rental. Validation against real hardware via Nsight Compute profiling.
 
 Critical distinction: SM120 (consumer Blackwell) does NOT have tcgen05 or TMEM. It uses extended mma.sync (Ampere-style warp-synchronous) with FP8/FP6/FP4 + block_scale support. The simulator should model sm_120 tensor execution as extended warp-synchronous mma.sync, NOT assuming SM100-style tcgen05/TMEM semantics.
 
@@ -106,7 +106,7 @@ SASS-level via NVBit (compatible with existing MICRO 2025 enhanced tracer format
 - modern-gpu-simulator-micro-2025/: Existing SOTA open-source GPU simulator (reference architecture)
 - NVIDIA_Manuals/: Complete PTX ISA, tuning guides, Nsight Compute guide, CUTLASS/CuTe docs
 - papers/: 65 curated papers covering all relevant domains
-- Local RTX 3090 Ti hardware for sm_86-portable smoke testing; cloud RTX PRO 6000 Blackwell rental for sm_120 validation
+- Local RTX 3090 Ti hardware for sm_86-portable smoke testing; cloud GeForce RTX 5090 Blackwell rental for sm_120 validation
 - NVBit 1.8 tracer (working on SM120, verified in Phase 0)
 - Docker container with CUDA 12.8 + g++11 for existing simulator builds
 
@@ -119,6 +119,6 @@ SASS-level via NVBit (compatible with existing MICRO 2025 enhanced tracer format
 
 ## Constraints
 - All simulator development and testing can run on host (no GPU needed for simulation)
-- Local trace collection and sm_86-portable smoke testing run on bare-metal host with RTX 3090 Ti; sm_120 trace collection and the cloud-target hardware profiling require the cloud RTX PRO 6000 Blackwell rental
+- Local trace collection and sm_86-portable smoke testing run on bare-metal host with RTX 3090 Ti; sm_120 trace collection and the cloud-target hardware profiling require the cloud GeForce RTX 5090 Blackwell rental
 - Must be compatible with existing NVBit trace format for reuse of collected traces
 - Open-source from day one

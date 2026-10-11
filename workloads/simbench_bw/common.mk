@@ -1,3 +1,12 @@
+ifeq ($(origin CXX),default)
+CXX := /usr/bin/g++-14
+endif
+CXX ?= /usr/bin/g++-14
+ifeq ($(origin CC),default)
+CC := /usr/bin/gcc-14
+endif
+CC ?= /usr/bin/gcc-14
+
 # Shared Makefile include for SimBench-BW kernel subdirectories.
 #
 # Per-kernel makefiles under workloads/simbench_bw/<level>/<slug>/Makefile
@@ -6,9 +15,10 @@
 #
 #   SM90A  -- Hopper datacenter (H100): wgmma, cp.async.bulk.tensor, clusters,
 #             DSMEM, mbarrier, elect.sync. NOT available on sm_120.
-#   SM120  -- Blackwell workstation baseline (RTX PRO 6000 Blackwell cloud
-#             target). HMMA FP16/BF16/TF32, QMMA FP8, sparse 2:4, clusters,
-#             DSMEM, and TMA are probeable surfaces. FP4/FP6/NVFP4 rows use
+#   SM120  -- Blackwell workstation baseline (RTX 5090 Blackwell cloud
+#             target). HMMA FP16/BF16/TF32, QMMA FP8, sparse 2:4,
+#             cluster-size-1 launch baselines, and TMA are probeable surfaces;
+#             remote DSMEM peer paths are not claimed on GeForce. FP4/FP6/NVFP4 rows use
 #             explicit sm_120f/sm_120a feature probes and must not be inferred
 #             from a successful baseline sm_120 compile.
 #   SM120F -- Blackwell forward-compatible subset (CUDA 13.0+): adds dense
@@ -23,10 +33,14 @@
 # pinned toolchain recorded in workloads/simbench_bw/DEPENDENCIES.md when that
 # file is authored.
 
-NVCC      ?= nvcc
-PTXAS     ?= ptxas
-CUOBJDUMP ?= cuobjdump
-NVDISASM  ?= nvdisasm
+CUDA_INSTALL_PATH ?= /usr/local/cuda-13.2
+NVCC      ?= $(CUDA_INSTALL_PATH)/bin/nvcc
+PTXAS     ?= $(CUDA_INSTALL_PATH)/bin/ptxas
+CUOBJDUMP ?= $(CUDA_INSTALL_PATH)/bin/cuobjdump
+NVDISASM  ?= $(CUDA_INSTALL_PATH)/bin/nvdisasm
+CC        ?= /usr/bin/gcc-14
+CXX       ?= /usr/bin/g++-14
+NVCC_CCBIN ?= $(CXX)
 
 # -----------------------------------------------------------------------------
 # Architecture flag sets
@@ -39,8 +53,7 @@ ARCH_SM120F = -gencode arch=compute_120f,code=sm_120f
 ARCH_SM120A = -gencode arch=compute_120a,code=sm_120a
 
 # Portable (cross-generation) flag set. A kernel declaring tier=P compiles
-# under this flag set and produces correct results on both H100 and RTX PRO
-# 6000 Blackwell. sm_120 is the safe portable baseline on Blackwell consumer
+# under this flag set and produces correct results on both H100 and RTX 5090. sm_120 is the safe portable baseline on Blackwell consumer
 # dies; sm_120f is a superset that adds dense FP4/FP6/NVFP4 block-scaled MMA.
 ARCH_PORTABLE = $(ARCH_SM90A) $(ARCH_SM120)
 
@@ -60,7 +73,7 @@ NVCC_VERBOSE_PTXAS = -Xptxas=-v
 # cross-reference; harmless otherwise.
 NVCC_LINEINFO = -lineinfo
 
-NVCC_COMMON = $(NVCC_STD) $(NVCC_VERBOSE_PTXAS) $(NVCC_LINEINFO)
+NVCC_COMMON = $(NVCC_STD) $(NVCC_VERBOSE_PTXAS) $(NVCC_LINEINFO) -ccbin=$(NVCC_CCBIN) -I$(CUDA_INSTALL_PATH)/include -L$(CUDA_INSTALL_PATH)/lib64
 
 # -----------------------------------------------------------------------------
 # SASS archival

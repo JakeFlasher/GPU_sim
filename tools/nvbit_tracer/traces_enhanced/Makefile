@@ -1,10 +1,20 @@
+ifeq ($(origin CXX),default)
+CXX := /usr/bin/g++-14
+endif
+CXX ?= /usr/bin/g++-14
+ifeq ($(origin CC),default)
+CC := /usr/bin/gcc-14
+endif
+CC ?= /usr/bin/gcc-14
+
 MKDIR_P = mkdir -p
 .DEFAULT_GOAL := traces_enhanced
 
 # Keep this subbuild runnable on its own as well as through the parent tracer
 # Makefile. Callers may override these paths explicitly.
-CUDA_INSTALL_PATH ?= $(if $(wildcard /usr/local/cuda-13.2/bin/nvcc),/usr/local/cuda-13.2,$(shell dirname $(shell dirname $(shell command -v nvcc))))
-PB_PREFIX ?= $(abspath ../../../.toolchain/pb)
+CUDA_INSTALL_PATH ?= /usr/local/cuda-13.2
+CXX ?= /usr/bin/g++-14
+PB_PREFIX ?= $(abspath $(CURDIR)/../../../.toolchain/pb)
 PKG_CONFIG ?= pkg-config
 PKG_CONFIG_FLAGS ?= --define-prefix
 PKG_CONFIG_PATH ?= $(PB_PREFIX)/lib/pkgconfig
@@ -39,8 +49,8 @@ PROTO_OBJ_DIR=$(PROTO_GEN_DIR)/obj
 # pinned prefix is checkout-local, while its .pc files retain the path from the
 # checkout where the environment was created; --define-prefix relocates those
 # paths from the .pc file's current directory.
-PROTOBUF_INCLUDES:=$(shell $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --cflags protobuf 2>/dev/null)
-PROTOBUF_LIBS:=$(shell $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --libs protobuf 2>/dev/null)
+PROTOBUF_INCLUDES:=$(shell PKG_CONFIG_PATH="$(PB_PREFIX)/lib/pkgconfig" $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --cflags protobuf 2>/dev/null)
+PROTOBUF_LIBS:=$(shell PKG_CONFIG_PATH="$(PB_PREFIX)/lib/pkgconfig" $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --libs protobuf 2>/dev/null)
 ifeq ($(PROTOBUF_INCLUDES),)
 $(error pkg-config could not resolve protobuf compile flags; ensure PKG_CONFIG_PATH names the pinned protobuf pkgconfig directory)
 endif

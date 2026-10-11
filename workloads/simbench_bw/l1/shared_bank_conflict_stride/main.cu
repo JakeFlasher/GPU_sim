@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "../../sm120_event_timing.h"
 
 extern "C" cudaError_t shared_bank_conflict_stride_launch(
     const float *d_in, float *d_out, float *d_sink,
@@ -100,9 +101,14 @@ int main(int argc, char **argv) {
     rc = cudaMemset(d_out, 0xff, bytes); if (rc) fail("memset out", rc);
     rc = cudaMemset(d_sink, 0xff, sizeof(float)); if (rc) fail("memset sink", rc);
     rc = cudaMemcpy(d_in, h_in, bytes, cudaMemcpyHostToDevice); if (rc) fail("H2D", rc);
-    rc = shared_bank_conflict_stride_launch(d_in, d_out, d_sink, rows, cols, stride, 0);
-    if (rc) fail("configure/launch", rc);
+    Sm120CudaEventScope event_scope;
+    const int event_reps = sm120_event_reps();
+    for (int rep = 0; rep < event_reps; ++rep) {
+        rc = shared_bank_conflict_stride_launch(d_in, d_out, d_sink, rows, cols, stride, 0);
+        if (rc) fail("configure/launch", rc);
+    }
     rc = cudaDeviceSynchronize(); if (rc) fail("sync", rc);
+    event_scope.finish("shared_bank_conflict_stride");
     rc = cudaMemcpy(h_out, d_out, bytes, cudaMemcpyDeviceToHost); if (rc) fail("D2H", rc);
     rc = cudaMemcpy(&h_sink, d_sink, sizeof(float), cudaMemcpyDeviceToHost); if (rc) fail("sink D2H", rc);
     float expected_sink = 0.0f;

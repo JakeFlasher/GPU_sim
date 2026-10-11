@@ -1,0 +1,1 @@
+{"uuid": "sm120-adapter-L1_081_joint_context_sm120", "axes": {"batch_size": 1, "image_seq_len": 16, "context_seq_len": 16}, "inputs": {"image_attention_output": {"type": "random"}, "context_attention_output": {"type": "random"}, "to_out_weight": {"type": "random"}, "to_out_bias": {"type": "random"}}, "tolerance": {"max_atol": 0.002, "max_rtol": 1e-05}}

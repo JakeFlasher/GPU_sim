@@ -18,6 +18,7 @@ const USAGE: &str = "Usage: sim-run --trace DIR --control FILE --arch-card FILE 
 [--hypothetical-issue-ports N] \
 [--architecture-spec FILE] \
 [--fast-frontier-only] \
+[--sm120-alpha] \
 [--latent-envelope] \
 [--service-stage-role independent_post_replay|residual_closure|replacement_timing] \
 [--ncu-shaped-metrics] \
@@ -64,6 +65,7 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
     let mut hypothetical_issue_ports = None;
     let mut architecture_spec = None;
     let mut fast_frontier_only = false;
+    let mut sm120_alpha = false;
     let mut latent_envelope = false;
     let mut kernel_id = None;
     let mut ncu_shaped_metrics = false;
@@ -213,6 +215,9 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
             value if value == OsStr::new("--fast-frontier-only") => {
                 fast_frontier_only = true;
             }
+            value if value == OsStr::new("--sm120-alpha") => {
+                sm120_alpha = true;
+            }
             value if value == OsStr::new("--latent-envelope") => {
                 latent_envelope = true;
             }
@@ -319,6 +324,7 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
         kernel_id,
         ncu_shaped_metrics,
         fast_frontier_only,
+        sm120_alpha,
         ncu_csv,
         ncu_launch,
         launch_resources,

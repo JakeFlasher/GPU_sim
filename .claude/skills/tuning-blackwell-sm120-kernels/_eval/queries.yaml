@@ -1,15 +1,15 @@
 queries:
-  - prompt: "what is the max warps per SM on RTX PRO 6000 Blackwell"
+  - prompt: "what is the max warps per SM on RTX 5090 Blackwell"
     expected_skill: tuning-blackwell-sm120-kernels
     expected_cards:
       - .claude/knowledge/blackwell/blackwell-tuning.md
-      - .claude/knowledge/blackwell/rtx_pro_6000_blackwell_capabilities.md
+      - .claude/knowledge/blackwell/blackwell-tuning.md
     forbidden_behavior:
       - answers 64 (correct is 48 for SM120)
   - prompt: "does the 5090 support clusters and DSMEM"
     expected_skill: tuning-blackwell-sm120-kernels
     expected_cards:
-      - .claude/knowledge/blackwell/rtx_pro_6000_blackwell_capabilities.md
+      - .claude/knowledge/blackwell/blackwell-tuning.md
     forbidden_behavior:
       - says "no, sm_120 lacks clusters" (it supports them; common forum FUD)
   - prompt: "migrate my Hopper wgmma kernel to Blackwell"
@@ -24,7 +24,7 @@ queries:
     expected_skill: tuning-blackwell-sm120-kernels
     expected_cards:
       - .claude/knowledge/blackwell/blackwell-compatibility.md
-      - .claude/knowledge/blackwell/rtx_pro_6000_blackwell_capabilities.md
+      - .claude/knowledge/blackwell/blackwell-tuning.md
     forbidden_behavior:
       - omits the sm_120a opt-in requirement
   - prompt: "tensor core throughput per SM on Blackwell for FP4 and FP8"

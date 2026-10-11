@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "../../sm120_event_timing.h"
 
 extern "C" void tma_tensor_copy_2d_launch(
     const CUtensorMap *tensor_map_in,
@@ -130,11 +131,24 @@ int main(int argc, char **argv) {
     make_tensor_map(&tensor_map_in, d_in, rows, cols);
     make_tensor_map(&tensor_map_out, d_out, rows, cols);
 
-    tma_tensor_copy_2d_launch(&tensor_map_in, &tensor_map_out, rows, cols, 0);
+    Sm120CudaEventScope event_scope;
+    const int event_reps = sm120_event_reps();
+    for (int rep = 0; rep < event_reps; ++rep) {
+        tma_tensor_copy_2d_launch(&tensor_map_in, &tensor_map_out, rows, cols, 0);
+    }
     rc = cudaDeviceSynchronize();
     if (rc) fail("sync (TMA kernel)", rc);
+    event_scope.finish("tma_tensor_copy_2d");
 
     rc = cudaMemcpy(h_out, d_out, n * sizeof(__nv_bfloat16), cudaMemcpyDeviceToHost); if (rc) fail("D2H out", rc);
+
+    // Passive payload observation: this records values consumed after the
+    // kernel's synchronization boundary without asserting correctness or
+    // manufacturing a native TMA completion timestamp.
+    const unsigned short first_payload = reinterpret_cast<const unsigned short *>(h_out)[0];
+    const unsigned short last_payload = reinterpret_cast<const unsigned short *>(h_out)[n - 1];
+    printf("SM120_PAYLOAD_OBSERVED label=tma_tensor_copy_2d bytes=%zu first_u16=%u last_u16=%u\n",
+           n * sizeof(__nv_bfloat16), (unsigned)first_payload, (unsigned)last_payload);
 
     printf("{\n");
     printf("  \"schema_version\": 1,\n");

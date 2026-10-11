@@ -107,7 +107,7 @@ def check_tier_consistency() -> list[str]:
             errors.append(f"tier_vs_platform_mismatch: tier={tier} slug={slug} expected platforms=both got {platforms!r}")
         if tier == "H" and platforms not in ("h100", "either"):
             errors.append(f"tier_vs_platform_mismatch: tier=H slug={slug} got platforms={platforms!r}")
-        if tier == "B" and platforms not in ("rtx_pro_6000_blackwell", "either"):
+        if tier == "B" and platforms not in ("rtx_5090_blackwell", "either"):
             errors.append(f"tier_vs_platform_mismatch: tier=B slug={slug} got platforms={platforms!r}")
         if tier == "control" and platforms != "either":
             errors.append(f"tier_vs_platform_mismatch: tier=control slug={slug} expected platforms=either (vendor control) got {platforms!r}")
@@ -235,7 +235,7 @@ def check_arch_gate_platform_consistency() -> list[str]:
         slug = r["slug"]
         gates = set(r["arch_gate"])
         platforms = pm_map.get(slug, {}).get("platforms")
-        # Blackwell-only gates (sm_120a / sm_120f) require platforms that include rtx_pro_6000_blackwell
+        # Blackwell-only gates (sm_120a / sm_120f) require platforms that include rtx_5090_blackwell
         has_hopper = "sm_90a" in gates
         has_blackwell = bool(gates & {"sm_120", "sm_120a", "sm_120f"})
         if platforms == "both":
@@ -244,9 +244,9 @@ def check_arch_gate_platform_consistency() -> list[str]:
         elif platforms == "h100":
             if not has_hopper:
                 errors.append(f"arch_gate_platform_mismatch: slug={slug} platforms=h100 but arch_gate={sorted(gates)}")
-        elif platforms == "rtx_pro_6000_blackwell":
+        elif platforms == "rtx_5090_blackwell":
             if not has_blackwell:
-                errors.append(f"arch_gate_platform_mismatch: slug={slug} platforms=rtx_pro_6000_blackwell but arch_gate={sorted(gates)}")
+                errors.append(f"arch_gate_platform_mismatch: slug={slug} platforms=rtx_5090_blackwell but arch_gate={sorted(gates)}")
     return errors
 
 

@@ -107,8 +107,14 @@ use sim_semantics::{NativeBoundaryExecutionPath, NativeBoundaryExecutionResult};
 
 use crate::control_bits::{ControlDomainError, DepBarrier, WaitMask};
 use crate::metrics::{SmActivity, WarpLifetime};
-use crate::program::{FunctionSchedule, IssueSlot, OpClass, PipelineClass};
-use crate::sass_operands::{FixedLatencyOpcode, FixedLatencyOperandStatus};
+use crate::program::{
+    sm120_alpha_scalar_control_stall_suppressed, FunctionSchedule, IssueSlot, OpClass,
+    PipelineClass,
+};
+use crate::sass_operands::{
+    FixedLatencyOpcode, FixedLatencyOperandStatus, SassRegister, SassRegisterFile,
+    SassSourceOperand,
+};
 
 pub use sim_mem::AccessKind;
 
@@ -118,6 +124,15 @@ pub(crate) struct ReplayInst {
     /// Function-relative pc — the join key into [`FunctionSchedule`].
     pub(crate) pc: u32,
     pub(crate) kind: AccessKind,
+    /// Effective executing lanes for the dynamic instruction. Native traces
+    /// carry both masks; legacy synthetic fixtures remain all-lane.
+    pub(crate) lane_mask: u32,
+}
+
+impl ReplayInst {
+    pub(crate) fn effective_lane_mask(self) -> u32 {
+        self.lane_mask
+    }
 }
 
 /// One traced warp of a block: physical slot + its dynamic stream + the
@@ -255,10 +270,133 @@ pub enum IssueResourceSource {
     /// or the architecture-default constructor. This is a design-space input,
     /// never evidence about the physical card.
     HypotheticalIssuePorts(Option<RequiredIssueResources>),
+    /// Explicit SM120 alpha lane.  The lane is a measured-envelope
+    /// hypothesis assembled from the retained RTX 5090 microbenchmarks; it is
+    /// intentionally distinct from both SM86 card defaults and strict carded
+    /// resources so reports cannot mistake it for a silicon topology claim.
+    Sm120Alpha,
     /// Unit-test-only lane for boundary tests that need synthetic scheduler
     /// values. This variant does not exist in production builds.
     #[cfg(test)]
     SyntheticTestFixture,
+}
+
+/// Explicit timing/resource inputs for the SM120 alpha lane.
+///
+/// Nothing in this structure is obtained from the SM86 architecture
+/// capability table.  Values are an executable, deliberately provisional
+/// envelope assembled from the retained M8 dependency/ILP and M9
+/// barrier/control probes.  The alpha lane is intended for Flat replay and
+/// sensitivity work; it is not a calibrated Blackwell silicon model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct Sm120AlphaConfig {
+    pub l1_hit_cycles: u64,
+    pub l2_hit_cycles: u64,
+    pub dram_cycles: u64,
+    pub shared_cycles: u64,
+    pub shared_additional_wavefront_cycles: u64,
+    pub non_memory_write_barrier_cycles: u64,
+    pub read_barrier_cycles: u64,
+    pub issue_ports: u32,
+    pub dual_issue_supported: bool,
+    pub max_resident_warps_per_sm: u32,
+    pub max_resident_blocks_per_sm: u32,
+    pub scalar_latency_cycles: u64,
+    /// Operation-family latency observations from the SM120 scheduler probe.
+    /// These are calibration inputs for the behavioral alpha model, not a
+    /// claim about a unique Blackwell execution pipeline.
+    pub fma_latency_cycles: u64,
+    pub mad_latency_cycles: u64,
+    pub add_latency_cycles: u64,
+    pub fma_initiation_interval_cycles: u64,
+    pub mad_initiation_interval_cycles: u64,
+    pub add_initiation_interval_cycles: u64,
+    /// Logical front-end warm/footprint envelope calibrated from P10 endpoint
+    /// probes.  It is applied only by the fast alpha stage and is not an
+    /// instruction-cache geometry claim.
+    pub front_end_base_cycles: u64,
+    pub front_end_line_cycles_numerator: u64,
+    pub front_end_line_cycles_denominator: u64,
+    pub scalar_initiation_interval_cycles: u64,
+    pub scalar_in_flight_capacity: u32,
+    pub barrier_warp_initiation_interval_cycles: u64,
+    pub barrier_generation_rearm_cycles: u64,
+    pub ldgsts_l1_mshr_floor: u32,
+    pub ldgsts_cache_all_payload_bytes_per_cycle: u64,
+    pub ldgsts_bypass_payload_bytes_per_cycle: u64,
+    pub ldgsts_cache_all_destination_wavefront_cycles: u64,
+    pub ldgsts_global_to_shared_transport_cycles: u64,
+    pub ldgsts_cache_all_destination_service_wavefronts: u64,
+    pub ldgsts_cache_all_destination_service_cycles: u64,
+}
+
+impl Sm120AlphaConfig {
+    /// Stable identifier for the explicit alpha configuration consumed by the
+    /// executor.  Reports should obtain this value from the configuration
+    /// instead of copying a profile name beside independently hard-coded
+    /// timing/occupancy fields.
+    pub const PROFILE_ID: &'static str = "sm120_m8_m9_sensitivity_v1_provisional";
+
+    pub const fn profile_id() -> &'static str {
+        Self::PROFILE_ID
+    }
+
+    /// Initial explicit M8/M9 envelope used by the CLI convenience flag.
+    /// These values are intentionally visible in one alpha-only constructor;
+    /// no call into an SM86 capability/default constructor is made.
+    pub const fn from_m8_m9() -> Self {
+        Self {
+            l1_hit_cycles: 32,
+            l2_hit_cycles: 160,
+            dram_cycles: 520,
+            shared_cycles: 20,
+            shared_additional_wavefront_cycles: 1,
+            // P9 scheduler calibration keeps scalar and barrier families
+            // separate; this is a generic fallback for unclassified scalar
+            // forms, not a claim that every INT/FP opcode has this latency.
+            non_memory_write_barrier_cycles: 8,
+            read_barrier_cycles: 8,
+            issue_ports: 1,
+            dual_issue_supported: false,
+            max_resident_warps_per_sm: 48,
+            max_resident_blocks_per_sm: 24,
+            scalar_latency_cycles: 23,
+            // P9 scheduler depth sweep: approximately 4.44 cycles per
+            // dependent FFMA/MAD and 1.44 cycles per dependent ADD; values
+            // are rounded upward for a conservative readiness envelope.
+            fma_latency_cycles: 5,
+            mad_latency_cycles: 5,
+            add_latency_cycles: 2,
+            fma_initiation_interval_cycles: 1,
+            // Fixed-work P9 sweeps show independent IMAD/MAD chains sustain
+            // roughly two clock cycles per operation on this SKU.
+            mad_initiation_interval_cycles: 2,
+            add_initiation_interval_cycles: 1,
+            front_end_base_cycles: 3900,
+            front_end_line_cycles_numerator: 3,
+            front_end_line_cycles_denominator: 2,
+            scalar_initiation_interval_cycles: 1,
+            scalar_in_flight_capacity: 8,
+            // The P9 barrier-warp sweep (w1/w8/w32 calibration, w16 held-out)
+            // is approximately two SM cycles per warp arrival in the measured
+            // launch envelope.  This remains a behavioral calibration knob.
+            barrier_warp_initiation_interval_cycles: 2,
+            barrier_generation_rearm_cycles: 1,
+            // Async/TMA semantics are not measured on SM120.  These positive
+            // values keep the generic completion arithmetic total; the direct
+            // alpha CLI rejects cache/async modes until a typed SM120 sidecar
+            // supplies their semantics.
+            ldgsts_l1_mshr_floor: 1,
+            ldgsts_cache_all_payload_bytes_per_cycle: 1,
+            // P14 independent TMA shape calibration uses a distinct bypass
+            // payload service arm; LDGSTS cache-all keeps its own rate.
+            ldgsts_bypass_payload_bytes_per_cycle: 4,
+            ldgsts_cache_all_destination_wavefront_cycles: 1,
+            ldgsts_global_to_shared_transport_cycles: 1,
+            ldgsts_cache_all_destination_service_wavefronts: 1,
+            ldgsts_cache_all_destination_service_cycles: 1,
+        }
+    }
 }
 
 impl IssueResourceSource {
@@ -270,6 +408,7 @@ impl IssueResourceSource {
             Self::ArchitectureDefaults => "architecture_local_reviewed_hypothesis",
             Self::Carded(_) => "architecture_card",
             Self::HypotheticalIssuePorts(_) => "hypothetical_issue_ports",
+            Self::Sm120Alpha => "sm120_alpha_measured_envelope",
             #[cfg(test)]
             Self::SyntheticTestFixture => "synthetic_test_fixture",
         }
@@ -286,16 +425,18 @@ pub struct IssueModelParams {
     pub(crate) arch: ArchId,
     pub(crate) resource_source: IssueResourceSource,
     /// Published SM-local instruction hierarchy and fetch/decode structure.
-    /// `None` exists only for synthetic unit fixtures that isolate another
-    /// issue mechanism; production constructors always bind an architecture
-    /// capability here.
+    /// `None` exists for synthetic fixtures and for the explicit SM120 alpha
+    /// lane, which intentionally does not claim an instruction-cache
+    /// capability.
     pub(crate) instruction_front_end: Option<InstructionFrontEnd>,
-    /// Published per-SMSP and SM-shared memory issue pipeline. `None` is
-    /// restricted to synthetic unit fixtures that isolate another mechanism.
+    /// Published per-SMSP and SM-shared memory issue pipeline. `None` is used
+    /// by synthetic fixtures and by the Flat-only SM120 alpha lane until a
+    /// Blackwell memory-issue measurement is admitted.
     pub(crate) memory_issue_pipeline: Option<MemoryIssuePipeline>,
-    /// Research-only scalar INT/FP execution occupancy. Production
-    /// constructors intentionally leave it unset until an independent
-    /// scheduler-port model replaces the rejected single-stream candidate.
+    /// Research-only scalar INT/FP execution occupancy. The explicit SM120
+    /// alpha lane supplies its measured-envelope scalar values here; ordinary
+    /// carded production constructors leave it unset until a full scheduler
+    /// port model is admitted.
     pub(crate) scalar_execution_pipeline: Option<ScalarExecutionPipeline>,
     /// Number of independent issue slots available per SMSP.  Carded values
     /// are consumed by the transaction loop rather than rejected as dormant
@@ -306,11 +447,11 @@ pub struct IssueModelParams {
     /// Source-hit return cadence for cacheable asynchronous copies.
     pub(crate) ldgsts_l1_hit_return_service: Option<LdgstsL1HitReturnService>,
     /// Additional SM-side return service for static `LDG.*.CONSTANT` loads.
-    /// Synthetic fixtures may omit it; production SM86 constructors bind the
-    /// architecture capability.
+    /// Synthetic fixtures and the Flat-only SM120 alpha lane may omit it;
+    /// carded SM86 constructors bind the architecture capability.
     pub(crate) constant_memory_return_service: Option<ConstantMemoryReturnService>,
     /// Per-SMSP immediate-constant cache used by CBANK operands. Synthetic
-    /// fixtures leave this absent so they continue to exercise only the
+    /// fixtures and SM120 alpha leave this absent so they exercise only the
     /// explicitly selected mechanism.
     pub(crate) immediate_constant_cache: Option<ImmediateConstantCache>,
     /// L1 hit data-ready latency (card `l1_hit_latency_cycles`, ceiled).
@@ -493,6 +634,7 @@ impl IssueModelParams {
             IssueResourceSource::HypotheticalIssuePorts(_) => {
                 return Err(IssueError::HypotheticalOverrideAlreadyApplied);
             }
+            IssueResourceSource::Sm120Alpha => return Err(IssueError::HypotheticalOverrideAlreadyApplied),
             #[cfg(test)]
             IssueResourceSource::SyntheticTestFixture => None,
         };
@@ -641,6 +783,270 @@ impl IssueModelParams {
             max_resident_warps_per_sm: resources.occupancy.max_resident_warps_per_sm,
             max_resident_blocks_per_sm: resources.occupancy.max_blocks,
         })
+    }
+
+    /// Construct SM120 alpha parameters from an explicit, card-bound envelope.
+    ///
+    /// The card contributes only the observed launch/occupancy contract.  All
+    /// timing and scheduler values are supplied by `config`; this function
+    /// never consults `ArchId::Sm86` capabilities and therefore cannot silently
+    /// inherit Ampere defaults.
+    pub fn from_card_alpha(
+        expected_arch: ArchId,
+        card: &ArchCard,
+        config: Sm120AlphaConfig,
+    ) -> Result<Self, IssueError> {
+        let arch = card.arch_id()?;
+        if expected_arch != ArchId::Sm120 || arch != ArchId::Sm120 {
+            return Err(IssueError::ArchitectureMismatch {
+                component: "SM120 alpha issue architecture card",
+                expected: ArchId::Sm120,
+                got: arch,
+            });
+        }
+        let runtime = card.require_runtime_limits()?;
+        if runtime.max_resident_warps_per_sm != config.max_resident_warps_per_sm {
+            return Err(IssueError::CardedResourceMismatch {
+                arch,
+                field: "runtime_limits.max_resident_warps_per_sm",
+                expected: u64::from(config.max_resident_warps_per_sm),
+                got: u64::from(runtime.max_resident_warps_per_sm),
+            });
+        }
+        // The card carries the public CC12.0 architectural ceiling (32
+        // blocks/SM).  The alpha profile intentionally uses the M8 row-level
+        // resource envelope (24 blocks/SM) so a shape-specific occupancy
+        // observation is not mistaken for the card maximum.  Accept a
+        // profile no larger than the card ceiling and keep the row value in
+        // the emitted alpha provenance.
+        if config.max_resident_blocks_per_sm > runtime.max_blocks_per_sm {
+            return Err(IssueError::CardedResourceMismatch {
+                arch,
+                field: "runtime_limits.max_blocks_per_sm",
+                expected: u64::from(runtime.max_blocks_per_sm),
+                got: u64::from(config.max_resident_blocks_per_sm),
+            });
+        }
+        if !(1..=4).contains(&config.issue_ports)
+            || config.max_resident_warps_per_sm == 0
+            || config.max_resident_blocks_per_sm == 0
+            || config.scalar_in_flight_capacity == 0
+            || config.ldgsts_l1_mshr_floor == 0
+        {
+            return Err(IssueError::CardedResourceMismatch {
+                arch,
+                field: "sm120_alpha_positive_resources",
+                expected: 1,
+                got: 0,
+            });
+        }
+        let positive = [
+            ("l1_hit_cycles", config.l1_hit_cycles),
+            ("l2_hit_cycles", config.l2_hit_cycles),
+            ("dram_cycles", config.dram_cycles),
+            ("shared_cycles", config.shared_cycles),
+            (
+                "shared_additional_wavefront_cycles",
+                config.shared_additional_wavefront_cycles,
+            ),
+            (
+                "non_memory_write_barrier_cycles",
+                config.non_memory_write_barrier_cycles,
+            ),
+            ("read_barrier_cycles", config.read_barrier_cycles),
+            ("scalar_latency_cycles", config.scalar_latency_cycles),
+            ("fma_latency_cycles", config.fma_latency_cycles),
+            ("mad_latency_cycles", config.mad_latency_cycles),
+            ("add_latency_cycles", config.add_latency_cycles),
+            (
+                "fma_initiation_interval_cycles",
+                config.fma_initiation_interval_cycles,
+            ),
+            (
+                "mad_initiation_interval_cycles",
+                config.mad_initiation_interval_cycles,
+            ),
+            (
+                "add_initiation_interval_cycles",
+                config.add_initiation_interval_cycles,
+            ),
+            ("front_end_base_cycles", config.front_end_base_cycles),
+            (
+                "front_end_line_cycles_numerator",
+                config.front_end_line_cycles_numerator,
+            ),
+            (
+                "front_end_line_cycles_denominator",
+                config.front_end_line_cycles_denominator,
+            ),
+            (
+                "scalar_initiation_interval_cycles",
+                config.scalar_initiation_interval_cycles,
+            ),
+            (
+                "barrier_warp_initiation_interval_cycles",
+                config.barrier_warp_initiation_interval_cycles,
+            ),
+            (
+                "barrier_generation_rearm_cycles",
+                config.barrier_generation_rearm_cycles,
+            ),
+            (
+                "ldgsts_cache_all_payload_bytes_per_cycle",
+                config.ldgsts_cache_all_payload_bytes_per_cycle,
+            ),
+            (
+                "ldgsts_bypass_payload_bytes_per_cycle",
+                config.ldgsts_bypass_payload_bytes_per_cycle,
+            ),
+            (
+                "ldgsts_cache_all_destination_wavefront_cycles",
+                config.ldgsts_cache_all_destination_wavefront_cycles,
+            ),
+            (
+                "ldgsts_global_to_shared_transport_cycles",
+                config.ldgsts_global_to_shared_transport_cycles,
+            ),
+            (
+                "ldgsts_cache_all_destination_service_wavefronts",
+                config.ldgsts_cache_all_destination_service_wavefronts,
+            ),
+            (
+                "ldgsts_cache_all_destination_service_cycles",
+                config.ldgsts_cache_all_destination_service_cycles,
+            ),
+        ];
+        if let Some((name, value)) = positive.into_iter().find(|(_, value)| *value == 0) {
+            return Err(IssueError::InvalidLatency {
+                name,
+                value: value as f64,
+            });
+        }
+        let payload_common = config
+            .ldgsts_cache_all_payload_bytes_per_cycle
+            .max(config.ldgsts_bypass_payload_bytes_per_cycle);
+        if payload_common % config.ldgsts_cache_all_payload_bytes_per_cycle != 0
+            || payload_common % config.ldgsts_bypass_payload_bytes_per_cycle != 0
+        {
+            return Err(IssueError::InvalidLdgstsCompletionThroughput {
+                arch,
+                cache_all_bytes_per_cycle: config.ldgsts_cache_all_payload_bytes_per_cycle,
+                bypass_bytes_per_cycle: config.ldgsts_bypass_payload_bytes_per_cycle,
+            });
+        }
+        let ldgsts_l1_mshr_floor = NonZeroU32::new(config.ldgsts_l1_mshr_floor).ok_or(
+            IssueError::InvalidLdgstsL1MshrFloor {
+                arch,
+                floor: config.ldgsts_l1_mshr_floor,
+            },
+        )?;
+        Ok(Self {
+            arch,
+            resource_source: IssueResourceSource::Sm120Alpha,
+            // The alpha lane deliberately does not instantiate any SM86
+            // front-end, memory-pipeline, IMC, or constant-return capability.
+            // Flat replay therefore uses only the explicit scalar/barrier
+            // envelope below; cache/async lanes remain unavailable.
+            instruction_front_end: None,
+            memory_issue_pipeline: None,
+            scalar_execution_pipeline: Some(ScalarExecutionPipeline {
+                latency_cycles: config.scalar_latency_cycles,
+                initiation_interval_cycles: config.scalar_initiation_interval_cycles,
+                in_flight_capacity: config.scalar_in_flight_capacity,
+            }),
+            issue_ports: config.issue_ports,
+            dual_issue_supported: config.dual_issue_supported,
+            ldgsts_l1_hit_return_service: None,
+            constant_memory_return_service: None,
+            immediate_constant_cache: None,
+            l1_hit_latency: config.l1_hit_cycles,
+            l1_miss_latency: config.l2_hit_cycles,
+            global_flat_latency: config.dram_cycles,
+            shared_write_barrier_latency: config.shared_cycles,
+            shared_additional_wavefront_latency: config.shared_additional_wavefront_cycles,
+            non_memory_write_barrier_latency: config.non_memory_write_barrier_cycles,
+            read_barrier_latency: config.read_barrier_cycles,
+            ldgsts_l1_mshr_floor,
+            ldgsts_completion_throughput: LdgstsCompletionThroughput {
+                cache_all_payload_bytes_per_cycle: config.ldgsts_cache_all_payload_bytes_per_cycle,
+                bypass_payload_bytes_per_cycle: config.ldgsts_bypass_payload_bytes_per_cycle,
+            },
+            ldgsts_cache_all_destination_wavefront_cycles:
+                config.ldgsts_cache_all_destination_wavefront_cycles,
+            ldgsts_global_to_shared_transport_latency:
+                config.ldgsts_global_to_shared_transport_cycles,
+            ldgsts_cache_all_destination_service_wavefronts:
+                config.ldgsts_cache_all_destination_service_wavefronts,
+            ldgsts_cache_all_destination_service_cycles:
+                config.ldgsts_cache_all_destination_service_cycles,
+            max_resident_warps_per_sm: config.max_resident_warps_per_sm,
+            max_resident_blocks_per_sm: config.max_resident_blocks_per_sm,
+        })
+    }
+
+    /// Convenience constructor for callers that do not have a card object
+    /// (unit fixtures and alpha-only microbench harnesses).  Production direct
+    /// replay should call [`Self::from_card_alpha`] so runtime limits remain
+    /// bound to the selected RTX 5090 card.
+    pub fn sm120_alpha() -> Result<Self, IssueError> {
+        let config = Sm120AlphaConfig::from_m8_m9();
+        let runtime = config;
+        if runtime.max_resident_warps_per_sm == 0 || runtime.max_resident_blocks_per_sm == 0 {
+            return Err(IssueError::CardedResourceMismatch {
+                arch: ArchId::Sm120,
+                field: "sm120_alpha_runtime_limits",
+                expected: 1,
+                got: 0,
+            });
+        }
+        // This fixture path is intentionally cardless; all values still come
+        // from the explicit alpha config above, never from SM86 capabilities.
+        let params = Self {
+            arch: ArchId::Sm120,
+            resource_source: IssueResourceSource::Sm120Alpha,
+            instruction_front_end: None,
+            memory_issue_pipeline: None,
+            scalar_execution_pipeline: Some(ScalarExecutionPipeline {
+                latency_cycles: runtime.scalar_latency_cycles,
+                initiation_interval_cycles: runtime.scalar_initiation_interval_cycles,
+                in_flight_capacity: runtime.scalar_in_flight_capacity,
+            }),
+            issue_ports: runtime.issue_ports,
+            dual_issue_supported: runtime.dual_issue_supported,
+            ldgsts_l1_hit_return_service: None,
+            constant_memory_return_service: None,
+            immediate_constant_cache: None,
+            l1_hit_latency: runtime.l1_hit_cycles,
+            l1_miss_latency: runtime.l2_hit_cycles,
+            global_flat_latency: runtime.dram_cycles,
+            shared_write_barrier_latency: runtime.shared_cycles,
+            shared_additional_wavefront_latency: runtime.shared_additional_wavefront_cycles,
+            non_memory_write_barrier_latency: runtime.non_memory_write_barrier_cycles,
+            read_barrier_latency: runtime.read_barrier_cycles,
+            ldgsts_l1_mshr_floor: NonZeroU32::new(runtime.ldgsts_l1_mshr_floor).ok_or(
+                IssueError::InvalidLdgstsL1MshrFloor {
+                    arch: ArchId::Sm120,
+                    floor: runtime.ldgsts_l1_mshr_floor,
+                },
+            )?,
+            ldgsts_completion_throughput: LdgstsCompletionThroughput {
+                cache_all_payload_bytes_per_cycle: runtime
+                    .ldgsts_cache_all_payload_bytes_per_cycle,
+                bypass_payload_bytes_per_cycle: runtime.ldgsts_bypass_payload_bytes_per_cycle,
+            },
+            ldgsts_cache_all_destination_wavefront_cycles:
+                runtime.ldgsts_cache_all_destination_wavefront_cycles,
+            ldgsts_global_to_shared_transport_latency: runtime
+                .ldgsts_global_to_shared_transport_cycles,
+            ldgsts_cache_all_destination_service_wavefronts: runtime
+                .ldgsts_cache_all_destination_service_wavefronts,
+            ldgsts_cache_all_destination_service_cycles: runtime
+                .ldgsts_cache_all_destination_service_cycles,
+            max_resident_warps_per_sm: runtime.max_resident_warps_per_sm,
+            max_resident_blocks_per_sm: runtime.max_resident_blocks_per_sm,
+        };
+        params.validate_resource_source()?;
+        Ok(params)
     }
 
     pub const fn arch(&self) -> ArchId {
@@ -1106,6 +1512,27 @@ impl IssueModelParams {
                 };
                 original.issue_ports = base.map_or(1, |resources| resources.smsp.issue_ports);
                 original.validate_resource_source()
+            }
+            IssueResourceSource::Sm120Alpha => {
+                if self.arch != ArchId::Sm120 {
+                    return Err(IssueError::ArchitectureMismatch {
+                        component: "SM120 alpha issue envelope",
+                        expected: ArchId::Sm120,
+                        got: self.arch,
+                    });
+                }
+                if !(1..=4).contains(&self.issue_ports)
+                    || self.max_resident_warps_per_sm == 0
+                    || self.max_resident_blocks_per_sm == 0
+                {
+                    return Err(IssueError::CardedResourceMismatch {
+                        arch: self.arch,
+                        field: "sm120_alpha_resources",
+                        expected: 1,
+                        got: u64::from(self.issue_ports),
+                    });
+                }
+                Ok(())
             }
             #[cfg(test)]
             IssueResourceSource::SyntheticTestFixture => Ok(()),
@@ -5274,6 +5701,53 @@ pub struct SmSimResult {
     pub activity: SmActivity,
 }
 
+// P15 full-replay service envelope.  These are logical route-service terms
+// inferred from independent width/stride shapes; they are not cache geometry,
+// partition hash, MSHR count or native completion timestamps.  The service is
+// admitted only for a single-warp dense launch so concurrent-warp overlap is
+// not charged twice by this small alpha arm.
+const SM120_FLAT_SERVICE_SECTOR_THRESHOLD: u64 = 512;
+const SM120_FLAT_GLOBAL_32B_SERVICE_CYCLES_PER_SECTOR: u64 = 14;
+const SM120_FLAT_GLOBAL_64B_SERVICE_CYCLES_PER_SECTOR: u64 = 10;
+const SM120_FLAT_GLOBAL_128B_SERVICE_CYCLES_PER_SECTOR: u64 = 8;
+const SM120_FLAT_SHARED_SERVICE_CYCLES_PER_WAVEFRONT: u64 = 7;
+const SM120_FLAT_MULTI_WARP_GLOBAL_SERVICE_CYCLES_PER_SECTOR: u64 = 2;
+const SM120_FLAT_MULTI_WARP_DENSE_EXTRA_CYCLES: u64 = 7;
+const SM120_FLAT_MULTI_WARP_MEDIUM_EXTRA_CYCLES: u64 = 40;
+const SM120_FLAT_SHARED_MEDIUM_EXTRA_CYCLES_PER_WAVEFRONT: u64 = 42;
+const SM120_FLAT_ASYNC_GROUP_SERVICE_CYCLES: u64 = 1_250;
+const SM120_FLAT_STORE_RETIRE_CYCLES_PER_SECTOR: u64 = 19;
+const SM120_FLAT_REDUCTION_RETIRE_CYCLES_PER_SECTOR: u64 = 17;
+
+fn sm120_flat_global_service_rate(opcode_text: &str) -> u64 {
+    let opcode = opcode_text.split_ascii_whitespace().next().unwrap_or(opcode_text);
+    if opcode.contains(".128") {
+        SM120_FLAT_GLOBAL_128B_SERVICE_CYCLES_PER_SECTOR
+    } else if opcode.contains(".64") {
+        SM120_FLAT_GLOBAL_64B_SERVICE_CYCLES_PER_SECTOR
+    } else {
+        SM120_FLAT_GLOBAL_32B_SERVICE_CYCLES_PER_SECTOR
+    }
+}
+
+fn sm120_flat_service_work(kind: AccessKind, opcode_text: &str) -> Option<(bool, u64)> {
+    match kind {
+        AccessKind::GlobalEligible { len, .. }
+        | AccessKind::GlobalBypass { len, .. }
+        | AccessKind::GlobalUntagged { len, .. }
+        | AccessKind::GlobalStore { len, .. }
+        | AccessKind::GlobalReduction { len, .. } if len != 0 => Some((
+            true,
+            u64::from(len).saturating_mul(sm120_flat_global_service_rate(opcode_text)),
+        )),
+        AccessKind::Shared { wavefronts } if wavefronts != 0 => Some((
+            false,
+            wavefronts.saturating_mul(SM120_FLAT_SHARED_SERVICE_CYCLES_PER_WAVEFRONT),
+        )),
+        _ => None,
+    }
+}
+
 /// Group witness for one sector request belonging to an effective scalar
 /// STORE/RED warp instruction. The system consumes these witnesses only to
 /// reconstruct exact per-instruction L2 hit/miss work for opt-in admission
@@ -6719,7 +7193,12 @@ impl ScalarExecutionPipelineState {
     ) -> Result<ScalarExecutionPipelinePlan, IssueError> {
         let mut next = self.clone();
         for (subcore, slot) in selected.into_iter().enumerate() {
-            let Some(PipelineClass::ScalarAlu { .. }) = slot else {
+            let Some(PipelineClass::ScalarAlu {
+                latency_cycles,
+                initiation_interval_cycles,
+                ..
+            }) = slot
+            else {
                 continue;
             };
             if next.release_times[subcore].len() >= self.config.in_flight_capacity as usize {
@@ -6728,13 +7207,13 @@ impl ScalarExecutionPipelineState {
             let ready_for_service = checked_cycle_add(
                 "scalar execution pipeline latency",
                 now,
-                self.config.latency_cycles,
+                latency_cycles,
             )?;
             let service_start = ready_for_service.max(next.next_service[subcore]);
             next.next_service[subcore] = checked_cycle_add(
                 "scalar execution pipeline initiation",
                 service_start,
-                self.config.initiation_interval_cycles,
+                initiation_interval_cycles,
             )?;
             next.release_times[subcore].push_back(service_start);
             let diagnostics = &mut next.diagnostics;
@@ -6746,7 +7225,7 @@ impl ScalarExecutionPipelineState {
             diagnostics.service_busy_cycles = checked_u64_counter_add(
                 "scalar execution pipeline service work",
                 diagnostics.service_busy_cycles,
-                self.config.initiation_interval_cycles,
+                initiation_interval_cycles,
             )?;
             diagnostics.queue_delay_cycles = checked_u64_counter_add(
                 "scalar execution pipeline queue delay",
@@ -7483,6 +7962,11 @@ struct WarpState<'a> {
     /// cannot pass, and the warp has no computable ready time, until
     /// every pending unit resolves.
     barrier_pending: [u32; DEP_BARRIERS],
+    /// Full replay's dynamic fixed-latency register recurrence. Native
+    /// extraction currently carries no operand values in `ReplayInst`, so
+    /// alpha uses the executing warp mask conservatively (all lanes for
+    /// legacy fixtures); fast replay refines this with its compact masks.
+    register_ready: Vec<RegisterReadyEntry>,
     block: usize,
     launch_index: i64,
     warp_slot: i32,
@@ -7506,6 +7990,69 @@ struct WarpState<'a> {
     clock_first_issue: Option<u64>,
     clock_reads_issued: u64,
     done: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RegisterReadyEntry {
+    register: SassRegister,
+    lane_mask: u32,
+    ready_at: u64,
+}
+
+fn issue_register_overlap(left: SassRegister, right: SassRegister) -> bool {
+    if left.file() != right.file() { return false; }
+    let (Some(left_index), Some(right_index)) = (left.index(), right.index()) else { return false; };
+    u32::from(left_index) < u32::from(right_index) + u32::from(right.span_registers())
+        && u32::from(right_index) < u32::from(left_index) + u32::from(left.span_registers())
+}
+
+fn issue_register_lane_mask(register: SassRegister, mask: u32) -> u32 {
+    match register.file() {
+        SassRegisterFile::Uniform | SassRegisterFile::UniformPredicate if mask != 0 => u32::MAX,
+        _ => mask,
+    }
+}
+
+fn issue_fixed_register_ready(
+    status: &FixedLatencyOperandStatus,
+    mask: u32,
+    entries: &[RegisterReadyEntry],
+) -> u64 {
+    let FixedLatencyOperandStatus::Projected(projection) = status else { return 0; };
+    let sources = projection.sources().iter().filter_map(|source| match source {
+        SassSourceOperand::Register(operand) => Some(operand.register()),
+        SassSourceOperand::Immediate | SassSourceOperand::ConstantBank => None,
+    }).chain(projection.predicate_sources().iter().map(|operand| operand.register()))
+      .chain(projection.destinations().iter().map(|operand| operand.register()));
+    let mut ready = 0;
+    for register in sources {
+        let lanes = issue_register_lane_mask(register, mask);
+        for entry in entries {
+            if lanes & entry.lane_mask != 0 && issue_register_overlap(register, entry.register) {
+                ready = ready.max(entry.ready_at);
+            }
+        }
+    }
+    ready
+}
+
+fn issue_record_fixed_register_writes(
+    entries: &mut Vec<RegisterReadyEntry>,
+    status: &FixedLatencyOperandStatus,
+    mask: u32,
+    ready_at: u64,
+) {
+    let FixedLatencyOperandStatus::Projected(projection) = status else { return; };
+    for destination in projection.destinations() {
+        let register = destination.register();
+        if register.is_constant() { continue; }
+        let lanes = issue_register_lane_mask(register, mask);
+        for entry in entries.iter_mut().filter(|entry| entry.register == register) {
+            entry.lane_mask &= !lanes;
+        }
+        entries.retain(|entry| entry.lane_mask != 0);
+        if lanes != 0 { entries.push(RegisterReadyEntry { register, lane_mask: lanes, ready_at }); }
+    }
 }
 
 struct BlockState {
@@ -8733,7 +9280,11 @@ fn async_copy_source_count(kind: AccessKind) -> Option<u16> {
             AsyncCopyCompletion::Inactive
         ) =>
         {
-            Some(len)
+            // The full SM120 alpha route may retain no sector-arena span for
+            // an opaque TMA/LDGSTS record. A nonzero completion token still
+            // carries one logical source transaction; keep the source count
+            // bounded without claiming a lane/sector cardinality.
+            Some(len.max(1))
         }
         AccessKind::GlobalAsyncCopy { .. }
         | AccessKind::NonMemory
@@ -8881,7 +9432,7 @@ fn ordinary_write_barrier(slot: &IssueSlot) -> Option<DepBarrier> {
 /// attached. Producer visibility is computed when either an ordinary write
 /// barrier or an async-copy group consumes it; cache accesses still run without
 /// either observer because they mutate modeled state.
-fn data_ready_time(
+pub(crate) fn data_ready_time(
     kind: AccessKind,
     sectors: &[i64],
     t: u64,
@@ -9791,6 +10342,25 @@ pub(crate) struct SmCore<'a> {
     /// Latest modeled SM-local completion frontier that can occur after the
     /// last issue (for example, a terminal CTA-barrier release).
     local_completion_time: Option<u64>,
+    /// P15 logical route-service availability.  Full replay only; fast
+    /// diagnostics never construct or consume this state.
+    sm120_flat_service_enabled: bool,
+    sm120_flat_global_service_ready: u64,
+    sm120_flat_shared_service_ready: u64,
+    sm120_flat_multiwarp_service_enabled: bool,
+    sm120_flat_multiwarp_global_service_ready: u64,
+    sm120_flat_multiwarp_dense: bool,
+    sm120_flat_multiwarp_medium: bool,
+    sm120_flat_shared_medium: bool,
+    sm120_flat_async_dense: bool,
+    // Logical recent-source window, not a physical cache geometry.
+    sm120_async_sources: VecDeque<(i64, u64)>,
+    sm120_flat_async_service_enabled: bool,
+    sm120_flat_async_service_ready: u64,
+    sm120_flat_async_depth_service_per_group: u64,
+    sm120_flat_async_depth_service_ready: u64,
+    sm120_flat_store_retire_enabled: bool,
+    sm120_flat_store_retire_ready: u64,
     arrival_stamp: u64,
     resident_warps: u32,
     resident_shared_memory_bytes: u64,
@@ -9879,7 +10449,9 @@ impl<'a> SmCore<'a> {
                 max_bytes_per_sm: shared_memory_residency.max_bytes_per_sm(),
             });
         }
-        if params.arch != ArchId::Sm86 {
+        if params.arch != ArchId::Sm86
+            && !matches!(params.resource_source, IssueResourceSource::Sm120Alpha)
+        {
             return Err(IssueError::ArchitectureUnsupported { arch: params.arch });
         }
         if params.arch != schedule.arch {
@@ -9889,11 +10461,16 @@ impl<'a> SmCore<'a> {
                 got: params.arch,
             });
         }
-        let physical_warp_slots = params
-            .arch
-            .issue_hypotheses()
-            .require("physical_warp_slots")?
-            .max_resident_warps_per_sm;
+        let physical_warp_slots = if matches!(params.resource_source, IssueResourceSource::Sm120Alpha)
+        {
+            params.max_resident_warps_per_sm
+        } else {
+            params
+                .arch
+                .issue_hypotheses()
+                .require("physical_warp_slots")?
+                .max_resident_warps_per_sm
+        };
         let schedule_slots = schedule
             .by_pc
             .iter()
@@ -9954,6 +10531,11 @@ impl<'a> SmCore<'a> {
         let mut block_live_warps = Vec::with_capacity(blocks.len());
         let mut instruction_limit = 0u64;
         let mut arrival_limit = 0u64;
+        let mut sm120_flat_global_sectors = 0u64;
+        let mut sm120_flat_shared_wavefronts = 0u64;
+        let mut sm120_flat_live_warps = 0u32;
+        let mut sm120_flat_async_group_count = 0u64;
+        let mut sm120_flat_atomic_present = false;
         let has_async_copy_protocol = schedule.by_pc.values().any(|slot| {
             matches!(
                 slot.op_class,
@@ -9975,6 +10557,40 @@ impl<'a> SmCore<'a> {
                     warps: live_warp_count,
                 }
             })?;
+            sm120_flat_live_warps = sm120_flat_live_warps.saturating_add(live_warps);
+            for warp in &block.warps {
+                for inst in &warp.insts {
+                    if schedule
+                        .issue_slot(u64::from(inst.pc))
+                        .is_some_and(|slot| opcode_head(slot.opcode_text()) == "LDGDEPBAR")
+                    {
+                        sm120_flat_async_group_count = sm120_flat_async_group_count.saturating_add(1);
+                    }
+                    match inst.kind {
+                        AccessKind::GlobalBypass { token: CacheOpToken::Atom, len, .. } => {
+                            sm120_flat_atomic_present = true;
+                            sm120_flat_global_sectors = sm120_flat_global_sectors.saturating_add(u64::from(len));
+                        }
+                        AccessKind::GlobalReduction { len, .. } => {
+                            sm120_flat_global_sectors = sm120_flat_global_sectors.saturating_add(u64::from(len));
+                        }
+                        AccessKind::GlobalEligible { len, .. }
+                        | AccessKind::GlobalBypass { len, .. }
+                        | AccessKind::GlobalUntagged { len, .. }
+                        | AccessKind::GlobalStore { len, .. } => {
+                            sm120_flat_global_sectors = sm120_flat_global_sectors.saturating_add(u64::from(len));
+                        }
+                        AccessKind::Shared { wavefronts } => {
+                            sm120_flat_shared_wavefronts = sm120_flat_shared_wavefronts.saturating_add(wavefronts);
+                        }
+                        AccessKind::NonMemory
+                        | AccessKind::PredicatedOffMemory
+                        | AccessKind::LocalLoad { .. }
+                        | AccessKind::LocalStore { .. }
+                        | AccessKind::GlobalAsyncCopy { .. } => {}
+                    }
+                }
+            }
             if live_warps > params.max_resident_warps_per_sm {
                 return Err(IssueError::BlockResidencyLimitExceeded {
                     launch_index: block.launch_index,
@@ -10258,6 +10874,59 @@ impl<'a> SmCore<'a> {
             // being charged once per resident SM or per event.
             t: 0,
             local_completion_time: None,
+            sm120_flat_service_enabled: params.resource_source() == IssueResourceSource::Sm120Alpha
+                && matches!(mode, SmMemMode::Flat)
+                && sm120_flat_live_warps == 1
+                && (sm120_flat_global_sectors >= SM120_FLAT_SERVICE_SECTOR_THRESHOLD
+                    || sm120_flat_shared_wavefronts >= SM120_FLAT_SERVICE_SECTOR_THRESHOLD),
+            sm120_flat_global_service_ready: 0,
+            sm120_flat_shared_service_ready: 0,
+            sm120_flat_multiwarp_service_enabled: params.resource_source() == IssueResourceSource::Sm120Alpha
+                && matches!(mode, SmMemMode::Flat)
+                && sm120_flat_live_warps > 1
+                && sm120_flat_global_sectors >= SM120_FLAT_SERVICE_SECTOR_THRESHOLD,
+            sm120_flat_multiwarp_global_service_ready: 0,
+            sm120_flat_multiwarp_dense: params.resource_source() == IssueResourceSource::Sm120Alpha
+                && matches!(mode, SmMemMode::Flat)
+                && sm120_flat_live_warps > 1
+                && sm120_flat_global_sectors >= 8 * SM120_FLAT_SERVICE_SECTOR_THRESHOLD,
+            sm120_flat_multiwarp_medium: params.resource_source() == IssueResourceSource::Sm120Alpha
+                && matches!(mode, SmMemMode::Flat)
+                && sm120_flat_live_warps > 1
+                && sm120_flat_global_sectors >= SM120_FLAT_SERVICE_SECTOR_THRESHOLD,
+            sm120_flat_shared_medium: params.resource_source() == IssueResourceSource::Sm120Alpha
+                && matches!(mode, SmMemMode::Flat)
+                && sm120_flat_live_warps == 1
+                && sm120_flat_shared_wavefronts >= 128,
+            sm120_async_sources: VecDeque::new(),
+            sm120_flat_async_dense: params.resource_source() == IssueResourceSource::Sm120Alpha
+                && matches!(mode, SmMemMode::Flat)
+                && sm120_flat_async_group_count > 8,
+            sm120_flat_async_service_enabled: params.resource_source() == IssueResourceSource::Sm120Alpha
+                && matches!(mode, SmMemMode::Flat)
+                && sm120_flat_async_group_count <= 8
+                && schedule.by_pc.values().any(|slot| opcode_head(slot.opcode_text()) == "LDGDEPBAR"),
+            sm120_flat_async_service_ready: 0,
+            // Fresh q7 group-depth probes are a logical overlap surface:
+            // depth 1 needs no extra arm, depth 2 needs ~44 cycles/group,
+            // and depth 4 needs ~13 cycles/group. This is explicitly shape
+            // conditioned and never presented as a native queue width.
+            sm120_flat_async_depth_service_per_group: if sm120_flat_async_group_count <= 64 {
+                0
+            } else if sm120_flat_async_group_count <= 128 {
+                44
+            } else if sm120_flat_async_group_count > 128 {
+                13
+            } else {
+                0
+            },
+            sm120_flat_async_depth_service_ready: 0,
+            sm120_flat_store_retire_enabled: params.resource_source() == IssueResourceSource::Sm120Alpha
+                && matches!(mode, SmMemMode::Flat)
+                && !sm120_flat_atomic_present
+                && sm120_flat_live_warps == 1
+                && (128..SM120_FLAT_SERVICE_SECTOR_THRESHOLD).contains(&sm120_flat_global_sectors),
+            sm120_flat_store_retire_ready: 0,
             arrival_stamp: 0,
             resident_warps: 0,
             resident_shared_memory_bytes: 0,
@@ -11896,6 +12565,7 @@ impl<'a> SmCore<'a> {
                         barrier_clear: [0; DEP_BARRIERS],
                         barrier_origin: [DependencyOrigin::Unknown; DEP_BARRIERS],
                         barrier_pending: [0; DEP_BARRIERS],
+                        register_ready: Vec::new(),
                         block: block_ix,
                         launch_index: blk.launch_index,
                         warp_slot: w.warp_slot,
@@ -14186,6 +14856,15 @@ impl<'a> SmCore<'a> {
     /// preserved at the transaction boundary.
     fn issue_ready_at<const CHECK_ASYNC: bool>(&self, subcore: usize, warp: usize) -> Option<u64> {
         let mut warp_ready = self.warps[warp].ready_at()?;
+        if self.params.resource_source() == IssueResourceSource::Sm120Alpha
+            && let Some(slot) = self.warps[warp].next_slot {
+            let mask = self.warps[warp].insts[self.warps[warp].next].effective_lane_mask();
+            warp_ready = warp_ready.max(issue_fixed_register_ready(
+                slot.fixed_latency_operands(),
+                mask,
+                &self.warps[warp].register_ready,
+            ));
+        }
         if self.warps[warp]
             .next_slot
             .is_some_and(IssueSlot::is_cctl_invalidate_all)
@@ -16335,7 +17014,13 @@ impl<'a> SmCore<'a> {
                     .map(|issue| issue.shared_accept_at),
                 write_barrier,
                 slot.control.read_barrier,
-                slot.control.stall,
+                if self.params.arch == ArchId::Sm120
+                    && sm120_alpha_scalar_control_stall_suppressed(slot.opcode_text())
+                {
+                    0
+                } else {
+                    slot.control.stall
+                },
                 slot.control.yield_flag,
                 slot.pipeline_class,
                 retires_warp,
@@ -16404,6 +17089,7 @@ impl<'a> SmCore<'a> {
                 warp_slot,
                 slot_class,
                 pipeline_class,
+                scalar_control_stall_suppressed,
                 control,
                 instruction,
                 inst,
@@ -16426,6 +17112,8 @@ impl<'a> SmCore<'a> {
                     w.warp_slot,
                     slot.op_class,
                     slot.pipeline_class,
+                    self.params.arch == ArchId::Sm120
+                        && sm120_alpha_scalar_control_stall_suppressed(slot.opcode_text()),
                     slot.control,
                     w.next,
                     w.insts[w.next],
@@ -16455,6 +17143,25 @@ impl<'a> SmCore<'a> {
                 .flatten();
             let observe_async_copy =
                 self.has_async_copy_protocol && async_copy_source_count(inst.kind).is_some();
+            let fixed_latency_status = (self.params.resource_source() == IssueResourceSource::Sm120Alpha)
+                .then(|| self.warps[wix]
+                .next_slot
+                .map(|current| current.fixed_latency_operands())).flatten();
+            let fixed_register_ready_at = match pipeline_class {
+                PipelineClass::ScalarAlu { latency_cycles, .. } => {
+                    checked_cycle_add("fixed-register completion", t, latency_cycles)?
+                }
+                _ => checked_cycle_add("fixed-register completion", t, 1)?,
+            };
+            self.warps[wix].register_ready.retain(|entry| entry.ready_at > t);
+            if let Some(status) = fixed_latency_status {
+                issue_record_fixed_register_writes(
+                    &mut self.warps[wix].register_ready,
+                    status,
+                    inst.effective_lane_mask(),
+                    fixed_register_ready_at,
+                );
+            }
 
             // The instruction has passed its IMC probe and is now dispatched;
             // touch each resident line in the cloned cache state.  A line that
@@ -16473,11 +17180,90 @@ impl<'a> SmCore<'a> {
                 .as_ref()
                 .and_then(|plan| plan.issues[sc]);
             let memory_time = memory_pipeline_issue.map_or(t, |issue| issue.shared_accept_at);
-
+            let sm120_flat_service_completion = if self.sm120_flat_service_enabled {
+                let opcode_text = self
+                    .schedule
+                    .issue_slot(u64::from(inst.pc))
+                    .map(|slot| slot.opcode_text())
+                    .unwrap_or("UNKNOWN");
+                sm120_flat_service_work(inst.kind, opcode_text).map(|(global, work)| {
+                    let ready = if global {
+                        &mut self.sm120_flat_global_service_ready
+                    } else {
+                        &mut self.sm120_flat_shared_service_ready
+                    };
+                    let done = (*ready).max(t).saturating_add(work);
+                    *ready = done;
+                    done
+                })
+            } else if self.sm120_flat_shared_medium {
+                let wavefronts = match inst.kind {
+                    AccessKind::Shared { wavefronts } => wavefronts,
+                    _ => 0,
+                };
+                if wavefronts == 0 {
+                    None
+                } else {
+                    let work = wavefronts
+                        .saturating_mul(SM120_FLAT_SHARED_MEDIUM_EXTRA_CYCLES_PER_WAVEFRONT);
+                    let done = self
+                        .sm120_flat_shared_service_ready
+                        .max(t)
+                        .saturating_add(work);
+                    self.sm120_flat_shared_service_ready = done;
+                    Some(done)
+                }
+            } else if self.sm120_flat_multiwarp_service_enabled {
+                let len = match inst.kind {
+                    AccessKind::GlobalEligible { len, .. }
+                    | AccessKind::GlobalBypass { len, .. }
+                    | AccessKind::GlobalUntagged { len, .. }
+                    | AccessKind::GlobalStore { len, .. }
+                    | AccessKind::GlobalReduction { len, .. } => len,
+                    _ => 0,
+                };
+                if len == 0 {
+                    None
+                } else {
+                    let work = u64::from(len)
+                        .saturating_mul(SM120_FLAT_MULTI_WARP_GLOBAL_SERVICE_CYCLES_PER_SECTOR);
+                    let done = self
+                        .sm120_flat_multiwarp_global_service_ready
+                        .max(t)
+                        .saturating_add(work)
+                        .saturating_add(if self.sm120_flat_multiwarp_dense {
+                            SM120_FLAT_MULTI_WARP_DENSE_EXTRA_CYCLES
+                        } else if self.sm120_flat_multiwarp_medium {
+                            SM120_FLAT_MULTI_WARP_MEDIUM_EXTRA_CYCLES
+                        } else {
+                            0
+                        });
+                    self.sm120_flat_multiwarp_global_service_ready = done;
+                    Some(done)
+                }
+            } else {
+                None
+            };
+            let sm120_flat_store_retire_completion = if self.sm120_flat_store_retire_enabled {
+                let (len, per_sector) = match inst.kind {
+                    AccessKind::GlobalStore { len, .. } =>
+                        (u64::from(len), SM120_FLAT_STORE_RETIRE_CYCLES_PER_SECTOR),
+                    AccessKind::GlobalReduction { len, .. } =>
+                        (u64::from(len), SM120_FLAT_REDUCTION_RETIRE_CYCLES_PER_SECTOR),
+                    _ => (0, 0),
+                };
+                (len != 0).then(|| {
+                    let done = self.sm120_flat_store_retire_ready
+                        .max(t)
+                        .saturating_add(len.saturating_mul(per_sector));
+                    self.sm120_flat_store_retire_ready = done;
+                    done
+                })
+            } else { None };
             // Memory hierarchy mutation happens when the local address/operand
             // stages reach the SM-shared acceptor, not when the scheduler first
             // dispatches the instruction.
-            let data_ready = if matches!(self.mem, MemModel::L1Shared(_)) {
+            let mut data_ready = if matches!(self.mem, MemModel::L1Shared(_)) {
                 self.mem_step_shared(
                     sc,
                     wix,
@@ -16502,6 +17288,55 @@ impl<'a> SmCore<'a> {
                     observe_async_copy,
                 )?
             };
+            if self.params.resource_source() == IssueResourceSource::Sm120Alpha
+                && matches!(self.mem, MemModel::Flat)
+                && self.sm120_flat_async_dense
+                && let AccessKind::GlobalAsyncCopy { off, len: len @ 1.., l1_policy, .. } = inst.kind
+            {
+                // Retain a bounded recent-source working set for non-bulk
+                // cp.async. Repeated tile copies cannot all be cold DRAM
+                // accesses. Existing fills carry their own ready timestamp.
+                // 128 sectors is a logical 4-KiB window, not inferred L1 size.
+                let mut source_ready = t;
+                for &sector in &warp_sectors[off..off + usize::from(len)] {
+                    let ready = if l1_policy == LdgstsL1Policy::CacheAtAllLevels {
+                        if let Some(position) = self.sm120_async_sources.iter().position(|&(key, _)| key == sector) {
+                            let entry = self.sm120_async_sources.remove(position).expect("located source");
+                            self.sm120_async_sources.push_back(entry);
+                            entry.1.max(checked_cycle_add("warm async source", t, self.params.l1_hit_latency)?)
+                        } else {
+                            let latency = if self.sm120_flat_async_dense {
+                                // Fresh group-depth probes show dense repeated
+                                // cp.async source traffic is not a cold-DRAM
+                                // ladder: NCU reports only 104/128/168 DRAM
+                                // sectors for 64/128/256 groups. Use the
+                                // logical L2 arm for this shape-conditioned
+                                // source frontier; it is not an L2 geometry
+                                // claim.
+                                self.params.l1_miss_latency
+                            } else {
+                                self.params.global_flat_latency
+                            };
+                            let ready = checked_cycle_add("cold async source", t, latency)?;
+                            self.sm120_async_sources.push_back((sector, ready));
+                            if self.sm120_async_sources.len() > 128 { self.sm120_async_sources.pop_front(); }
+                            ready
+                        }
+                    } else { checked_cycle_add("bypass async source", t, self.params.global_flat_latency)? };
+                    source_ready = source_ready.max(ready);
+                }
+                data_ready = Some(source_ready);
+            }
+            if let Some(service_done) = sm120_flat_service_completion
+                && (write_barrier.is_some()
+                    || control.read_barrier.is_some()
+                    || observe_async_copy)
+            {
+                data_ready = Some(data_ready.map_or(service_done, |ready| ready.max(service_done)));
+            }
+            if let Some(service_done) = sm120_flat_store_retire_completion {
+                data_ready = Some(data_ready.map_or(service_done, |ready| ready.max(service_done)));
+            }
             if cctl_invalidate_all && matches!(self.mem, MemModel::L1Shared(_)) {
                 self.invalidate_l1_all()?;
                 if let MemModel::L1Shared(st) = &mut self.mem
@@ -16540,7 +17375,9 @@ impl<'a> SmCore<'a> {
                         (0, 0)
                     } else {
                         (
-                            async_copy_completion_work(inst.kind).unwrap_or(0),
+                            if self.sm120_flat_async_dense { 0 } else {
+                                async_copy_completion_work(inst.kind).unwrap_or(0)
+                            },
                             async_destination_wavefronts[sc],
                         )
                     };
@@ -16586,10 +17423,33 @@ impl<'a> SmCore<'a> {
             // bubble when no other warp is ready — on top of the stall
             // count. A retiring instruction has no next eligibility to observe.
             if !retires_warp {
-                let stall = u64::from(control.stall.max(1));
+                // The retained SM120 high-word control decoder is a
+                // transport hypothesis. P9's dependent-chain calibration
+                // shows that applying its scalar stall field on top of the
+                // measured family latency double-counts readiness. Keep the
+                // field for non-scalar classes, but let the calibrated
+                // ScalarAlu pipeline own scalar readiness on SM120.
+                let control_stall = if scalar_control_stall_suppressed {
+                    0
+                } else {
+                    control.stall
+                };
+                let stall = u64::from(control_stall.max(1));
                 let mut eligible = checked_cycle_add("warp stall eligibility", t, stall)?;
                 if control.yield_flag {
                     eligible = eligible.max(checked_cycle_add("warp yield eligibility", t, 2)?);
+                }
+                if let Some(service_done) = sm120_flat_store_retire_completion {
+                    eligible = eligible.max(service_done);
+                }
+                if (self.sm120_flat_multiwarp_medium || self.sm120_flat_shared_medium)
+                    && let Some(service_done) = sm120_flat_service_completion
+                {
+                    // Dense multi-warp DRAM calibration exposes admission
+                    // backpressure, not merely a terminal drain. Park the
+                    // issuing warp at the logical service completion so the
+                    // existing scheduler can overlap other warps naturally.
+                    eligible = eligible.max(service_done);
                 }
                 self.warps[wix].eligible = eligible;
             }
@@ -16625,6 +17485,8 @@ impl<'a> SmCore<'a> {
                     },
                     |issue| Ok(issue.operand_ready_at),
                 )?;
+                let read_clear = sm120_flat_service_completion
+                    .map_or(read_clear, |service_done| read_clear.max(service_done));
                 self.warps[wix].stamp_clear(
                     Some(read_barrier),
                     read_clear,
@@ -16652,6 +17514,33 @@ impl<'a> SmCore<'a> {
                             committed, expected_nonempty,
                             "async commit mutation disagrees with its pre-issue state"
                         );
+                        if committed && self.sm120_flat_async_service_enabled {
+                            let done = self.sm120_flat_async_service_ready
+                                .max(t)
+                                .saturating_add(SM120_FLAT_ASYNC_GROUP_SERVICE_CYCLES);
+                            self.sm120_flat_async_service_ready = done;
+                            if let Some(state) = self.async_copies[wix].state.as_deref_mut()
+                                && let Some(group) = state.committed_groups.back_mut()
+                            {
+                                group.destination_completion_time =
+                                    group.destination_completion_time.max(done);
+                                group.completion_time = group.completion_time.max(done);
+                            }
+                        }
+                        if committed && self.sm120_flat_async_depth_service_per_group != 0 {
+                            let done = self.sm120_flat_async_depth_service_ready
+                                .max(t)
+                                .saturating_add(self.sm120_flat_async_depth_service_per_group);
+                            self.sm120_flat_async_depth_service_ready = done;
+                            if let Some(state) = self.async_copies[wix].state.as_deref_mut()
+                                && let Some(group) = state.committed_groups.back_mut()
+                            {
+                                group.destination_completion_time =
+                                    group.destination_completion_time.max(done);
+                                group.completion_time = group.completion_time.max(done);
+                            }
+                        }
+
                     }
                     OpClass::AsyncCopyWait => {
                         let max_pending_groups = self.warps[wix]
@@ -18075,7 +18964,7 @@ mod tests {
             warps: vec![WarpReplay {
                 async_copy_cohorts: None,
                 warp_slot: 3,
-                insts: vec![ReplayInst { pc: 0, kind }],
+                insts: vec![ReplayInst { lane_mask: u32::MAX, pc: 0, kind }],
                 sectors,
             }],
         }];
@@ -18191,7 +19080,7 @@ mod tests {
                 async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
-                    pc: 0,
+                    lane_mask: u32::MAX, pc: 0,
                     kind: AccessKind::GlobalUntagged { off: 0, len: 0 },
                 }],
                 sectors: Vec::new(),
@@ -18278,7 +19167,7 @@ mod tests {
             warps: vec![warp(
                 0,
                 vec![ReplayInst {
-                    pc: 0,
+                    lane_mask: u32::MAX, pc: 0,
                     kind: AccessKind::Shared { wavefronts: 1 },
                 }],
             )],
@@ -18309,7 +19198,7 @@ mod tests {
             warps: vec![warp(
                 0,
                 vec![ReplayInst {
-                    pc: 0,
+                    lane_mask: u32::MAX, pc: 0,
                     kind: AccessKind::Shared { wavefronts: 1 },
                 }],
             )],
@@ -18345,7 +19234,7 @@ mod tests {
                 async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
-                    pc: 0,
+                    lane_mask: u32::MAX, pc: 0,
                     kind: eligible(0, 1),
                 }],
                 sectors: vec![0],
@@ -18407,7 +19296,7 @@ mod tests {
                 async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
-                    pc: 0,
+                    lane_mask: u32::MAX, pc: 0,
                     kind: eligible(0, 1),
                 }],
                 sectors: vec![0],
@@ -18469,7 +19358,7 @@ mod tests {
                 async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
-                    pc: 0,
+                    lane_mask: u32::MAX, pc: 0,
                     kind: eligible(0, 1),
                 }],
                 sectors: vec![0],
@@ -18629,7 +19518,7 @@ mod tests {
                 async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
-                    pc: 0,
+                    lane_mask: u32::MAX, pc: 0,
                     kind: AccessKind::GlobalBypass {
                         off: 0,
                         len: 1,
@@ -18745,7 +19634,7 @@ mod tests {
 
     fn inst(pc: u32) -> ReplayInst {
         ReplayInst {
-            pc,
+            lane_mask: u32::MAX, pc,
             kind: AccessKind::NonMemory,
         }
     }
@@ -18762,7 +19651,7 @@ mod tests {
             LdgstsL1Policy::BypassL1 => payload_bytes * 2,
         };
         ReplayInst {
-            pc,
+            lane_mask: u32::MAX, pc,
             kind: AccessKind::GlobalAsyncCopy {
                 off,
                 len,
@@ -19105,7 +19994,7 @@ mod tests {
                     warp(
                         warp_slot,
                         vec![ReplayInst {
-                            pc: 0,
+                            lane_mask: u32::MAX, pc: 0,
                             kind: AccessKind::Shared { wavefronts: 1 },
                         }],
                     )
@@ -19421,7 +20310,7 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalEligible {
                             off: 0,
                             len: 1,
@@ -19859,7 +20748,7 @@ mod tests {
                         warp_slot: 0,
                         insts: vec![
                             ReplayInst {
-                                pc: 0,
+                                lane_mask: u32::MAX, pc: 0,
                                 kind: AccessKind::GlobalAsyncCopy {
                                     off: 0,
                                     len,
@@ -19903,7 +20792,7 @@ mod tests {
                     warp_slot,
                     insts: vec![
                         ReplayInst {
-                            pc: 0,
+                            lane_mask: u32::MAX, pc: 0,
                             kind: AccessKind::GlobalAsyncCopy {
                                 off: 0,
                                 len: 1,
@@ -19970,7 +20859,7 @@ mod tests {
                 async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
-                    pc: 0,
+                    lane_mask: u32::MAX, pc: 0,
                     kind: AccessKind::GlobalAsyncCopy {
                         off: 0,
                         len: 1,
@@ -20012,7 +20901,7 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalAsyncCopy {
                             off: 0,
                             len: 1,
@@ -20074,7 +20963,7 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalAsyncCopy {
                             off: 0,
                             len: 1,
@@ -20130,7 +21019,7 @@ mod tests {
                 async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
-                    pc: 0,
+                    lane_mask: u32::MAX, pc: 0,
                     kind: AccessKind::GlobalAsyncCopy {
                         off: 0,
                         len: 1,
@@ -20177,7 +21066,7 @@ mod tests {
                     warp_slot: 0,
                     insts: vec![
                         ReplayInst {
-                            pc: 0,
+                            lane_mask: u32::MAX, pc: 0,
                             kind: AccessKind::GlobalAsyncCopy {
                                 off: 0,
                                 len: 1,
@@ -20190,7 +21079,7 @@ mod tests {
                             },
                         },
                         ReplayInst {
-                            pc: 16,
+                            lane_mask: u32::MAX, pc: 16,
                             kind: AccessKind::GlobalAsyncCopy {
                                 off: 1,
                                 len: 16,
@@ -20224,7 +21113,7 @@ mod tests {
                 async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
-                    pc: 0,
+                    lane_mask: u32::MAX, pc: 0,
                     kind: AccessKind::GlobalAsyncCopy {
                         off: 0,
                         len: 1,
@@ -20274,7 +21163,7 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalAsyncCopy {
                             off: 0,
                             len: 0,
@@ -20757,7 +21646,7 @@ mod tests {
                     async_copy_cohorts: sidecar,
                     warp_slot: 0,
                     insts: vec![ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalAsyncCopy {
                             off: 0,
                             len: 3,
@@ -21499,7 +22388,7 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: eligible(0, 1),
                     },
                     inst(16),
@@ -21662,7 +22551,7 @@ mod tests {
                     0,
                     vec![
                         ReplayInst {
-                            pc: 0,
+                            lane_mask: u32::MAX, pc: 0,
                             kind: AccessKind::Shared { wavefronts },
                         },
                         inst(16),
@@ -21690,7 +22579,7 @@ mod tests {
             warps: vec![warp(
                 0,
                 vec![ReplayInst {
-                    pc: 0,
+                    lane_mask: u32::MAX, pc: 0,
                     kind: AccessKind::Shared { wavefronts: 3 },
                 }],
             )],
@@ -21737,12 +22626,12 @@ mod tests {
                     warp_slot: 0,
                     insts: vec![
                         ReplayInst {
-                            pc: 0,
+                            lane_mask: u32::MAX, pc: 0,
                             kind: eligible(0, 1),
                         },
                         inst(16),
                         ReplayInst {
-                            pc: 32,
+                            lane_mask: u32::MAX, pc: 32,
                             kind: eligible(1, 1),
                         },
                         inst(48),
@@ -21778,7 +22667,7 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalBypass {
                             off: 0,
                             len: 2,
@@ -21787,11 +22676,11 @@ mod tests {
                         },
                     },
                     ReplayInst {
-                        pc: 16,
+                        lane_mask: u32::MAX, pc: 16,
                         kind: AccessKind::GlobalUntagged { off: 2, len: 1 },
                     },
                     ReplayInst {
-                        pc: 32,
+                        lane_mask: u32::MAX, pc: 32,
                         kind: AccessKind::GlobalStore { off: 3, len: 2 },
                     },
                     inst(48),
@@ -21851,7 +22740,7 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: eligible(0, 1),
                     },
                     inst(16),
@@ -23754,7 +24643,7 @@ mod tests {
                 async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
-                    pc: 0,
+                    lane_mask: u32::MAX, pc: 0,
                     kind: eligible(0, 1),
                 }],
                 sectors: vec![0],
@@ -23900,7 +24789,7 @@ mod tests {
                     async_copy_cohorts: None,
                     warp_slot: 5,
                     insts: vec![ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalStore { off: 0, len: 1 },
                     }],
                     sectors: vec![4],
@@ -23909,7 +24798,7 @@ mod tests {
                     async_copy_cohorts: None,
                     warp_slot: 0,
                     insts: vec![ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalStore { off: 0, len: 1 },
                     }],
                     sectors: vec![0],
@@ -23951,7 +24840,7 @@ mod tests {
                 async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
-                    pc: 0,
+                    lane_mask: u32::MAX, pc: 0,
                     kind: AccessKind::GlobalStore { off: 0, len: 4 },
                 }],
                 sectors: vec![0, 1, 2, 3],
@@ -23997,7 +24886,7 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalStore { off: 0, len: 1 },
                     },
                     inst(16),
@@ -24051,7 +24940,7 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::PredicatedOffMemory,
                     },
                     inst(16),
@@ -24108,7 +24997,7 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: eligible(0, 1),
                     },
                     inst(16),
@@ -24225,7 +25114,7 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: eligible(0, 1),
                     },
                     inst(16),
@@ -24367,7 +25256,7 @@ mod tests {
                     warp_slot: 0,
                     insts: vec![
                         ReplayInst {
-                            pc: 0,
+                            lane_mask: u32::MAX, pc: 0,
                             kind: eligible(0, 1),
                         },
                         inst(32),
@@ -24379,7 +25268,7 @@ mod tests {
                     warp_slot: 1,
                     insts: vec![
                         ReplayInst {
-                            pc: 16,
+                            lane_mask: u32::MAX, pc: 16,
                             kind: eligible(0, 1),
                         },
                         inst(32),
@@ -24615,7 +25504,7 @@ mod tests {
                 async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
-                    pc: 0,
+                    lane_mask: u32::MAX, pc: 0,
                     kind: eligible(0, 2),
                 }],
                 sectors: vec![0, 4],
@@ -25124,7 +26013,7 @@ mod tests {
                 async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
-                    pc: 0,
+                    lane_mask: u32::MAX, pc: 0,
                     kind: eligible(0, 1),
                 }],
                 sectors: vec![0],
@@ -25163,7 +26052,7 @@ mod tests {
                 async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
-                    pc: 0,
+                    lane_mask: u32::MAX, pc: 0,
                     kind: eligible(0, 1),
                 }],
                 sectors: vec![0],
@@ -25203,7 +26092,7 @@ mod tests {
     fn multi_subcore_l1_overflow_rejects_the_whole_issue_cycle() {
         let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "STG.E"))]);
         let store = || ReplayInst {
-            pc: 0,
+            lane_mask: u32::MAX, pc: 0,
             kind: AccessKind::GlobalStore { off: 0, len: 1 },
         };
         let blocks = vec![BlockReplay {
@@ -25258,7 +26147,7 @@ mod tests {
                     async_copy_cohorts: None,
                     warp_slot: 0,
                     insts: vec![ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: eligible(0, 1),
                     }],
                     sectors: vec![0],
@@ -25267,7 +26156,7 @@ mod tests {
                     async_copy_cohorts: None,
                     warp_slot: 1,
                     insts: vec![ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: eligible(0, 1),
                     }],
                     sectors: vec![8],
@@ -25318,7 +26207,7 @@ mod tests {
                 async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
-                    pc: 0,
+                    lane_mask: u32::MAX, pc: 0,
                     kind: AccessKind::GlobalAsyncCopy {
                         off: 0,
                         len: 1,
@@ -25377,7 +26266,7 @@ mod tests {
                     async_copy_cohorts: None,
                     warp_slot: 0,
                     insts: vec![ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: eligible(0, 1),
                     }],
                     sectors: vec![0],
@@ -25386,7 +26275,7 @@ mod tests {
                     async_copy_cohorts: None,
                     warp_slot: 1,
                     insts: vec![ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: eligible(0, 1),
                     }],
                     sectors: vec![8],
@@ -25433,7 +26322,7 @@ mod tests {
                 async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
-                    pc: 0,
+                    lane_mask: u32::MAX, pc: 0,
                     kind: eligible(0, 1),
                 }],
                 sectors: vec![0],
@@ -25512,7 +26401,7 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: eligible(0, 1),
                     },
                     inst(16),
@@ -25574,7 +26463,7 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: eligible(0, 1),
                     },
                     inst(16),
@@ -25658,7 +26547,7 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: eligible(0, 1),
                     },
                     inst(16),
@@ -25745,7 +26634,7 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: eligible(0, 1),
                     },
                     inst(16),
@@ -25851,7 +26740,7 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: eligible(0, 1),
                     },
                     inst(16),
@@ -25943,7 +26832,7 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: eligible(0, 1),
                     },
                     inst(16),
@@ -25970,7 +26859,7 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: eligible(0, 1),
                     },
                     inst(16),
@@ -26014,7 +26903,7 @@ mod tests {
             warp_slot: slot_ix,
             insts: vec![
                 ReplayInst {
-                    pc: 0,
+                    lane_mask: u32::MAX, pc: 0,
                     kind: eligible(0, 1),
                 },
                 inst(16),
@@ -26052,7 +26941,7 @@ mod tests {
                 async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
-                    pc: 0,
+                    lane_mask: u32::MAX, pc: 0,
                     kind: eligible(0, 1),
                 }],
                 sectors: vec![0, 8],
@@ -26127,7 +27016,7 @@ mod tests {
                     warp_slot: 0,
                     insts: vec![
                         ReplayInst {
-                            pc: 0,
+                            lane_mask: u32::MAX, pc: 0,
                             kind: eligible(0, 1),
                         },
                         inst(16),
@@ -26139,7 +27028,7 @@ mod tests {
                     warp_slot: 1,
                     insts: vec![
                         ReplayInst {
-                            pc: 0,
+                            lane_mask: u32::MAX, pc: 0,
                             kind: eligible(0, 1),
                         },
                         inst(16),
@@ -26213,7 +27102,7 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalBypass {
                             off: 0,
                             len: 2,
@@ -26279,7 +27168,7 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalBypass {
                             off: 0,
                             len: 1,
@@ -26369,7 +27258,7 @@ mod tests {
                 async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
-                    pc: 0,
+                    lane_mask: u32::MAX, pc: 0,
                     kind: AccessKind::GlobalBypass {
                         off: 0,
                         len: 1,
@@ -26426,7 +27315,7 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalStore { off: 0, len: 2 },
                     },
                     inst(16),
@@ -26467,7 +27356,7 @@ mod tests {
                 async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
-                    pc: 0,
+                    lane_mask: u32::MAX, pc: 0,
                     kind: AccessKind::GlobalReduction {
                         off: 0,
                         len: 2,
@@ -26526,7 +27415,7 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalEligible {
                             off: 0,
                             len: 4,
@@ -26577,7 +27466,7 @@ mod tests {
                 async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
-                    pc: 0,
+                    lane_mask: u32::MAX, pc: 0,
                     kind: AccessKind::GlobalEligible {
                         off: 0,
                         len: 2,
@@ -26608,7 +27497,7 @@ mod tests {
                 async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
-                    pc: 0,
+                    lane_mask: u32::MAX, pc: 0,
                     kind: AccessKind::GlobalEligible {
                         off: 0,
                         len: 1,
@@ -26675,7 +27564,7 @@ mod tests {
                 async_copy_cohorts: None,
                 warp_slot: 0,
                 insts: vec![ReplayInst {
-                    pc: 0,
+                    lane_mask: u32::MAX, pc: 0,
                     kind: AccessKind::GlobalEligible {
                         off: 0,
                         len: 1,
@@ -26803,7 +27692,7 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalEligible {
                             off: 0,
                             len: 1,
@@ -26811,7 +27700,7 @@ mod tests {
                         },
                     },
                     ReplayInst {
-                        pc: 16,
+                        lane_mask: u32::MAX, pc: 16,
                         kind: AccessKind::GlobalEligible {
                             off: 1,
                             len: 2,
@@ -26897,7 +27786,7 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalEligible {
                             off: 0,
                             len: 1,
@@ -26905,7 +27794,7 @@ mod tests {
                         },
                     },
                     ReplayInst {
-                        pc: 16,
+                        lane_mask: u32::MAX, pc: 16,
                         kind: AccessKind::GlobalEligible {
                             off: 1,
                             len: 1,
@@ -26913,7 +27802,7 @@ mod tests {
                         },
                     },
                     ReplayInst {
-                        pc: 32,
+                        lane_mask: u32::MAX, pc: 32,
                         kind: AccessKind::GlobalEligible {
                             off: 2,
                             len: 1,
@@ -27006,7 +27895,7 @@ mod tests {
                 warp_slot: 0,
                 insts: vec![
                     ReplayInst {
-                        pc: 0,
+                        lane_mask: u32::MAX, pc: 0,
                         kind: AccessKind::GlobalBypass {
                             off: 0,
                             len: 1,

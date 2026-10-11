@@ -6,7 +6,7 @@ device. On a 3090 Ti (sm_86 / GA102) that produced numerically
 plausible but architecturally wrong ``local_sol_score`` values
 against a non-matching roofline.
 
-The resolver first distinguishes CC 12.0 device tiers. The RTX PRO 6000
+The resolver first distinguishes CC 12.0 device tiers. The RTX 5090
 Workstation Edition is the active cloud target, but it has no checked-in SOLAR
 roofline yet, so it intentionally returns ``None`` rather than selecting the
 historical RTX 5060 laptop yaml. Unknown / malformed / MIG inputs return
@@ -136,9 +136,9 @@ def resolve_local_arch_yaml(host_info: object) -> Optional[Path]:
         return None
     if cc == "12.0":
         lowered = device_name.lower()
-        if "rtx pro 6000" in lowered:
+        if "rtx 5090" in lowered:
             _LOGGER.info(
-                "SM120 RTX PRO 6000 Workstation detected; no Pro-specific SOLAR yaml is installed"
+                "SM120 RTX 5090 detected; no RTX-5090-specific SOLAR yaml is installed"
             )
             return None
         if "5060" in lowered:
@@ -229,8 +229,8 @@ def arch_resolution_reason(host_info: object) -> str:
         return f"compute_capability={cc_raw!r} unrecognised"
     if cc == "12.0":
         lowered = device_name.lower()
-        if "rtx pro 6000" in lowered:
-            return "compute_capability=12.0; RTX PRO 6000 Workstation has no SOLAR yaml"
+        if "rtx 5090" in lowered:
+            return "compute_capability=12.0; RTX 5090 has no SOLAR yaml"
         if "5060" in lowered:
             return "compute_capability=12.0; historical RTX 5060 yaml"
         return f"compute_capability=12.0; unknown device tier {device_name!r}"

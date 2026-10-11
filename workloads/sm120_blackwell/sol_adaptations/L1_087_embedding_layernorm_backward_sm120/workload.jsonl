@@ -1,0 +1,1 @@
+{"uuid": "sm120-adapter-L1_087_embedding_layernorm_backward_sm120", "axes": {"batch_size": 1, "seq_len": 4}, "inputs": {"grad_output": {"type": "custom"}, "input_ids": {"type": "custom"}, "hidden_states_fp32": {"type": "custom"}, "rstd": {"type": "custom"}, "norm_weight": {"type": "custom"}}, "tolerance": {"max_atol": 1e-05, "max_rtol": 0.05}}

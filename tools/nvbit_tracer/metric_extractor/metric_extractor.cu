@@ -14,7 +14,7 @@
 //
 // Build:
 //   make ARCH=sm_86       — local 3090 Ti.
-//   make ARCH=sm_120      — cloud RTX PRO 6000 Workstation.
+//   make ARCH=sm_120      — cloud RTX 5090.
 //   make ARCH=sm_100a     — cloud B200 cross-compile.
 //
 // Build-up of the tool, oldest first:

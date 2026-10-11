@@ -590,6 +590,36 @@ pub struct OccupancyResources {
     pub max_blocks: u32,
 }
 
+/// Runtime launch/device limits observed from CUDA attributes. This block is
+/// intentionally separate from `occupancy`/issue hypotheses and from L1
+/// geometry: a card may know the launch envelope while still refusing to
+/// invent an SM120 scheduler or cache model.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct RuntimeLimits {
+    #[serde(deserialize_with = "deserialize_positive_u32")]
+    pub max_resident_warps_per_sm: u32,
+    #[serde(deserialize_with = "deserialize_positive_u32")]
+    pub max_blocks_per_sm: u32,
+    #[serde(deserialize_with = "deserialize_positive_u32")]
+    pub max_threads_per_sm: u32,
+    #[serde(deserialize_with = "deserialize_positive_u32")]
+    pub max_threads_per_block: u32,
+    /// PTX special-register identifier ranges, not occupancy or topology.
+    #[serde(deserialize_with = "deserialize_positive_u32")]
+    pub sm_id_upper_bound: u32,
+    #[serde(deserialize_with = "deserialize_positive_u32")]
+    pub warp_id_upper_bound: u32,
+    #[serde(deserialize_with = "deserialize_positive_u64")]
+    pub max_shared_memory_per_sm_bytes: u64,
+    #[serde(deserialize_with = "deserialize_positive_u64")]
+    pub max_shared_memory_per_block_bytes: u64,
+    #[serde(deserialize_with = "deserialize_positive_u64")]
+    pub max_shared_memory_per_block_optin_bytes: u64,
+    pub shared_memory_carveout_kib: Vec<u32>,
+    pub provenance: String,
+}
+
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 pub struct DepBarrierResources {
@@ -749,6 +779,8 @@ struct RawArchCard {
     #[serde(default = "Carded::absent_gap")]
     occupancy: Carded<OccupancyResources>,
     #[serde(default = "Carded::absent_gap")]
+    runtime_limits: Carded<RuntimeLimits>,
+    #[serde(default = "Carded::absent_gap")]
     dep_barriers: Carded<DepBarrierResources>,
     #[serde(default = "Carded::absent_gap")]
     barrier_latencies: Carded<BarrierLatencyResources>,
@@ -785,6 +817,7 @@ pub struct ArchCard {
     dram_bandwidth: Carded<DramBandwidth>,
     smsp: Carded<SmspResources>,
     occupancy: Carded<OccupancyResources>,
+    runtime_limits: Carded<RuntimeLimits>,
     dep_barriers: Carded<DepBarrierResources>,
     barrier_latencies: Carded<BarrierLatencyResources>,
     dual_issue: Carded<DualIssueResources>,
@@ -843,6 +876,7 @@ impl ArchCard {
             dram_bandwidth: raw.dram_bandwidth,
             smsp: raw.smsp,
             occupancy: raw.occupancy,
+            runtime_limits: raw.runtime_limits,
             dep_barriers: raw.dep_barriers,
             barrier_latencies: raw.barrier_latencies,
             dual_issue: raw.dual_issue,
@@ -859,6 +893,7 @@ impl ArchCard {
         card.dram_bandwidth = card.dram_bandwidth.bind_arch(arch);
         card.smsp = card.smsp.bind_arch(arch);
         card.occupancy = card.occupancy.bind_arch(arch);
+        card.runtime_limits = card.runtime_limits.bind_arch(arch);
         card.dep_barriers = card.dep_barriers.bind_arch(arch);
         card.barrier_latencies = card.barrier_latencies.bind_arch(arch);
         card.dual_issue = card.dual_issue.bind_arch(arch);
@@ -1146,7 +1181,156 @@ impl ArchCard {
             resources.max_resident_warps_per_sm,
         )?;
         Self::require_positive_u32("occupancy.max_blocks", resources.max_blocks)?;
+        // Validate a present runtime projection (including duplicate-limit
+        // agreement) without requiring runtime data on legacy SM86 cards.
+        match self.runtime_limits.require_for_arch(arch, "runtime_limits") {
+            Ok(_) => {
+                self.require_runtime_limits()?;
+            }
+            Err(CalibError::BlockResearchGap { .. }) => {}
+            Err(error) => return Err(error),
+        }
         Ok(resources)
+    }
+
+    /// Runtime launch/device limits are an observed contract, not an issue or
+    /// cache geometry hypothesis. Consumers that need this envelope must
+    /// request it explicitly; absence remains a typed gap.
+    pub fn require_runtime_limits(&self) -> Result<&RuntimeLimits, CalibError> {
+        let arch = self.sku_id()?.arch();
+        let limits = self
+            .runtime_limits
+            .require_for_arch(arch, "runtime_limits")?;
+        Self::require_positive_u32(
+            "runtime_limits.max_resident_warps_per_sm",
+            limits.max_resident_warps_per_sm,
+        )?;
+        Self::require_positive_u32("runtime_limits.max_blocks_per_sm", limits.max_blocks_per_sm)?;
+        Self::require_positive_u32(
+            "runtime_limits.max_threads_per_sm",
+            limits.max_threads_per_sm,
+        )?;
+        Self::require_positive_u64(
+            "runtime_limits.max_shared_memory_per_sm_bytes",
+            limits.max_shared_memory_per_sm_bytes,
+        )?;
+        Self::require_positive_u64(
+            "runtime_limits.max_shared_memory_per_block_bytes",
+            limits.max_shared_memory_per_block_bytes,
+        )?;
+        Self::require_positive_u64(
+            "runtime_limits.max_shared_memory_per_block_optin_bytes",
+            limits.max_shared_memory_per_block_optin_bytes,
+        )?;
+        Self::require_positive_u32(
+            "runtime_limits.max_threads_per_block",
+            limits.max_threads_per_block,
+        )?;
+        Self::require_positive_u32("runtime_limits.sm_id_upper_bound", limits.sm_id_upper_bound)?;
+        Self::require_positive_u32(
+            "runtime_limits.warp_id_upper_bound",
+            limits.warp_id_upper_bound,
+        )?;
+        if limits.max_threads_per_block > limits.max_threads_per_sm {
+            return Err(CalibError::InvalidCardValue {
+                field: "runtime_limits.max_threads_per_block",
+                value: limits.max_threads_per_block.to_string(),
+                requirement: "per-block thread limit <= per-SM thread limit",
+            });
+        }
+        if limits.sm_id_upper_bound < self.sm_count()?
+            || limits.warp_id_upper_bound < limits.max_resident_warps_per_sm
+        {
+            return Err(CalibError::InvalidCardValue {
+                field: "runtime_limits.identifier_ranges",
+                value: format!(
+                    "sm={}, warp={}",
+                    limits.sm_id_upper_bound, limits.warp_id_upper_bound
+                ),
+                requirement: "identifier ranges contain the maximum simultaneous residents; equality is not assumed",
+            });
+        }
+        let warp_threads = u64::from(limits.max_resident_warps_per_sm)
+            .checked_mul(32)
+            .ok_or_else(|| CalibError::InvalidCardValue {
+                field: "runtime_limits.max_resident_warps_per_sm",
+                value: limits.max_resident_warps_per_sm.to_string(),
+                requirement: "warps*32 must fit in max_threads_per_sm",
+            })?;
+        if u64::from(limits.max_threads_per_sm) < warp_threads {
+            return Err(CalibError::InvalidCardValue {
+                field: "runtime_limits.max_threads_per_sm",
+                value: limits.max_threads_per_sm.to_string(),
+                requirement: "at least max_resident_warps_per_sm*32 threads",
+            });
+        }
+        if limits.max_shared_memory_per_block_bytes > limits.max_shared_memory_per_block_optin_bytes
+            || limits.max_shared_memory_per_block_optin_bytes
+                > limits.max_shared_memory_per_sm_bytes
+        {
+            return Err(CalibError::InvalidCardValue {
+                field: "runtime_limits.shared_memory",
+                value: format!(
+                    "{}/{}/{}",
+                    limits.max_shared_memory_per_block_bytes,
+                    limits.max_shared_memory_per_block_optin_bytes,
+                    limits.max_shared_memory_per_sm_bytes
+                ),
+                requirement: "block <= opt-in block <= per-SM shared bytes",
+            });
+        }
+        if limits.provenance.trim().is_empty() {
+            return Err(CalibError::InvalidCardValue {
+                field: "runtime_limits.provenance",
+                value: limits.provenance.clone(),
+                requirement: "non-empty observation context",
+            });
+        }
+        if limits.shared_memory_carveout_kib.is_empty()
+            || limits
+                .shared_memory_carveout_kib
+                .windows(2)
+                .any(|pair| pair[0] >= pair[1])
+            || limits
+                .shared_memory_carveout_kib
+                .iter()
+                .any(|kib| u64::from(*kib) * 1024 > limits.max_shared_memory_per_sm_bytes)
+        {
+            return Err(CalibError::InvalidCardValue {
+                field: "runtime_limits.shared_memory_carveout_kib",
+                value: format!("{:?}", limits.shared_memory_carveout_kib),
+                requirement: "strictly increasing carveouts within per-SM shared bytes",
+            });
+        }
+        // Keep the duplicated launch-envelope projection coherent.  The
+        // runtime block is authoritative for placement, but direct metric
+        // consumers still expose `occupancy`; allowing them to disagree would
+        // make one run report two different SM120 ceilings.
+        if let Ok(occupancy) = self.occupancy.require_for_arch(arch, "occupancy") {
+            Self::require_positive_u32(
+                "occupancy.max_resident_warps_per_sm",
+                occupancy.max_resident_warps_per_sm,
+            )?;
+            Self::require_positive_u32("occupancy.max_blocks", occupancy.max_blocks)?;
+            if occupancy.max_resident_warps_per_sm != limits.max_resident_warps_per_sm {
+                return Err(CalibError::InvalidCardValue {
+                    field: "runtime_limits.max_resident_warps_per_sm",
+                    value: format!(
+                        "{} != {}",
+                        limits.max_resident_warps_per_sm, occupancy.max_resident_warps_per_sm
+                    ),
+                    requirement: "match occupancy.max_resident_warps_per_sm",
+                });
+            }
+            if occupancy.max_blocks != limits.max_blocks_per_sm {
+                return Err(CalibError::InvalidCardValue {
+                    field: "runtime_limits.max_blocks_per_sm",
+                    value: format!("{} != {}", limits.max_blocks_per_sm, occupancy.max_blocks),
+                    requirement: "match occupancy.max_blocks",
+                });
+            }
+        }
+        Ok(limits)
     }
 
     pub fn require_dep_barrier_resources(&self) -> Result<&DepBarrierResources, CalibError> {
@@ -1423,17 +1607,34 @@ mod tests {
             .expect("valid sm_120 build identity");
         assert_eq!(identity.deploy(), ArchId::Sm120);
         assert_eq!(identity.sku(), Sku::Rtx5060Laptop);
-
-        let pro = ArchCard::load(&card_path("sm_120-rtx-pro-6000-ws.json"))
-            .expect("load sm_120 Pro 6000 card");
-        let identity = pro
-            .identity(BuildArch::Sm120)
-            .expect("valid Pro 6000 sm_120 build identity");
-        assert_eq!(identity.deploy(), ArchId::Sm120);
-        assert_eq!(identity.sku(), Sku::RtxPro6000Workstation);
-        assert_eq!(pro.require_occupancy_resources().unwrap().max_blocks, 32);
         assert!(matches!(
-            pro.require_l2_geometry(),
+            sm120.require_runtime_limits(),
+            Err(CalibError::BlockResearchGap {
+                block: "runtime_limits",
+                ..
+            })
+        ));
+
+        let rtx5090 =
+            ArchCard::load(&card_path("sm_120-rtx-5090.json")).expect("load sm_120 RTX 5090 card");
+        let identity = rtx5090
+            .identity(BuildArch::Sm120)
+            .expect("valid RTX 5090 sm_120 build identity");
+        assert_eq!(identity.deploy(), ArchId::Sm120);
+        assert_eq!(identity.sku(), Sku::Rtx5090);
+        assert_eq!(
+            rtx5090.require_occupancy_resources().unwrap().max_blocks,
+            24
+        );
+        let runtime_limits = rtx5090.require_runtime_limits().unwrap();
+        assert_eq!(runtime_limits.max_blocks_per_sm, 24);
+        assert_eq!(runtime_limits.max_shared_memory_per_sm_bytes, 102_400);
+        assert_eq!(
+            runtime_limits.shared_memory_carveout_kib,
+            [0, 8, 16, 32, 64, 100]
+        );
+        assert!(matches!(
+            rtx5090.require_l2_geometry(),
             Err(CalibError::BlockResearchGap { .. })
         ));
 
@@ -1442,6 +1643,116 @@ mod tests {
                 card["compute_capability"] = serde_json::json!([12, 0]);
             }),
             Err(CalibError::ComputeCapabilityMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn runtime_limits_reject_impossible_semantic_relations() {
+        let cases: [(&str, Box<dyn Fn(&mut serde_json::Value)>); 8] = [
+            (
+                "threads_below_warp_product",
+                Box::new(|card| {
+                    card["runtime_limits"]["max_threads_per_sm"] = serde_json::json!(1024)
+                }),
+            ),
+            (
+                "block_above_optin",
+                Box::new(|card| {
+                    card["runtime_limits"]["max_shared_memory_per_block_bytes"] =
+                        serde_json::json!(102400)
+                }),
+            ),
+            (
+                "optin_above_sm",
+                Box::new(|card| {
+                    card["runtime_limits"]["max_shared_memory_per_block_optin_bytes"] =
+                        serde_json::json!(204800)
+                }),
+            ),
+            (
+                "carveout_outside_sm",
+                Box::new(|card| {
+                    card["runtime_limits"]["shared_memory_carveout_kib"] =
+                        serde_json::json!([0, 101])
+                }),
+            ),
+            (
+                "empty_provenance",
+                Box::new(|card| card["runtime_limits"]["provenance"] = serde_json::json!("   ")),
+            ),
+            (
+                "block_threads_above_sm",
+                Box::new(|card| {
+                    card["runtime_limits"]["max_threads_per_block"] = serde_json::json!(2048)
+                }),
+            ),
+            (
+                "sm_identifier_bound_below_card",
+                Box::new(|card| {
+                    card["runtime_limits"]["sm_id_upper_bound"] = serde_json::json!(169)
+                }),
+            ),
+            (
+                "warp_identifier_bound_below_resident",
+                Box::new(|card| {
+                    card["runtime_limits"]["warp_id_upper_bound"] = serde_json::json!(47)
+                }),
+            ),
+        ];
+        for (name, mutate) in cases {
+            let card = load_mutated_card("sm_120-rtx-5090.json", mutate)
+                .unwrap_or_else(|error| panic!("{name}: mutation should parse: {error:?}"));
+            assert!(
+                matches!(
+                    card.require_runtime_limits(),
+                    Err(CalibError::InvalidCardValue { .. })
+                ),
+                "{name}: expected semantic runtime-limit rejection"
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_and_occupancy_launch_limits_cannot_diverge() {
+        let runtime_mismatch = load_mutated_card("sm_120-rtx-5090.json", |card| {
+            card["runtime_limits"]["max_resident_warps_per_sm"] = serde_json::json!(32);
+        })
+        .unwrap();
+        assert!(matches!(
+            runtime_mismatch.require_runtime_limits(),
+            Err(CalibError::InvalidCardValue {
+                field: "runtime_limits.max_resident_warps_per_sm",
+                requirement: "match occupancy.max_resident_warps_per_sm",
+                ..
+            })
+        ));
+        assert!(matches!(
+            runtime_mismatch.require_occupancy_resources(),
+            Err(CalibError::InvalidCardValue {
+                field: "runtime_limits.max_resident_warps_per_sm",
+                ..
+            })
+        ));
+
+        let occupancy_mismatch = load_mutated_card("sm_120-rtx-5090.json", |card| {
+            card["occupancy"]["max_blocks"] = serde_json::json!(16);
+        })
+        .unwrap();
+        assert!(matches!(
+            occupancy_mismatch.require_occupancy_resources(),
+            Err(CalibError::InvalidCardValue {
+                field: "runtime_limits.max_blocks_per_sm",
+                requirement: "match occupancy.max_blocks",
+                ..
+            })
+        ));
+        assert!(matches!(
+            occupancy_mismatch.require_runtime_limits(),
+            Err(CalibError::InvalidCardValue {
+                field: "runtime_limits.max_blocks_per_sm",
+                requirement: "match occupancy.max_blocks",
+                ..
+            })
         ));
     }
 
@@ -1660,11 +1971,7 @@ mod tests {
 
     #[test]
     fn production_cards_expose_consumed_sm86_resources_and_keep_sm120_typed() {
-        for name in [
-            "sm_86.json",
-            "sm_120-laptop.json",
-            "sm_120-rtx-pro-6000-ws.json",
-        ] {
+        for name in ["sm_86.json", "sm_120-laptop.json", "sm_120-rtx-5090.json"] {
             let value: serde_json::Value =
                 serde_json::from_slice(&std::fs::read(card_path(name)).unwrap()).unwrap();
             let blocks = [

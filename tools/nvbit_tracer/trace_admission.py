@@ -37,6 +37,7 @@ from tools.local_labels.immutable_artifact import (
 from tools.nvbit_tracer.import_trace_contract import (
     ADDRESS_CARRYING_V1_TRACE_CONTRACT_ID,
     LDGSTS_DESTINATION_V3_TRACE_CONTRACT_ID,
+    SM120_LDGSTS_DESTINATION_V3_TRACE_CONTRACT_ID,
     SHARED_MEMORY_SPLIT_V2_TRACE_CONTRACT_ID,
     AllocationEntry,
     TraceContractRuntimePrerequisiteMissing,
@@ -62,11 +63,15 @@ from tools.nvbit_tracer.protobuf_wire_preflight import (
 LEGACY_TRACE_CONTRACT_ID = ADDRESS_CARRYING_V1_TRACE_CONTRACT_ID
 SHARED_MEMORY_SPLIT_TRACE_CONTRACT_ID = SHARED_MEMORY_SPLIT_V2_TRACE_CONTRACT_ID
 EXPECTED_TRACE_CONTRACT_ID = LDGSTS_DESTINATION_V3_TRACE_CONTRACT_ID
+FORWARD_TRACE_CONTRACT_IDS = frozenset(
+    (EXPECTED_TRACE_CONTRACT_ID, SM120_LDGSTS_DESTINATION_V3_TRACE_CONTRACT_ID)
+)
 SUPPORTED_TRACE_CONTRACT_IDS = frozenset(
     {
         LEGACY_TRACE_CONTRACT_ID,
         SHARED_MEMORY_SPLIT_TRACE_CONTRACT_ID,
         EXPECTED_TRACE_CONTRACT_ID,
+        SM120_LDGSTS_DESTINATION_V3_TRACE_CONTRACT_ID,
     }
 )
 EXPECTED_MEMORY_PAYLOAD_CLASSES = (1, 2, 3, 6, 8)
@@ -308,7 +313,7 @@ class TraceAdmission:
         ):
             raise TypeError("memory_payload_classes must be an exact integer tuple")
         if self.admission_scope == TRACE_ADMISSION_SCOPE:
-            if self.trace_contract_id != EXPECTED_TRACE_CONTRACT_ID:
+            if self.trace_contract_id not in FORWARD_TRACE_CONTRACT_IDS:
                 raise ValueError(
                     "forward trace admission requires the exact LDGSTS "
                     "destination-v3 contract"
@@ -1023,7 +1028,7 @@ def _validate_trace_root(
                 f"got {root.trace_contract_id!r}, expected one of "
                 f"{sorted(SUPPORTED_TRACE_CONTRACT_IDS)!r}",
             )
-    elif root.trace_contract_id != EXPECTED_TRACE_CONTRACT_ID:
+    elif root.trace_contract_id not in FORWARD_TRACE_CONTRACT_IDS:
         if root.trace_contract_id == LEGACY_TRACE_CONTRACT_ID:
             raise TraceAdmissionError(
                 "legacy_trace_historical_only",

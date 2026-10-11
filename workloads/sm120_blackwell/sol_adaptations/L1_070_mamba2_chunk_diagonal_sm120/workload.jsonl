@@ -1,0 +1,1 @@
+{"uuid": "sm120-adapter-L1_070_mamba2_chunk_diagonal_sm120", "axes": {"batch_size": 1, "num_chunks": 1}, "inputs": {"hidden_states": {"type": "random"}, "A_cumsum": {"type": "random"}, "B": {"type": "random"}, "C": {"type": "random"}}, "tolerance": {"max_atol": 1e-05, "max_rtol": 0.05}}

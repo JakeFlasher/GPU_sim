@@ -39,6 +39,7 @@ constexpr const int PT = 7;
 /* the entire predicate register is encoded as "8" */
 constexpr const int PR = 8;
 constexpr const int URZ = 63;
+constexpr const int URZ_BLACKWELL_PLUS = 255;
 constexpr const int UPT = 7;  // uniform predicate true
 constexpr const int UPR = 8;  // entire uniform predicate register
 constexpr const int MAX_CHARS = 256;

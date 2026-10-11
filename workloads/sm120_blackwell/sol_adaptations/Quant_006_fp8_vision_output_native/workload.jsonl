@@ -1,0 +1,1 @@
+{"uuid": "737f8425-e21d-582d-82e0-8bbe25ebf9bb", "axes": {"seq_len": 64}, "inputs": {"attn_output": {"type": "custom"}, "weight": {"type": "custom"}, "scale_attn": {"type": "custom"}, "scale_weight": {"type": "custom"}}, "tolerance": {"max_atol": 0.005, "max_rtol": 0.02, "required_matched_ratio": 0.99}}

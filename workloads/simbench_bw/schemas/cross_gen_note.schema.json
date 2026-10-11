@@ -34,7 +34,7 @@
     "blackwell_behavior": {
       "type": "string",
       "minLength": 1,
-      "description": "Short prose description of the behavior observed on sm_120 (RTX PRO 6000 Blackwell)."
+      "description": "Short prose description of the behavior observed on sm_120 (RTX 5090 Blackwell)."
     },
     "observed_delta": {
       "type": "object",

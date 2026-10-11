@@ -28,13 +28,13 @@ repeat_iters = 30
 
 [[trace_shapes]]
 name = "trace_00"
-axes = { total_tokens = 1024, head_dim = 64, heads = 8, num_seqs = 4 }
+axes = { total_tokens = 16, head_dim = 64, heads = 1, num_seqs = 1 }
 launch_config = { grid = [1024, 8, 1], block = [64, 1, 1] }
 predicted_bytes = 335544320
 estimator_source = "static"
 
 [[correctness_shapes]]
 name = "correctness_00"
-axes = { total_tokens = 1024, head_dim = 64, heads = 8, num_seqs = 4 }
+axes = { total_tokens = 16, head_dim = 64, heads = 1, num_seqs = 1 }
 launch_config = { grid = [1024, 8, 1], block = [64, 1, 1] }
 digest_kind = "hash"

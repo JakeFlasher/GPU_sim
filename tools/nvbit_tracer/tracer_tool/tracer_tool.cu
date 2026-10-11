@@ -75,6 +75,7 @@
 #include "phase_record_writer.h"
 #include "active_launch_gate.h"
 #include "module_origin_resolver.h"
+#include "static_metadata_exporter.h"
 // MOD. End. Enhanced Tracer
 
 #include "../traces_enhanced/pb_trace/include/trace.pb.h"
@@ -124,6 +125,20 @@ extern "C" CUresult cuStreamGetId_ptsz(CUstream hStream,
  * the wire encoding. */
 #include "memory_op_class.h"
 #include "memory_op_access_kind.h"
+
+/* Environment switches are passed explicitly by the cloud wrappers, often
+ * as NAME=0.  Presence is therefore not equivalent to enablement.  Keep one
+ * strict parser for all SM120 policy flags so a textual false value cannot
+ * accidentally widen address admission or select a diagnostic mode. */
+static bool env_flag_enabled(const char *name) {
+  const char *raw = std::getenv(name);
+  if (raw == nullptr) return false;
+  std::string value(raw);
+  for (char &c : value)
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  return value == "1" || value == "true" || value == "yes" ||
+         value == "on";
+}
 
 static_assert(
     static_cast<int>(memory_op_class_classifier::kUnspecified) ==
@@ -210,7 +225,7 @@ static_assert(
 #define TRACE_SAMPLING_PASS_VERSION 2
 
 /* Channel used to communicate from GPU to CPU receiving thread */
-#define CHANNEL_SIZE (1l << 20)
+#define CHANNEL_SIZE (1l << 24)
 static constexpr size_t MAX_PHASE_RECORD_BUFFER_BYTES = 64ULL * 1024ULL * 1024ULL;
 
 int num_devices = 0;
@@ -1427,6 +1442,377 @@ static bool is_excluded_op_class(
          cls == memory_op_class_classifier::kTmem;
 }
 
+extern std::string extrainfo_path;
+
+/* NVBit 1.8 exposes TMA descriptor/coordinate handles rather than a normal
+ * per-lane MREF.  Keep the complete decoded transfer and generated element
+ * addresses in a line-oriented sidecar; this avoids pretending that a
+ * single 32-lane address vector represents a multidimensional DMA transfer.
+ * The sidecar is emitted next to the protobuf trace and is intentionally
+ * independent of the old unsupported-memory exclusion path. */
+struct TmaAddressList {
+  std::vector<TMAElementAddress_t> values;
+};
+
+static void collect_tma_addresses(const TMAElementAddress_t *values,
+                                  size_t count, void *opaque) {
+  auto *out = static_cast<TmaAddressList *>(opaque);
+  if (out == nullptr || values == nullptr) return;
+  out->values.insert(out->values.end(), values, values + count);
+}
+
+static std::mutex tma_sidecar_mutex;
+static std::mutex sync_sidecar_mutex;
+/* Phase-check predicates are written at IPOINT_AFTER, while their guard and
+ * barrier address are captured by the preceding IPOINT_BEFORE MREF call. Keep
+ * only the short-lived anchor needed to label the result lanes; retaining a
+ * large unbounded map would be pathological for long traces. */
+struct SyncBeforeMask {
+  uint32_t active_mask;
+  uint32_t predicate_mask;
+};
+static std::map<std::string, SyncBeforeMask> sync_before_masks;
+
+static void write_sync_operand_sidecar_record(
+    const inst_trace_t &ma, const std::string &opcode,
+    const std::string &tb_string_id, uint32_t kernel_id, int device_id,
+    uint64_t warp_instruction_index) {
+  if (opcode.empty()) return;
+  create_folder(extrainfo_path.c_str());
+  const std::string path = extrainfo_path + "/sync_trace.jsonl";
+  std::lock_guard<std::mutex> lock(sync_sidecar_mutex);
+  std::ofstream out(path, std::ios::out | std::ios::app);
+  if (!out) {
+    fprintf(stderr, "FATAL: cannot open synchronization sidecar %s\n",
+            path.c_str());
+    fflush(stderr);
+    _exit(EXIT_FAILURE);
+  }
+  const bool is_mref = ma.sync_role == SM120_SYNC_ROLE_BARRIER_ADDRESS;
+  const bool has_sync_value =
+      ma.sync_role != SM120_SYNC_ROLE_NONE &&
+      ma.per_operand_type != TRACED_REG_TYPE::NO_REGS;
+  const std::string mask_key =
+      std::to_string(device_id) + ":" + std::to_string(kernel_id) + ":" +
+      tb_string_id + ":" + std::to_string(ma.warpid_tb) + ":" +
+      std::to_string(warp_instruction_index);
+  uint32_t reported_active_mask = ma.active_mask;
+  uint32_t reported_predicate_mask = ma.predicate_mask;
+  bool before_mask_present = false;
+  const bool phase_check = opcode.find("PHASECHK") != std::string::npos;
+  if (ma.sync_phase == 0 && is_mref && phase_check) {
+    sync_before_masks[mask_key] = {ma.active_mask, ma.predicate_mask};
+  } else if (ma.sync_phase != 0 && phase_check) {
+    auto before = sync_before_masks.find(mask_key);
+    if (before != sync_before_masks.end()) {
+      reported_active_mask = before->second.active_mask;
+      reported_predicate_mask = before->second.predicate_mask;
+      before_mask_present = true;
+      sync_before_masks.erase(before);
+    }
+  }
+  const uint32_t mask =
+      has_sync_value ? (reported_active_mask & reported_predicate_mask) : 0u;
+  const bool has_hi_value =
+      ma.per_operand_type == TRACED_REG_TYPE::REGULAR_2_REGS ||
+      ma.per_operand_type == TRACED_REG_TYPE::UNIFORM_2_REGS;
+  const uint32_t captured_words =
+      ma.per_operand_type == TRACED_REG_TYPE::REGULAR_4_REGS ? 4u
+      : (has_hi_value ? 2u : 1u);
+  const bool predicate_value =
+      ma.per_operand_type == TRACED_REG_TYPE::PREDICATE ||
+      ma.per_operand_type == TRACED_REG_TYPE::UNIFORM_PREDICATE;
+  // NVBit's MREF API always supplies a 64-bit runtime address, even when the
+  // SASS shared-state operand descriptor is four bytes wide.
+  const uint32_t captured_bytes =
+      is_mref ? 8u : (predicate_value ? 1u : captured_words * 4u);
+  const bool value_complete = predicate_value || ma.sync_width == 0 ||
+                              captured_bytes >= ma.sync_width;
+  out << "{\"schema_version\":1"
+      << ",\"capability_id\":\"sm120_sync_operand_sidecar_v1\""
+      << ",\"device_id\":" << device_id
+      << ",\"kernel_id\":" << kernel_id
+      << ",\"threadblock\":\"" << tb_string_id
+      << "\",\"cta\":[" << ma.cta_id_x << "," << ma.cta_id_y << ","
+      << ma.cta_id_z << "],\"warp_id\":" << ma.warpid_tb
+      << ",\"warp_instruction_index\":" << warp_instruction_index
+      << ",\"function_id\":" << ma.unique_function_id
+      << ",\"pc\":" << ma.vpc
+      << ",\"opcode\":\"" << opcode << "\""
+      << ",\"operand_kind\":\"" << (is_mref
+                                             ? "mbarrier_address"
+                                             : (has_sync_value
+                                                    ? "mbarrier_register"
+                                                    : "sync_control"))
+      << "\",\"sync_role\":" << ma.sync_role
+      << ",\"operand_index\":" << ma.sync_operand_index
+      << ",\"register_id_present\":"
+      << (ma.sync_register_id != SECRET_UREG_DESC_NOT_USED ? "true" : "false");
+  if (ma.sync_register_id != SECRET_UREG_DESC_NOT_USED)
+    out << ",\"register_id\":" << ma.sync_register_id;
+  out
+      << ",\"phase\":\"" << (ma.sync_phase ? "after" : "before")
+      << "\",\"operand_width\":" << ma.sync_width
+      << ",\"active_mask\":" << reported_active_mask
+      << ",\"predicate_mask\":" << reported_predicate_mask
+      << ",\"lane_mask\":" << mask
+      << ",\"value_mask_source\":\""
+      << (ma.sync_phase ? (before_mask_present ? "pre_instruction_anchor"
+                                               : "call_site_fallback")
+                        : "instruction_call_site")
+      << "\",\"value_mask_complete\":"
+      << ((!ma.sync_phase || before_mask_present) ? "true" : "false")
+      << ",\"value_words_captured\":"
+      << (has_sync_value ? captured_words : 0u)
+      << ",\"captured_value_width_bytes\":"
+      << (has_sync_value ? captured_bytes : 0u)
+      << ",\"value_complete\":"
+      << ((!has_sync_value || value_complete) ? "true" : "false")
+      << ",\"values_present\":" << (has_sync_value ? "true" : "false")
+      << ",\"values\":[";
+  bool first = true;
+  for (int lane = 0; lane < 32; ++lane) {
+    if (((mask >> lane) & 1u) == 0) continue;
+    if (!first) out << ',';
+    first = false;
+    out << ma.addrs_or_reg_val_0[lane];
+  }
+  out << "]";
+  if (is_mref) {
+    uint32_t first_barrier_key = 0;
+    bool have_barrier_key = false;
+    for (int lane = 0; lane < 32; ++lane) {
+      if (((mask >> lane) & 1u) == 0) continue;
+      first_barrier_key = static_cast<uint32_t>(
+          ma.addrs_or_reg_val_0[lane] & 0xffffffffu);
+      have_barrier_key = true;
+      break;
+    }
+    out << ",\"barrier_address_present\":"
+        << (have_barrier_key ? "true" : "false");
+    if (have_barrier_key)
+      out << ",\"barrier_address_u32\":" << first_barrier_key;
+  }
+  if (has_hi_value) {
+    out << ",\"value_hi\":[";
+    first = true;
+    for (int lane = 0; lane < 32; ++lane) {
+      if (((mask >> lane) & 1u) == 0) continue;
+      if (!first) out << ',';
+      first = false;
+      out << ma.reg_val_1[lane];
+    }
+    out << "]";
+  }
+  if (ma.per_operand_type == TRACED_REG_TYPE::REGULAR_4_REGS) {
+    out << ",\"value_word_2\":[";
+    first = true;
+    for (int lane = 0; lane < 32; ++lane) {
+      if (((mask >> lane) & 1u) == 0) continue;
+      if (!first) out << ',';
+      first = false;
+      out << ma.reg_val_1[lane];
+    }
+    out << "],\"value_word_3\":[";
+    first = true;
+    for (int lane = 0; lane < 32; ++lane) {
+      if (((mask >> lane) & 1u) == 0) continue;
+      if (!first) out << ',';
+      first = false;
+      out << ma.reg_val_2[lane];
+    }
+    out << "],\"value_word_4\":[";
+    first = true;
+    for (int lane = 0; lane < 32; ++lane) {
+      if (((mask >> lane) & 1u) == 0) continue;
+      if (!first) out << ',';
+      first = false;
+      out << ma.reg_val_3[lane];
+    }
+    out << "]";
+  }
+  out << "}\n";
+  out.flush();
+  if (!out) {
+    fprintf(stderr, "FATAL: synchronization sidecar write failed: %s\n",
+            path.c_str());
+    fflush(stderr);
+    _exit(EXIT_FAILURE);
+  }
+}
+
+static void write_tma_sidecar_record(
+    CUcontext ctx, const inst_trace_t &ma, const std::string &opcode,
+    const std::string &tb_string_id, uint32_t kernel_id, int device_id,
+    uint64_t warp_instruction_index) {
+  // Predicated-off UTMA instructions are still dynamic instruction records,
+  // but issue no DMA transfer. Do not decode possibly undefined operands.
+  if (ma.tma_param_size == 0 || opcode.empty() ||
+      (ma.active_mask & ma.predicate_mask) == 0) return;
+  TMATransferInfo_t info = nvbit_parse_tma_transfer_info(
+      ctx, opcode.c_str(), const_cast<uint8_t *>(ma.tma_param_handle),
+      ma.tma_param_size);
+  TmaAddressList src_addresses;
+  TmaAddressList dst_addresses;
+  nvbit_parse_tma_src_addrs(ctx, opcode.c_str(),
+                            const_cast<uint8_t *>(ma.tma_param_handle),
+                            ma.tma_param_size, collect_tma_addresses,
+                            &src_addresses);
+  nvbit_parse_tma_dst_addrs(ctx, opcode.c_str(),
+                            const_cast<uint8_t *>(ma.tma_param_handle),
+                            ma.tma_param_size, collect_tma_addresses,
+                            &dst_addresses);
+
+  // The 1.8.1 handle already carries runtime coordinates: observed UTMASTG
+  // tuples change between tiles. Do not reinterpret descriptor pointers as
+  // coordinates or add guessed offsets to NVBit-generated addresses.
+
+  create_folder(extrainfo_path.c_str());
+  const std::string path = extrainfo_path + "/tma_trace.jsonl";
+  std::lock_guard<std::mutex> lock(tma_sidecar_mutex);
+  std::ofstream out(path, std::ios::out | std::ios::app);
+  if (!out) {
+    fprintf(stderr, "FATAL: cannot open TMA sidecar %s\n", path.c_str());
+    fflush(stderr);
+    _exit(EXIT_FAILURE);
+  }
+  out << "{\"schema_version\":2"
+      << ",\"capability_id\":\"sm120_tma_sidecar_v1\""
+      << ",\"device_id\":" << device_id
+      << ",\"kernel_id\":" << kernel_id
+      << ",\"threadblock\":\"" << tb_string_id
+      << "\",\"cta\":[" << ma.cta_id_x << "," << ma.cta_id_y << ","
+      << ma.cta_id_z << "],\"warp_id\":" << ma.warpid_tb
+      << ",\"warp_instruction_index\":" << warp_instruction_index
+      << ",\"function_id\":" << ma.unique_function_id
+      << ",\"active_mask\":" << ma.active_mask
+      << ",\"predicate_mask\":" << ma.predicate_mask
+      << ",\"sm_id\":" << ma.sm_id << ",\"pc\":" << ma.vpc
+      << ",\"opcode\":\"" << opcode << "\",\"handle_size\":"
+      << ma.tma_param_size << ",\"is_tensor\":"
+      << (info.is_tensor ? "true" : "false") << ",\"is_bulk\":"
+      << (info.is_bulk ? "true" : "false") << ",\"is_multicast\":"
+      << (info.is_multicast ? "true" : "false")
+      << ",\"transfer_count\":" << info.transfer_count
+      << ",\"transfer_size\":" << info.transfer_size
+      << ",\"byte_count\":" << info.byte_count
+      << ",\"zero_byte_disposition\":\""
+      << (info.byte_count == 0 ? "oob_or_empty_transfer" : "nonzero_transfer")
+      << "\""
+      << ",\"multicast_cta_mask\":" << info.multicast_cta_mask
+      << ",\"src_mbar_valid\":"
+      << (((info.src_memspace == InstrType::MemorySpace::SHARED ||
+          info.src_memspace == InstrType::MemorySpace::DISTRIBUTED_SHARED) &&
+           info.src.shared.is_mbar_valid)
+              ? "true"
+              : "false")
+      << ",\"src_mbar_address\":"
+      << ((info.src_memspace == InstrType::MemorySpace::SHARED ||
+          info.src_memspace == InstrType::MemorySpace::DISTRIBUTED_SHARED) &&
+          info.src.shared.is_mbar_valid
+              ? info.src.shared.mbar_address
+              : 0)
+      << ",\"src_mbar_address_offset\":"
+      << ((info.src_memspace == InstrType::MemorySpace::SHARED ||
+          info.src_memspace == InstrType::MemorySpace::DISTRIBUTED_SHARED) &&
+          info.src.shared.is_mbar_valid
+              ? info.src.shared.mbar_address_offset
+              : 0)
+      << ",\"src_mbar_cluster_cta_id\":"
+      << ((info.src_memspace == InstrType::MemorySpace::SHARED ||
+          info.src_memspace == InstrType::MemorySpace::DISTRIBUTED_SHARED) &&
+          info.src.shared.is_mbar_valid
+              ? info.src.shared.mbar_address_cluster_cta_id
+              : 0)
+      << ",\"dst_mbar_valid\":"
+      << (((info.dst_memspace == InstrType::MemorySpace::SHARED ||
+          info.dst_memspace == InstrType::MemorySpace::DISTRIBUTED_SHARED) &&
+           info.dst.shared.is_mbar_valid)
+              ? "true"
+              : "false")
+      << ",\"dst_mbar_address\":"
+      << ((info.dst_memspace == InstrType::MemorySpace::SHARED ||
+          info.dst_memspace == InstrType::MemorySpace::DISTRIBUTED_SHARED) &&
+          info.dst.shared.is_mbar_valid
+              ? info.dst.shared.mbar_address
+              : 0)
+      << ",\"dst_mbar_address_offset\":"
+      << ((info.dst_memspace == InstrType::MemorySpace::SHARED ||
+          info.dst_memspace == InstrType::MemorySpace::DISTRIBUTED_SHARED) &&
+          info.dst.shared.is_mbar_valid
+              ? info.dst.shared.mbar_address_offset
+              : 0)
+      << ",\"dst_mbar_cluster_cta_id\":"
+      << ((info.dst_memspace == InstrType::MemorySpace::SHARED ||
+          info.dst_memspace == InstrType::MemorySpace::DISTRIBUTED_SHARED) &&
+          info.dst.shared.is_mbar_valid
+              ? info.dst.shared.mbar_address_cluster_cta_id
+              : 0)
+      << ",\"tma_ureg_count\":" << ma.tma_ureg_count
+      << ",\"tma_operand_root_values\":[";
+  for (uint32_t i = 0; i < ma.tma_ureg_count && i < 4; ++i) {
+    if (i) out << ',';
+    out << ma.tma_ureg_values[i];
+  }
+  const uint32_t dim = info.is_tensor ? info.tensor.dim : 0;
+  const bool runtime_coords_loaded = info.is_tensor && ma.tma_ureg_count > 0;
+  out << "],\"runtime_coords_loaded\":"
+      << (runtime_coords_loaded ? "true" : "false")
+      << ",\"coordinate_source\":\"nvbit_1_8_1_runtime_parameter_handle_plus_ureg_roots\""
+      << ",\"src_memspace\":" << static_cast<int>(info.src_memspace)
+      << ",\"dst_memspace\":" << static_cast<int>(info.dst_memspace)
+      << ",\"dim\":" << dim << ",\"coords\":[";
+  for (uint32_t i = 0; i < dim && i < InstrType::MAX_TMA_DIM; ++i) {
+    if (i) out << ',';
+    out << info.tensor.coords[i];
+  }
+  out << "]";
+  if (info.is_tensor && info.tensor.mode == InstrType::TMALoadMode::TILED) {
+    const auto &map = info.tensor.map.tiled;
+    out << ",\"tensor_map\":{\"data_type\":" << static_cast<int>(map.tensorDataType)
+        << ",\"rank\":" << map.tensorRank
+        << ",\"global_address\":" << reinterpret_cast<uint64_t>(map.globalAddress)
+        << ",\"swizzle\":" << static_cast<int>(map.swizzle)
+        << ",\"interleave\":" << static_cast<int>(map.interleave)
+        << ",\"global_dims\":[";
+    for (uint32_t i = 0; i < dim; ++i) { if (i) out << ','; out << map.globalDim[i]; }
+    out << "],\"global_strides_bytes\":[";
+    for (uint32_t i = 0; i + 1 < dim; ++i) { if (i) out << ','; out << map.globalStrides[i]; }
+    out << "],\"box_dims\":[";
+    for (uint32_t i = 0; i < dim; ++i) { if (i) out << ','; out << map.boxDim[i]; }
+    out << "],\"element_strides\":[";
+    for (uint32_t i = 0; i < dim; ++i) { if (i) out << ','; out << map.elementStrides[i]; }
+    out << "]}";
+  }
+  out << ",\"raw_handle_hex\":\"";
+  static constexpr char hex[] = "0123456789abcdef";
+  for (uint32_t i = 0; i < ma.tma_param_size; ++i) {
+    out << hex[ma.tma_param_handle[i] >> 4]
+        << hex[ma.tma_param_handle[i] & 0xf];
+  }
+  out << "\",\"src_addresses\":[";
+  for (size_t i = 0; i < src_addresses.values.size(); ++i) {
+    if (i) out << ',';
+    out << "{\"address\":" << src_addresses.values[i].address
+        << ",\"oob\":"
+        << (src_addresses.values[i].is_oob ? "true" : "false") << '}';
+  }
+  out << "],\"dst_addresses\":[";
+  for (size_t i = 0; i < dst_addresses.values.size(); ++i) {
+    if (i) out << ',';
+    out << "{\"address\":" << dst_addresses.values[i].address
+        << ",\"oob\":"
+        << (dst_addresses.values[i].is_oob ? "true" : "false") << '}';
+  }
+  out << "]}\n";
+  out.flush();
+  if (!out) {
+    fprintf(stderr, "FATAL: TMA sidecar write failed: %s\n", path.c_str());
+    fflush(stderr);
+    _exit(EXIT_FAILURE);
+  }
+}
+
 /* Map an NVBit per-instruction memory space to the wire `address_space`
  * (dynamic_trace::MemorySpace). This is the default discriminator the
  * allocation-identity gate keys on. GLOBAL_TO_SHARED is instruction-level
@@ -1458,17 +1844,71 @@ static dynamic_trace::MemorySpace nvbit_memspace_to_proto(
  * decoded MREFs are [shared destination, global source]. The injected channel
  * carries that ordinal in reg_id: 0 -> SHARED, 1 -> GLOBAL. Any other ordinal
  * stays UNSPECIFIED and fails the V3 ordered-pair contract instead of being
- * guessed from address values or allocation lookup results. */
+ * guessed from address values or allocation lookup results. Generic LD/ST
+ * operands use the device-resolved per-lane state-space metadata carried in
+ * the channel packet. */
 static dynamic_trace::MemorySpace operand_address_space(
     memory_op_class_classifier::Value cls,
     dynamic_trace::MemorySpace instruction_space,
-    uint32_t mref_ordinal) {
+    uint32_t mref_ordinal,
+    const inst_trace_t &record) {
+  if (instruction_space == dynamic_trace::MEMORY_SPACE_GENERIC) {
+    uint32_t mask = record.active_mask & record.predicate_mask;
+    if (record.address_lane_mask_present) mask &= record.address_lane_mask;
+    uint32_t space = 0;
+    for (unsigned lane = 0; lane < 32; ++lane) {
+      if (((mask >> lane) & 1u) == 0) continue;
+      const uint32_t lane_space = record.reg_val_1[lane];
+      if (lane_space < 1 || lane_space > 3 ||
+          (space != 0 && space != lane_space))
+        return dynamic_trace::MEMORY_SPACE_GENERIC;
+      space = lane_space;
+    }
+    if (space != 0) return static_cast<dynamic_trace::MemorySpace>(space);
+    return dynamic_trace::MEMORY_SPACE_GENERIC;
+  }
   if (cls != memory_op_class_classifier::kAsyncCopy) {
     return instruction_space;
   }
   if (mref_ordinal == 0) return dynamic_trace::MEMORY_SPACE_SHARED;
   if (mref_ordinal == 1) return dynamic_trace::MEMORY_SPACE_GLOBAL;
   return dynamic_trace::MEMORY_SPACE_UNSPECIFIED;
+}
+
+static uint32_t effective_address_lane_mask(const inst_trace_t &record);
+static uint32_t lookup_launch_allocation_id(
+    const CTXstate *ctx_state, CUcontext ctx, uint64_t address);
+
+/* Generic LD/ST keeps the SASS head `LD`/`ST`, so refine the class after the
+ * runtime address-space predicate has resolved the operand. */
+static memory_op_class_classifier::Value refine_generic_memory_class(
+    std::string_view opcode, memory_op_class_classifier::Value cls,
+    dynamic_trace::MemorySpace address_space) {
+  const auto head = opcode.substr(0, opcode.find('.'));
+  if (head != "LD" && head != "ST") return cls;
+  if (address_space == dynamic_trace::MEMORY_SPACE_GLOBAL)
+    return memory_op_class_classifier::kGlobal;
+  if (address_space == dynamic_trace::MEMORY_SPACE_SHARED)
+    return memory_op_class_classifier::kShared;
+  if (address_space == dynamic_trace::MEMORY_SPACE_LOCAL)
+    return memory_op_class_classifier::kLocal;
+  return memory_op_class_classifier::kUnspecified;
+}
+
+static bool generic_address_resolves_global(
+    CUcontext ctx, const inst_trace_t &record, const CTXstate *ctx_state) {
+  const uint32_t mask = effective_address_lane_mask(record);
+  if (mask == 0) return false;
+  uint32_t first_id = 0;
+  for (unsigned lane = 0; lane < 32; ++lane) {
+    if (((mask >> lane) & 1u) == 0) continue;
+    const uint32_t id = lookup_launch_allocation_id(
+        ctx_state, ctx, record.addrs_or_reg_val_0[lane]);
+    if (id == 0) return false;
+    if (first_id == 0) first_id = id;
+    else if (id != first_id) return false;
+  }
+  return first_id != 0;
 }
 
 /* Whether a wire `address_space` must resolve a global allocation_id and fail
@@ -1574,6 +2014,10 @@ static bool trace_sampling_sector_accesses(
 struct TraceSamplingIdentityResult {
   bool required = false;
   bool any_zero = false;
+  // At least one active lane did not resolve to a registered allocation, but
+  // the explicit SM120 module-global disposition allowed the address payload
+  // to be retained.  This is distinct from any_zero (strict-mode exclusion).
+  bool unresolved = false;
   bool multiple_non_zero = false;
   uint32_t allocation_id = 0;
 };
@@ -1613,7 +2057,14 @@ static TraceSamplingIdentityResult trace_sampling_identity_result(
     const uint32_t lane_id = lookup_launch_allocation_id(
         ctx_state, ctx, record.addrs_or_reg_val_0[lane]);
     if (lane_id == 0) {
-      result.any_zero = true;
+      // CUDA module/library-owned globals (for example cuFFT twiddle tables)
+      // are valid device storage but are not necessarily discoverable through
+      // cuMemAlloc callbacks.  The explicit workload opt-in preserves their
+      // addresses without inventing an allocation_id; ordinary captures keep
+      // the strict unmapped sidecar behavior.
+      result.unresolved = true;
+      if (!env_flag_enabled("SM120_ALLOW_UNREGISTERED_GLOBALS"))
+        result.any_zero = true;
     } else if (first_non_zero == 0) {
       first_non_zero = lane_id;
     } else if (lane_id != first_non_zero) {
@@ -1641,8 +2092,131 @@ static std::string slug_of_function_unique_id(uint32_t fid) {
   }
   return std::string("unknown");
 }
+
+/* Producer-side cache-operator classifier.  This intentionally records the
+ * spelling present in the SASS mnemonic (rather than guessing a semantic
+ * equivalent from the memory class).  Unknown/architecture-specific suffixes
+ * are retained as OTHER, which is distinct from UNSPECIFIED/absent and lets a
+ * consumer tell "classified but not in the closed vocabulary" from an old
+ * trace that predates this field. */
+static dynamic_trace::InstructionCacheOp cache_operator_for_opcode(
+    std::string_view opcode) {
+  const auto dot = opcode.find('.');
+  const std::string_view head =
+      dot == std::string_view::npos ? opcode : opcode.substr(0, dot);
+  auto has_token = [&](std::string_view token) {
+    std::string_view tail = dot == std::string_view::npos
+                                ? std::string_view{}
+                                : opcode.substr(dot + 1);
+    while (!tail.empty()) {
+      const auto next = tail.find('.');
+      const auto part = next == std::string_view::npos
+                            ? tail
+                            : tail.substr(0, next);
+      if (part == token) return true;
+      if (next == std::string_view::npos) break;
+      tail.remove_prefix(next + 1);
+    }
+    return false;
+  };
+  using dynamic_trace::INSTRUCTION_CACHE_OP_ATOM;
+  using dynamic_trace::INSTRUCTION_CACHE_OP_LDGSTS;
+  using dynamic_trace::INSTRUCTION_CACHE_OP_LDG_E_CA;
+  using dynamic_trace::INSTRUCTION_CACHE_OP_LDG_E_CG;
+  using dynamic_trace::INSTRUCTION_CACHE_OP_LDG_E_CS;
+  using dynamic_trace::INSTRUCTION_CACHE_OP_LDG_E_EF;
+  using dynamic_trace::INSTRUCTION_CACHE_OP_LDG_E_STRONG_GPU;
+  using dynamic_trace::INSTRUCTION_CACHE_OP_LDG_E_STRONG_SM;
+  using dynamic_trace::INSTRUCTION_CACHE_OP_LDL;
+  using dynamic_trace::INSTRUCTION_CACHE_OP_OTHER;
+  using dynamic_trace::INSTRUCTION_CACHE_OP_STL;
+  using dynamic_trace::INSTRUCTION_CACHE_OP_TEX;
+  if (head == "LDGSTS") return INSTRUCTION_CACHE_OP_LDGSTS;
+  if (head == "LDL") return INSTRUCTION_CACHE_OP_LDL;
+  if (head == "STL") return INSTRUCTION_CACHE_OP_STL;
+  if (head == "ATOM" || head == "ATOMS" || head == "ATOMG" ||
+      head == "RED" || head == "REDS" || head == "REDG")
+    return INSTRUCTION_CACHE_OP_ATOM;
+  if (head == "TEX" || head == "TLD" || head == "TLD4" || head == "TXQ")
+    return INSTRUCTION_CACHE_OP_TEX;
+  if (head == "LDG") {
+    if (has_token("CA")) return INSTRUCTION_CACHE_OP_LDG_E_CA;
+    if (has_token("CG")) return INSTRUCTION_CACHE_OP_LDG_E_CG;
+    if (has_token("CS")) return INSTRUCTION_CACHE_OP_LDG_E_CS;
+    if (has_token("EF")) return INSTRUCTION_CACHE_OP_LDG_E_EF;
+    if (has_token("STRONG.SM")) return INSTRUCTION_CACHE_OP_LDG_E_STRONG_SM;
+    if (has_token("STRONG.GPU")) return INSTRUCTION_CACHE_OP_LDG_E_STRONG_GPU;
+    // nvdisasm emits STRONG.SM/STRONG.GPU as separate dot tokens on some
+    // toolkit releases; preserve those spellings as well.
+    if (has_token("SM") && has_token("STRONG"))
+      return INSTRUCTION_CACHE_OP_LDG_E_STRONG_SM;
+    if (has_token("GPU") && has_token("STRONG"))
+      return INSTRUCTION_CACHE_OP_LDG_E_STRONG_GPU;
+    return INSTRUCTION_CACHE_OP_OTHER;
+  }
+  // LDS/STS and generic LD/ST have a valid but architecture-dependent cache
+  // spelling not represented in the closed vocabulary.
+  return INSTRUCTION_CACHE_OP_OTHER;
+}
+
+static bool is_collective_matrix_memory(std::string_view opcode) {
+  const auto dot = opcode.find('.');
+  const std::string_view head =
+      dot == std::string_view::npos ? opcode : opcode.substr(0, dot);
+  return head == "LDSM" || head == "STSM";
+}
+
+/* PTX documents ldmatrix as .b16 elements and .x1/.x2/.x4 matrix groups.
+ * Native SASS spells this as e.g. LDSM.16.M88.4.  Only use numeric-token
+ * parsing for this explicitly recognized collective family; ordinary memory
+ * widths always come from NVBit's runtime getSize(). */
+static uint32_t collective_matrix_element_width(std::string_view opcode) {
+  if (!is_collective_matrix_memory(opcode)) return 0;
+  const auto dot = opcode.find('.');
+  std::string_view tail = dot == std::string_view::npos
+                              ? std::string_view{}
+                              : opcode.substr(dot + 1);
+  const auto next = tail.find('.');
+  const std::string_view bits =
+      next == std::string_view::npos ? tail : tail.substr(0, next);
+  if (bits == "8" || bits == "16" || bits == "32" || bits == "64") {
+    return static_cast<uint32_t>(std::strtoul(std::string(bits).c_str(), nullptr,
+                                              10) / 8);
+  }
+  return 2;  // PTX ldmatrix default element type is .b16.
+}
+
+static uint32_t collective_matrix_lane_mask(std::string_view opcode,
+                                            uint32_t active_mask) {
+  if (!is_collective_matrix_memory(opcode)) return active_mask;
+  // The final numeric qualifier is the matrix count (.x1/.x2/.x4 in PTX;
+  // native SASS commonly emits M88.1/M88.2/M88.4).  Each matrix consumes eight
+  // row-address lanes as documented by PTX.
+  uint32_t matrix_count = 1;
+  const auto dot = opcode.find('.');
+  std::string_view tail = dot == std::string_view::npos
+                              ? std::string_view{}
+                              : opcode.substr(dot + 1);
+  while (!tail.empty()) {
+    const auto next = tail.find('.');
+    const auto tok = next == std::string_view::npos
+                         ? tail
+                         : tail.substr(0, next);
+    if (tok == "1" || tok == "2" || tok == "4")
+      matrix_count = static_cast<uint32_t>(tok[0] - '0');
+    if (next == std::string_view::npos) break;
+    tail.remove_prefix(next + 1);
+  }
+  const uint32_t lanes = matrix_count * 8u;
+  const uint32_t shape_mask = lanes >= 32 ? 0xffffffffu : ((1u << lanes) - 1u);
+  return active_mask & shape_mask;
+}
 std::map<uint64_t, std::map<int,std::string>> map_func_addr_to_pc_to_sass_instr; // Used for kernels that does not appear in the binary
 std::map<std::string, uint64_t> map_kernel_name_to_func_addr;
+// Self-contained static SM120 metadata.  This is populated directly from the
+// NVBit Instr API before any injected call is inserted, so it remains
+// available when the bounded legacy cuobjdump parser is skipped or times out.
+std::map<uint32_t, nvbit_static_metadata::Function> static_metadata_functions;
 // First element of tuple is kernel name and second the variant id
 
 traced_execution *m_enhanced_traced_execution;
@@ -2161,6 +2735,10 @@ static bool is_module_origin_event(nvbit_api_cuda_t cbid) {
          cbid == API_CUDA_cuModuleLoadData ||
          cbid == API_CUDA_cuModuleLoadDataEx ||
          cbid == API_CUDA_cuModuleLoadFatBinary ||
+         cbid == API_CUDA_cuModuleGetGlobal ||
+         cbid == API_CUDA_cu64ModuleGetGlobal ||
+         cbid == API_CUDA_cuModuleGetGlobal_v2 ||
+         cbid == API_CUDA_cuLibraryGetGlobal ||
          cbid == API_CUDA_cuModuleGetFunction ||
          cbid == API_CUDA_cuModuleUnload ||
          cbid == API_CUDA_cuLibraryLoadData ||
@@ -2178,7 +2756,43 @@ static void handle_module_origin_event(CUcontext ctx, int is_exit,
                                        nvbit_api_cuda_t cbid, void* params,
                                        CUresult* status) {
   if (!is_exit || status == nullptr || *status != CUDA_SUCCESS) return;
+  auto register_module_global = [&](CUdeviceptr *dptr, size_t bytes) {
+    if (dptr == nullptr || *dptr == 0 || bytes == 0 || ctx == nullptr) return;
+    CTXstate *state = lookup_context_state_or_fail(
+        ctx, "nvbit_at_cuda_event/cuModuleGetGlobal context");
+    const int device_id = checked_stored_context_device_id(
+        state, "nvbit_at_cuda_event/cuModuleGetGlobal device");
+    nvbit_tracer::register_allocation(
+        ctx, static_cast<uint64_t>(*dptr), static_cast<uint64_t>(bytes),
+        device_id);
+  };
   switch (cbid) {
+    case API_CUDA_cuModuleGetGlobal: {
+      auto *p = static_cast<cuModuleGetGlobal_params *>(params);
+      register_module_global(
+          reinterpret_cast<CUdeviceptr *>(p->dptr),
+          p->bytes == nullptr ? 0 : static_cast<size_t>(*p->bytes));
+      break;
+    }
+    case API_CUDA_cu64ModuleGetGlobal: {
+      auto *p = static_cast<cuModuleGetGlobal_params *>(params);
+      register_module_global(
+          reinterpret_cast<CUdeviceptr *>(p->dptr),
+          p->bytes == nullptr ? 0 : static_cast<size_t>(*p->bytes));
+      break;
+    }
+    case API_CUDA_cuModuleGetGlobal_v2: {
+      auto *p = static_cast<cuModuleGetGlobal_v2_params *>(params);
+      register_module_global(
+          p->dptr, p->bytes == nullptr ? 0 : static_cast<size_t>(*p->bytes));
+      break;
+    }
+    case API_CUDA_cuLibraryGetGlobal: {
+      auto *p = static_cast<cuLibraryGetGlobal_params *>(params);
+      register_module_global(
+          p->dptr, p->bytes == nullptr ? 0 : static_cast<size_t>(*p->bytes));
+      break;
+    }
     case API_CUDA_cuModuleLoad: {
       auto* p = static_cast<cuModuleLoad_params*>(params);
       if (p->module != nullptr && *p->module != nullptr && p->fname != nullptr)
@@ -2542,6 +3156,22 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func, int device_id
     fail_device_identity("instrument_function_if_needed/stop_report",
                          detail.str());
   }
+  set_uniform_zero_register(binary_version >= 100
+                                ? static_cast<unsigned int>(URZ_BLACKWELL_PLUS)
+                                : static_cast<unsigned int>(URZ));
+  /* SM120_MEMORY_TENSOR_ONLY is retained as a compatibility name for older
+   * capture launchers, but it must not be used as an instruction filter.  A
+   * trace that drops control/scheduler instructions is not replayable: branch
+   * targets, barriers, fences, and the issue order around tensor/memory ops
+   * are part of the dynamic execution contract.  The mode therefore only
+   * affects the optional operand-value policy below; every static instruction
+   * is still instrumented. */
+  const bool sm120_memory_tensor_only =
+      env_flag_enabled("SM120_MEMORY_TENSOR_ONLY");
+  const bool sm120_main_function_only =
+      env_flag_enabled("SM120_MAIN_FUNCTION_ONLY");
+  const bool sm120_legacy_payload_only =
+      env_flag_enabled("SM120_LEGACY_PAYLOAD_ONLY");
 
   std::vector<CUfunction> related_functions =
       nvbit_get_related_functions(ctx, func);
@@ -2551,6 +3181,13 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func, int device_id
 
   /* iterate on function */
   for (auto f : related_functions) {
+    if ((sm120_main_function_only || sm120_legacy_payload_only) && f != func) {
+      /* Diagnostic compatibility mode: isolate the launched entry function
+       * while resolving a helper-function launch failure.  It is never a
+       * complete trace mode; the normal path instruments every related
+       * function once the offending ABI is fixed. */
+      continue;
+    }
     current_kernel_key_instructions_by_pc.clear();
     current_kernel_call_or_ret_by_pc.clear();
     /* "recording" function was instrumented, if set insertion failed
@@ -2571,11 +3208,286 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func, int device_id
     }
 
     uint32_t cnt = 0;
+    // Ptxas temporarily stores a GPR in Rpc.LO around this exact straight-line
+    // cluster-size query. NVBit calls clobber Rpc, so observe the four protected
+    // instructions AFTER the restore, in their original order. No memory access,
+    // guard, branch, or lane-mask change occurs in this recognized bundle.
+    // These are delayed observations of executed instructions, not issue times.
+    std::map<Instr *, Instr *> rpc_after_site;
+    const std::regex rpc_save(R"(RPCMOV\.32\s+Rpc\.LO,\s*(R[0-9]+)\s*;)");
+    for (size_t j = 0; j < instrs.size(); ++j) {
+      const std::string sass = instrs[j]->getSass();
+      std::smatch match;
+      if (!std::regex_match(sass, match, rpc_save)) continue;
+      auto fail_rpc = [&]() {
+        fprintf(stderr, "FATAL: unrecognized RPC live range at PC 0x%x in %s; "
+                        "cannot safely place instrumentation calls.\n",
+                instrs[j]->getOffset(), current_kernel_name.c_str());
+        fflush(stderr);
+        _exit(EXIT_FAILURE);
+      };
+      if (j + 4 >= instrs.size() || instrs[j]->hasPred()) fail_rpc();
+      const std::string reg = match[1].str();
+      const std::regex restore("RPCMOV\\.32\\s+" + reg +
+                               R"(,\s*Rpc\.LO\s*;)");
+      if (!std::regex_match(std::string(instrs[j+4]->getSass()), restore) ||
+          std::string(instrs[j+1]->getOpcode()) != "CS2R.32" ||
+          std::string(instrs[j+1]->getSass()).find("SR_CgaSize") == std::string::npos ||
+          std::string(instrs[j+2]->getOpcodeShort()) != "IMAD" ||
+          std::string(instrs[j+3]->getOpcodeShort()) != "R2UR") fail_rpc();
+      for (size_t k = j + 1; k <= j + 4; ++k) {
+        if (instrs[k]->hasPred() || instrs[k]->getOffset() !=
+            instrs[j]->getOffset() + 16 * (k-j)) fail_rpc();
+        for (int o = 0; o < instrs[k]->getNumOperands(); ++o) {
+          if (instrs[k]->getOperand(o)->type == InstrType::OperandType::MREF)
+            fail_rpc();
+        }
+        // Reject direct incoming edges to the middle of the observed bundle.
+        for (auto branch : instrs) {
+          const std::string head = branch->getOpcodeShort();
+          if (head != "BRA" && head != "JMP" && head != "BSSY") continue;
+          for (int o = 0; o < branch->getNumOperands(); ++o) {
+            const auto *operand = branch->getOperand(o);
+            if (operand->type == InstrType::OperandType::IMM_UINT64 &&
+                operand->u.imm_uint64.value == instrs[k]->getOffset()) fail_rpc();
+          }
+        }
+        rpc_after_site.emplace(instrs[k], instrs[j+4]);
+      }
+    }
+    std::filesystem::create_directories(extrainfo_path + "/native_sass");
+    std::ofstream native_sass(extrainfo_path + "/native_sass/function_" +
+                             std::to_string(next_candidate_unique_function_id) + ".sass");
+    const std::string native_prefix = extrainfo_path + "/native_sass/function_" +
+                                     std::to_string(next_candidate_unique_function_id);
+    std::ofstream native_binary(native_prefix + ".bin", std::ios::binary);
+    std::ofstream native_encoding(native_prefix + ".encoding.tsv");
+    if (!native_sass || !native_binary || !native_encoding) {
+      fprintf(stderr, "FATAL: cannot write native SASS\n");
+      _exit(EXIT_FAILURE);
+    }
+    nvbit_static_metadata::Function static_function;
+    static_function.function_id =
+        static_cast<uint32_t>(next_candidate_unique_function_id);
+    static_function.name = current_kernel_name;
+    static_function.function_address = addr_funct;
+    static_function.architecture_version =
+        static_cast<uint32_t>(binary_version);
+    native_sass << "function_id " << next_candidate_unique_function_id << "\nname "
+                << current_kernel_name << "\n";
+    // Save pre-instrumentation encodings as supplied by NVBit, including the
+    // compiler's control bits. No opcode/control-field reconstruction is used.
+    // The binary is packed in instruction order; the table maps its byte offsets
+    // back to original function PCs, so gaps need not be invented or padded.
+    native_encoding << "pc_hex\tfile_byte_offset\tbyte_count\tbytes_in_nvbit_callback_order\n";
+    size_t native_byte_offset = 0;
+    for (auto original : instrs) {
+      std::vector<uint8_t> encoding;
+      original->getSassBinary([](uint8_t byte, void* data) {
+        static_cast<std::vector<uint8_t>*>(data)->push_back(byte);
+      }, &encoding);
+      if (encoding.empty()) {
+        fprintf(stderr, "FATAL: NVBit returned no original encoding at PC 0x%x\n",
+                original->getOffset());
+        _exit(EXIT_FAILURE);
+      }
+      native_binary.write(reinterpret_cast<const char*>(encoding.data()), encoding.size());
+      native_encoding << std::hex << original->getOffset() << '\t' << std::dec
+                      << native_byte_offset << '\t' << encoding.size() << '\t';
+      for (uint8_t byte : encoding)
+        native_encoding << std::hex << std::setw(2) << std::setfill('0')
+                        << static_cast<unsigned int>(byte);
+      native_encoding << '\n';
+      native_byte_offset += encoding.size();
+      native_sass << std::hex << original->getOffset() << "\t" << original->getSass();
+      auto site = rpc_after_site.find(original);
+      if (site != rpc_after_site.end())
+        native_sass << "\t# observed_after_pc=0x" << site->second->getOffset();
+      native_sass << '\n';
+      nvbit_static_metadata::Instruction static_instruction;
+      static_instruction.pc = original->getOffset();
+      static_instruction.sass = original->getSass();
+      static_instruction.opcode = original->getOpcode();
+      static_instruction.opcode_short = original->getOpcodeShort();
+      static_instruction.predicated = original->hasPred();
+      static_instruction.predicate_uniform = original->isPredUniform();
+      static_instruction.predicate_negated = original->isPredNeg();
+      static_instruction.predicate_register = original->getPredNum();
+      static_instruction.predicate_register_available = original->hasPred();
+      static_instruction.encoding = std::move(encoding);
+      for (int operand_index = 0; operand_index < original->getNumOperands();
+           ++operand_index) {
+        const InstrType::operand_t *source =
+            original->getOperand(operand_index);
+        if (source == nullptr) continue;
+        nvbit_static_metadata::Instruction::Operand operand;
+        operand.text = source->str;
+        const int type_index = static_cast<int>(source->type);
+        if (type_index >= 0 &&
+            type_index < static_cast<int>(sizeof(InstrType::OperandTypeStr) /
+                                          sizeof(InstrType::OperandTypeStr[0]))) {
+          operand.type = InstrType::OperandTypeStr[type_index];
+        } else {
+          operand.type = "UNKNOWN";
+        }
+        operand.is_negative = source->is_neg;
+        operand.is_not = source->is_not;
+        operand.is_absolute = source->is_abs;
+        operand.nbytes = source->nbytes;
+        operand.reuse_bit = operand.text.find("reuse") != std::string::npos;
+        {
+          const std::size_t first_dot = operand.text.find('.');
+          if (first_dot != std::string::npos) {
+            std::size_t start = first_dot + 1;
+            while (start < operand.text.size()) {
+              const std::size_t next = operand.text.find('.', start);
+              const std::size_t end = next == std::string::npos
+                                          ? operand.text.size()
+                                          : next;
+              if (end > start) {
+                std::string modifier = operand.text.substr(start, end - start);
+                modifier.erase(std::remove(modifier.begin(), modifier.end(), ']'),
+                               modifier.end());
+                operand.modifiers.push_back(std::move(modifier));
+              }
+              if (next == std::string::npos) break;
+              start = next + 1;
+            }
+          }
+        }
+        const auto modifier_name = [](InstrType::RegModifierType modifier,
+                                      bool *available) {
+          const int index = static_cast<int>(modifier);
+          const int count = static_cast<int>(
+              sizeof(InstrType::RegModifierTypeStr) /
+              sizeof(InstrType::RegModifierTypeStr[0]));
+          if (available != nullptr) *available = index >= 0 && index < count;
+          return (index >= 0 && index < count)
+                     ? std::string(InstrType::RegModifierTypeStr[index])
+                     : std::string();
+        };
+        const auto add_register_ref =
+            [&operand](const char *role, int number,
+                       const std::string &modifier = std::string(),
+                       bool has_modifier = false) {
+              nvbit_static_metadata::Instruction::Operand::RegisterRef ref;
+              ref.role = role;
+              ref.number = number;
+              ref.modifier = modifier;
+              ref.has_modifier = has_modifier;
+              operand.register_refs.push_back(std::move(ref));
+            };
+        switch (source->type) {
+          case InstrType::OperandType::IMM_UINT64:
+            operand.has_u64 = true;
+            operand.u64 = source->u.imm_uint64.value;
+            break;
+          case InstrType::OperandType::IMM_DOUBLE:
+            operand.has_f64 = true;
+            operand.f64 = source->u.imm_double.value;
+            break;
+          case InstrType::OperandType::REG:
+          case InstrType::OperandType::UREG:
+            operand.has_reg = true;
+            operand.reg_num = source->u.reg.num;
+            operand.has_reg_property = source->u.reg.prop[0] != '\0';
+            operand.reg_property = source->u.reg.prop;
+            add_register_ref(source->type == InstrType::OperandType::REG
+                                 ? "REG"
+                                 : "UREG",
+                             source->u.reg.num);
+            break;
+          case InstrType::OperandType::PRED:
+          case InstrType::OperandType::UPRED:
+            operand.has_pred = true;
+            operand.pred_num = source->u.pred.num;
+            add_register_ref(source->type == InstrType::OperandType::PRED
+                                 ? "PRED"
+                                 : "UPRED",
+                             source->u.pred.num);
+            break;
+          case InstrType::OperandType::CBANK:
+            operand.has_cbank = true;
+            operand.cbank_id = source->u.cbank.id;
+            operand.cbank_has_imm = source->u.cbank.has_imm_offset;
+            operand.cbank_imm = source->u.cbank.imm_offset;
+            operand.cbank_has_reg = source->u.cbank.has_reg_offset;
+            operand.cbank_reg = source->u.cbank.reg_offset;
+            if (source->u.cbank.has_reg_offset)
+              add_register_ref("CBANK_REG", source->u.cbank.reg_offset);
+            break;
+          case InstrType::OperandType::MREF:
+            operand.has_mref = true;
+            operand.mref_has_ra = source->u.mref.has_ra;
+            operand.mref_ra = source->u.mref.ra_num;
+            if (source->u.mref.has_ra) {
+              bool modifier_available = false;
+              operand.mref_ra_modifier = modifier_name(
+                  source->u.mref.ra_mod, &modifier_available);
+              add_register_ref("MREF_RA", source->u.mref.ra_num,
+                               operand.mref_ra_modifier, modifier_available);
+            }
+            operand.mref_has_ur = source->u.mref.has_ur;
+            operand.mref_ur = source->u.mref.ur_num;
+            if (source->u.mref.has_ur) {
+              bool modifier_available = false;
+              operand.mref_ur_modifier = modifier_name(
+                  source->u.mref.ur_mod, &modifier_available);
+              add_register_ref("MREF_UR", source->u.mref.ur_num,
+                               operand.mref_ur_modifier, modifier_available);
+            }
+            operand.mref_has_imm = source->u.mref.has_imm;
+            operand.mref_imm = source->u.mref.imm;
+            operand.mref_has_desc = source->u.mref.has_desc;
+            operand.mref_desc = source->u.mref.desc_ureg_num;
+            if (source->u.mref.has_desc)
+              add_register_ref("MREF_DESC", source->u.mref.desc_ureg_num);
+            break;
+          case InstrType::OperandType::GENERIC:
+            operand.has_generic = true;
+            operand.generic_text = source->u.generic.array;
+            break;
+          case InstrType::OperandType::MEM_DESC:
+            operand.has_desc = true;
+            operand.desc_ureg = source->u.mem_desc.ureg_num;
+            add_register_ref("DESC", source->u.mem_desc.ureg_num);
+            break;
+          case InstrType::OperandType::TMA_PARAM_HANDLE:
+            operand.has_tma = true;
+            for (int slot = 0; slot < InstrType::MAX_TMA_REGS; ++slot) {
+              operand.tma_ureg[slot] = source->u.tma_param_handle.ureg_num[slot];
+              if (operand.tma_ureg[slot] >= 0)
+                add_register_ref("TMA_UREG", operand.tma_ureg[slot]);
+            }
+            break;
+          default:
+            break;
+        }
+        if (operand.register_refs.size() == 1) {
+          operand.has_reg = true;
+          operand.reg_num = operand.register_refs.front().number;
+        } else if (operand.register_refs.size() > 1) {
+          operand.has_reg = false;
+          operand.reg_num = 0;
+          operand.legacy_reg_alias_ambiguous = true;
+        }
+        static_instruction.operands.push_back(std::move(operand));
+      }
+      static_function.instructions.push_back(std::move(static_instruction));
+    }
+    native_sass.flush();
+    native_binary.flush();
+    native_encoding.flush();
+    if (!native_sass || !native_binary || !native_encoding) {
+      fprintf(stderr, "FATAL: native SASS/encoding write failed\n");
+      _exit(EXIT_FAILURE);
+    }
+    static_metadata_functions[static_function.function_id] =
+        std::move(static_function);
     /* iterate on all the static instructions in the function */
     for (auto instr : instrs) {
-
-      if (cnt < instr_begin_interval || cnt >= instr_end_interval) {
-        cnt++;
+      const uint32_t instruction_index = cnt++;
+      if (instruction_index < instr_begin_interval || instruction_index >= instr_end_interval) {
         continue;
       }
       if (verbose) {
@@ -2636,19 +3548,116 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func, int device_id
       bool is_rel_type = (std::string(instr->getOpcode()).find("REL") != std::string::npos);
       bool is_call_or_ret_with_reg = false;
 
-      if(track_this_instruction(cnt, threshold_unique_kernel_checking ,instr->getOpcode())) {
+      if(track_this_instruction(instruction_index, threshold_unique_kernel_checking ,instr->getOpcode())) {
         current_kernel_key_instructions_by_pc[vpc] = inst_str;
       }
 
+      bool raw_sass_fallback = false;
       std::shared_ptr<traced_instruction> inst_parsed = create_no_binay_instruction(vpc, inst_str);
       if (inst_parsed == nullptr) {
+        // Blackwell SM120 introduces valid SASS operand classes (for
+        // example RPCMOV.32 Rpc.LO) that the legacy enhanced parser does not
+        // understand. Keep the native NVBit instruction identity and inject a
+        // conservative NO_REGS record rather than aborting the whole kernel.
+        // The raw SASS string is still retained in the static kernel map, and
+        // NVBit supplies the real predicate guard at the call site.
+        raw_sass_fallback = true;
+        inst_parsed = std::make_shared<traced_instruction>(
+            [&]() {
+              std::stringstream pc_stream;
+              pc_stream << std::hex << vpc;
+              return pc_stream.str();
+            }(),
+            vpc, instr->getOpcode(), instr->hasPred(), instr->isPredUniform(),
+            instr->isPredNeg(), instr->getPredNum());
         fprintf(stderr,
-                "FATAL: failed to parse static SASS instruction at PC 0x%x: %s\n",
+                "WARNING: raw SASS fallback at PC 0x%x: %s; using conservative metadata.\n",
                 static_cast<unsigned int>(vpc), inst_str.c_str());
         fflush(stderr);
-        _exit(EXIT_FAILURE);
       }
       inst_parsed->set_simulation_opcode(OpcodeMap, inst_parsed->get_op_code());
+      const std::string raw_opcode(instr->getOpcode());
+      const std::string raw_sass(instr->getSass());
+      const bool is_tma_instruction = instr->isTMAMem() || instr->isTMATensor();
+      const bool sm120_sync_instruction =
+          raw_opcode.rfind("SYNCS", 0) == 0 ||
+          raw_opcode.rfind("ARRIVES", 0) == 0;
+      const auto rpc_site = rpc_after_site.find(instr);
+      const bool rpc_live_protected = rpc_site != rpc_after_site.end();
+      const bool sm120_scheduler_barrier =
+          raw_opcode.rfind("SYNCS", 0) == 0 ||
+          raw_opcode.rfind("FENCE", 0) == 0 ||
+          raw_opcode.rfind("BSYNC", 0) == 0 ||
+          raw_opcode.rfind("BSSY", 0) == 0;
+      const bool sm120_internal_control =
+          raw_opcode.rfind("SYNCS", 0) == 0 ||
+          raw_opcode.rfind("ULEA", 0) == 0 ||
+          raw_opcode.rfind("UIADD3", 0) == 0 ||
+          raw_opcode.rfind("USHF", 0) == 0 ||
+          raw_opcode.rfind("FENCE", 0) == 0 ||
+          raw_opcode.rfind("UPLOP3", 0) == 0 ||
+          raw_opcode.rfind("S2UR", 0) == 0 ||
+          raw_opcode.rfind("UMOV", 0) == 0 ||
+          raw_opcode.rfind("USEL", 0) == 0 ||
+          raw_opcode.rfind("BRA", 0) == 0 ||
+          raw_opcode.rfind("BSSY", 0) == 0 ||
+          raw_opcode.rfind("BSYNC", 0) == 0 ||
+          raw_opcode.rfind("JMP", 0) == 0 ||
+          raw_opcode.rfind("BRX", 0) == 0;
+      /* All SM120 control/scheduler instructions are now instrumented by
+       * default.  A call-free fallback remains available for diagnosing a
+       * future toolkit/NVBit regression, but it is explicit rather than the
+       * normal collection path; silently omitting these instructions makes a
+       * dynamic trace structurally incomplete. */
+      const bool suppress_sm120_controls =
+          env_flag_enabled("SM120_SUPPRESS_CONTROL_CALLS");
+      const bool suppress_internal_control =
+          sm120_internal_control && suppress_sm120_controls;
+      if (sm120_internal_control || rpc_live_protected) {
+        raw_sass_fallback = true;
+      }
+      if (sm120_legacy_payload_only && !inst_parsed->is_tensor_core_op()) {
+        bool has_mref = false;
+        for (int operand = 0; operand < instr->getNumOperands(); ++operand) {
+          if (instr->getOperand(operand)->type == InstrType::OperandType::MREF) {
+            has_mref = true;
+            break;
+          }
+        }
+        if (!has_mref) {
+          continue;
+        }
+      }
+      /* Do not discard ordinary/control instructions in the compatibility
+       * memory/tensor mode.  They receive a NO_REGS record when no supported
+       * operand ABI is available, preserving their dynamic PC and predicate
+       * guard without guessing register values. */
+      bool tensor_core_shape_supported = true;
+      if (inst_parsed->is_tensor_core_op()) {
+        tensor_core_shape_supported =
+            inst_parsed->set_tensor_core_instruction_info();
+        if (!tensor_core_shape_supported) {
+          fprintf(stderr,
+                  "WARNING: unsupported tensor-core instruction shape at PC "
+                  "0x%x (%s); using NO_REGS metadata.\n",
+                  instr->getOffset(), instr->getOpcode());
+          fflush(stderr);
+        }
+      }
+      // The protobuf format does not serialize register-value snapshots.
+      // Do not inject unused REG/UREG/PRED reads: they inflate the channel and
+      // can misinterpret new register classes (Rpc, URZ) as ordinary values.
+      // Every instruction still receives a dynamic PC/active/predicate record.
+      const bool capture_all_operands =
+          (std::getenv("SM120_CAPTURE_OPERANDS") != nullptr &&
+           std::string(std::getenv("SM120_CAPTURE_OPERANDS")) != "0");
+      const bool capture_operand_values =
+          capture_all_operands ||
+          (sm120_memory_tensor_only && inst_parsed->is_tensor_core_op() &&
+           tensor_core_shape_supported);
+      const bool capture_sync_operands = sm120_sync_instruction;
+      const bool capture_register_operands =
+          capture_operand_values || capture_sync_operands;
 
       if(is_call_or_ret && !is_rel_type) {
         current_kernel_call_or_ret_by_pc[vpc] = inst_str;
@@ -2662,14 +3671,114 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func, int device_id
 
       bool has_ldc_with_reg = false;
       bool has_ldc_with_ureg = false;
+      bool has_ldc_with_imm = false;
       std::vector<uint32_t> desc_ureg_ids;
       std::map<uint32_t, uint32_t> memref_idx_with_desc;
       std::map<uint32_t, traced_operand_instrument> per_operand_type;
+      std::map<uint32_t, uint32_t> sync_meta_by_inject;
+      // NVBit's UREG operand number is an internal uniform-file index on
+      // Blackwell (e.g. textual UR8 can arrive as index 4). Keep the textual
+      // logical register number separately for the host sidecar while still
+      // passing the NVBit index to nvbit_add_call_arg_ureg_val.
+      std::map<uint32_t, uint32_t> sync_reported_reg_id_by_inject;
       int ldc_reg_id = -1;
 
       std::vector<int> aux_reg_ids;
+      std::vector<int> tma_ureg_ids;
       uint64_t call_ret_imm = 0;
+      uint64_t ldc_imm_offset = 0;
+      uint32_t ldc_bank_id = 0;
       uint32_t num_of_injects = 0;
+
+      auto sync_operand_meta = [&](const InstrType::operand_t *operand,
+                                   int operand_index) -> uint32_t {
+        if (!sm120_sync_instruction) return 0;
+        uint32_t role = SM120_SYNC_ROLE_AUX_REGISTER;
+        bool after = false;
+        const std::string op_head = raw_opcode;
+        if (operand->type == InstrType::OperandType::MREF) {
+          role = SM120_SYNC_ROLE_BARRIER_ADDRESS;
+        } else if (op_head.find("PHASECHK") != std::string::npos &&
+                   operand_index == 0 &&
+                   (operand->type == InstrType::OperandType::PRED ||
+                    operand->type == InstrType::OperandType::UPRED)) {
+          role = SM120_SYNC_ROLE_RESULT_PREDICATE;
+          after = true;
+        } else if (op_head.find("ARRIVE") != std::string::npos &&
+                   operand_index == 0 &&
+                   (operand->type == InstrType::OperandType::REG ||
+                    operand->type == InstrType::OperandType::UREG)) {
+          role = SM120_SYNC_ROLE_ARRIVAL_STATE;
+          after = true;
+        } else if (op_head.find("ARRIVE") != std::string::npos &&
+                   operand_index > 0) {
+          role = SM120_SYNC_ROLE_COUNT_OR_TX;
+        } else if (op_head.find("PHASECHK") != std::string::npos &&
+                   operand_index > 0) {
+          role = SM120_SYNC_ROLE_PHASE_OR_STATE;
+        } else if (op_head.find("EXCH") != std::string::npos &&
+                   operand_index > 0) {
+          role = SM120_SYNC_ROLE_EXCHANGE_VALUE;
+        }
+        // `nbytes` is the logical width of this static operand.  When the
+        // capture ABI expands a register into a pair/quad of 32-bit reads,
+        // account for those words explicitly; otherwise the sidecar would
+        // advertise a complete 4-byte value for an 8/16-byte operand.
+        uint32_t width = static_cast<uint32_t>(
+            std::max(0, operand->nbytes > 0 ? operand->nbytes : instr->getSize()));
+        TraceEnhancedOperandType width_type = TraceEnhancedOperandType::REG;
+        if (operand->type == InstrType::OperandType::UREG)
+          width_type = TraceEnhancedOperandType::UREG;
+        else if (operand->type == InstrType::OperandType::PRED)
+          width_type = TraceEnhancedOperandType::PRED;
+        else if (operand->type == InstrType::OperandType::UPRED)
+          width_type = TraceEnhancedOperandType::UPRED;
+        if (operand->type == InstrType::OperandType::REG ||
+            operand->type == InstrType::OperandType::UREG) {
+          const unsigned words = get_number_of_uses_per_operand(
+              *inst_parsed, operand->u.reg.num, operand_index, width_type);
+          if (words > 1 && operand->nbytes > 0 && operand->nbytes <= 4)
+            width *= words;
+        }
+        return (role & 0xffu) |
+               ((static_cast<uint32_t>(operand_index) & 0xffu) << 8) |
+               ((after ? 1u : 0u) << 16) |
+               ((width & 0x7fffu) << 17);
+      };
+      auto sync_reported_register_id = [&](const InstrType::operand_t *operand)
+          -> uint32_t {
+        const std::string text(operand->str);
+        // NVBit 1.8 may classify Blackwell uniform operands as REG in the
+        // low-level descriptor even though their textual operand is UR*. Use
+        // the stable SASS spelling first, then fall back to u.reg.num.
+        unsigned int uniform_id = 0;
+        if (text.rfind("UR", 0) == 0 &&
+            get_ur_register(text, uniform_id))
+          return uniform_id;
+        if (text == "RZ")
+          return static_cast<uint32_t>(InstrType::RZ);
+        size_t prefix = std::string::npos;
+        if (!text.empty() && text[0] == 'R')
+          prefix = 1;
+        else if (!text.empty() && text[0] == 'P')
+          prefix = 1;
+        else if (text.rfind("UP", 0) == 0)
+          prefix = 2;
+        if (prefix != std::string::npos && prefix < text.size() &&
+            std::isdigit(static_cast<unsigned char>(text[prefix]))) {
+          size_t end = prefix;
+          while (end < text.size() &&
+                 std::isdigit(static_cast<unsigned char>(text[end])))
+            ++end;
+          try {
+            return static_cast<uint32_t>(
+                std::stoul(text.substr(prefix, end - prefix)));
+          } catch (...) {
+            // Fall through to NVBit's parser number on malformed text.
+          }
+        }
+        return static_cast<uint32_t>(operand->u.reg.num);
+      };
 
       int ldgsts_ignore_src_predicate = -1;
       bool ldgsts_ignore_src_predicate_is_not = false;
@@ -2684,19 +3793,18 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func, int device_id
         }
       }
 
-      if(inst_parsed->is_tensor_core_op()) {
-        if (!inst_parsed->set_tensor_core_instruction_info()) {
-          fprintf(stderr,
-                  "FATAL: unsupported tensor-core instruction shape at PC "
-                  "0x%x; refusing to publish incomplete register metadata.\n",
-                  instr->getOffset());
-          fflush(stderr);
-          _exit(EXIT_FAILURE);
-        }
-      }
       for(int i = 0; i < instr->getNumOperands(); ++i){
         const InstrType::operand_t *op = instr->getOperand(i);
-        if (op->type == InstrType::OperandType::MREF) {
+        if (op->type == InstrType::OperandType::TMA_PARAM_HANDLE) {
+          for (int slot = 0; slot < InstrType::MAX_TMA_REGS; ++slot) {
+            const int reg = op->u.tma_param_handle.ureg_num[slot];
+            if (reg >= 0 && reg != static_cast<int>(URZ_BLACKWELL_PLUS) &&
+                tma_ureg_ids.size() < 4) {
+              tma_ureg_ids.push_back(reg);
+            }
+          }
+        } else if (op->type == InstrType::OperandType::MREF &&
+            (sm120_sync_instruction || !is_tma_instruction)) {
           mem_oper_idx++;
           // LDGSTS carries [shared_dst] at MREF ordinal 0 and
           // [global_src.64] at ordinal 1. Instrument both. Calls are emitted in
@@ -2706,16 +3814,21 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func, int device_id
           // infers operand space from an allocation lookup.
           num_mref++;
           per_operand_type[num_of_injects] = traced_operand_instrument(TRACED_REG_TYPE::MEMORY_REF, 0, 0);
+          if (sm120_sync_instruction)
+            sync_meta_by_inject[num_of_injects] = sync_operand_meta(op, i);
           if(op->u.mref.has_desc) {
             memref_idx_with_desc[mem_oper_idx] = op->u.mref.desc_ureg_num;
           }
           num_of_injects++;
-        }else if( (op->type == InstrType::OperandType::CBANK) && (instr->getOperand(i)->u.cbank.has_reg_offset || (std::string(op->str).find("UR") != std::string::npos) ) ) {
+        }else if(op->type == InstrType::OperandType::CBANK) {
+          ldc_bank_id = static_cast<uint32_t>(op->u.cbank.id);
           if(std::string(op->str).find("UR") != std::string::npos) {
             has_ldc_with_ureg = true;
             unsigned int uniform_register_id = 0;
+            const unsigned int ur_limit =
+                binary_version >= 100 ? InstrType::URZ_BLACKWELL_PLUS : URZ;
             if (!get_ur_register(std::string(op->str), uniform_register_id) ||
-                uniform_register_id > static_cast<unsigned int>(URZ)) {
+                uniform_register_id > ur_limit) {
               fprintf(stderr,
                       "FATAL: malformed uniform register in constant-bank "
                       "operand at PC 0x%x: %s\n",
@@ -2724,23 +3837,35 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func, int device_id
               _exit(EXIT_FAILURE);
             }
             ldc_reg_id = static_cast<int>(uniform_register_id);
-          }else {
+          }else if (op->u.cbank.has_reg_offset) {
             has_ldc_with_reg = true;
             ldc_reg_id = instr->getOperand(i)->u.cbank.reg_offset;
+          } else if (op->u.cbank.has_imm_offset) {
+            has_ldc_with_imm = true;
+            ldc_imm_offset = static_cast<uint64_t>(
+                static_cast<int64_t>(op->u.cbank.imm_offset));
+          }
+          // A cbank register-offset form may carry an additional signed
+          // immediate. Preserve it in the 64-bit constant slot; the runtime
+          // register value is carried by the documented uint32 argument slot.
+          if (op->u.cbank.has_imm_offset) {
+            ldc_imm_offset = static_cast<uint64_t>(
+                static_cast<int64_t>(op->u.cbank.imm_offset));
           }
           per_operand_type[num_of_injects] = traced_operand_instrument(TRACED_REG_TYPE::MEMORY_REF, 0, 0);
           num_of_injects++;
         }else if(op->type == InstrType::OperandType::IMM_UINT64 && is_call_or_ret) {
           call_ret_imm = op->u.imm_uint64.value;
-          per_operand_type[num_of_injects] = traced_operand_instrument(TRACED_REG_TYPE::MEMORY_REF, 0, 0);
-          num_of_injects++;
         }else if(op->type == InstrType::OperandType::REG && is_call_or_ret) {
-          aux_reg_ids.push_back(op->u.reg.num);
-          aux_reg_ids.push_back(op->u.reg.num + 1);
+          if (!is_call_or_ret_with_reg) {
+            aux_reg_ids.push_back(op->u.reg.num);
+            aux_reg_ids.push_back(op->u.reg.num + 1);
+          }
           is_call_or_ret_with_reg = true;
-          per_operand_type[num_of_injects] = traced_operand_instrument(TRACED_REG_TYPE::MEMORY_REF, 0, 0);
-          num_of_injects++;
-        }else if(op->type == InstrType::OperandType::REG) {
+        }else if(op->type == InstrType::OperandType::REG &&
+                 std::string(op->str).rfind("UR", 0) != 0 &&
+                 capture_register_operands) {
+          if (sm120_sync_instruction && op->u.reg.num == InstrType::RZ) continue;
           TraceEnhancedOperandType reg_type = TraceEnhancedOperandType::REG;
           int num_uses = get_number_of_uses_per_operand(*inst_parsed, op->u.reg.num, i, reg_type);
           per_operand_type[num_of_injects] = traced_operand_instrument(TRACED_REG_TYPE::REGULAR, num_uses, op->u.reg.num);
@@ -2749,28 +3874,113 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func, int device_id
           }else if(num_uses == 4) {
             per_operand_type[num_of_injects].reg_type = TRACED_REG_TYPE::REGULAR_4_REGS;
           }
+          if (sm120_sync_instruction)
+            sync_meta_by_inject[num_of_injects] = sync_operand_meta(op, i);
+          if (sm120_sync_instruction) {
+            sync_reported_reg_id_by_inject[num_of_injects] =
+                sync_reported_register_id(op);
+          }
           num_of_injects++;
-        }else if(op->type == InstrType::OperandType::UREG) {
+        }else if((op->type == InstrType::OperandType::UREG ||
+                  (op->type == InstrType::OperandType::REG &&
+                   std::string(op->str).rfind("UR", 0) == 0)) &&
+                 capture_register_operands) {
+          if (sm120_sync_instruction &&
+              (op->u.reg.num == InstrType::URZ ||
+               std::string(op->str) == "URZ" ||
+               op->u.reg.num == InstrType::URZ_BLACKWELL_PLUS))
+            continue;
           TraceEnhancedOperandType reg_type = TraceEnhancedOperandType::UREG;
           int num_uses = get_number_of_uses_per_operand(*inst_parsed, op->u.reg.num, i, reg_type);
+          // Uniform registers are 32-bit NVBit API values. Blackwell
+          // synchronization forms that advertise an 8-byte UREG operand
+          // consume the adjacent uniform register as the high word, even
+          // though the legacy helper only expands GPR operands. Preserve the
+          // complete 64-bit token for this typed sync path.
+          if (sm120_sync_instruction && num_uses == 1 &&
+              (op->nbytes >= 8 || raw_opcode.find(".64") != std::string::npos))
+            num_uses = 2;
           per_operand_type[num_of_injects] = traced_operand_instrument(TRACED_REG_TYPE::UNIFORM, num_uses, op->u.reg.num);
           if(num_uses == 2) {
             per_operand_type[num_of_injects].reg_type = TRACED_REG_TYPE::UNIFORM_2_REGS;
           }
+          if (sm120_sync_instruction)
+            sync_meta_by_inject[num_of_injects] = sync_operand_meta(op, i);
+          if (sm120_sync_instruction)
+            sync_reported_reg_id_by_inject[num_of_injects] =
+                sync_reported_register_id(op);
           num_of_injects++;
-        }else if(op->type == InstrType::OperandType::PRED) {
+        }else if(op->type == InstrType::OperandType::PRED &&
+                 capture_register_operands) {
           int num_uses = get_number_of_uses_per_operand(*inst_parsed, op->u.reg.num, i, TraceEnhancedOperandType::PRED);
           per_operand_type[num_of_injects] = traced_operand_instrument(TRACED_REG_TYPE::PREDICATE, num_uses, op->u.reg.num);
+          if (sm120_sync_instruction)
+            sync_meta_by_inject[num_of_injects] = sync_operand_meta(op, i);
+          if (sm120_sync_instruction)
+            sync_reported_reg_id_by_inject[num_of_injects] =
+                sync_reported_register_id(op);
           num_of_injects++;
-        }else if(op->type == InstrType::OperandType::UPRED) {
+        }else if(op->type == InstrType::OperandType::UPRED &&
+                 capture_register_operands) {
           int num_uses = get_number_of_uses_per_operand(*inst_parsed, op->u.reg.num, i, TraceEnhancedOperandType::UPRED);
           per_operand_type[num_of_injects] = traced_operand_instrument(TRACED_REG_TYPE::UNIFORM_PREDICATE, num_uses, op->u.reg.num);
+          if (sm120_sync_instruction)
+            sync_meta_by_inject[num_of_injects] = sync_operand_meta(op, i);
+          if (sm120_sync_instruction)
+            sync_reported_reg_id_by_inject[num_of_injects] =
+                sync_reported_register_id(op);
           num_of_injects++;
         }
       }
 
+      // A CALL/RET has one dynamic target payload even when its SASS syntax
+      // contains both an immediate and a register operand.  The old loop
+      // created one channel record per operand, causing duplicate targets and
+      // making the receiver's remaining-inject count disagree with the
+      // instruction's semantic payload.
+      if (is_call_or_ret && !raw_sass_fallback) {
+        per_operand_type.clear();
+        per_operand_type[0] = traced_operand_instrument(
+            TRACED_REG_TYPE::MEMORY_REF, 0, 0);
+        num_of_injects = 1;
+      }
+
+      if (is_tma_instruction) {
+        // A TMA instruction has no per-lane MREF address. NVBit 1.8 exposes
+        // the runtime descriptor/coordinate handle through the dedicated
+        // TMA_PARAM_HANDLE call argument; emit exactly one host-decodable
+        // record instead of applying the legacy MREF ABI.
+        per_operand_type.clear();
+        num_of_injects = 0;
+        mem_oper_idx = -1;
+        has_ldc_with_reg = false;
+        has_ldc_with_ureg = false;
+        is_call_or_ret = false;
+        is_call_or_ret_with_reg = false;
+
+      }
+
+      if (raw_sass_fallback && !sm120_sync_instruction) {
+        // Never guess how a new Blackwell operand class maps to NVBit's
+        // injected argument ABI. Keep one dynamic opcode record and omit all
+        // register/constant arguments for this instruction.
+        per_operand_type.clear();
+        num_of_injects = 0;
+        mem_oper_idx = -1;
+        has_ldc_with_reg = false;
+        has_ldc_with_ureg = false;
+        is_call_or_ret = false;
+        is_call_or_ret_with_reg = false;
+      }
+
       if(num_of_injects == 0) {
         per_operand_type[0] = traced_operand_instrument(TRACED_REG_TYPE::NO_REGS, 0, 0);
+        if (sm120_sync_instruction) {
+          const uint32_t sync_control_meta =
+              (SM120_SYNC_ROLE_NONE & 0xffu) |
+              ((static_cast<uint32_t>(instr->getSize()) & 0x7fffu) << 17);
+          sync_meta_by_inject[0] = sync_control_meta;
+        }
         num_of_injects++;
       }
       if (num_mref > 2) {
@@ -2783,24 +3993,67 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func, int device_id
         _exit(EXIT_FAILURE);
       }
 
+      const bool sm120_payload_only_suppression =
+          sm120_legacy_payload_only && !inst_parsed->is_tensor_core_op() &&
+          num_mref == 0 && !has_ldc_with_reg && !has_ldc_with_ureg &&
+          !has_ldc_with_imm;
+      const bool suppress_scheduler_barrier =
+          sm120_scheduler_barrier && suppress_sm120_controls;
+      Instr *original_instr = instr;
+      if (rpc_live_protected) instr = rpc_site->second;
+      if (!suppress_internal_control &&
+          !suppress_scheduler_barrier && !sm120_payload_only_suppression) {
       for(unsigned int i = 0; i < num_of_injects; i++) {
           /* insert call to the instrumentation function with its arguments */
-          nvbit_insert_call(instr, "instrument_inst", IPOINT_BEFORE);
+          const uint32_t sync_meta =
+              sm120_sync_instruction &&
+                      sync_meta_by_inject.find(i) != sync_meta_by_inject.end()
+                  ? sync_meta_by_inject[i]
+                  : 0u;
+          const bool sync_after =
+              sm120_sync_instruction && ((sync_meta >> 16) & 1u) != 0;
+          const uint64_t sync_reported_reg_id =
+              sm120_sync_instruction &&
+                      sync_reported_reg_id_by_inject.find(i) !=
+                          sync_reported_reg_id_by_inject.end()
+                  ? sync_reported_reg_id_by_inject[i]
+                  : static_cast<uint64_t>(per_operand_type[i].first_reg_id);
+          nvbit_insert_call(instr, "instrument_inst",
+                            (sync_after || rpc_live_protected)
+                                ? IPOINT_AFTER
+                                : IPOINT_BEFORE);
           /* pass predicate value */
           nvbit_add_call_arg_guard_pred_val(instr);
           /* send Unique Function Identifier and PC */
           nvbit_add_call_arg_const_val32(instr, next_candidate_unique_function_id);
-          nvbit_add_call_arg_const_val32(instr, (int)instr->getOffset());
+          nvbit_add_call_arg_const_val32(instr, static_cast<uint32_t>(vpc));
           /* send number of injects and type of operand */
           nvbit_add_call_arg_const_val32(instr, num_of_injects);
           nvbit_add_call_arg_const_val32(instr, per_operand_type[i].reg_type);
 
-          if(per_operand_type[i].reg_type == TRACED_REG_TYPE::MEMORY_REF) {
-              if (mem_oper_idx >= 0) {
+          if (is_tma_instruction) {
+              nvbit_add_call_arg_const_val32(instr, MEM_TYPE::TMA);
+              nvbit_add_call_arg_const_val64(instr, 0);
+              nvbit_add_call_arg_const_val32(instr, 0);
+              nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
+              nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
+              nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
+          } else if(per_operand_type[i].reg_type == TRACED_REG_TYPE::MEMORY_REF) {
+            if (mem_oper_idx >= 0) {
+              if (sm120_sync_instruction) {
+                nvbit_add_call_arg_const_val32(instr, MEM_TYPE::SM120_SYNC_OPERAND);
+              } else {
                 nvbit_add_call_arg_const_val32(instr, MEM_TYPE::STANDARD_MEM);
+              }
               nvbit_add_call_arg_mref_addr64(instr, mem_oper_idx);
               nvbit_add_call_arg_const_val32(instr, (int)instr->getSize());
-              if(memref_idx_with_desc.find(mem_oper_idx) != memref_idx_with_desc.end()) {
+              if (sm120_sync_instruction) {
+                nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
+                nvbit_add_call_arg_const_val32(instr, sync_meta);
+                nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
+                mem_oper_idx--;
+              } else {
+                if(memref_idx_with_desc.find(mem_oper_idx) != memref_idx_with_desc.end()) {
                 nvbit_add_call_arg_ureg_val(instr, memref_idx_with_desc[mem_oper_idx]);
               }else {
                 nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
@@ -2811,6 +4064,8 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func, int device_id
               // destination remains active so zero-fill writes are preserved.
               uint32_t mref_metadata =
                   static_cast<uint32_t>(mem_oper_idx) & MREF_ORDINAL_MASK;
+              if (original_instr->getMemorySpace() == InstrType::MemorySpace::GENERIC)
+                mref_metadata |= MREF_GENERIC_ADDRESS;
               const bool carries_ignore_src =
                   mem_oper_idx == 1 && ldgsts_ignore_src_predicate >= 0;
               if (carries_ignore_src) {
@@ -2827,18 +4082,29 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func, int device_id
                 nvbit_add_call_arg_const_val32(
                     instr, SECRET_UREG_DESC_NOT_USED);
               }
-              mem_oper_idx--;
-            }else if(has_ldc_with_reg || has_ldc_with_ureg) {
-              nvbit_add_call_arg_const_val32(instr, MEM_TYPE::CONSTANT_MEM);
-              nvbit_add_call_arg_const_val64(instr, 0);
-              if(has_ldc_with_ureg) {
-                nvbit_add_call_arg_ureg_val(instr, ldc_reg_id);
-              }else {
-                nvbit_add_call_arg_reg_val(instr, ldc_reg_id);
+                mem_oper_idx--;
               }
-              nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
-              nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
-              nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
+            }else if(has_ldc_with_reg || has_ldc_with_ureg ||
+                     has_ldc_with_imm) {
+              nvbit_add_call_arg_const_val32(instr, MEM_TYPE::CONSTANT_MEM);
+              // The NVBit call-argument API is typed: reg/ureg values are
+              // uint32, while addr_or_offset_or_reg_id is uint64.  Keep the
+              // ABI aligned by passing the static cbank immediate in the
+              // 64-bit slot and the dynamic register value (when present) in
+              // the uint32 width slot.  The actual width is carried in
+              // op_reg_val_3.
+              nvbit_add_call_arg_const_val64(instr, ldc_imm_offset);
+              if (has_ldc_with_ureg) {
+                nvbit_add_call_arg_ureg_val(instr, ldc_reg_id);
+              } else if (has_ldc_with_reg) {
+                nvbit_add_call_arg_reg_val(instr, ldc_reg_id);
+              } else {
+                nvbit_add_call_arg_const_val32(instr, 0);
+              }
+              nvbit_add_call_arg_const_val32(instr, ldc_bank_id);
+              nvbit_add_call_arg_const_val32(
+                  instr, (has_ldc_with_reg || has_ldc_with_ureg) ? 1u : 0u);
+              nvbit_add_call_arg_const_val32(instr, (int)instr->getSize());
             }else if(is_call_or_ret) {
               nvbit_add_call_arg_const_val32(instr, MEM_TYPE::CALL_OR_RET);
               nvbit_add_call_arg_const_val64(instr, call_ret_imm);
@@ -2847,59 +4113,133 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func, int device_id
                 nvbit_add_call_arg_reg_val(instr, aux_reg_ids[1]);
               }else {
                 nvbit_add_call_arg_const_val32(instr, 0);
-                nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
+                nvbit_add_call_arg_const_val32(instr, 0);
               }
-              nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
+              // op_reg_val_2 is a typed "register-derived target" flag;
+              // without it the immediate is the complete target and the
+              // device stub must not combine a sentinel high word.
+              nvbit_add_call_arg_const_val32(
+                  instr, (is_call_or_ret_with_reg ? 1u : 0u) |
+                             (is_rel_type ? 2u : 0u));
               nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
             }
           }else if(per_operand_type[i].reg_type == TRACED_REG_TYPE::REGULAR) {
-            nvbit_add_call_arg_const_val32(instr, MEM_TYPE::NONE);
-            nvbit_add_call_arg_const_val64(instr, per_operand_type[i].first_reg_id); 
+            nvbit_add_call_arg_const_val32(
+                instr, sm120_sync_instruction ? MEM_TYPE::SM120_SYNC_OPERAND
+                                               : MEM_TYPE::NONE);
+            nvbit_add_call_arg_const_val64(
+                instr, sm120_sync_instruction ? sync_reported_reg_id
+                                               : static_cast<uint64_t>(
+                                                     per_operand_type[i].first_reg_id));
             nvbit_add_call_arg_reg_val(instr, per_operand_type[i].first_reg_id);
             nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
-            nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
+            nvbit_add_call_arg_const_val32(
+                instr, sm120_sync_instruction
+                          ? sync_meta
+                          : SECRET_UREG_DESC_NOT_USED);
             nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
           }else if(per_operand_type[i].reg_type == TRACED_REG_TYPE::REGULAR_2_REGS) {
-            nvbit_add_call_arg_const_val32(instr, MEM_TYPE::NONE);
-            nvbit_add_call_arg_const_val64(instr, per_operand_type[i].first_reg_id);
+            nvbit_add_call_arg_const_val32(
+                instr, sm120_sync_instruction ? MEM_TYPE::SM120_SYNC_OPERAND
+                                               : MEM_TYPE::NONE);
+            nvbit_add_call_arg_const_val64(
+                instr, sm120_sync_instruction ? sync_reported_reg_id
+                                               : static_cast<uint64_t>(
+                                                     per_operand_type[i].first_reg_id));
             nvbit_add_call_arg_reg_val(instr, per_operand_type[i].first_reg_id);
             nvbit_add_call_arg_reg_val(instr, per_operand_type[i].first_reg_id + 1);
-            nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
+            nvbit_add_call_arg_const_val32(
+                instr, sm120_sync_instruction
+                          ? sync_meta
+                          : SECRET_UREG_DESC_NOT_USED);
             nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
           }else if(per_operand_type[i].reg_type == TRACED_REG_TYPE::REGULAR_4_REGS) {
-            nvbit_add_call_arg_const_val32(instr, MEM_TYPE::NONE);
-            nvbit_add_call_arg_const_val64(instr, per_operand_type[i].first_reg_id);
+            nvbit_add_call_arg_const_val32(
+                instr, sm120_sync_instruction ? MEM_TYPE::SM120_SYNC_OPERAND
+                                               : MEM_TYPE::NONE);
+            // Four register words consume op_reg_val_0..3.  Pack the sync
+            // role/index/phase/width with the static base register in the
+            // 64-bit descriptor slot so the device stub receives every word
+            // and still has typed metadata.
+            const uint64_t sync_descriptor =
+                sm120_sync_instruction
+                    ? ((static_cast<uint64_t>(sync_meta) << 32) |
+                       (sync_reported_reg_id & 0xffffffffu))
+                    : static_cast<uint64_t>(per_operand_type[i].first_reg_id);
+            nvbit_add_call_arg_const_val64(instr, sync_descriptor);
             nvbit_add_call_arg_reg_val(instr, per_operand_type[i].first_reg_id);
             nvbit_add_call_arg_reg_val(instr, per_operand_type[i].first_reg_id + 1);
             nvbit_add_call_arg_reg_val(instr, per_operand_type[i].first_reg_id + 2);
             nvbit_add_call_arg_reg_val(instr, per_operand_type[i].first_reg_id + 3);
           }else if(per_operand_type[i].reg_type == TRACED_REG_TYPE::UNIFORM) {
-            nvbit_add_call_arg_const_val32(instr, MEM_TYPE::NONE);
-            nvbit_add_call_arg_const_val64(instr, per_operand_type[i].first_reg_id);
+            nvbit_add_call_arg_const_val32(
+                instr, sm120_sync_instruction ? MEM_TYPE::SM120_SYNC_OPERAND
+                                               : MEM_TYPE::NONE);
+            nvbit_add_call_arg_const_val64(
+                instr, sm120_sync_instruction ? sync_reported_reg_id
+                                               : static_cast<uint64_t>(
+                                                     per_operand_type[i].first_reg_id));
             nvbit_add_call_arg_ureg_val(instr, per_operand_type[i].first_reg_id);
             nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
-            nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
+            nvbit_add_call_arg_const_val32(
+                instr, sm120_sync_instruction
+                          ? sync_meta
+                          : SECRET_UREG_DESC_NOT_USED);
             nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
           }else if(per_operand_type[i].reg_type == TRACED_REG_TYPE::UNIFORM_2_REGS) {
-            nvbit_add_call_arg_const_val32(instr, MEM_TYPE::NONE);
-            nvbit_add_call_arg_const_val64(instr, per_operand_type[i].first_reg_id);
+            nvbit_add_call_arg_const_val32(
+                instr, sm120_sync_instruction ? MEM_TYPE::SM120_SYNC_OPERAND
+                                               : MEM_TYPE::NONE);
+            nvbit_add_call_arg_const_val64(
+                instr, sm120_sync_instruction ? sync_reported_reg_id
+                                               : static_cast<uint64_t>(
+                                                     per_operand_type[i].first_reg_id));
             nvbit_add_call_arg_ureg_val(instr, per_operand_type[i].first_reg_id);
             nvbit_add_call_arg_ureg_val(instr, per_operand_type[i].first_reg_id + 1);
-            nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
+            nvbit_add_call_arg_const_val32(
+                instr, sm120_sync_instruction
+                          ? sync_meta
+                          : SECRET_UREG_DESC_NOT_USED);
             nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
           }else if(per_operand_type[i].reg_type == TRACED_REG_TYPE::PREDICATE) {
-            nvbit_add_call_arg_const_val32(instr, MEM_TYPE::NONE);
-            nvbit_add_call_arg_const_val64(instr, per_operand_type[i].first_reg_id);
-            nvbit_add_call_arg_pred_reg(instr);
+            nvbit_add_call_arg_const_val32(
+                instr, sm120_sync_instruction ? MEM_TYPE::SM120_SYNC_OPERAND
+                                               : MEM_TYPE::NONE);
+            nvbit_add_call_arg_const_val64(
+                instr, sm120_sync_instruction ? sync_reported_reg_id
+                                               : static_cast<uint64_t>(
+                                                     per_operand_type[i].first_reg_id));
+            if (sm120_sync_instruction &&
+                per_operand_type[i].first_reg_id != InstrType::PR)
+              nvbit_add_call_arg_pred_val_at(
+                  instr, per_operand_type[i].first_reg_id);
+            else
+              nvbit_add_call_arg_pred_reg(instr);
             nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
-            nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
+            nvbit_add_call_arg_const_val32(
+                instr, sm120_sync_instruction
+                          ? sync_meta
+                          : SECRET_UREG_DESC_NOT_USED);
             nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
           }else if(per_operand_type[i].reg_type == TRACED_REG_TYPE::UNIFORM_PREDICATE) {
-            nvbit_add_call_arg_const_val32(instr, MEM_TYPE::NONE);
-            nvbit_add_call_arg_const_val64(instr, per_operand_type[i].first_reg_id);
-            nvbit_add_call_arg_upred_reg(instr);
+            nvbit_add_call_arg_const_val32(
+                instr, sm120_sync_instruction ? MEM_TYPE::SM120_SYNC_OPERAND
+                                               : MEM_TYPE::NONE);
+            nvbit_add_call_arg_const_val64(
+                instr, sm120_sync_instruction ? sync_reported_reg_id
+                                               : static_cast<uint64_t>(
+                                                     per_operand_type[i].first_reg_id));
+            if (sm120_sync_instruction &&
+                per_operand_type[i].first_reg_id != InstrType::UPR)
+              nvbit_add_call_arg_upred_val_at(
+                  instr, per_operand_type[i].first_reg_id);
+            else
+              nvbit_add_call_arg_upred_reg(instr);
             nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
-            nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
+            nvbit_add_call_arg_const_val32(
+                instr, sm120_sync_instruction
+                          ? sync_meta
+                          : SECRET_UREG_DESC_NOT_USED);
             nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
           }else {
             if (per_operand_type[i].reg_type != TRACED_REG_TYPE::NO_REGS ||
@@ -2911,11 +4251,16 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func, int device_id
               fflush(stderr);
               _exit(EXIT_FAILURE);
             }
-            nvbit_add_call_arg_const_val32(instr, MEM_TYPE::NONE);
+            nvbit_add_call_arg_const_val32(
+                instr, sm120_sync_instruction ? MEM_TYPE::SM120_SYNC_OPERAND
+                                               : MEM_TYPE::NONE);
             nvbit_add_call_arg_const_val64(instr, SECRET_UREG_DESC_NOT_USED);
             nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
             nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
-            nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
+            nvbit_add_call_arg_const_val32(
+                instr, sm120_sync_instruction
+                          ? sync_meta
+                          : SECRET_UREG_DESC_NOT_USED);
             nvbit_add_call_arg_const_val32(instr, SECRET_UREG_DESC_NOT_USED);
           }
 
@@ -2926,8 +4271,31 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func, int device_id
           nvbit_add_call_arg_const_val64(instr,
                                         (uint64_t)&reported_dynamic_instr_counter);
           nvbit_add_call_arg_const_val64(instr, (uint64_t)&stop_report[device_id]);
+          if (is_tma_instruction) {
+            nvbit_add_call_arg_tma_param_handle_and_size(instr, ctx);
+            nvbit_add_call_arg_const_val32(
+                instr, static_cast<uint32_t>(tma_ureg_ids.size()));
+            for (size_t slot = 0; slot < 4; ++slot) {
+              if (slot < tma_ureg_ids.size()) {
+                nvbit_add_call_arg_ureg_val(instr, tma_ureg_ids[slot]);
+              } else {
+                nvbit_add_call_arg_const_val32(instr, 0);
+              }
+            }
+          } else {
+            nvbit_add_call_arg_const_val64(instr, 0);
+            nvbit_add_call_arg_const_val32(instr, 0);
+            nvbit_add_call_arg_const_val32(instr, 0);
+            nvbit_add_call_arg_const_val32(instr, 0);
+            nvbit_add_call_arg_const_val32(instr, 0);
+            nvbit_add_call_arg_const_val32(instr, 0);
+            nvbit_add_call_arg_const_val32(instr, 0);
+          }
       }
-      cnt++;
+      }
+
+      instr = original_instr;
+
     }
 
     // BEGIN_PHASE_INJECTION_BLOCK
@@ -5247,7 +6615,13 @@ void *recv_thread_fun(void *args) {
                     it_space->second);
               }
               ts_address_space = operand_address_space(
-                  ts_cls, ts_address_space, ma->reg_id);
+                  ts_cls, ts_address_space, ma->reg_id, *ma);
+              if (ts_address_space == dynamic_trace::MEMORY_SPACE_GENERIC &&
+                  ts_cls == memory_op_class_classifier::kUnspecified &&
+                  generic_address_resolves_global(ctx, *ma, ctx_state)) {
+                ts_address_space = dynamic_trace::MEMORY_SPACE_GLOBAL;
+              }
+              ts_cls = refine_generic_memory_class(id_to_opcode_map[ts_opcode_id], ts_cls, ts_address_space);
               uint64_t record_sector_accesses = 0;
               if (!trace_sampling_sector_accesses(
                       *ma, ts_cls, ts_address_space,
@@ -5376,7 +6750,11 @@ void *recv_thread_fun(void *args) {
           inst = wp.mutable_instructions(wp.instructions_size()-1);
         }
         remaining_injects--;
-        std::bitset<32> mask(effective_address_lane_mask(*ma));
+        const std::string &dynamic_opcode = id_to_opcode_map[opcode_id];
+        const uint32_t dynamic_mask = effective_address_lane_mask(*ma);
+        const uint32_t address_mask = collective_matrix_lane_mask(
+            dynamic_opcode, dynamic_mask);
+        std::bitset<32> mask(address_mask);
         // Memory-class and per-lane data width: applied whenever the
         // arriving operand record is memory (mem_type != NONE),
         // regardless of whether this is the first operand for the
@@ -5405,11 +6783,54 @@ void *recv_thread_fun(void *args) {
         // the per-instruction memory surface. Their operand records
         // populate the instruction-level `data_width` and
         // `memory_op_class` fields and add an `address` record.
-        // `CONSTANT_MEM` and `CALL_OR_RET` records create the
-        // protobuf instruction (so the warp's `instructions` list
-        // still counts them) but contribute no `data_width`,
-        // `memory_op_class`, or `address` payload — keeping the
-        // wire surface aligned with the offline contract validator.
+        // `CONSTANT_MEM` and `CALL_OR_RET` records create the protobuf
+        // instruction and now retain their non-allocation payload in the
+        // dedicated fields below.  They intentionally do not acquire a
+        // MemoryOpClass/address record: cbank offsets and call targets are
+        // not device-allocation addresses.
+        if (ma->mem_type == MEM_TYPE::CONSTANT_MEM) {
+          inst->set_constant_memory_bank(ma->aux_id);
+          inst->set_constant_memory_offset(ma->aux_immediate);
+          const uint32_t constant_mask =
+              ma->active_mask & ma->predicate_mask;
+          for (int lane = 0; lane < 32; ++lane) {
+            if ((constant_mask >> lane) & 1u)
+              inst->add_constant_memory_addresses(
+                  ma->addrs_or_reg_val_0[lane]);
+          }
+          num_processed_bytes += sizeof(inst_trace_t);
+          continue;
+        }
+        if (ma->mem_type == MEM_TYPE::SM120_SYNC_OPERAND) {
+          const std::string &sync_opcode = id_to_opcode_map[opcode_id];
+          write_sync_operand_sidecar_record(
+              *ma, sync_opcode, tb_string_id,
+              static_cast<uint32_t>(kernel_id_snap), device_id,
+              wp.instructions_size() - 1);
+          num_processed_bytes += sizeof(inst_trace_t);
+          continue;
+        }
+        if (ma->mem_type == MEM_TYPE::CALL_OR_RET) {
+          inst->set_call_return_immediate(ma->aux_immediate);
+          inst->set_call_return_flags(ma->aux_flags);
+          const uint32_t target_mask =
+              ma->active_mask & ma->predicate_mask;
+          for (int lane = 0; lane < 32; ++lane) {
+            if ((target_mask >> lane) & 1u)
+              inst->add_call_return_targets(
+                  ma->addrs_or_reg_val_0[lane]);
+          }
+          num_processed_bytes += sizeof(inst_trace_t);
+          continue;
+        }
+        if (ma->mem_type == MEM_TYPE::TMA) {
+          const std::string &tma_opcode = id_to_opcode_map[opcode_id];
+          write_tma_sidecar_record(ctx, *ma, tma_opcode, tb_string_id,
+                                   static_cast<uint32_t>(kernel_id_snap),
+                                   device_id, wp.instructions_size() - 1);
+          num_processed_bytes += sizeof(inst_trace_t);
+          continue;
+        }
         if (ma->mem_type == MEM_TYPE::STANDARD_MEM) {
           const std::string &opcode_full =
               id_to_opcode_map[opcode_id];
@@ -5437,8 +6858,28 @@ void *recv_thread_fun(void *args) {
               addr_space =
                   static_cast<dynamic_trace::MemorySpace>(it_space->second);
           }
-          addr_space = operand_address_space(cls, addr_space, ma->reg_id);
-
+          addr_space = operand_address_space(
+              cls, addr_space, ma->reg_id, *ma);
+          if (addr_space == dynamic_trace::MEMORY_SPACE_GENERIC &&
+              cls == memory_op_class_classifier::kUnspecified) {
+            // The descriptor ABI carries a per-lane runtime-space tag. In
+            // this path the first/last active lanes are enough to distinguish
+            // the unanimous global form; the full address identity gate below
+            // still rejects mixed allocations.
+            if (ma->reg_val_1[0] == RUNTIME_SPACE_GLOBAL &&
+                ma->reg_val_1[31] == RUNTIME_SPACE_GLOBAL)
+              addr_space = dynamic_trace::MEMORY_SPACE_GLOBAL;
+          }
+          if (addr_space == dynamic_trace::MEMORY_SPACE_GENERIC &&
+              cls == memory_op_class_classifier::kUnspecified &&
+              generic_address_resolves_global(ctx, *ma, ctx_state)) {
+            // Some SM120 descriptor LD/ST forms do not accept a generic
+            // pointer in NVBit's isspacep operand ABI. If every active lane
+            // nevertheless resolves to one live CUDA allocation, the
+            // registry is the stronger global-space discriminator.
+            addr_space = dynamic_trace::MEMORY_SPACE_GLOBAL;
+          }
+          cls = refine_generic_memory_class(opcode_full, cls, addr_space);
           /* task11b producer-side typed exclusions: route both
            * the 6 explicit excluded classes (TEXTURE / SURFACE /
            * ATOMIC / TMA / ASYNC_COPY / CLUSTER_DSMEM) AND the
@@ -5477,6 +6918,22 @@ void *recv_thread_fun(void *args) {
           if (is_excluded_op_class(cls) ||
               cls == memory_op_class_classifier::kUnspecified ||
               kind == memory_op_access_kind_classifier::kUnspecified) {
+            const std::string &excluded_opcode = id_to_opcode_map[opcode_id];
+            /* UTMACCTL.PF and UGETNEXTWORKID are scheduler/work-distribution
+             * operations that the broad SASS classifier sees as UTMA/DSMEM,
+             * but they do not issue a data transfer and have no address
+             * payload. They remain represented by their dynamic instruction
+             * record; do not manufacture an "unsupported memory" error for
+             * them. Actual UTMALDG/UTMASTG transfers arrive through the
+             * dedicated TMA handle path above. */
+            if (excluded_opcode.rfind("UTMACCTL", 0) == 0 ||
+                excluded_opcode.rfind("CCTL", 0) == 0 ||
+                excluded_opcode.rfind("ARRIVES", 0) == 0 ||
+                excluded_opcode.rfind("QSPC", 0) == 0 ||
+                excluded_opcode.rfind("UGETNEXTWORKID", 0) == 0) {
+              num_processed_bytes += sizeof(inst_trace_t);
+              continue;
+            }
             /* AC-T5.2 path_resolved arm:
              *   true  — both classifiers recognized the opcode
              *           and assigned it a memory class in the
@@ -5552,8 +7009,6 @@ void *recv_thread_fun(void *args) {
                   std::string("GLOBAL"),
                   static_cast<uint64_t>(ma->vpc),
                   std::string("unmapped_memory_range"));
-              num_processed_bytes += sizeof(inst_trace_t);
-              continue;
             }
             if (identity.multiple_non_zero) {
               nvbit_tracer::aggregate(
@@ -5562,17 +7017,28 @@ void *recv_thread_fun(void *args) {
                   std::string("GLOBAL"),
                   static_cast<uint64_t>(ma->vpc),
                   std::string("cross_allocation_lane_span"));
-              num_processed_bytes += sizeof(inst_trace_t);
-              continue;
             }
-            resolved_allocation_id = identity.allocation_id;
+            if (!identity.any_zero && !identity.multiple_non_zero)
+              resolved_allocation_id = identity.allocation_id;
           }
 
-          inst->set_data_width(ma->width);
+          const bool collective_matrix =
+              is_collective_matrix_memory(opcode_full);
+          const uint32_t logical_width = collective_matrix
+                                             ? collective_matrix_element_width(
+                                                   opcode_full)
+                                             : static_cast<uint32_t>(ma->width);
+          inst->set_data_width(static_cast<int32_t>(logical_width));
+          inst->set_transfer_width(ma->width);
           inst->set_memory_op_class(
               static_cast<dynamic_trace::MemoryOpClass>(cls));
           inst->set_memory_op_access_kind(
               static_cast<dynamic_trace::MemoryOpAccessKind>(kind));
+          // Preserve the exact SASS cache-policy spelling in the additive
+          // cache-operator field.  This is intentionally independent from
+          // the memory-space classifier above.
+          inst->set_instruction_cache_op(
+              cache_operator_for_opcode(opcode_full));
           dynamic_trace::address *addr = inst->add_addresses();
           // Per-address memory space (the address-carrying contract
           // discriminator). Stamped whenever known so the consumer identity
@@ -5585,6 +7051,13 @@ void *recv_thread_fun(void *args) {
           if (ma->address_lane_mask_present != 0) {
             addr->set_lane_mask(ma->address_lane_mask);
           }
+          if (collective_matrix) {
+            // PTX ldmatrix supplies row addresses through only 8/16/32
+            // designated lanes for .x1/.x2/.x4. Keep that operand mask
+            // explicit instead of treating copied values in other lanes as
+            // independent addresses.
+            addr->set_lane_mask(address_mask);
+          }
           std::istringstream iss(id_to_opcode_map[opcode_id]);
           std::vector<std::string> tokens;
           std::string token;
@@ -5594,7 +7067,13 @@ void *recv_thread_fun(void *args) {
             if (!token.empty())
               tokens.push_back(token);
           }
-          addr->set_data_width(get_datawidth_from_opcode(tokens));
+          // NVBit's runtime width is authoritative for the address payload,
+          // including collective LDSM/STSM forms whose mnemonic contains a
+          // matrix shape token (for example `.M88.2`) that is not the
+          // per-lane transfer width.  Parsing the first numeric opcode token
+          // caused the historical 16-byte-vs-2-byte conflicts.
+          addr->set_data_width(static_cast<int32_t>(logical_width));
+          addr->set_transfer_width(ma->width);
 
           bool base_stride_success = false;
           bool base_delta_success = false;
@@ -5656,8 +7135,22 @@ void *recv_thread_fun(void *args) {
            * explicit-presence (HasField=false) is the wire signal
            * the validator's allocation/range identity check uses
            * to skip the per-record range verification. */
-          if (resolved_allocation_id != 0) {
+          if (resolved_allocation_id != 0 && !identity.unresolved &&
+              !identity.multiple_non_zero) {
             addr->set_allocation_id(resolved_allocation_id);
+            addr->set_allocation_identity_status("resolved");
+          } else if (identity.required && identity.multiple_non_zero) {
+            addr->set_allocation_identity_status("cross_allocation");
+          } else if (identity.required && identity.unresolved) {
+            // Strict mode still retains raw addresses, but records the
+            // unresolved disposition and emits the typed sidecar above. The
+            // opt-in module-global mode uses the more specific status; the
+            // default status makes no claim that an unknown range is valid
+            // module storage.
+            addr->set_allocation_identity_status(
+                env_flag_enabled("SM120_ALLOW_UNREGISTERED_GLOBALS")
+                    ? "unresolved_module_global"
+                    : "unresolved_global");
           }
         }
         num_processed_bytes += sizeof(inst_trace_t);
@@ -6120,7 +7613,7 @@ static void init_context_state(CUcontext ctx) {
   ctx_state->channel_host.init((int)ctx_state_map.size() - 1, CHANNEL_SIZE,
                                ctx_state->channel_dev, recv_thread_fun, ctx);
   ctx_state->instruction_channel_initialized = true;
-  nvbit_set_tool_pthread(ctx_state->channel_host.get_thread());
+  nvbit_set_tool_thread(static_cast<uint64_t>(ctx_state->channel_host.get_thread()));
 
   /* Closure-plan NVBit phase-injection contract: when the env-gated
    * activation switch is on, allocate a per-context phase channel
@@ -6244,7 +7737,10 @@ void nvbit_at_ctx_term(CUcontext ctx) {
       // address-carrying payload classes and additionally requires every kernel
       // to carry presence-bearing static and dynamic shared-memory components
       // whose sum equals the legacy combined field.
-      dyn_trace.set_trace_contract_id("sm86_addr_carry_ldgsts_dst_v3");
+      dyn_trace.set_trace_contract_id(
+          (dyn_trace.binary_version() >= 120)
+              ? "sm120_addr_carry_ldgsts_dst_v3"
+              : "sm86_addr_carry_ldgsts_dst_v3");
       const dynamic_trace::MemoryOpClass retained_capabilities[] = {
           dynamic_trace::MEMORY_OP_CLASS_GLOBAL,
           dynamic_trace::MEMORY_OP_CLASS_SHARED,
@@ -6260,6 +7756,30 @@ void nvbit_at_ctx_term(CUcontext ctx) {
           }
         }
         if (!present) dyn_trace.add_memory_payload_classes(capability);
+      }
+      // Additive SM120 capability vocabulary.  These are descriptive
+      // capabilities, not admission/approval gates; old readers ignore the
+      // repeated string field while new readers can select the sidecars and
+      // non-allocation payloads without guessing from environment variables.
+      static constexpr const char *trace_capabilities[] = {
+          "sm120_cache_operator_v1",
+          "sm120_tma_sidecar_v1",
+          "sm120_tma_zero_byte_disposition_v1",
+          "sm120_sync_control_main_trace_v1",
+          "sm120_sync_operand_sidecar_v1",
+          "sm120_constant_call_payloads_v1",
+          "sm120_address_width_runtime_v1",
+          "sm120_register_values_unavailable_v1",
+      };
+      for (const char *capability : trace_capabilities) {
+        bool present = false;
+        for (int i = 0; i < dyn_trace.trace_capabilities_size(); ++i) {
+          if (dyn_trace.trace_capabilities(i) == capability) {
+            present = true;
+            break;
+          }
+        }
+        if (!present) dyn_trace.add_trace_capabilities(capability);
       }
       // Ensure the serialized trace reports a device binary_version that
       // actually corresponds to one of the contexts that contributed the
@@ -6419,6 +7939,55 @@ void nvbit_at_ctx_term(CUcontext ctx) {
       std::cout << "Starting the enhanced tracer" << std::endl;
       enhanced_tracer();
       std::cout << "Terminated the enhanced tracer" << std::endl;
+    }
+    // Publish the bounded, NVBit-native static join after the optional legacy
+    // enhanced pass.  This path is independent of cuobjdump/nvdisasm and is
+    // therefore available in both SKIP_ENHANCED_TRACER=1 captures and large
+    // CUTLASS cubins whose external parser is intentionally bounded.  Raw
+    // encodings and observed control-word fields are retained; no latency or
+    // undocumented pipeline semantics are invented here.
+    {
+      std::string static_benchmark_name = get_program_path();
+      const std::size_t static_name_sep = static_benchmark_name.find_last_of("/");
+      if (static_name_sep != std::string::npos)
+        static_benchmark_name = static_benchmark_name.substr(static_name_sep + 1);
+      const std::string static_execution_info_path =
+          extrainfo_path + "/native_static_metadata.json";
+      if (!nvbit_static_metadata::WriteExecutionInfo(
+              static_execution_info_path, static_benchmark_name,
+              static_metadata_functions)) {
+        fprintf(stderr,
+                "FATAL: failed to publish NVBit-native static metadata %s\n",
+                static_execution_info_path.c_str());
+        fflush(stderr);
+        _exit(EXIT_FAILURE);
+      }
+      std::cout << "Serialized NVBit-native static metadata to "
+                << static_execution_info_path << " (functions="
+                << static_metadata_functions.size() << ")" << std::endl;
+      // The simulator's existing join loader consumes the historical
+      // enhanced_execution_info.json path.  When the legacy cuobjdump pass is
+      // deliberately skipped, publish the same NVBit-native, operand-bearing
+      // schema at that compatibility path as well.  Never overwrite a file
+      // produced by the legacy enhanced pass; the native file remains the
+      // authoritative SM120 representation and explicitly marks unavailable
+      // RFU/register metadata.
+      if (skip_enhanced_tracer) {
+        const std::string compatibility_path =
+            extrainfo_path + "/enhanced_execution_info.json";
+        std::error_code compatibility_ec;
+        if (!std::filesystem::exists(compatibility_path,
+                                     compatibility_ec) &&
+            !nvbit_static_metadata::WriteExecutionInfo(
+                compatibility_path, static_benchmark_name,
+                static_metadata_functions)) {
+          fprintf(stderr,
+                  "FATAL: failed to publish SM120 compatibility metadata %s\n",
+                  compatibility_path.c_str());
+          fflush(stderr);
+          _exit(EXIT_FAILURE);
+        }
+      }
     }
   }
   // A context can be created and destroyed without ever reaching

@@ -140,6 +140,10 @@ inline Value classify(std::string_view opcode) {
     return kUnspecified;
   }
 
+  // SM120 generic descriptor load/store.
+  if (head == "LD") return kLoad;
+  if (head == "ST") return kStore;
+
   // GLOBAL. Plain global load / store. `LDGDEPBAR` is a memory-
   // ordering barrier, not a load — exact-match `LDG` / `STG`
   // excludes it because its head token is the full `LDGDEPBAR`,

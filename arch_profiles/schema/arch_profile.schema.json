@@ -31,7 +31,7 @@
       "then": {
         "properties": {
           "compute_capability": {"const": [12, 0]},
-          "sku": {"enum": ["rtx_5060_laptop", "rtx_pro_6000_ws"]},
+          "sku": {"enum": ["rtx_5060_laptop", "rtx_5090"]},
           "bare_ldg_e_default": {"const": "unknown_typed_unavailable"},
           "build_arch_family": {
             "items": {"enum": ["sm_120", "sm_120a", "sm_120f"]}
@@ -42,7 +42,7 @@
   ],
   "properties": {
     "arch_id": {"type": "string", "enum": ["sm_86", "sm_120"], "description": "Canonical bare deploy/label arch token."},
-    "sku": {"type": "string", "enum": ["rtx_3090_ti", "rtx_5060_laptop", "rtx_pro_6000_ws"], "description": "Device-tier SKU. Cards sharing sm_120 remain explicit and are never selected from a bare CC token."},
+    "sku": {"type": "string", "enum": ["rtx_3090_ti", "rtx_5060_laptop", "rtx_5090"], "description": "Device-tier SKU. Cards sharing sm_120 remain explicit and are never selected from a bare CC token."},
     "display_name": {"type": "string"},
     "die": {"type": "string"},
     "microarchitecture": {"type": "string"},
@@ -76,6 +76,7 @@
     },
     "smsp": {"$ref": "#/$defs/smspResourcesOrGap"},
     "occupancy": {"$ref": "#/$defs/occupancyResourcesOrGap"},
+    "runtime_limits": {"$ref": "#/$defs/runtimeLimitsOrGap"},
     "dep_barriers": {"$ref": "#/$defs/depBarrierResourcesOrGap"},
     "barrier_latencies": {"$ref": "#/$defs/barrierLatencyResourcesOrGap"},
     "dual_issue": {"$ref": "#/$defs/dualIssueResourcesOrGap"},
@@ -167,6 +168,43 @@
     "occupancyResourcesOrGap": {
       "oneOf": [
         {"$ref": "#/$defs/occupancyResources"},
+        {"$ref": "#/$defs/researchGap"}
+      ]
+    },
+    "runtimeLimits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "max_resident_warps_per_sm",
+        "max_blocks_per_sm",
+        "max_threads_per_sm", "max_threads_per_block", "sm_id_upper_bound", "warp_id_upper_bound",
+        "max_shared_memory_per_sm_bytes",
+        "max_shared_memory_per_block_bytes",
+        "max_shared_memory_per_block_optin_bytes",
+        "shared_memory_carveout_kib",
+        "provenance"
+      ],
+      "properties": {
+        "max_resident_warps_per_sm": {"$ref": "#/$defs/positiveU32"},
+        "max_blocks_per_sm": {"$ref": "#/$defs/positiveU32"},
+        "max_threads_per_sm": {"$ref": "#/$defs/positiveU32"},
+        "max_threads_per_block": {"$ref": "#/$defs/positiveU32"},
+        "sm_id_upper_bound": {"$ref": "#/$defs/positiveU32"},
+        "warp_id_upper_bound": {"$ref": "#/$defs/positiveU32"},
+        "max_shared_memory_per_sm_bytes": {"$ref": "#/$defs/positiveU64"},
+        "max_shared_memory_per_block_bytes": {"$ref": "#/$defs/positiveU64"},
+        "max_shared_memory_per_block_optin_bytes": {"$ref": "#/$defs/positiveU64"},
+        "shared_memory_carveout_kib": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "integer", "minimum": 0, "maximum": 4294967295}
+        },
+        "provenance": {"type": "string", "minLength": 1}
+      }
+    },
+    "runtimeLimitsOrGap": {
+      "oneOf": [
+        {"$ref": "#/$defs/runtimeLimits"},
         {"$ref": "#/$defs/researchGap"}
       ]
     },

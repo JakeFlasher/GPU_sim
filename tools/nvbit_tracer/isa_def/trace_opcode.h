@@ -301,6 +301,25 @@ enum TraceInstrOpcode {
   OP_FHADD,
   OP_FHFMA,
   OP_FMNMX3,
+  // Observed SM120 control/uniform/TMA heads.  These remain distinct enum
+  // identities; the generic operation category in the opcode map is only a
+  // dispatch bucket and is not a mnemonic alias.
+  OP_SYNCS_SM120,
+  OP_ENDCOLLECTIVE_SM120,
+  OP_ELECT_SM120,
+  OP_USETMAXREG_SM120,
+  OP_UFSEL_SM120,
+  OP_UFSETP_SM120,
+  OP_ACQBULK_SM120,
+  OP_PREEXIT_SM120,
+  OP_ARRIVES_SM120,
+  OP_UF2I_SM120,
+  OP_UTMACMDFLUSH_SM120,
+  OP_UTMACCTL_SM120,
+  OP_FENCE_SM120,
+  OP_UTMALDG_SM120,
+  OP_UTMASTG_SM120,
+  OP_STSM_SM120,
   SASS_NUM_OPCODES /* The total number of opcodes. */
 };
 typedef enum TraceInstrOpcode sass_op_type;

@@ -1,7 +1,17 @@
+ifeq ($(origin CXX),default)
+CXX := /usr/bin/g++-14
+endif
+CXX ?= /usr/bin/g++-14
+ifeq ($(origin CC),default)
+CC := /usr/bin/gcc-14
+endif
+CC ?= /usr/bin/gcc-14
+
 .DEFAULT_GOAL := all
 CUDA_INSTALL_PATH ?= $(if $(wildcard /usr/local/cuda-13.2/bin/nvcc),/usr/local/cuda-13.2,$(shell dirname $(shell dirname $(shell command -v nvcc))))
-NVCC_CCBIN?=$(if $(wildcard /usr/bin/g++-14),/usr/bin/g++-14,$(CXX))
-NVCC?=$(CUDA_INSTALL_PATH)/bin/nvcc -ccbin=$(NVCC_CCBIN) -D_FORCE_INLINES
+NVCC_CCBIN?=/usr/bin/g++-14
+NVCC?=$(CUDA_INSTALL_PATH)/bin/nvcc
+NVCC_HOST_FLAGS=-ccbin=$(NVCC_CCBIN) -D_FORCE_INLINES -I$(CUDA_INSTALL_PATH)/include
 PTXAS?=$(CUDA_INSTALL_PATH)/bin/ptxas
 
 DEBUG_TOOL?=0
@@ -10,7 +20,11 @@ DEBUG_TOOL?=0
 # The parent Makefile exports these values, but invoking this Makefile directly
 # previously fell through to the host protobuf (currently 7.36) and paired it
 # with the checked-in 7.34 generated code.
-PB_PREFIX ?= $(abspath ../../../.toolchain/pb)
+# `make -C tools/nvbit_tracer/tracer_tool` changes CURDIR before expansion;
+# the old bare `../../../.toolchain/pb` therefore resolved to `/root/.toolchain`
+# on this checkout and silently selected the host protobuf metadata.  Anchor the
+# pinned protobuf runtime to this Makefile's directory instead.
+PB_PREFIX ?= $(abspath $(CURDIR)/../../../.toolchain/pb)
 PKG_CONFIG ?= pkg-config
 PKG_CONFIG_FLAGS ?= --define-prefix
 PKG_CONFIG_PATH ?= $(PB_PREFIX)/lib/pkgconfig
@@ -48,7 +62,7 @@ endif
 NVBIT_PATH=../nvbit_release/core
 
 LIBS=-L$(NVBIT_PATH) -lnvbit
-NVCC_PATH=-L$(CUDA_INSTALL_PATH)/lib64
+NVCC_PATH=-L$(CUDA_INSTALL_PATH)/lib64 -I$(CUDA_INSTALL_PATH)/include
 
 # Protobuf 34.x depends on Abseil; resolve the full transitive closure via
 # pkg-config so the link line follows whatever the host protobuf runtime
@@ -63,8 +77,8 @@ NVCC_PATH=-L$(CUDA_INSTALL_PATH)/lib64
 # or an unresolved-symbol crash at LD_PRELOAD time.
 PKG_CONFIG?=pkg-config
 PKG_CONFIG_FLAGS?=--define-prefix
-PROTOBUF_CFLAGS:=$(shell $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --cflags protobuf 2>/dev/null)
-PROTOBUF_LIBS:=$(shell $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --libs protobuf 2>/dev/null)
+PROTOBUF_CFLAGS:=$(shell PKG_CONFIG_PATH="$(PB_PREFIX)/lib/pkgconfig" $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --cflags protobuf 2>/dev/null)
+PROTOBUF_LIBS:=$(shell PKG_CONFIG_PATH="$(PB_PREFIX)/lib/pkgconfig" $(PKG_CONFIG) $(PKG_CONFIG_FLAGS) --libs protobuf 2>/dev/null)
 ifeq ($(PROTOBUF_CFLAGS),)
 $(error pkg-config could not resolve protobuf compile flags; set PKG_CONFIG or PKG_CONFIG_PATH for the installed protobuf)
 endif
@@ -72,11 +86,18 @@ ifeq ($(PROTOBUF_LIBS),)
 $(error pkg-config could not resolve 'protobuf'. Install protobuf-dev (or equivalent) and ensure $(PKG_CONFIG) can find its .pc file. protobuf 34.x pulls in ~80 Abseil libs that bare '-lprotobuf' does not expose — silently falling back would produce a broken tracer_tool.so.)
 endif
 
+# nvcc 13.2 does not accept the host-only `-pthread` spelling as a direct
+# compiler option (it must be forwarded to g++).  pkg-config emits that flag
+# on this host, so normalize it once for every nvcc compile/link invocation;
+# the host-only CXX rules continue to use the unmodified pkg-config values.
+PROTOBUF_CFLAGS_NVCC := $(subst -pthread,-Xcompiler -pthread,$(PROTOBUF_CFLAGS))
+PROTOBUF_LIBS_NVCC := $(subst -pthread,-Xcompiler -pthread,$(PROTOBUF_LIBS))
+
 # Private compiler flags. Do not expose this as generic `INCLUDES`: command-line
 # variables propagate to the traces_enhanced sub-make and can replace that
 # build's generated-header paths. pkg-config --define-prefix relocates the
 # copied .toolchain/pb metadata to the current checkout.
-TRACER_INCLUDES=-I$(NVBIT_PATH) $(PROTOBUF_CFLAGS)
+TRACER_INCLUDES=-I$(NVBIT_PATH) $(PROTOBUF_CFLAGS_NVCC)
 
 SOURCES=$(wildcard *.cu)
 
@@ -130,8 +151,10 @@ TRACE_PRINTER = trace_printer
 
 all: traces_enhanced $(NVBIT_TOOL) trace_printer
 
-$(NVBIT_TOOL): $(OBJECTS) $(HOST_OBJECTS) $(NVBIT_PATH)/libnvbit.a traces_enhanced
-	$(NVCC) -arch=$(ARCH) $(OPTFLAGS) $(OBJECTS) $(HOST_OBJECTS) $(TRACES_ENHANCED_OBJ) $(TRACES_ENHANCED_PROTOCOL_BUFFER_OBJ) $(LIBS) $(NVCC_PATH) -Xlinker --no-as-needed -lcuda -Xlinker --as-needed -lcudart_static $(PROTOBUF_LIBS) -Xlinker -z -Xlinker defs -shared -o $@
+NVBIT_CHANNEL_HEADER=../nvbit_release/core/utils/channel.hpp
+
+$(NVBIT_TOOL): $(OBJECTS) $(HOST_OBJECTS) $(NVBIT_PATH)/libnvbit.a $(NVBIT_CHANNEL_HEADER) traces_enhanced
+	$(NVCC) $(NVCC_HOST_FLAGS) -arch=$(ARCH) $(OPTFLAGS) $(OBJECTS) $(HOST_OBJECTS) $(TRACES_ENHANCED_OBJ) $(TRACES_ENHANCED_PROTOCOL_BUFFER_OBJ) $(LIBS) $(NVCC_PATH) -Xlinker --no-as-needed -lcuda -Xlinker --as-needed -lcudart_static $(PROTOBUF_LIBS_NVCC) -Xlinker -z -Xlinker defs -shared -o $@
 
 # allocation_registry.cc is host-only C++ (no CUDA / NVBit / nvcc).
 # Build it with g++ + -fPIC so it can link into the shared tracer .so
@@ -187,14 +210,14 @@ TRACES_ENHANCED_PB_HEADERS = \
 	$(TRACES_ENHANCED_PROTOCOL_BUFFER_DIR)/include/warp.pb.h
 
 %.o: %.cu common.h $(TRACES_ENHANCED_PB_HEADERS) | traces_enhanced
-	$(NVCC) -dc -c -std=c++20 $(TRACER_INCLUDES) -Xptxas -cloning=no -Xcompiler -Wall -arch=$(ARCH) $(OPTFLAGS) -Xcompiler -fPIC $< -o $@
+	$(NVCC) $(NVCC_HOST_FLAGS) -dc -c -std=c++20 $(TRACER_INCLUDES) -Xptxas -cloning=no -Xcompiler -Wall -arch=$(ARCH) $(OPTFLAGS) -Xcompiler -fPIC $< -o $@
 
-$(TRACER_TOOL_OBJECT): Makefile tracer_tool.cu common.h $(TRACES_ENHANCED_PB_HEADERS) \
+$(TRACER_TOOL_OBJECT): Makefile tracer_tool.cu common.h $(NVBIT_CHANNEL_HEADER) $(TRACES_ENHANCED_PB_HEADERS) \
 	active_launch_gate.h module_origin_resolver.h phase_record_writer.h phase_record_path.h ../metric_extractor/tier2_sha256.h \
 	../traces_enhanced/src/traced_execution.h ../traces_enhanced/src/traced_kernel.h \
 	../traces_enhanced/src/traced_instruction.h ../traces_enhanced/src/traced_operand.h \
 	../traces_enhanced/src/control_bits.h ../traces_enhanced/src/register_usage.h | traces_enhanced
-	$(NVCC) -dc -c -MMD -MP -MF $(@:.o=.d) -MT $@ -std=c++20 $(TRACER_INCLUDES) -Xptxas -cloning=no -Xcompiler -Wall -arch=$(ARCH) $(OPTFLAGS) -Xcompiler -fPIC tracer_tool.cu -o $@
+	$(NVCC) $(NVCC_HOST_FLAGS) -dc -c -MMD -MP -MF $(@:.o=.d) -MT $@ -std=c++20 $(TRACER_INCLUDES) -Xptxas -cloning=no -Xcompiler -Wall -arch=$(ARCH) $(OPTFLAGS) -Xcompiler -fPIC tracer_tool.cu -o $@
 
 # Compatibility target for callers that explicitly request tracer_tool.o.  The
 # live link uses TRACER_TOOL_OBJECT, so this copy cannot contaminate another
@@ -202,8 +225,8 @@ $(TRACER_TOOL_OBJECT): Makefile tracer_tool.cu common.h $(TRACES_ENHANCED_PB_HEA
 tracer_tool.o: $(TRACER_TOOL_OBJECT)
 	cp $< $@
 
-$(INJECT_FUNCS_OBJECT): inject_funcs.cu Makefile common.h $(TRACES_ENHANCED_PB_HEADERS) | traces_enhanced
-	$(NVCC) $(TRACER_INCLUDES) $(MAXRREGCOUNT_FLAG) -Xptxas -astoolspatch --keep-device-functions -MMD -MP -MF $(@:.o=.d) -MT $@ -arch=$(ARCH) -Xcompiler -Wall -Xcompiler -fPIC -c $< -o $@
+$(INJECT_FUNCS_OBJECT): inject_funcs.cu Makefile common.h $(NVBIT_CHANNEL_HEADER) $(TRACES_ENHANCED_PB_HEADERS) | traces_enhanced
+	$(NVCC) $(NVCC_HOST_FLAGS) $(TRACER_INCLUDES) $(MAXRREGCOUNT_FLAG) -Xptxas -astoolspatch --keep-device-functions -MMD -MP -MF $(@:.o=.d) -MT $@ -arch=$(ARCH) -Xcompiler -Wall -Xcompiler -fPIC -c $< -o $@
 
 # Compatibility target for callers that explicitly request inject_funcs.o.
 inject_funcs.o: $(INJECT_FUNCS_OBJECT)
@@ -217,7 +240,7 @@ traces_enhanced:
 # Build the trace_printer executable
 # First compile trace_printer's code into a shared library
 trace_printer: traces_enhanced
-	$(NVCC) -std=c++20 $(TRACER_INCLUDES) $(OPTFLAGS) -o $(TRACE_PRINTER) $(TRACES_ENHANCED_OBJ) $(TRACES_ENHANCED_PROTOCOL_BUFFER_OBJ) trace_printer.cc $(PROTOBUF_LIBS)
+	$(NVCC) $(NVCC_HOST_FLAGS) -std=c++20 $(TRACER_INCLUDES) $(OPTFLAGS) -o $(TRACE_PRINTER) $(TRACES_ENHANCED_OBJ) $(TRACES_ENHANCED_PROTOCOL_BUFFER_OBJ) trace_printer.cc $(PROTOBUF_LIBS_NVCC)
 
 clean:
 	rm -f *.so *.o *.d trace_printer $(PHASE_CLASSIFIER_TEST_BIN) $(MEMORY_OP_CLASS_TEST_BIN) $(MEMORY_OP_ACCESS_KIND_TEST_BIN) $(ALLOCATION_REGISTRY_TEST_BIN) $(EXCLUSION_AGGREGATOR_TEST_BIN) $(PATH_RESOLVER_TEST_BIN) $(ACTIVE_LAUNCH_GATE_TEST_BIN) $(MODULE_ORIGIN_RESOLVER_TEST_BIN) $(PHASE_RECORD_WRITER_TEST_BIN)

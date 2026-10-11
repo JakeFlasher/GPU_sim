@@ -40,7 +40,7 @@ runbook from a stale post-checkout worktree.
 All evidence claims produced by this harness are bound by the declared
 architecture evidence statuses per `AGENTS.md`:
 `Offline-verified`, `Verified-live-sm_86`, `Verified-live-sm_120`, and
-`Cross-arch-verified`. The active SM120 live target is the cloud RTX PRO 6000
+`Cross-arch-verified`. The active SM120 live target is the cloud RTX 5090
 Workstation; historical RTX 5060 laptop records remain separate SKU evidence.
 The
 producer-side helpers `dual_workload_pairing_index.py`,
@@ -122,9 +122,9 @@ EXACTLY twice (warmup branch + timed branch). Workloads outside this
 2-producer set still lack the hook and will deterministically fail
 dual-source reconciliation; extending the hook to additional roster
 entries remains a queued side issue. The v6+v7 sm_86 leg is
-`Verified-live-sm_86`; the matching sm_120 leg on the RTX PRO 6000 Workstation is
+`Verified-live-sm_86`; the matching sm_120 leg on the RTX 5090 is
 deferred to the step-by-step cloud manual at
-`/home/jakeshea/sm120_rtx_pro_6000_capture/MANUAL.md`. It is a fresh cloud
+`/root/sm120_rtx_5090_capture/MANUAL.md`. It is a fresh cloud
 vertical, not a 5060-laptop replay or an RLCR workflow.
 
 ## Layout

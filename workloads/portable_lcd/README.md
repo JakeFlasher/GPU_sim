@@ -4,7 +4,7 @@ A small, curated workload suite of real-world AI/HPC kernels whose
 architectural feature set is the **lowest common denominator** across
 NVIDIA Ampere `sm_86` (the local RTX 3090 Ti smoke-test host on this
 branch), Hopper `sm_90a` (the cloud H100 target), and workstation
-Blackwell `sm_120` (the cloud RTX PRO 6000 Blackwell target).
+Blackwell `sm_120` (the cloud GeForce RTX 5090 target).
 
 Single-source kernels compile via a single `-arch=compute_80` PTX
 baseline plus three real-arch SASS slices (`sm_86` + `sm_90` +
@@ -117,7 +117,7 @@ slip into a kernel Makefile.
 The forward-compatibility intent is **device-family based**: the
 `sm_90` cubin is intended to run on H100-class devices (CC 9.0,
 including `sm_90a` variants) without using any `sm_90a`-only
-features; the `sm_120` cubin is intended to run on RTX PRO 6000
+features; the `sm_120` cubin is intended to run on RTX 5090
 Blackwell (CC 12.0, including `sm_120a` / `sm_120f` variants)
 without using any architecture-conditional features. This suite
 does not claim "forward compatibility" beyond device-family intent.

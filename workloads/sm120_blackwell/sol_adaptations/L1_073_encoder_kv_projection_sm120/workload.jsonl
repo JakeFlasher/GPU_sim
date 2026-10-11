@@ -1,0 +1,1 @@
+{"uuid": "sm120-adapter-L1_073_encoder_kv_projection_sm120", "axes": {"batch_size": 1, "encoder_seq_len": 4}, "inputs": {"encoder_hidden_states": {"type": "random"}, "norm_weight": {"type": "random"}, "k_proj_weight": {"type": "random"}, "v_proj_weight": {"type": "random"}, "eps": {"type": "scalar", "value": 1e-06}}, "tolerance": {"max_atol": 0.00018, "max_rtol": 0.01}}

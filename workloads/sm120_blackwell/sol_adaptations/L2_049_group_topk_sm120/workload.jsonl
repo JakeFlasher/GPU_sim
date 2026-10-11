@@ -1,0 +1,1 @@
+{"uuid": "sm120-adapter-L2-049", "axes": {"num_tokens": 128}, "inputs": {"hidden_states": {"type": "random"}, "weight": {"type": "random"}, "expert_bias": {"type": "random"}, "routed_scaling_factor": {"type": "scalar", "value": 2.5}}, "tolerance": {"max_atol": 0.63, "max_rtol": 0.01, "required_match_ratio": 0.98}}

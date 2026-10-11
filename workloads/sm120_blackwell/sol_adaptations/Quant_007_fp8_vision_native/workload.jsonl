@@ -1,0 +1,1 @@
+{"uuid": "sm120-native-Quant_007_fp8_vision_native", "axes": {"seq_len": 64}, "inputs": {"hidden_states": {"type": "random"}, "qkv_weight": {"type": "random"}, "qkv_bias": {"type": "random"}}, "tolerance": {"max_atol": 0.005, "max_rtol": 0.02, "required_matched_ratio": 0.99}}

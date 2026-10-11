@@ -86,7 +86,10 @@ use crate::issue::{
     validate_memory_service_candidates,
 };
 use crate::metrics::TraceMetrics;
-use crate::program::{FunctionSchedule, OpClass, PipelineClass};
+use crate::issue::Sm120AlphaConfig;
+use crate::program::{
+    sm120_alpha_scalar_control_stall_suppressed, FunctionSchedule, OpClass, PipelineClass,
+};
 use crate::sass_operands::{FixedLatencyOperandStatus, SassRegister, SassSourceOperand};
 use crate::system::{
     DramBw, DramStats, L1PayloadAdmissionEvent, L2SourceSplit, SystemError,
@@ -313,25 +316,43 @@ pub enum ReplayError {
         max_bytes_per_sm: u64,
     },
     #[error(
-        "{path}: traced sm_id {sm_id} is outside architecture {arch} SKU {sku:?} range 0..{sm_count}"
+        "kernel {kernel_id} requires {bytes_per_cta} shared-memory bytes per CTA, exceeding architecture {arch} per-block opt-in limit {max_bytes_per_block}"
+    )]
+    CtaSharedMemoryBlockLimitExceeded {
+        kernel_id: i32,
+        arch: ArchId,
+        bytes_per_cta: u64,
+        max_bytes_per_block: u64,
+    },
+    #[error(
+        "kernel {kernel_id} block has {threads_per_cta} threads, exceeding architecture {arch} per-block thread limit {max_threads_per_block}"
+    )]
+    CtaThreadCapacityExceeded {
+        kernel_id: i32,
+        arch: ArchId,
+        threads_per_cta: u64,
+        max_threads_per_block: u32,
+    },
+    #[error(
+        "{path}: traced sm_id {sm_id} is outside architecture {arch} SKU {sku:?} identifier range 0..{sm_id_upper_bound}"
     )]
     SmIdOutOfRange {
         path: PathBuf,
         sm_id: i32,
         arch: ArchId,
         sku: Sku,
-        sm_count: u32,
+        sm_id_upper_bound: u32,
     },
     #[cfg(feature = "campaign")]
     #[error(
-        "trace_sampling per_sm_slot_map block {launch_index} declares sm_id {sm_id} outside architecture {arch} SKU {sku:?} range 0..{sm_count}"
+        "trace_sampling per_sm_slot_map block {launch_index} declares sm_id {sm_id} outside architecture {arch} SKU {sku:?} identifier range 0..{sm_id_upper_bound}"
     )]
     SamplingSmIdOutOfRange {
         launch_index: u64,
         sm_id: u64,
         arch: ArchId,
         sku: Sku,
-        sm_count: u32,
+        sm_id_upper_bound: u32,
     },
     #[cfg(feature = "campaign")]
     #[error(
@@ -942,6 +963,8 @@ pub struct FastFrontierSummary {
     pub macro_dispatches: u64,
     pub maximum_exact_final_cycle: u64,
     pub maximum_summarized_final_cycle: u64,
+    pub front_end_static_lines: u64,
+    pub front_end_penalty_cycles: u64,
     pub terminal_state_matches: bool,
     /// Full-trace denominator for selective compression. Candidate records
     /// are those inside a scalar segment; reified records are candidates that
@@ -958,6 +981,300 @@ pub struct FastFrontierCoverage {
     pub summarized_records: u64,
     pub reified_records: u64,
     pub uncovered_records: u64,
+}
+
+struct FastDynamicWarp<'a> {
+    warp: &'a WarpReplay,
+    masks: &'a [u32],
+    next: usize,
+    slot: Option<&'a crate::program::IssueSlot>,
+    ready: u64,
+    completion: u64,
+    waiting_at_barrier: bool,
+    barrier_arrival: u64,
+    done: bool,
+    registers: Vec<(SassRegister, u32, u64)>,
+    barriers: [u64; 6],
+}
+
+fn fast_cycle_add(base: u64, delta: u64) -> Result<u64, ReplayError> {
+    base.checked_add(delta).ok_or_else(|| ReplayError::FastFrontier {
+        detail: "fast replay cycle overflow".to_owned(),
+    })
+}
+
+fn fast_register_overlap(left: SassRegister, right: SassRegister) -> bool {
+    if left.file() != right.file() { return false; }
+    let (Some(left), Some(right)) = (left.index().map(|i| (u32::from(i), u32::from(left.span_registers()))),
+                                    right.index().map(|i| (u32::from(i), u32::from(right.span_registers())))) else {
+        return false;
+    };
+    left.0 < right.0 + right.1 && right.0 < left.0 + left.1
+}
+
+fn fast_register_mask(register: SassRegister, mask: u32) -> u32 {
+    match register.file() {
+        crate::sass_operands::SassRegisterFile::Uniform
+        | crate::sass_operands::SassRegisterFile::UniformPredicate if mask != 0 => u32::MAX,
+        _ => mask,
+    }
+}
+
+fn fast_pipeline_index(pipeline: PipelineClass) -> usize {
+    match pipeline {
+        PipelineClass::ScalarAlu { .. } => 0,
+        PipelineClass::Tensor { .. } => 1,
+        PipelineClass::Sfu { .. } => 2,
+        _ => 3,
+    }
+}
+
+impl FastDynamicWarp<'_> {
+    fn ready_at(&self, dispatch: u64, pipes: &[u64; 4], pending: &[u64], rearm: u64)
+        -> Option<u64>
+    {
+        if self.done || self.waiting_at_barrier { return None; }
+        let slot = self.slot?;
+        let mask = self.masks[self.next];
+        let mut ready = self.ready.max(dispatch);
+        if mask != 0 {
+            ready = ready.max(pipes[fast_pipeline_index(slot.pipeline_class())]);
+            let waits = slot.control().wait_mask().bits()
+                | slot.ordinary_dependency_wait_mask().bits();
+            for (index, &clear) in self.barriers.iter().enumerate() {
+                if waits & (1 << index) != 0 { ready = ready.max(clear); }
+            }
+            if let Some(projection) = slot.fixed_latency_operands().projected() {
+                let sources = projection.sources().iter().filter_map(|source| match source {
+                    SassSourceOperand::Register(operand) => Some(operand.register()),
+                    _ => None,
+                });
+                // RAW and WAW are both completion dependencies. Include predicate
+                // inputs, ignore constant registers, and preserve lane identity.
+                for register in sources.chain(projection.predicate_sources().iter().map(|o| o.register()))
+                    .chain(projection.destinations().iter().map(|o| o.register()))
+                {
+                    let lanes = fast_register_mask(register, mask);
+                    for &(prior, prior_lanes, done) in &self.registers {
+                        if lanes & prior_lanes != 0 && fast_register_overlap(prior, register) {
+                            ready = ready.max(done);
+                        }
+                    }
+                }
+            }
+            if let PipelineClass::ScalarAlu { in_flight_capacity, .. } = slot.pipeline_class() {
+                // Candidate queries must never remove another candidate's pending
+                // completions at a speculative future timestamp.
+                while pending.iter().filter(|&&done| done > ready).count() >= in_flight_capacity.max(1) as usize {
+                    ready = pending.iter().copied().filter(|&done| done > ready).min()?;
+                }
+            }
+            if slot.op_class() == OpClass::BlockBarrier { ready = ready.max(rearm); }
+        }
+        Some(ready)
+    }
+}
+
+/// Event-driven SM120 fast replay. Same-cycle picks see one immutable resource
+/// snapshot; idle time jumps to the exact next known readiness. The modulo-four
+/// SMSP assignment is the existing alpha assumption, not observed wiring.
+fn fast_dynamic_sm_frontier(
+    blocks: &[BlockReplay],
+    schedule: &FunctionSchedule,
+    masks: &BTreeMap<(i64, i32), Vec<u32>>,
+    params: &IssueModelParams,
+    residency: SharedMemoryResidency,
+) -> Result<(u64, u64, u64, u64), ReplayError> {
+    struct BlockState { first: usize, end: usize, slots: u64, rearm: u64 }
+    let mut warps = Vec::new();
+    let mut block_states = Vec::new();
+    for block in blocks {
+        let first = warps.len();
+        let mut slots = 0u64;
+        for warp in &block.warps {
+            slots |= 1u64.checked_shl(warp.warp_slot as u32).ok_or_else(|| ReplayError::FastFrontier {
+                detail: "fast warp slot exceeds its resident bitmap".to_owned(),
+            })?;
+            let lane_masks = masks.get(&(block.launch_index, warp.warp_slot)).ok_or_else(|| ReplayError::FastFrontier {
+                detail: "fast warp lane masks are missing".to_owned(),
+            })?;
+            if lane_masks.len() != warp.insts.len() {
+                return Err(ReplayError::FastFrontier { detail: "fast warp lane-mask length mismatch".to_owned() });
+            }
+            let slot = warp.insts.first().map(|inst| schedule.issue_slot(u64::from(inst.pc))
+                .ok_or_else(|| ReplayError::FastFrontier { detail: "fast schedule PC missing".to_owned() })).transpose()?;
+            warps.push(FastDynamicWarp {
+                warp, masks: lane_masks, next: 0, slot, ready: 0, completion: 0,
+                waiting_at_barrier: false, barrier_arrival: 0, done: slot.is_none(),
+                registers: Vec::new(), barriers: [0; 6],
+            });
+        }
+        block_states.push(BlockState { first, end: warps.len(), slots, rearm: 0 });
+    }
+    let mut active: Vec<usize> = Vec::new();
+    let mut next_block = 0;
+    let mut active_slots = 0u64;
+    let mut dispatch = [0u64; 4];
+    let mut pipes = [[0u64; 4]; 4];
+    let mut pending: [Vec<u64>; 4] = std::array::from_fn(|_| Vec::new());
+    let mut held = [None; 4];
+    let mut barrier_server = 0u64;
+    let barrier_rearm = schedule.by_pc.values().filter_map(|slot| match slot.pipeline_class() {
+        PipelineClass::Barrier { generation_rearm_cycles, .. } => Some(generation_rearm_cycles),
+        _ => None,
+    }).max().unwrap_or(0);
+    let mut now = 0u64;
+    let mut frontier = 0u64;
+    let (mut memory_records, mut async_records, mut barrier_records) = (0u64, 0u64, 0u64);
+    while next_block < blocks.len() || !active.is_empty() {
+        let mut next_event = None;
+        active.retain(|&block| {
+            let state = &block_states[block];
+            let members = &warps[state.first..state.end];
+            if members.iter().all(|w| w.done) {
+                let end = members.iter().map(|w| w.completion).max().unwrap_or(now);
+                if end <= now { active_slots &= !state.slots; return false; }
+                next_event = Some(next_event.map_or(end, |prior: u64| prior.min(end)));
+            }
+            true
+        });
+        // Admission reuses traced slots only after the prior CTA has retired.
+        // Apply the same launch-order, warp, CTA and shared-memory ceilings as
+        // full replay; do not admit every traced block simultaneously.
+        while next_block < blocks.len() {
+            let state = &block_states[next_block];
+            let occupied = active_slots | state.slots;
+            let shared_fits = (active.len() as u64 + 1).checked_mul(residency.bytes_per_cta())
+                .is_some_and(|bytes| bytes <= residency.max_bytes_per_sm());
+            if active.len() >= params.max_resident_blocks_per_sm() as usize
+                || occupied.count_ones() > params.max_resident_warps_per_sm()
+                || active_slots & state.slots != 0 || !shared_fits
+            { break; }
+            for warp in &mut warps[state.first..state.end] { warp.ready = now; warp.completion = now; }
+            active_slots = occupied;
+            active.push(next_block);
+            next_block += 1;
+        }
+        if active.is_empty() {
+            if next_block == blocks.len() { break; }
+            return Err(ReplayError::FastFrontier { detail: "fast CTA exceeds resident resource limits".to_owned() });
+        }
+        for completions in &mut pending { completions.retain(|&done| done > now); }
+        let mut picks = [None; 4];
+        for &block in &active {
+            let state = &block_states[block];
+            for index in state.first..state.end {
+                let warp = &warps[index];
+                let smsp = warp.warp.warp_slot as usize % 4;
+                let Some(ready) = warp.ready_at(dispatch[smsp], &pipes[smsp], &pending[smsp], state.rearm) else { continue };
+                if ready > now {
+                    next_event = Some(next_event.map_or(ready, |prior| prior.min(ready)));
+                } else if picks[smsp].is_none() || held[smsp] == Some(index)
+                    || (picks[smsp] != held[smsp] && picks[smsp].is_some_and(|prior| index > prior))
+                { picks[smsp] = Some(index); }
+            }
+        }
+        if picks.iter().all(Option::is_none) {
+            now = next_event.filter(|&next| next > now).ok_or_else(|| ReplayError::FastFrontier {
+                detail: "fast replay cannot progress: incomplete CTA barrier or schedule".to_owned(),
+            })?;
+            continue;
+        }
+        // Every pick below issues at `now`; committing one partition cannot
+        // move the timestamp seen by another partition's already selected pick.
+        for (smsp, pick) in picks.into_iter().enumerate() {
+            let Some(index) = pick else { continue };
+            let warp = &mut warps[index];
+            let inst = warp.warp.insts[warp.next];
+            let slot = warp.slot.ok_or_else(|| ReplayError::FastFrontier { detail: "fast schedule PC missing".to_owned() })?;
+            let mask = warp.masks[warp.next];
+            let pipeline = slot.pipeline_class();
+            let control = slot.control();
+            let interval = pipeline.initiation_interval_cycles().unwrap_or(1).max(1);
+            let latency = match pipeline {
+                PipelineClass::ScalarAlu { latency_cycles, .. } => latency_cycles,
+                _ => 1,
+            };
+            let issued_end = fast_cycle_add(now, 1)?;
+            dispatch[smsp] = issued_end;
+            frontier = frontier.max(issued_end);
+            let projection = slot.fixed_latency_operands().projected();
+            let done = if mask == 0 { issued_end } else { fast_cycle_add(now, latency)? };
+            if mask != 0 {
+                if !matches!(pipeline, PipelineClass::Barrier { .. } | PipelineClass::Branch { .. }) {
+                    pipes[smsp][fast_pipeline_index(pipeline)] = fast_cycle_add(now, interval)?;
+                }
+                if matches!(pipeline, PipelineClass::ScalarAlu { .. }) { pending[smsp].push(done); }
+                // Completed writes no longer constrain future reads. Partial
+                // predication overwrites only executing lanes, not the whole register.
+                warp.registers.retain(|&(_, _, ready)| ready > now);
+                if let Some(projection) = projection {
+                    for destination in projection.destinations() {
+                        let register = destination.register();
+                        if register.is_constant() { continue; }
+                        let lanes = fast_register_mask(register, mask);
+                        for (prior, prior_lanes, _) in &mut warp.registers {
+                            if *prior == register { *prior_lanes &= !lanes; }
+                        }
+                        warp.registers.retain(|&(_, lanes, _)| lanes != 0);
+                        warp.registers.push((register, lanes, done));
+                    }
+                }
+            }
+            // Share Flat-mode dependency latency arithmetic with full replay.
+            // Cache queues and native async visibility are still not modeled here.
+            let write = (mask != 0 && slot.op_class() != OpClass::AsyncCopyCommit)
+                .then_some(control.write_barrier()).flatten();
+            if let Some(ready) = crate::issue::data_ready_time(inst.kind, &[], now, params, None, write, false)? {
+                if let Some(barrier) = write { warp.barriers[barrier.index()] = warp.barriers[barrier.index()].max(ready); }
+            }
+            if mask != 0 && let Some(barrier) = control.read_barrier() {
+                warp.barriers[barrier.index()] = warp.barriers[barrier.index()].max(fast_cycle_add(now, params.read_barrier_latency())?);
+            }
+            let suppress = mask != 0 && projection.is_some()
+                && sm120_alpha_scalar_control_stall_suppressed(slot.opcode_text());
+            let stall = if suppress { 1 } else { u64::from(control.stall()).max(1) };
+            warp.ready = fast_cycle_add(now, stall.max(if control.yield_flag() { 2 } else { 1 }))?;
+            warp.completion = warp.completion.max(done);
+            match inst.kind {
+                AccessKind::NonMemory | AccessKind::PredicatedOffMemory => {}
+                AccessKind::GlobalAsyncCopy { .. } => { memory_records += 1; async_records += 1; }
+                _ => memory_records += 1,
+            }
+            warp.next += 1;
+            if slot.op_class() == OpClass::BlockBarrier && mask != 0 {
+                barrier_records += 1;
+                barrier_server = fast_cycle_add(barrier_server.max(now), interval)?;
+                warp.barrier_arrival = barrier_server;
+                warp.waiting_at_barrier = true;
+            } else if warp.next == warp.warp.insts.len() { warp.done = true; }
+            warp.slot = warp.warp.insts.get(warp.next).map(|next| schedule.issue_slot(u64::from(next.pc))
+                .ok_or_else(|| ReplayError::FastFrontier { detail: "fast schedule PC missing".to_owned() })).transpose()?;
+            held[smsp] = (!warp.done && !warp.waiting_at_barrier && !control.yield_flag()).then_some(index);
+        }
+        for &block in &active {
+            let state = &mut block_states[block];
+            let members = &mut warps[state.first..state.end];
+            if members.iter().any(|w| w.waiting_at_barrier)
+                && members.iter().all(|w| w.done || w.waiting_at_barrier)
+            {
+                let arrival = members.iter().filter(|w| w.waiting_at_barrier)
+                    .map(|w| w.barrier_arrival).max().unwrap_or(now);
+                let release = fast_cycle_add(arrival, 1)?;
+                state.rearm = fast_cycle_add(arrival, barrier_rearm)?;
+                for warp in members.iter_mut().filter(|w| w.waiting_at_barrier) {
+                    warp.waiting_at_barrier = false;
+                    warp.ready = warp.ready.max(release);
+                    warp.completion = warp.completion.max(release);
+                    warp.done = warp.next == warp.warp.insts.len();
+                }
+                frontier = frontier.max(release);
+            }
+        }
+        now = fast_cycle_add(now, 1)?;
+    }
+    frontier = frontier.max(warps.iter().map(|w| w.completion).max().unwrap_or(0));
+    Ok((frontier, memory_records, async_records, barrier_records))
 }
 
 fn fast_scalar_segments(
@@ -1227,6 +1544,8 @@ pub fn fast_frontier_for_trace(
         macro_dispatches: 0,
         maximum_exact_final_cycle: 0,
         maximum_summarized_final_cycle: 0,
+        front_end_static_lines: 0,
+        front_end_penalty_cycles: 0,
         terminal_state_matches: true,
         coverage: FastFrontierCoverage {
             trace_records,
@@ -1477,6 +1796,149 @@ pub fn fast_frontier_for_trace(
         .ok_or_else(|| ReplayError::FastFrontier {
             detail: "candidate coverage exceeds trace record count".to_owned(),
         })?;
+    Ok(summary)
+}
+
+/// Build the SM120 alpha stage/event prediction without walking the full
+/// memory/event queue.  This complementary diagnostic consumes the compact
+/// native trace, static schedule classes, dynamic per-warp dependencies,
+/// modeled SMSP placement and CTA barriers. Ordinary memory dependencies use
+/// the shared Flat-latency arithmetic; cache service and native async visibility
+/// remain outside this path.
+///
+/// Unlike the older SM86 selective-scalar path this function accepts one
+/// launch from a multi-launch TraceDir.  Each launch is attributed by its own
+/// `KernelLoc`, so the caller can report a complete capture without treating
+/// capture-wide order as a timing oracle.
+pub fn sm120_fast_stage_for_trace(
+    td: &TraceDir,
+    loc: &KernelLoc<'_>,
+    schedule: &FunctionSchedule,
+    arch_card: &ArchCard,
+    alpha_config: Sm120AlphaConfig,
+) -> Result<FastFrontierSummary, ReplayError> {
+    let placement = PlacementConfig::from_arch_card(arch_card, schedule.arch)?;
+    require_trace_architecture(td, schedule.arch)?;
+    let extracted = extract_per_sm_blocks(td, loc, schedule, placement, false)?;
+    let params = IssueModelParams::from_card_alpha(ArchId::Sm120, arch_card, alpha_config)?;
+    let mut masks = BTreeMap::new();
+    for (launch_index, block) in td.validated_threadblocks_in_launch_order(loc)? {
+        for warp in block.warps() {
+            let Some(slot) = warp.instructions().find_map(|inst| inst.warpid_sm()) else { continue };
+            let lane_masks = warp.instructions().map(|inst| {
+                if inst.predicate_mask_present() { inst.predicate_on_mask() }
+                else if inst.active_mask_present() { inst.active_mask() }
+                else { u32::MAX }
+            }).collect::<Vec<_>>();
+            masks.insert((launch_index, slot), lane_masks);
+        }
+    }
+    let trace_records = extracted.records_seen;
+    let mut summary = FastFrontierSummary {
+        contract: "sm120_fast_stage_event_v1",
+        architecture: schedule.arch.token(),
+        blocks_seen: 0,
+        warps_seen: 0,
+        eligible_warps: 0,
+        candidate_regions: 0,
+        certified_regions: 0,
+        reified_regions: 0,
+        candidate_instructions: trace_records,
+        collapsed_instructions: 0,
+        exact_execution_steps: trace_records,
+        summarized_execution_steps: 0,
+        macro_dispatches: 0,
+        maximum_exact_final_cycle: 0,
+        maximum_summarized_final_cycle: 0,
+        front_end_static_lines: 0,
+        front_end_penalty_cycles: 0,
+        // This summary is intentionally not an exact-state certificate.  A
+        // false value prevents downstream users from reading it as the old
+        // SM86 scalar equivalence contract.
+        terminal_state_matches: false,
+        coverage: FastFrontierCoverage {
+            trace_records,
+            candidate_records: trace_records,
+            summarized_records: 0,
+            reified_records: trace_records,
+            uncovered_records: 0,
+        },
+        refusal_reasons: BTreeMap::new(),
+    };
+
+    let mut memory_records = 0_u64;
+    let mut async_records = 0_u64;
+    let mut barrier_records = 0_u64;
+    let mut resource_class_counts: BTreeMap<String, u64> = BTreeMap::new();
+    let add = |counter: &'static str, value: &mut u64, amount: u64| {
+        *value = value.checked_add(amount).ok_or_else(|| ReplayError::FastFrontier {
+            detail: format!("{counter} overflows u64"),
+        })?;
+        Ok::<(), ReplayError>(())
+    };
+
+    for blocks in extracted.per_sm_blocks.values() {
+        add("blocks_seen", &mut summary.blocks_seen, u64::try_from(blocks.len()).map_err(|_| ReplayError::FastFrontier { detail: "block count exceeds u64".to_owned() })?)?;
+        for block in blocks {
+            add("warps_seen", &mut summary.warps_seen, u64::try_from(block.warps.len()).unwrap_or(u64::MAX))?;
+            add("eligible_warps", &mut summary.eligible_warps, u64::try_from(block.warps.len()).unwrap_or(u64::MAX))?;
+            add("candidate_regions", &mut summary.candidate_regions, u64::try_from(block.warps.len()).unwrap_or(u64::MAX))?;
+            for warp in &block.warps {
+                for instruction in &warp.insts {
+                    let class_name = schedule.issue_slot(u64::from(instruction.pc)).map(|slot| match slot.pipeline_class() {
+                        PipelineClass::DispatchOnly => "dispatch",
+                        PipelineClass::Branch { .. } => "branch",
+                        PipelineClass::Barrier { .. } => "barrier",
+                        PipelineClass::Tensor { .. } => "tensor",
+                        PipelineClass::Sfu { .. } => "uniform_sfu",
+                        PipelineClass::ScalarAlu { .. } => "scalar",
+                    }).unwrap_or("unknown");
+                    *resource_class_counts.entry(class_name.to_owned()).or_default() += 1;
+                }
+            }
+        }
+        let (frontier, memory, async_count, barriers) = fast_dynamic_sm_frontier(
+            blocks, schedule, &masks, &params, extracted.shared_memory_residency,
+        )?;
+        summary.maximum_exact_final_cycle = summary.maximum_exact_final_cycle.max(frontier);
+        memory_records = memory_records.saturating_add(memory);
+        async_records = async_records.saturating_add(async_count);
+        barrier_records = barrier_records.saturating_add(barriers);
+    }
+    // Charge the footprint actually fetched by this launch, not all cold
+    // branches present in the static function table.
+    let line_cycles = extracted.front_end.compulsory_instruction_read_sectors;
+    if alpha_config.front_end_line_cycles_denominator == 0 {
+        return Err(ReplayError::FastFrontier { detail: "front-end line denominator is zero".to_owned() });
+    }
+    let scaled_lines = line_cycles
+        .checked_mul(alpha_config.front_end_line_cycles_numerator)
+        .and_then(|value| {
+            value
+                .checked_add(alpha_config.front_end_line_cycles_denominator - 1)
+        })
+        .ok_or_else(|| ReplayError::FastFrontier {
+            detail: "front-end line penalty overflows u64".to_owned(),
+        })?
+        / alpha_config.front_end_line_cycles_denominator;
+    let front_end_penalty = alpha_config
+        .front_end_base_cycles
+        .checked_add(scaled_lines)
+        .ok_or_else(|| ReplayError::FastFrontier {
+            detail: "front-end penalty overflows u64".to_owned(),
+        })?;
+    summary.front_end_static_lines = line_cycles;
+    summary.front_end_penalty_cycles = front_end_penalty;
+    summary.maximum_summarized_final_cycle = summary
+        .maximum_exact_final_cycle
+        .checked_add(front_end_penalty)
+        .ok_or_else(|| ReplayError::FastFrontier {
+            detail: "front-end-adjusted SM120 stage cycles overflow u64".to_owned(),
+        })?;
+    summary.refusal_reasons.insert("stage_resource_classes".to_owned(), resource_class_counts.values().sum());
+    summary.refusal_reasons.insert("memory_service_pending".to_owned(), memory_records);
+    summary.refusal_reasons.insert("async_completion_pending".to_owned(), async_records);
+    summary.refusal_reasons.insert("barrier_visibility_pending".to_owned(), barrier_records);
     Ok(summary)
 }
 
@@ -2217,7 +2679,22 @@ struct PlacementConfig {
     arch: ArchId,
     sku: Sku,
     sm_count: u32,
+    /// Upper bound of the `%smid` identifier domain.  PTX explicitly permits
+    /// non-contiguous identifiers, so this is not used as a dense SM count.
+    sm_id_upper_bound: u32,
+    /// Maximum physical warp slot admitted by the runtime launch contract.
+    /// This is deliberately sourced from `runtime_limits` when a card has
+    /// that block; it is not an issue-width or scheduler hypothesis.
+    max_resident_warps_per_sm: u32,
+    /// Launch-envelope block/thread ceilings.  These are retained even when
+    /// no issue model exists; a trace can be admitted for structural checks
+    /// without inventing scheduler throughput.
+    max_resident_blocks_per_sm: u32,
+    max_threads_per_sm: u32,
+    max_threads_per_block: u32,
     max_shared_bytes_per_sm: u64,
+    max_shared_bytes_per_block: u64,
+    max_shared_bytes_per_block_optin: u64,
 }
 
 impl PlacementConfig {
@@ -2227,10 +2704,85 @@ impl PlacementConfig {
         require_replay_arch(expected_arch, arch, "architecture card")?;
         let sku = card.sku_id().map_err(card_error)?;
         let sm_count = card.sm_count().map_err(card_error)?;
-        let max_shared_bytes_per_sm = card
-            .require_l1_geometry()
-            .map_err(|source| ReplayError::ArchitectureCardSharedMemoryCapacity { arch, source })?
-            .max_shared_bytes;
+        // Placement needs two architecture-local *launch-envelope* facts:
+        // physical warp-slot capacity and per-SM shared-memory capacity.  A
+        // Blackwell card intentionally leaves L1 geometry as a research gap,
+        // so consulting `l1_geometry` here would incorrectly couple placement
+        // to an unmeasured cache hypothesis.  Prefer the observed CUDA
+        // runtime-limit block when present.  The legacy SM86 card predates
+        // that block; retain its validated L1 shared-capacity field only as a
+        // compatibility fallback, and never use it to admit SM120.
+        let (
+            max_resident_warps_per_sm,
+            sm_id_upper_bound,
+            max_resident_blocks_per_sm,
+            max_threads_per_sm,
+            max_threads_per_block,
+            max_shared_bytes_per_sm,
+            max_shared_bytes_per_block,
+            max_shared_bytes_per_block_optin,
+        ) = match card.require_runtime_limits() {
+            Ok(limits) => (
+                limits.max_resident_warps_per_sm,
+                limits.sm_id_upper_bound,
+                limits.max_blocks_per_sm,
+                limits.max_threads_per_sm,
+                limits.max_threads_per_block,
+                limits.max_shared_memory_per_sm_bytes,
+                limits.max_shared_memory_per_block_bytes,
+                limits.max_shared_memory_per_block_optin_bytes,
+            ),
+            Err(
+                gap @ CalibError::BlockResearchGap {
+                    block: "runtime_limits",
+                    ..
+                },
+            ) => {
+                if arch != ArchId::Sm86 {
+                    return Err(ReplayError::ArchitectureCardSharedMemoryCapacity {
+                        arch,
+                        source: gap,
+                    });
+                }
+                let l1 = card.require_l1_geometry().map_err(|source| {
+                    ReplayError::ArchitectureCardSharedMemoryCapacity { arch, source }
+                })?;
+                let (legacy_warps, legacy_blocks) = match card.require_occupancy_resources() {
+                    Ok(occupancy) => (occupancy.max_resident_warps_per_sm, occupancy.max_blocks),
+                    Err(CalibError::BlockResearchGap {
+                        block: "occupancy", ..
+                    }) => arch
+                        .issue_hypotheses()
+                        .require("legacy physical warp-slot capacity")
+                        .map(|hypotheses| {
+                            (
+                                hypotheses.max_resident_warps_per_sm,
+                                hypotheses.max_resident_blocks_per_sm,
+                            )
+                        })
+                        .map_err(|source| ReplayError::WarpCapacityUnavailable { arch, source })?,
+                    Err(source) => {
+                        return Err(ReplayError::ArchitectureCardSharedMemoryCapacity {
+                            arch,
+                            source,
+                        });
+                    }
+                };
+                (
+                    legacy_warps,
+                    sm_count,
+                    legacy_blocks,
+                    legacy_warps.saturating_mul(32),
+                    legacy_warps.saturating_mul(32),
+                    l1.max_shared_bytes,
+                    l1.max_shared_bytes,
+                    l1.max_shared_bytes,
+                )
+            }
+            Err(source) => {
+                return Err(ReplayError::ArchitectureCardSharedMemoryCapacity { arch, source });
+            }
+        };
         if max_shared_bytes_per_sm == 0 {
             return Err(ReplayError::SharedMemoryCapacityInvalid {
                 arch,
@@ -2241,7 +2793,14 @@ impl PlacementConfig {
             arch,
             sku,
             sm_count,
+            sm_id_upper_bound,
+            max_resident_warps_per_sm,
+            max_resident_blocks_per_sm,
+            max_threads_per_sm,
+            max_threads_per_block,
             max_shared_bytes_per_sm,
+            max_shared_bytes_per_block,
+            max_shared_bytes_per_block_optin,
         })
     }
 
@@ -2263,6 +2822,35 @@ impl PlacementConfig {
                 max_bytes_per_sm: self.max_shared_bytes_per_sm,
             });
         }
+        if bytes_per_cta > self.max_shared_bytes_per_block_optin {
+            return Err(ReplayError::CtaSharedMemoryBlockLimitExceeded {
+                kernel_id: kernel.id,
+                arch: self.arch,
+                bytes_per_cta,
+                max_bytes_per_block: self.max_shared_bytes_per_block_optin,
+            });
+        }
+        let block = kernel
+            .block_dim
+            .as_ref()
+            .filter(|dim| dim.x > 0 && dim.y > 0 && dim.z > 0)
+            .map(|dim| {
+                u64::try_from(dim.x)
+                    .ok()
+                    .and_then(|x| u64::try_from(dim.y).ok().and_then(|y| x.checked_mul(y)))
+                    .and_then(|xy| u64::try_from(dim.z).ok().and_then(|z| xy.checked_mul(z)))
+            })
+            .flatten();
+        if let Some(threads_per_cta) = block {
+            if threads_per_cta > u64::from(self.max_threads_per_block) {
+                return Err(ReplayError::CtaThreadCapacityExceeded {
+                    kernel_id: kernel.id,
+                    arch: self.arch,
+                    threads_per_cta,
+                    max_threads_per_block: self.max_threads_per_block,
+                });
+            }
+        }
         Ok(SharedMemoryResidency::new(
             self.max_shared_bytes_per_sm,
             bytes_per_cta,
@@ -2270,13 +2858,13 @@ impl PlacementConfig {
     }
 
     fn require_traced_sm(self, path: &Path, sm_id: i32) -> Result<(), ReplayError> {
-        if sm_id < 0 || u32::try_from(sm_id).unwrap_or(u32::MAX) >= self.sm_count {
+        if sm_id < 0 || u32::try_from(sm_id).unwrap_or(u32::MAX) >= self.sm_id_upper_bound {
             return Err(ReplayError::SmIdOutOfRange {
                 path: path.to_path_buf(),
                 sm_id,
                 arch: self.arch,
                 sku: self.sku,
-                sm_count: self.sm_count,
+                sm_id_upper_bound: self.sm_id_upper_bound,
             });
         }
         Ok(())
@@ -2284,13 +2872,13 @@ impl PlacementConfig {
 
     #[cfg(feature = "campaign")]
     fn require_declared_sm(self, launch_index: u64, sm_id: u64) -> Result<(), ReplayError> {
-        if sm_id >= u64::from(self.sm_count) {
+        if sm_id >= u64::from(self.sm_id_upper_bound) {
             return Err(ReplayError::SamplingSmIdOutOfRange {
                 launch_index,
                 sm_id,
                 arch: self.arch,
                 sku: self.sku,
-                sm_count: self.sm_count,
+                sm_id_upper_bound: self.sm_id_upper_bound,
             });
         }
         Ok(())
@@ -2303,7 +2891,14 @@ const fn sm86_test_placement() -> PlacementConfig {
         arch: ArchId::Sm86,
         sku: Sku::Rtx3090Ti,
         sm_count: 84,
+        sm_id_upper_bound: 84,
+        max_resident_warps_per_sm: 48,
+        max_resident_blocks_per_sm: 16,
+        max_threads_per_sm: 1_536,
+        max_threads_per_block: 1_536,
         max_shared_bytes_per_sm: 102_400,
+        max_shared_bytes_per_block: 102_400,
+        max_shared_bytes_per_block_optin: 102_400,
     }
 }
 
@@ -2432,15 +3027,11 @@ fn extract_per_sm_blocks(
             .is_none_or(|sidecar| Some(sidecar.original_block()) == block);
     #[cfg(not(feature = "campaign"))]
     let validate_warp_roster = expected_block_warps.is_some();
-    let max_resident_warps = schedule
-        .arch
-        .issue_hypotheses()
-        .require("physical warp-slot capacity")
-        .map_err(|source| ReplayError::WarpCapacityUnavailable {
-            arch: schedule.arch,
-            source,
-        })?
-        .max_resident_warps_per_sm;
+    // Physical slot validation is part of the traced launch envelope.  Do
+    // not obtain it from `issue_hypotheses()`: SM120 intentionally has no
+    // admitted scheduler hypothesis, while the 5090 runtime card does carry
+    // a measured max-resident-warp limit.
+    let max_resident_warps = placement.max_resident_warps_per_sm;
     let cluster = normalized_cluster_dim(loc.kernel(), schedule.arch)?;
     // sm_id → blocks (launch index kept for in-SM ordering).
     let mut per_sm_blocks: BTreeMap<i32, Vec<BlockReplay>> = BTreeMap::new();
@@ -2613,9 +3204,11 @@ fn extract_per_sm_blocks(
                         warp,
                         schedule,
                         schedule.arch,
+                        inst.pc(),
                         &path,
                         warp_id,
                         record_ix,
+                        &mut sectors,
                     )?
                 };
                 let active_mask_present = inst.active_mask_present();
@@ -2685,6 +3278,8 @@ fn extract_per_sm_blocks(
                 insts.push(ReplayInst {
                     pc: inst.pc(),
                     kind,
+                    lane_mask: if inst.predicate_mask_present() { inst.predicate_on_mask() }
+                        else if inst.active_mask_present() { inst.active_mask() } else { u32::MAX },
                 });
             }
             branch_successors.finish(&mut trace_metrics.branch_targets)?;
@@ -3628,7 +4223,26 @@ fn replay_kernel_with_schedule_and_l2_and_candidates_with_payload_events(
         validate_replay_architecture(schedule, params, mode, memory_admission_feedback)?;
     let placement = PlacementConfig::from_arch_card(arch_card, schedule.arch)?;
     require_trace_architecture(td, schedule.arch)?;
-    let decode_sectors = !matches!(mode, ReplayMemMode::Flat);
+    // The SM120 alpha Flat lane normally keeps the compact, empty-sector
+    // representation so opaque async/TMA records retain their existing typed
+    // fallback.  For ordinary global/shared calibration launches, however,
+    // retain the already-captured NVBit sector arena even in full replay.  It
+    // gives the new logical service tail request width and working-set
+    // information without consulting scored NCU rows or changing fast replay.
+    let alpha_flat_sector_decode = matches!(mode, ReplayMemMode::Flat)
+        && params.resource_source() == IssueResourceSource::Sm120Alpha
+        && !schedule.by_pc.values().any(|slot| {
+            slot.ldgsts_l1_policy().is_some()
+                || matches!(
+                    slot.op_class(),
+                    OpClass::AsyncCopyCommit | OpClass::AsyncCopyWait
+                )
+                || matches!(
+                    opcode_head(slot.opcode_text()),
+                    "UTMALDG" | "UTMASTG"
+                )
+        });
+    let decode_sectors = !matches!(mode, ReplayMemMode::Flat) || alpha_flat_sector_decode;
     let ExtractedKernel {
         per_sm_blocks,
         records_seen,
@@ -4099,7 +4713,7 @@ mod instrumentation_order_tests {
             warp_slot,
             insts: vec![
                 ReplayInst {
-                    pc: 0,
+                    lane_mask: u32::MAX, pc: 0,
                     kind: AccessKind::GlobalAsyncCopy {
                         off: 0,
                         len: 0,
@@ -4108,11 +4722,11 @@ mod instrumentation_order_tests {
                     },
                 },
                 ReplayInst {
-                    pc: 4,
+                    lane_mask: u32::MAX, pc: 4,
                     kind: AccessKind::NonMemory,
                 },
                 ReplayInst {
-                    pc: 8,
+                    lane_mask: u32::MAX, pc: 8,
                     kind: AccessKind::NonMemory,
                 },
             ],
@@ -4197,7 +4811,7 @@ mod instrumentation_order_tests {
         let mut extra = blocks([1, 2, 5], [3, 4, 6]);
         let warp = &mut extra.get_mut(&0).unwrap()[0].warps[0];
         warp.insts.push(ReplayInst {
-            pc: 12,
+            lane_mask: u32::MAX, pc: 12,
             kind: AccessKind::NonMemory,
         });
         warp.async_copy_cohorts
@@ -4967,7 +5581,8 @@ fn require_sm86_special_role(
     route: ReplayMemoryRoute,
     class: pb::MemoryOpClass,
 ) -> Result<(), ReplayError> {
-    if arch != ArchId::Sm86 {
+    let alpha_sm120 = arch == ArchId::Sm120;
+    if arch != ArchId::Sm86 && !alpha_sm120 {
         return Err(ReplayError::UnsupportedMemoryPath { arch, class });
     }
     let slot = schedule
@@ -4975,10 +5590,20 @@ fn require_sm86_special_role(
         .get(&u64::from(pc))
         .ok_or(ReplayError::UnsupportedMemoryPath { arch, class })?;
     let head = opcode_head(&slot.opcode_text);
+    if alpha_sm120
+        && class == pb::MemoryOpClass::AsyncCopy
+        && head == "LDGSTS"
+    {
+        // Alpha treats an observed async/TMA source as a flat global demand;
+        // no SM86 LDGSTS completion or cache route is attached.
+        return Ok(());
+    }
     let valid = match (route, class) {
         (ReplayMemoryRoute::Global, pb::MemoryOpClass::Atomic) => match slot.mem_role {
-            MemRole::BypassLoad(CacheOpToken::Atom) => matches!(head, "ATOM" | "ATOMG"),
-            MemRole::Reduction => head == "RED",
+            MemRole::BypassLoad(CacheOpToken::Atom) => {
+                matches!(head, "ATOM" | "ATOMG") || (alpha_sm120 && head == "REDG")
+            }
+            MemRole::Reduction => matches!(head, "RED" | "REDG"),
             _ => false,
         },
         (ReplayMemoryRoute::Global, pb::MemoryOpClass::AsyncCopy) => {
@@ -5021,6 +5646,15 @@ fn require_known_global_role(
         return Ok(MemRole::None);
     };
     if slot.mem_role == MemRole::None && !is_known_untagged_opcode(&slot.opcode_text) {
+        // The SM120 alpha path admits newly observed Blackwell storage-family
+        // spellings as untagged global traffic.  They retain their dynamic
+        // address/sector stream and flat latency, but do not borrow a guessed
+        // cache operator or writeback class.  Ordinary SM120 replay remains
+        // fail-closed because this branch is keyed by the alpha-tagged
+        // deployment schedule.
+        if arch != ArchId::Sm86 {
+            return Ok(MemRole::None);
+        }
         return Err(ReplayError::UnknownGlobalOpcode {
             arch,
             pc,
@@ -5759,11 +6393,42 @@ fn classify_compact_flat(
     warp: &ValidatedWarp,
     schedule: &FunctionSchedule,
     arch: ArchId,
+    pc: u32,
     path: &Path,
     warp_id: i32,
     record_ix: usize,
+    sector_arena: &mut Vec<i64>,
 ) -> Result<AccessKind, ReplayError> {
     let Some(preflight) = preflight else {
+        if arch == ArchId::Sm120
+            && schedule.issue_slot(u64::from(pc)).is_some_and(|slot| {
+                let head = opcode_head(&slot.opcode_text);
+                matches!(head, "UTMALDG" | "UTMASTG")
+            })
+        {
+            // TMA operands are carried by tensor-map/mbarrier sidecars rather
+            // than ordinary dynamic address operands in the compact trace.
+            // Keep a typed full-replay async transaction using the observed
+            // P6 8-KiB payload class; this is a logical completion work token,
+            // not a native engine timestamp.
+            return Ok(AccessKind::GlobalAsyncCopy {
+                off: 0,
+                len: 0,
+                completion_work: encode_async_copy_payload_work(8192).ok_or(
+                    ReplayError::AsyncCopyCompletionWorkOutOfRange {
+                        path: path.to_path_buf(),
+                        warp_id,
+                        record_ix,
+                        completion_work: 8192,
+                        max_completion_work: ASYNC_COPY_COMPLETION_VALUE_MASK,
+                    },
+                )?,
+                // TMA tensor-map transfers use the distinct logical bypass
+                // service arm in full replay. This is a calibration-domain
+                // route, not a physical cache policy claim.
+                l1_policy: LdgstsL1Policy::BypassL1,
+            });
+        }
         return Ok(AccessKind::NonMemory);
     };
     if !preflight.memory.has_effective_lanes() {
@@ -5801,6 +6466,45 @@ fn classify_compact_flat(
             Ok(flat_global_kind(role))
         }
         (ReplayMemoryRoute::Global, pb::MemoryOpClass::AsyncCopy) => {
+            if arch == ArchId::Sm120 {
+                // Full-replay-only alpha route: preserve an observed async
+                // source as a typed completion token instead of collapsing it
+                // into an ordinary global instruction.  The compact trace may
+                // lack TMA operand bytes; in that case retain at least one
+                // sector of logical source work and keep the missing payload
+                // provenance explicit in the report. This is not a native TMA
+                // engine timestamp or queue model.
+                let source_sectors = match warp.sector_plan(preflight.memory) {
+                    ValidatedSectorPlan::Sectors(sectors) => sectors,
+                    ValidatedSectorPlan::Error { error, .. } => {
+                        return Err(deferred_sector_error(error, path, warp_id, record_ix));
+                    }
+                };
+                let payload_bytes = warp.effective_data_bytes(preflight.memory);
+                let sector_bytes = u64::try_from(source_sectors.len())
+                    .ok()
+                    .and_then(|count| count.checked_mul(32))
+                    .unwrap_or(0);
+                let logical_bytes = payload_bytes.max(sector_bytes).max(32);
+                let completion_work = u32::try_from(logical_bytes)
+                    .ok()
+                    .and_then(encode_async_copy_payload_work)
+                    .ok_or(ReplayError::AsyncCopyCompletionWorkOutOfRange {
+                        path: path.to_path_buf(),
+                        warp_id,
+                        record_ix,
+                        completion_work: logical_bytes,
+                        max_completion_work: ASYNC_COPY_COMPLETION_VALUE_MASK,
+                    })?;
+                let off = sector_arena.len();
+                sector_arena.extend_from_slice(source_sectors);
+                return Ok(AccessKind::GlobalAsyncCopy {
+                    off,
+                    len: source_sectors.len() as u16,
+                    completion_work,
+                    l1_policy: LdgstsL1Policy::CacheAtAllLevels,
+                });
+            }
             require_sm86_special_role(
                 schedule,
                 arch,
@@ -6139,7 +6843,18 @@ fn project_async_copy_completion_work(
     warp_id: i32,
     record_ix: usize,
 ) -> Result<u32, ReplayError> {
-    let throughput = arch
+    // The flat SM120 alpha path returns before this helper and charges an
+    // explicit global-demand approximation.  Any caller that reaches the
+    // compact async completion machinery must therefore be an architecture
+    // with an admitted LDGSTS protocol; never map SM120 to SM86 here.
+    if arch == ArchId::Sm120 {
+        return Err(ReplayError::UnsupportedMemoryPath {
+            arch,
+            class: pb::MemoryOpClass::AsyncCopy,
+        });
+    }
+    let timing_arch = arch;
+    let throughput = timing_arch
         .ldgsts_completion_throughput()
         .require("ldgsts_completion_throughput")
         .map_err(IssueError::from)?;
@@ -6208,7 +6923,7 @@ fn project_async_copy_completion_work(
         match destination_topology {
             Some(topology) => {
                 let wavefronts = topology.cache_all_bank_wavefronts_total;
-                let timing = arch
+                let timing = timing_arch
                     .ldgsts_destination_wavefront_timing()
                     .require("ldgsts_destination_wavefront_timing")
                     .map_err(IssueError::from)?;
@@ -10172,9 +10887,83 @@ mod replay_identity_tests {
             Err(ReplayError::ArchitectureCardSharedMemoryCapacity {
                 arch: ArchId::Sm120,
                 source: CalibError::BlockResearchGap {
-                    block: "l1_geometry",
+                    block: "runtime_limits",
                     ..
                 },
+            })
+        ));
+    }
+
+    #[test]
+    fn rtx5090_sm120_placement_uses_runtime_launch_limits_without_l1_geometry() {
+        // Runtime launch limits are sufficient for the spatial-placement and
+        // shared-residency envelope.  This must not be confused with an
+        // admitted L1 geometry or SM120 timing model: downstream cache/issue
+        // consumers still fail closed on their own typed gaps.
+        let path = Path::new("../../arch_profiles/cards/sm_120-rtx-5090.json");
+        let card = ArchCard::load(path).unwrap();
+        assert_eq!(card.require_occupancy_resources().unwrap().max_blocks, 24);
+        let placement = PlacementConfig::from_arch_card(&card, ArchId::Sm120).unwrap();
+        assert_eq!(placement.sm_count, 170);
+        assert_eq!(placement.sm_id_upper_bound, 170);
+        assert_eq!(placement.max_resident_warps_per_sm, 48);
+        assert_eq!(placement.max_resident_blocks_per_sm, 24);
+        assert_eq!(placement.max_threads_per_sm, 1_536);
+        assert_eq!(placement.max_threads_per_block, 1_024);
+        assert_eq!(placement.max_shared_bytes_per_sm, 102_400);
+        assert_eq!(placement.max_shared_bytes_per_block, 49_152);
+        assert_eq!(placement.max_shared_bytes_per_block_optin, 101_376);
+        assert!(matches!(
+            card.require_l1_geometry(),
+            Err(CalibError::BlockResearchGap {
+                block: "l1_geometry",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn rtx5090_placement_rejects_shared_memory_above_block_optin_limit() {
+        let path = Path::new("../../arch_profiles/cards/sm_120-rtx-5090.json");
+        let card = ArchCard::load(path).unwrap();
+        let placement = PlacementConfig::from_arch_card(&card, ArchId::Sm120).unwrap();
+        let kernel = pb::Kernel {
+            id: 17,
+            size_shared_memory: 101_377,
+            ..Default::default()
+        };
+        assert!(matches!(
+            placement.shared_memory_residency(&kernel),
+            Err(ReplayError::CtaSharedMemoryBlockLimitExceeded {
+                kernel_id: 17,
+                arch: ArchId::Sm120,
+                bytes_per_cta: 101_377,
+                max_bytes_per_block: 101_376,
+            })
+        ));
+    }
+
+    #[test]
+    fn sm120_placement_rejects_block_above_runtime_thread_limit() {
+        let path = Path::new("../../arch_profiles/cards/sm_120-rtx-5090.json");
+        let card = ArchCard::load(path).unwrap();
+        let placement = PlacementConfig::from_arch_card(&card, ArchId::Sm120).unwrap();
+        let kernel = pb::Kernel {
+            id: 18,
+            block_dim: Some(pb::Dim3d {
+                x: 1_537,
+                y: 1,
+                z: 1,
+            }),
+            ..Default::default()
+        };
+        assert!(matches!(
+            placement.shared_memory_residency(&kernel),
+            Err(ReplayError::CtaThreadCapacityExceeded {
+                kernel_id: 18,
+                arch: ArchId::Sm120,
+                threads_per_cta: 1_537,
+                max_threads_per_block: 1_024,
             })
         ));
     }
@@ -10242,10 +11031,11 @@ mod replay_identity_tests {
         let oversized_slots = (0..49).collect::<Vec<i32>>();
         assert!(matches!(
             placement_result(1_568, &oversized_slots).unwrap_err(),
-            ReplayError::WarpSlotOutOfRange {
-                warp_id: 48,
-                warp_slot: 48,
-                max_resident_warps: 48,
+            ReplayError::CtaThreadCapacityExceeded {
+                kernel_id: 1,
+                arch: ArchId::Sm86,
+                threads_per_cta: 1_568,
+                max_threads_per_block: 1_536,
                 ..
             }
         ));
@@ -10260,7 +11050,7 @@ mod replay_identity_tests {
                 sm_id: 84,
                 arch: ArchId::Sm86,
                 sku: Sku::Rtx3090Ti,
-                sm_count: 84,
+                sm_id_upper_bound: 84,
                 ..
             }
         ));
@@ -10270,7 +11060,7 @@ mod replay_identity_tests {
                 sm_id: -1,
                 arch: ArchId::Sm86,
                 sku: Sku::Rtx3090Ti,
-                sm_count: 84,
+                sm_id_upper_bound: 84,
                 ..
             }
         ));
@@ -10287,7 +11077,7 @@ mod replay_identity_tests {
                     sm_id: 84,
                     arch: ArchId::Sm86,
                     sku: Sku::Rtx3090Ti,
-                    sm_count: 84,
+                    sm_id_upper_bound: 84,
                 }
             ));
         }
@@ -12065,7 +12855,7 @@ mod completeness_tests {
                 sm_id: 84,
                 arch: ArchId::Sm86,
                 sku: Sku::Rtx3090Ti,
-                sm_count: 84,
+                sm_id_upper_bound: 84,
             }
         ));
     }
@@ -12541,7 +13331,7 @@ mod fast_frontier_unit_tests {
             insts: pcs
                 .iter()
                 .map(|&pc| ReplayInst {
-                    pc,
+                    lane_mask: u32::MAX, pc,
                     kind: AccessKind::NonMemory,
                 })
                 .collect(),

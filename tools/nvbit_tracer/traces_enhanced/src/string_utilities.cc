@@ -98,6 +98,11 @@ std::string create_sass_instr(std::string full_instruction_str, bool is_substrin
 }
 
 bool get_ur_register(const std::string &operand_str, unsigned int &register_id) {
+    const std::string token = strip_string(operand_str);
+    if (token == "URZ" || token == "-URZ") {
+        register_id = 255;
+        return true;
+    }
     std::regex e ("UR(\\d+)");
     std::smatch match;
     if (!std::regex_search(operand_str, match, e) || match.size() <= 1) {

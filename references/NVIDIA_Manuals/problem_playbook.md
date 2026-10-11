@@ -99,7 +99,7 @@ Note the semantic pitfalls already documented in `CLAUDE.md`:
 `l1_hits + l1_misses` is a **sector** aggregate, not a request count;
 `active_cycles` is issue-driven, not the same as `sm__cycles_active.avg`.
 
-## 4. SM120 / Blackwell Behavior (Cloud RTX PRO 6000 Blackwell, The Validation Target)
+## 4. SM120 / Blackwell Behavior (Cloud GeForce RTX 5090 Blackwell, The Validation Target)
 
 **Blackwell semantics live in more than the `blackwell_*` guides.**
 Route by question type — the `blackwell_tuning/` and

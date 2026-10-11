@@ -127,7 +127,10 @@ static const std::unordered_map<std::string, OpcodeChar> Blackwell_OpcodeMap = {
     // Movement Instructions
     {"MOV", OpcodeChar(OP_MOV, INTP_OP)},
     {"MOV32I", OpcodeChar(OP_MOV32I, INTP_OP)},
-    {"MOVM", OpcodeChar(OP_MOVM, TENSOR_CORE_OP)},  // move matrix
+    // MOVM moves matrix-register fragments but is not an MMA operation and
+    // carries no m/n/k shape suffix. Classifying it as tensor-core makes the
+    // enhanced parser demand an MMA shape and abort on valid SM120 SASS.
+    {"MOVM", OpcodeChar(OP_MOVM, INTP_OP)},
     {"PRMT", OpcodeChar(OP_PRMT, INTP_OP)},
     {"SEL", OpcodeChar(OP_SEL, INTP_OP)},
     {"SGXT", OpcodeChar(OP_SGXT, INTP_OP)},
@@ -355,6 +358,26 @@ static const std::unordered_map<std::string, OpcodeChar> Blackwell_OpcodeMap = {
     {"SETLMEMBASE", OpcodeChar(OP_SETLMEMBASE, MISCELLANEOUS_NO_QUEUE_OP)},
     {"VOTE", OpcodeChar(OP_VOTE, MISCELLANEOUS_NO_QUEUE_OP)},
     {"VOTE_VTG", OpcodeChar(OP_VOTE_VTG, MISCELLANEOUS_NO_QUEUE_OP)},
+
+    // SM120 heads observed through CUDA 13.2/NVBit 1.8.1.  Keep each
+    // mnemonic's opcode identity distinct even when the existing timing
+    // taxonomy has only a coarse dispatch category.
+    {"SYNCS", OpcodeChar(OP_SYNCS_SM120, BARRIER_OP)},
+    {"ENDCOLLECTIVE", OpcodeChar(OP_ENDCOLLECTIVE_SM120, MISCELLANEOUS_QUEUE_OP)},
+    {"ELECT", OpcodeChar(OP_ELECT_SM120, UNIFORM_OP)},
+    {"USETMAXREG", OpcodeChar(OP_USETMAXREG_SM120, UNIFORM_OP)},
+    {"UFSEL", OpcodeChar(OP_UFSEL_SM120, UNIFORM_OP)},
+    {"UFSETP", OpcodeChar(OP_UFSETP_SM120, UNIFORM_OP)},
+    {"ACQBULK", OpcodeChar(OP_ACQBULK_SM120, MISCELLANEOUS_QUEUE_OP)},
+    {"PREEXIT", OpcodeChar(OP_PREEXIT_SM120, EXIT_OPS)},
+    {"ARRIVES", OpcodeChar(OP_ARRIVES_SM120, MISCELLANEOUS_QUEUE_OP)},
+    {"UF2I", OpcodeChar(OP_UF2I_SM120, UNIFORM_OP)},
+    {"UTMACMDFLUSH", OpcodeChar(OP_UTMACMDFLUSH_SM120, MISCELLANEOUS_QUEUE_OP)},
+    {"UTMACCTL", OpcodeChar(OP_UTMACCTL_SM120, MISCELLANEOUS_QUEUE_OP)},
+    {"FENCE", OpcodeChar(OP_FENCE_SM120, MEMORY_BARRIER_OP)},
+    {"UTMALDG", OpcodeChar(OP_UTMALDG_SM120, LOAD_OP)},
+    {"UTMASTG", OpcodeChar(OP_UTMASTG_SM120, STORE_OP)},
+    {"STSM", OpcodeChar(OP_STSM_SM120, STORE_OP)},
 
 };
 

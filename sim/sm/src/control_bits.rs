@@ -533,6 +533,20 @@ impl ControlSidecar {
         raw: &[u8],
         expected_arch: ArchId,
     ) -> Result<Self, ControlBitsError> {
+        Self::parse_for_arch_with_alpha(path, raw, expected_arch, false)
+    }
+
+    /// Parse a control sidecar for the explicit SM120 alpha timing lane.  The
+    /// exporter supplies the same high-word bit layout used by the mature
+    /// decoder, but the production SM120 control-layout capability remains a
+    /// research gap.  Alpha therefore admits the wire layout only under an
+    /// explicit caller flag and keeps the deployment identity as `sm_120`.
+    pub fn parse_for_arch_with_alpha(
+        path: &Path,
+        raw: &[u8],
+        expected_arch: ArchId,
+        alpha_layout: bool,
+    ) -> Result<Self, ControlBitsError> {
         reject_duplicate_json_keys(raw).map_err(|source| ControlBitsError::Parse {
             path: path.display().to_string(),
             source,
@@ -542,10 +556,14 @@ impl ControlSidecar {
                 path: path.display().to_string(),
                 source,
             })?;
-        Self::from_raw(sidecar, expected_arch.token())
+        Self::from_raw(sidecar, expected_arch.token(), alpha_layout)
     }
 
-    fn from_raw(raw: RawSidecar, expected_arch: &str) -> Result<Self, ControlBitsError> {
+    fn from_raw(
+        raw: RawSidecar,
+        expected_arch: &str,
+        alpha_layout: bool,
+    ) -> Result<Self, ControlBitsError> {
         let expected = ArchId::parse_deploy(expected_arch).map_err(|source| {
             ControlBitsError::ArchitectureParse {
                 arch: expected_arch.to_owned(),
@@ -564,13 +582,20 @@ impl ControlSidecar {
                 expected: expected.token().to_owned(),
             });
         }
-        actual
-            .control_layout()
-            .require("control_layout")
-            .map_err(|source| ControlBitsError::UnsupportedArchitecture {
-                arch: actual.token().to_owned(),
-                source,
-            })?;
+        if !alpha_layout {
+            actual
+                .control_layout()
+                .require("control_layout")
+                .map_err(|source| ControlBitsError::UnsupportedArchitecture {
+                    arch: actual.token().to_owned(),
+                    source,
+                })?;
+        } else if actual != ArchId::Sm120 {
+            return Err(ControlBitsError::ArchMismatch {
+                got: actual.token().to_owned(),
+                expected: ArchId::Sm120.token().to_owned(),
+            });
+        }
         for (key, expected) in EXPECTED_LAYOUT {
             match raw.parser_contract.control_layout.get(key) {
                 Some(got) if got == expected => {}
@@ -641,22 +666,30 @@ impl ControlSidecar {
                         word: high_word_str.clone(),
                     }
                 })?;
-                let redecoded = match ControlBits::decode(high_word) {
-                    Ok(control) => control,
-                    Err(ControlDecodeError::ReservedNonZero) => {
-                        return Err(ControlBitsError::ReservedNonZero {
-                            function: fname.clone(),
-                            pc: rec.pc,
-                            high_word,
-                        });
-                    }
-                    Err(ControlDecodeError::Domain(source)) => {
-                        return Err(ControlBitsError::InvalidControlDomain {
-                            function: fname.clone(),
-                            pc: rec.pc,
-                            source,
-                        });
-                    }
+                let redecoded = if alpha_layout {
+                    // SM120 alpha consumes the sidecar's explicit control
+                    // fields as an opaque timing hypothesis.  The raw word is
+                    // retained for provenance, but its Ampere bit layout is
+                    // not asserted or re-decoded.
+                    None
+                } else {
+                    Some(match ControlBits::decode(high_word) {
+                        Ok(control) => control,
+                        Err(ControlDecodeError::ReservedNonZero) => {
+                            return Err(ControlBitsError::ReservedNonZero {
+                                function: fname.clone(),
+                                pc: rec.pc,
+                                high_word,
+                            });
+                        }
+                        Err(ControlDecodeError::Domain(source)) => {
+                            return Err(ControlBitsError::InvalidControlDomain {
+                                function: fname.clone(),
+                                pc: rec.pc,
+                                source,
+                            });
+                        }
+                    })
                 };
                 let recorded_raw =
                     rec.control
@@ -665,14 +698,33 @@ impl ControlSidecar {
                             function: fname.clone(),
                             pc: rec.pc,
                         })?;
-                let yield_flag =
+                // The SM120 alpha sidecar currently stores the raw SASS wire
+                // bit, whereas the model field is semantic (`true` means
+                // yield).  Public SASS control notation uses the zero wire
+                // value for `Y`; invert only for the explicitly alpha
+                // transport path.  The native SM86 decoder retains its
+                // established mapping.
+                let yield_flag = if alpha_layout {
+                    match recorded_raw.yield_flag {
+                        0 => true,
+                        1 => false,
+                        value => {
+                            return Err(ControlBitsError::InvalidControlDomain {
+                                function: fname.clone(),
+                                pc: rec.pc,
+                                source: ControlDomainError::YieldFlagOutOfRange { value },
+                            });
+                        }
+                    }
+                } else {
                     ControlBits::yield_from_wire(recorded_raw.yield_flag).map_err(|source| {
                         ControlBitsError::InvalidControlDomain {
                             function: fname.clone(),
                             pc: rec.pc,
                             source,
                         }
-                    })?;
+                    })?
+                };
                 let recorded = ControlBits::new(
                     recorded_raw.stall,
                     yield_flag,
@@ -686,7 +738,9 @@ impl ControlSidecar {
                     pc: rec.pc,
                     source,
                 })?;
-                if recorded != redecoded {
+                if let Some(redecoded) = redecoded
+                    && recorded != redecoded
+                {
                     return Err(ControlBitsError::RedecodeMismatch {
                         function: fname.clone(),
                         pc: rec.pc,
@@ -844,7 +898,7 @@ mod tests {
     #[test]
     fn mini_sidecar_loads() {
         let raw: RawSidecar = serde_json::from_str(&mini_sidecar_json()).unwrap();
-        let sc = ControlSidecar::from_raw(raw, "sm_86").expect("valid sidecar");
+        let sc = ControlSidecar::from_raw(raw, "sm_86", false).expect("valid sidecar");
         let f = &sc.functions["k"];
         assert_eq!(f.by_pc.len(), 1);
         assert_eq!(f.by_pc[&0].control.stall, 2);
@@ -887,7 +941,7 @@ mod tests {
             .replace(r#""yield_flag": 1"#, r#""yield_flag": 2"#);
         let raw: RawSidecar = serde_json::from_str(&json).unwrap();
         assert!(matches!(
-            ControlSidecar::from_raw(raw, "sm_86"),
+            ControlSidecar::from_raw(raw, "sm_86", false),
             Err(ControlBitsError::InvalidControlDomain {
                 source: ControlDomainError::YieldFlagOutOfRange { value: 2 },
                 ..
@@ -901,7 +955,7 @@ mod tests {
         let json = mini_sidecar_json().replace("0x000fe400078e00ff", &format!("{high_word:#018x}"));
         let raw: RawSidecar = serde_json::from_str(&json).unwrap();
         assert!(matches!(
-            ControlSidecar::from_raw(raw, "sm_86"),
+            ControlSidecar::from_raw(raw, "sm_86", false),
             Err(ControlBitsError::InvalidControlDomain {
                 source: ControlDomainError::BarrierOutOfRange {
                     field: "write barrier",
@@ -916,7 +970,7 @@ mod tests {
     fn arch_mismatch_rejected() {
         let raw: RawSidecar = serde_json::from_str(&mini_sidecar_json()).unwrap();
         assert!(matches!(
-            ControlSidecar::from_raw(raw, "sm_120"),
+            ControlSidecar::from_raw(raw, "sm_120", false),
             Err(ControlBitsError::ArchMismatch { .. })
         ));
     }
@@ -926,7 +980,7 @@ mod tests {
         let json = mini_sidecar_json().replace("bits 0:3", "bits 0:4");
         let raw: RawSidecar = serde_json::from_str(&json).unwrap();
         assert!(matches!(
-            ControlSidecar::from_raw(raw, "sm_86"),
+            ControlSidecar::from_raw(raw, "sm_86", false),
             Err(ControlBitsError::LayoutDrift { .. })
         ));
     }
@@ -937,7 +991,7 @@ mod tests {
         let json = mini_sidecar_json().replace(r#""stall": 2"#, r#""stall": 3"#);
         let raw: RawSidecar = serde_json::from_str(&json).unwrap();
         assert!(matches!(
-            ControlSidecar::from_raw(raw, "sm_86"),
+            ControlSidecar::from_raw(raw, "sm_86", false),
             Err(ControlBitsError::RedecodeMismatch { .. })
         ));
     }
@@ -947,7 +1001,7 @@ mod tests {
         let json = mini_sidecar_json()
             .replace(r#""status": "decoded""#, r#""status": "unknown_encoding""#);
         let raw: RawSidecar = serde_json::from_str(&json).unwrap();
-        let error = ControlSidecar::from_raw(raw, "sm_86").unwrap_err();
+        let error = ControlSidecar::from_raw(raw, "sm_86", false).unwrap_err();
         assert!(matches!(
             &error,
             ControlBitsError::UnsupportedEncoding { count: 1, .. }
@@ -964,7 +1018,7 @@ mod tests {
         let json = mini_sidecar_json().replace(r#""status": "decoded""#, r#""status": "decodedd""#);
         let raw: RawSidecar = serde_json::from_str(&json).unwrap();
         assert!(matches!(
-            ControlSidecar::from_raw(raw, "sm_86"),
+            ControlSidecar::from_raw(raw, "sm_86", false),
             Err(ControlBitsError::InvalidRecordStatus {
                 function,
                 pc: 0,
@@ -983,7 +1037,7 @@ mod tests {
             .replace(r#""high_word": "0x000fe400078e00ff","#, "");
         let raw: RawSidecar = serde_json::from_str(&json).expect("must parse without high_word");
         assert!(matches!(
-            ControlSidecar::from_raw(raw, "sm_86"),
+            ControlSidecar::from_raw(raw, "sm_86", false),
             Err(ControlBitsError::UnsupportedEncoding { .. })
         ));
     }
@@ -999,7 +1053,7 @@ mod tests {
         );
         let raw: RawSidecar = serde_json::from_str(&json).expect("must parse without control");
         assert!(matches!(
-            ControlSidecar::from_raw(raw, "sm_86"),
+            ControlSidecar::from_raw(raw, "sm_86", false),
             Err(ControlBitsError::MissingControlBlock { pc: 0, .. })
         ));
     }
@@ -1009,7 +1063,7 @@ mod tests {
         let json = mini_sidecar_json().replace(r#""total_decoded": 1"#, r#""total_decoded": 2"#);
         let raw: RawSidecar = serde_json::from_str(&json).unwrap();
         assert!(matches!(
-            ControlSidecar::from_raw(raw, "sm_86"),
+            ControlSidecar::from_raw(raw, "sm_86", false),
             Err(ControlBitsError::SummaryDrift { .. })
         ));
     }

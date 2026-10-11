@@ -1,6 +1,6 @@
 ---
 name: designing-gpu-simulator
-description: "Design or implement native SM86 Rust replay, bounded custom SIMT execution, architecture inputs, metric projections, or simulator performance experiments."
+description: "Design or implement native SM86/SM120 Rust replay, bounded custom SIMT execution, architecture inputs, metric projections, or simulator performance experiments."
 ---
 
 # Simulator engineering routes

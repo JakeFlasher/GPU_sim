@@ -45,7 +45,7 @@
 #include "cuda.h"
 #include "generated_cuda_meta.h"
 
-#define NVBIT_VERSION "1.8"
+#define NVBIT_VERSION "1.8.1"
 
 /* Instruction class returned by the NVBit inspection API nvbit_get_instrs */
 class Instr {
@@ -94,10 +94,10 @@ class Instr {
     /* prints one line instruction with idx, offset, sass */
     void print(const char* prefix = NULL);
 
-    /* Constructor used internally by NVBit */
-    Instr(const char* sass);
-
   private:
+    /* Constructor used internally by NVBit */
+    Instr(const char* sass, uint32_t sm_major, uint32_t sm_minor);
+
     /* Reserved variable used internally by NVBit */
     const void* reserved;
     friend class Nvbit;
@@ -656,11 +656,11 @@ void nvbit_set_at_launch(CUcontext ctx, CUfunction func, uint64_t param_val,
                          CUstream custream = nullptr,
                          uint64_t launch_handle = 0);
 
-/* Notify nvbit of a pthread used by the tool, this pthread will not
- * trigger any call backs even if executing CUDA events of kernel launches.
- * Multiple pthreads can be registered one after the other. */
-void nvbit_set_tool_pthread(pthread_t tool_pthread);
-void nvbit_unset_tool_pthread(pthread_t tool_pthread);
+/* Notify nvbit of a thread used by the tool. This thread will not trigger any
+ * callbacks even if it executes CUDA events or kernel launches. Multiple
+ * threads can be registered one after the other. */
+void nvbit_set_tool_thread(uint64_t tool_thread_id);
+void nvbit_unset_tool_thread(uint64_t tool_thread_id);
 
 /* Set nvdisasm */
 void nvbit_set_nvdisasm(const char* nvdisasm);

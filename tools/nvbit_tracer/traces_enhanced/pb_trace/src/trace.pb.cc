@@ -59,6 +59,15 @@ inline constexpr Trace::Impl_::Impl_(
         #endif
         ,
         _memory_payload_classes_cached_byte_size_{0},
+        #ifdef PROTOBUF_INTERNAL_REMOVE_ARENA_PTRS_REPEATED_PTR_FIELD
+        trace_capabilities_{visibility, ::_pbi::InternalMetadataOffset::Build<
+            ::dynamic_trace::Trace,
+            PROTOBUF_FIELD_OFFSET(::dynamic_trace::Trace, _impl_.trace_capabilities_)>()
+        }
+        #else  // !PROTOBUF_INTERNAL_REMOVE_ARENA_PTRS_REPEATED_PTR_FIELD
+        trace_capabilities_ {}
+        #endif
+        ,
         name_(
             &::google::protobuf::internal::fixed_address_empty_string,
             ::_pbi::ConstantInitialized()),
@@ -117,7 +126,7 @@ const ::uint32_t
         1,
         0x081, // bitmap
         PROTOBUF_FIELD_OFFSET(::dynamic_trace::Trace, _impl_._has_bits_),
-        11, // hasbit index offset
+        12, // hasbit index offset
         PROTOBUF_FIELD_OFFSET(::dynamic_trace::Trace, _impl_.name_),
         PROTOBUF_FIELD_OFFSET(::dynamic_trace::Trace, _impl_.binary_version_),
         PROTOBUF_FIELD_OFFSET(::dynamic_trace::Trace, _impl_.nvbit_version_),
@@ -126,14 +135,16 @@ const ::uint32_t
         PROTOBUF_FIELD_OFFSET(::dynamic_trace::Trace, _impl_.gpu_device_),
         PROTOBUF_FIELD_OFFSET(::dynamic_trace::Trace, _impl_.trace_contract_id_),
         PROTOBUF_FIELD_OFFSET(::dynamic_trace::Trace, _impl_.memory_payload_classes_),
-        1,
-        4,
+        PROTOBUF_FIELD_OFFSET(::dynamic_trace::Trace, _impl_.trace_capabilities_),
         2,
         5,
+        3,
         6,
         7,
-        3,
+        8,
+        4,
         0,
+        1,
 };
 
 static const ::_pbi::MigrationSchema
@@ -148,16 +159,17 @@ static const ::_pb::Message* PROTOBUF_NONNULL const file_default_instances[] = {
 const char descriptor_table_protodef_trace_2eproto[] ABSL_ATTRIBUTE_SECTION_VARIABLE(
     protodesc_cold) = {
     "\n\013trace.proto\022\rdynamic_trace\032\020gpu_device"
-    ".proto\032\021instruction.proto\"\343\002\n\005Trace\022\014\n\004n"
+    ".proto\032\021instruction.proto\"\377\002\n\005Trace\022\014\n\004n"
     "ame\030\001 \001(\t\022\026\n\016binary_version\030\002 \001(\005\022\025\n\rnvb"
     "it_version\030\003 \001(\t\022\030\n\020accelsim_version\030\004 \001"
     "(\005\022$\n\034is_gathered_registers_values\030\005 \001(\010"
     "\0227\n\ngpu_device\030\006 \003(\0132#.dynamic_trace.Tra"
     "ce.GpuDeviceEntry\022\031\n\021trace_contract_id\030\007"
     " \001(\t\022<\n\026memory_payload_classes\030\010 \003(\0162\034.d"
-    "ynamic_trace.MemoryOpClass\032K\n\016GpuDeviceE"
-    "ntry\022\013\n\003key\030\001 \001(\003\022(\n\005value\030\002 \001(\0132\031.dynam"
-    "ic_trace.gpu_device:\0028\001b\006proto3"
+    "ynamic_trace.MemoryOpClass\022\032\n\022trace_capa"
+    "bilities\030\t \003(\t\032K\n\016GpuDeviceEntry\022\013\n\003key\030"
+    "\001 \001(\003\022(\n\005value\030\002 \001(\0132\031.dynamic_trace.gpu"
+    "_device:\0028\001b\006proto3"
 };
 static const ::_pbi::DescriptorTable* PROTOBUF_NONNULL const
     descriptor_table_trace_2eproto_deps[2] = {
@@ -168,7 +180,7 @@ static ::absl::once_flag descriptor_table_trace_2eproto_once;
 PROTOBUF_CONSTINIT const ::_pbi::DescriptorTable descriptor_table_trace_2eproto = {
     false,
     false,
-    431,
+    459,
     descriptor_table_protodef_trace_2eproto,
     "trace.proto",
     &descriptor_table_trace_2eproto_once,
@@ -291,7 +303,7 @@ void Trace::clear_gpu_device() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.gpu_device_.Clear();
   ClearHasBitForRepeated(_impl_._has_bits_[0],
-                  0x00000080U);
+                  0x00000100U);
 }
 Trace::Trace(::google::protobuf::Arena* PROTOBUF_NULLABLE arena)
 #if defined(PROTOBUF_CUSTOM_VTABLE)
@@ -318,6 +330,15 @@ PROTOBUF_NDEBUG_INLINE Trace::Impl_::Impl_(
         #endif
         ,
         _memory_payload_classes_cached_byte_size_{0},
+        #ifdef PROTOBUF_INTERNAL_REMOVE_ARENA_PTRS_REPEATED_PTR_FIELD
+        trace_capabilities_{visibility, ::_pbi::InternalMetadataOffset::Build<
+            ::dynamic_trace::Trace,
+            PROTOBUF_FIELD_OFFSET(::dynamic_trace::Trace, _impl_.trace_capabilities_)>()
+        , from.trace_capabilities_}
+        #else
+        trace_capabilities_ { visibility, arena, from.trace_capabilities_ }
+        #endif
+        ,
         name_(arena, from.name_),
         nvbit_version_(arena, from.nvbit_version_),
         trace_contract_id_(arena, from.trace_contract_id_),
@@ -368,6 +389,15 @@ PROTOBUF_NDEBUG_INLINE Trace::Impl_::Impl_(
         #endif
         ,
         _memory_payload_classes_cached_byte_size_{0},
+        #ifdef PROTOBUF_INTERNAL_REMOVE_ARENA_PTRS_REPEATED_PTR_FIELD
+        trace_capabilities_{visibility, ::_pbi::InternalMetadataOffset::Build<
+            ::dynamic_trace::Trace,
+            PROTOBUF_FIELD_OFFSET(::dynamic_trace::Trace, _impl_.trace_capabilities_)>()
+        }
+        #else
+        trace_capabilities_ { visibility, arena }
+        #endif
+        ,
         name_(arena),
         nvbit_version_(arena),
         trace_contract_id_(arena),
@@ -428,6 +458,10 @@ constexpr auto Trace::InternalNewImpl_() {
           decltype(Trace::_impl_.memory_payload_classes_)::
               InternalGetArenaOffset(
                   ::google::protobuf::Message::internal_visibility()),
+      PROTOBUF_FIELD_OFFSET(Trace, _impl_.trace_capabilities_) +
+          decltype(Trace::_impl_.trace_capabilities_)::
+              InternalGetArenaOffset(
+                  ::google::protobuf::Message::internal_visibility()),
   });
   if (arena_bits.has_value()) {
     return ::google::protobuf::internal::MessageCreator::CopyInit(
@@ -472,16 +506,16 @@ Trace::GetClassData() const {
   return Trace_class_data_.base();
 }
 PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1
-const ::_pbi::TcParseTable<3, 8, 2, 70, 2>
+const ::_pbi::TcParseTable<4, 9, 2, 88, 2>
 Trace::_table_ = {
   {
     PROTOBUF_FIELD_OFFSET(Trace, _impl_._has_bits_),
     0, // no _extensions_
-    8, 56,  // max_field_number, fast_idx_mask
+    9, 120,  // max_field_number, fast_idx_mask
     offsetof(decltype(_table_), field_lookup_table),
-    4294967040,  // skipmap
+    4294966784,  // skipmap
     offsetof(decltype(_table_), field_entries),
-    8,  // num_field_entries
+    9,  // num_field_entries
     2,  // num_aux_entries
     offsetof(decltype(_table_), aux_entries),
     Trace_class_data_.base(),
@@ -491,54 +525,67 @@ Trace::_table_ = {
     ::_pbi::TcParser::GetTable<::dynamic_trace::Trace>(),  // to_prefetch
     #endif  // PROTOBUF_PREFETCH_PARSE_TABLE
   }, {{
-    // repeated .dynamic_trace.MemoryOpClass memory_payload_classes = 8;
-    {::_pbi::TcParser::FastV32P1,
-     {66, 0, 0,
-      PROTOBUF_FIELD_OFFSET(Trace, _impl_.memory_payload_classes_)}},
+    {::_pbi::TcParser::MiniParse, {}},
     // string name = 1;
     {::_pbi::TcParser::FastUS1,
-     {10, 1, 0,
+     {10, 2, 0,
       PROTOBUF_FIELD_OFFSET(Trace, _impl_.name_)}},
     // int32 binary_version = 2;
-    {::_pbi::TcParser::SingularVarintNoZag1<::uint32_t, offsetof(Trace, _impl_.binary_version_), 4>(),
-     {16, 4, 0,
+    {::_pbi::TcParser::SingularVarintNoZag1<::uint32_t, offsetof(Trace, _impl_.binary_version_), 5>(),
+     {16, 5, 0,
       PROTOBUF_FIELD_OFFSET(Trace, _impl_.binary_version_)}},
     // string nvbit_version = 3;
     {::_pbi::TcParser::FastUS1,
-     {26, 2, 0,
+     {26, 3, 0,
       PROTOBUF_FIELD_OFFSET(Trace, _impl_.nvbit_version_)}},
     // int32 accelsim_version = 4;
-    {::_pbi::TcParser::SingularVarintNoZag1<::uint32_t, offsetof(Trace, _impl_.accelsim_version_), 5>(),
-     {32, 5, 0,
+    {::_pbi::TcParser::SingularVarintNoZag1<::uint32_t, offsetof(Trace, _impl_.accelsim_version_), 6>(),
+     {32, 6, 0,
       PROTOBUF_FIELD_OFFSET(Trace, _impl_.accelsim_version_)}},
     // bool is_gathered_registers_values = 5;
-    {::_pbi::TcParser::SingularVarintNoZag1<bool, offsetof(Trace, _impl_.is_gathered_registers_values_), 6>(),
-     {40, 6, 0,
+    {::_pbi::TcParser::SingularVarintNoZag1<bool, offsetof(Trace, _impl_.is_gathered_registers_values_), 7>(),
+     {40, 7, 0,
       PROTOBUF_FIELD_OFFSET(Trace, _impl_.is_gathered_registers_values_)}},
     {::_pbi::TcParser::MiniParse, {}},
     // string trace_contract_id = 7;
     {::_pbi::TcParser::FastUS1,
-     {58, 3, 0,
+     {58, 4, 0,
       PROTOBUF_FIELD_OFFSET(Trace, _impl_.trace_contract_id_)}},
+    // repeated .dynamic_trace.MemoryOpClass memory_payload_classes = 8;
+    {::_pbi::TcParser::FastV32P1,
+     {66, 0, 0,
+      PROTOBUF_FIELD_OFFSET(Trace, _impl_.memory_payload_classes_)}},
+    // repeated string trace_capabilities = 9;
+    {::_pbi::TcParser::FastUR1,
+     {74, 1, 0,
+      PROTOBUF_FIELD_OFFSET(Trace, _impl_.trace_capabilities_)}},
+    {::_pbi::TcParser::MiniParse, {}},
+    {::_pbi::TcParser::MiniParse, {}},
+    {::_pbi::TcParser::MiniParse, {}},
+    {::_pbi::TcParser::MiniParse, {}},
+    {::_pbi::TcParser::MiniParse, {}},
+    {::_pbi::TcParser::MiniParse, {}},
   }}, {{
     65535, 65535
   }}, {{
     // string name = 1;
-    {PROTOBUF_FIELD_OFFSET(Trace, _impl_.name_), _Internal::kHasBitsOffset + 1, 0, (0 | ::_fl::kFcOptional | ::_fl::kUtf8String | ::_fl::kRepAString)},
+    {PROTOBUF_FIELD_OFFSET(Trace, _impl_.name_), _Internal::kHasBitsOffset + 2, 0, (0 | ::_fl::kFcOptional | ::_fl::kUtf8String | ::_fl::kRepAString)},
     // int32 binary_version = 2;
-    {PROTOBUF_FIELD_OFFSET(Trace, _impl_.binary_version_), _Internal::kHasBitsOffset + 4, 0, (0 | ::_fl::kFcOptional | ::_fl::kInt32)},
+    {PROTOBUF_FIELD_OFFSET(Trace, _impl_.binary_version_), _Internal::kHasBitsOffset + 5, 0, (0 | ::_fl::kFcOptional | ::_fl::kInt32)},
     // string nvbit_version = 3;
-    {PROTOBUF_FIELD_OFFSET(Trace, _impl_.nvbit_version_), _Internal::kHasBitsOffset + 2, 0, (0 | ::_fl::kFcOptional | ::_fl::kUtf8String | ::_fl::kRepAString)},
+    {PROTOBUF_FIELD_OFFSET(Trace, _impl_.nvbit_version_), _Internal::kHasBitsOffset + 3, 0, (0 | ::_fl::kFcOptional | ::_fl::kUtf8String | ::_fl::kRepAString)},
     // int32 accelsim_version = 4;
-    {PROTOBUF_FIELD_OFFSET(Trace, _impl_.accelsim_version_), _Internal::kHasBitsOffset + 5, 0, (0 | ::_fl::kFcOptional | ::_fl::kInt32)},
+    {PROTOBUF_FIELD_OFFSET(Trace, _impl_.accelsim_version_), _Internal::kHasBitsOffset + 6, 0, (0 | ::_fl::kFcOptional | ::_fl::kInt32)},
     // bool is_gathered_registers_values = 5;
-    {PROTOBUF_FIELD_OFFSET(Trace, _impl_.is_gathered_registers_values_), _Internal::kHasBitsOffset + 6, 0, (0 | ::_fl::kFcOptional | ::_fl::kBool)},
+    {PROTOBUF_FIELD_OFFSET(Trace, _impl_.is_gathered_registers_values_), _Internal::kHasBitsOffset + 7, 0, (0 | ::_fl::kFcOptional | ::_fl::kBool)},
     // map<int64, .dynamic_trace.gpu_device> gpu_device = 6;
-    {PROTOBUF_FIELD_OFFSET(Trace, _impl_.gpu_device_), _Internal::kHasBitsOffset + 7, 0, (0 | ::_fl::kFcRepeated | ::_fl::kMap)},
+    {PROTOBUF_FIELD_OFFSET(Trace, _impl_.gpu_device_), _Internal::kHasBitsOffset + 8, 0, (0 | ::_fl::kFcRepeated | ::_fl::kMap)},
     // string trace_contract_id = 7;
-    {PROTOBUF_FIELD_OFFSET(Trace, _impl_.trace_contract_id_), _Internal::kHasBitsOffset + 3, 0, (0 | ::_fl::kFcOptional | ::_fl::kUtf8String | ::_fl::kRepAString)},
+    {PROTOBUF_FIELD_OFFSET(Trace, _impl_.trace_contract_id_), _Internal::kHasBitsOffset + 4, 0, (0 | ::_fl::kFcOptional | ::_fl::kUtf8String | ::_fl::kRepAString)},
     // repeated .dynamic_trace.MemoryOpClass memory_payload_classes = 8;
     {PROTOBUF_FIELD_OFFSET(Trace, _impl_.memory_payload_classes_), _Internal::kHasBitsOffset + 0, 0, (0 | ::_fl::kFcRepeated | ::_fl::kPackedOpenEnum)},
+    // repeated string trace_capabilities = 9;
+    {PROTOBUF_FIELD_OFFSET(Trace, _impl_.trace_capabilities_), _Internal::kHasBitsOffset + 1, 0, (0 | ::_fl::kFcRepeated | ::_fl::kUtf8String | ::_fl::kRepSString)},
   }},
   {{
       {::_pbi::TcParser::GetMapAuxInfo(
@@ -546,11 +593,12 @@ Trace::_table_ = {
       {::_pbi::TcParser::GetTable<::dynamic_trace::gpu_device>()},
   }},
   {{
-    "\23\4\0\15\0\0\0\21\0\0\0\0\0\0\0\0"
+    "\23\4\0\15\0\0\0\21\0\22\0\0\0\0\0\0"
     "dynamic_trace.Trace"
     "name"
     "nvbit_version"
     "trace_contract_id"
+    "trace_capabilities"
   }},
 };
 PROTOBUF_NOINLINE void Trace::Clear() {
@@ -561,27 +609,30 @@ PROTOBUF_NOINLINE void Trace::Clear() {
   (void) cached_has_bits;
 
   cached_has_bits = _impl_._has_bits_[0];
-  if (BatchCheckHasBit(cached_has_bits, 0x0000000fU)) {
+  if (BatchCheckHasBit(cached_has_bits, 0x0000001fU)) {
     if (CheckHasBitForRepeated(cached_has_bits, 0x00000001U)) {
       _impl_.memory_payload_classes_.Clear();
     }
-    if (CheckHasBit(cached_has_bits, 0x00000002U)) {
-      _impl_.name_.ClearNonDefaultToEmpty();
+    if (CheckHasBitForRepeated(cached_has_bits, 0x00000002U)) {
+      _impl_.trace_capabilities_.Clear();
     }
     if (CheckHasBit(cached_has_bits, 0x00000004U)) {
-      _impl_.nvbit_version_.ClearNonDefaultToEmpty();
+      _impl_.name_.ClearNonDefaultToEmpty();
     }
     if (CheckHasBit(cached_has_bits, 0x00000008U)) {
+      _impl_.nvbit_version_.ClearNonDefaultToEmpty();
+    }
+    if (CheckHasBit(cached_has_bits, 0x00000010U)) {
       _impl_.trace_contract_id_.ClearNonDefaultToEmpty();
     }
   }
-  if (BatchCheckHasBit(cached_has_bits, 0x000000f0U)) {
+  if (BatchCheckHasBit(cached_has_bits, 0x000000e0U)) {
     ::memset(&_impl_.binary_version_, 0, static_cast<::size_t>(
         reinterpret_cast<char*>(&_impl_.is_gathered_registers_values_) -
         reinterpret_cast<char*>(&_impl_.binary_version_)) + sizeof(_impl_.is_gathered_registers_values_));
-    if (CheckHasBitForRepeated(cached_has_bits, 0x00000080U)) {
-      _impl_.gpu_device_.Clear();
-    }
+  }
+  if (CheckHasBitForRepeated(cached_has_bits, 0x00000100U)) {
+    _impl_.gpu_device_.Clear();
   }
   _impl_._has_bits_.Clear();
   _internal_metadata_.Clear<::google::protobuf::UnknownFieldSet>();
@@ -607,7 +658,7 @@ PROTOBUF_NOINLINE void Trace::Clear() {
 
   cached_has_bits = this_._impl_._has_bits_[0];
   // string name = 1;
-  if (CheckHasBit(cached_has_bits, 0x00000002U)) {
+  if (CheckHasBit(cached_has_bits, 0x00000004U)) {
     if (!this_._internal_name().empty()) {
       const ::std::string& _s = this_._internal_name();
       ::google::protobuf::internal::WireFormatLite::VerifyUtf8String(
@@ -617,7 +668,7 @@ PROTOBUF_NOINLINE void Trace::Clear() {
   }
 
   // int32 binary_version = 2;
-  if (CheckHasBit(cached_has_bits, 0x00000010U)) {
+  if (CheckHasBit(cached_has_bits, 0x00000020U)) {
     if (this_._internal_binary_version() != 0) {
       target =
           ::google::protobuf::internal::WireFormatLite::WriteInt32ToArrayWithField<2>(
@@ -626,7 +677,7 @@ PROTOBUF_NOINLINE void Trace::Clear() {
   }
 
   // string nvbit_version = 3;
-  if (CheckHasBit(cached_has_bits, 0x00000004U)) {
+  if (CheckHasBit(cached_has_bits, 0x00000008U)) {
     if (!this_._internal_nvbit_version().empty()) {
       const ::std::string& _s = this_._internal_nvbit_version();
       ::google::protobuf::internal::WireFormatLite::VerifyUtf8String(
@@ -636,7 +687,7 @@ PROTOBUF_NOINLINE void Trace::Clear() {
   }
 
   // int32 accelsim_version = 4;
-  if (CheckHasBit(cached_has_bits, 0x00000020U)) {
+  if (CheckHasBit(cached_has_bits, 0x00000040U)) {
     if (this_._internal_accelsim_version() != 0) {
       target =
           ::google::protobuf::internal::WireFormatLite::WriteInt32ToArrayWithField<4>(
@@ -645,7 +696,7 @@ PROTOBUF_NOINLINE void Trace::Clear() {
   }
 
   // bool is_gathered_registers_values = 5;
-  if (CheckHasBit(cached_has_bits, 0x00000040U)) {
+  if (CheckHasBit(cached_has_bits, 0x00000080U)) {
     if (this_._internal_is_gathered_registers_values() != 0) {
       target = stream->EnsureSpace(target);
       target = ::_pbi::WireFormatLite::WriteBoolToArray(
@@ -654,7 +705,7 @@ PROTOBUF_NOINLINE void Trace::Clear() {
   }
 
   // map<int64, .dynamic_trace.gpu_device> gpu_device = 6;
-  if (CheckHasBitForRepeated(cached_has_bits, 0x00000080U)) {
+  if (CheckHasBitForRepeated(cached_has_bits, 0x00000100U)) {
     if (!this_._internal_gpu_device().empty()) {
       using MapType = ::google::protobuf::Map<::int64_t, ::dynamic_trace::gpu_device>;
       using WireHelper = _pbi::MapEntryFuncs<::int64_t, ::dynamic_trace::gpu_device,
@@ -677,7 +728,7 @@ PROTOBUF_NOINLINE void Trace::Clear() {
   }
 
   // string trace_contract_id = 7;
-  if (CheckHasBit(cached_has_bits, 0x00000008U)) {
+  if (CheckHasBit(cached_has_bits, 0x00000010U)) {
     if (!this_._internal_trace_contract_id().empty()) {
       const ::std::string& _s = this_._internal_trace_contract_id();
       ::google::protobuf::internal::WireFormatLite::VerifyUtf8String(
@@ -694,6 +745,16 @@ PROTOBUF_NOINLINE void Trace::Clear() {
         target = stream->WriteEnumPacked(
             8, this_._internal_memory_payload_classes(), byte_size, target);
       }
+    }
+  }
+
+  // repeated string trace_capabilities = 9;
+  if (CheckHasBitForRepeated(cached_has_bits, 0x00000002U)) {
+    for (int i = 0, n = this_._internal_trace_capabilities_size(); i < n; ++i) {
+      const auto& s = this_._internal_trace_capabilities().Get(i);
+      ::google::protobuf::internal::WireFormatLite::VerifyUtf8String(
+          s.data(), static_cast<int>(s.length()), ::google::protobuf::internal::WireFormatLite::SERIALIZE, "dynamic_trace.Trace.trace_capabilities");
+      target = stream->WriteString(9, s, target);
     }
   }
 
@@ -728,49 +789,60 @@ PROTOBUF_NOINLINE void Trace::Clear() {
       total_size += ::_pbi::WireFormatLite::EnumSizeWithPackedTagSize(
           this_._internal_memory_payload_classes(), 1, this_._impl_._memory_payload_classes_cached_byte_size_);
     }
+    // repeated string trace_capabilities = 9;
+    if (CheckHasBitForRepeated(cached_has_bits, 0x00000002U)) {
+      total_size +=
+          1 * ::google::protobuf::internal::FromIntSize(this_._internal_trace_capabilities().size());
+      for (int i = 0, n = this_._internal_trace_capabilities().size(); i < n; ++i) {
+        total_size += ::google::protobuf::internal::WireFormatLite::StringSize(
+            this_._internal_trace_capabilities().Get(i));
+      }
+    }
     // string name = 1;
-    if (CheckHasBit(cached_has_bits, 0x00000002U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000004U)) {
       if (!this_._internal_name().empty()) {
         total_size += 1 + ::google::protobuf::internal::WireFormatLite::StringSize(
                                         this_._internal_name());
       }
     }
     // string nvbit_version = 3;
-    if (CheckHasBit(cached_has_bits, 0x00000004U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000008U)) {
       if (!this_._internal_nvbit_version().empty()) {
         total_size += 1 + ::google::protobuf::internal::WireFormatLite::StringSize(
                                         this_._internal_nvbit_version());
       }
     }
     // string trace_contract_id = 7;
-    if (CheckHasBit(cached_has_bits, 0x00000008U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000010U)) {
       if (!this_._internal_trace_contract_id().empty()) {
         total_size += 1 + ::google::protobuf::internal::WireFormatLite::StringSize(
                                         this_._internal_trace_contract_id());
       }
     }
     // int32 binary_version = 2;
-    if (CheckHasBit(cached_has_bits, 0x00000010U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000020U)) {
       if (this_._internal_binary_version() != 0) {
         total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(
             this_._internal_binary_version());
       }
     }
     // int32 accelsim_version = 4;
-    if (CheckHasBit(cached_has_bits, 0x00000020U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000040U)) {
       if (this_._internal_accelsim_version() != 0) {
         total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(
             this_._internal_accelsim_version());
       }
     }
     // bool is_gathered_registers_values = 5;
-    if (CheckHasBit(cached_has_bits, 0x00000040U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000080U)) {
       if (this_._internal_is_gathered_registers_values() != 0) {
         total_size += 2;
       }
     }
+  }
+   {
     // map<int64, .dynamic_trace.gpu_device> gpu_device = 6;
-    if (CheckHasBitForRepeated(cached_has_bits, 0x00000080U)) {
+    if (CheckHasBitForRepeated(cached_has_bits, 0x00000100U)) {
       total_size +=
           1 * ::google::protobuf::internal::FromIntSize(this_._internal_gpu_device_size());
       for (const auto& entry : this_._internal_gpu_device()) {
@@ -792,6 +864,7 @@ void Trace::MergeImpl(::google::protobuf::MessageLite& to_msg,
   if constexpr (::_pbi::DebugHardenCheckHasBitConsistency()) {
     from.CheckHasBitConsistency();
   }
+  ::google::protobuf::Arena* arena = _this->GetArena();
   // @@protoc_insertion_point(class_specific_merge_from_start:dynamic_trace.Trace)
   ABSL_DCHECK_NE(&from, _this);
   ::uint32_t cached_has_bits = 0;
@@ -802,7 +875,12 @@ void Trace::MergeImpl(::google::protobuf::MessageLite& to_msg,
     if (CheckHasBitForRepeated(cached_has_bits, 0x00000001U)) {
       _this->_internal_mutable_memory_payload_classes()->MergeFrom(from._internal_memory_payload_classes());
     }
-    if (CheckHasBit(cached_has_bits, 0x00000002U)) {
+    if (CheckHasBitForRepeated(cached_has_bits, 0x00000002U)) {
+      _this->_internal_mutable_trace_capabilities()->InternalMergeFromWithArena(
+          ::google::protobuf::MessageLite::internal_visibility(), arena,
+          from._internal_trace_capabilities());
+    }
+    if (CheckHasBit(cached_has_bits, 0x00000004U)) {
       if (!from._internal_name().empty()) {
         _this->_internal_set_name(from._internal_name());
       } else {
@@ -811,7 +889,7 @@ void Trace::MergeImpl(::google::protobuf::MessageLite& to_msg,
         }
       }
     }
-    if (CheckHasBit(cached_has_bits, 0x00000004U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000008U)) {
       if (!from._internal_nvbit_version().empty()) {
         _this->_internal_set_nvbit_version(from._internal_nvbit_version());
       } else {
@@ -820,7 +898,7 @@ void Trace::MergeImpl(::google::protobuf::MessageLite& to_msg,
         }
       }
     }
-    if (CheckHasBit(cached_has_bits, 0x00000008U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000010U)) {
       if (!from._internal_trace_contract_id().empty()) {
         _this->_internal_set_trace_contract_id(from._internal_trace_contract_id());
       } else {
@@ -829,24 +907,24 @@ void Trace::MergeImpl(::google::protobuf::MessageLite& to_msg,
         }
       }
     }
-    if (CheckHasBit(cached_has_bits, 0x00000010U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000020U)) {
       if (from._internal_binary_version() != 0) {
         _this->_impl_.binary_version_ = from._impl_.binary_version_;
       }
     }
-    if (CheckHasBit(cached_has_bits, 0x00000020U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000040U)) {
       if (from._internal_accelsim_version() != 0) {
         _this->_impl_.accelsim_version_ = from._impl_.accelsim_version_;
       }
     }
-    if (CheckHasBit(cached_has_bits, 0x00000040U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000080U)) {
       if (from._internal_is_gathered_registers_values() != 0) {
         _this->_impl_.is_gathered_registers_values_ = from._impl_.is_gathered_registers_values_;
       }
     }
-    if (CheckHasBitForRepeated(cached_has_bits, 0x00000080U)) {
-      _this->_impl_.gpu_device_.MergeFrom(from._impl_.gpu_device_);
-    }
+  }
+  if (CheckHasBitForRepeated(cached_has_bits, 0x00000100U)) {
+    _this->_impl_.gpu_device_.MergeFrom(from._impl_.gpu_device_);
   }
   _this->_impl_._has_bits_[0] |= cached_has_bits;
   _this->_internal_metadata_.MergeFrom<::google::protobuf::UnknownFieldSet>(
@@ -868,6 +946,7 @@ void Trace::InternalSwap(Trace* PROTOBUF_RESTRICT PROTOBUF_NONNULL other) {
   _internal_metadata_.InternalSwap(&other->_internal_metadata_);
   swap(_impl_._has_bits_[0], other->_impl_._has_bits_[0]);
   _impl_.memory_payload_classes_.InternalSwap(&other->_impl_.memory_payload_classes_);
+  _impl_.trace_capabilities_.InternalSwap(&other->_impl_.trace_capabilities_);
   ::_pbi::ArenaStringPtr::InternalSwap(&_impl_.name_, &other->_impl_.name_, arena);
   ::_pbi::ArenaStringPtr::InternalSwap(&_impl_.nvbit_version_, &other->_impl_.nvbit_version_, arena);
   ::_pbi::ArenaStringPtr::InternalSwap(&_impl_.trace_contract_id_, &other->_impl_.trace_contract_id_, arena);

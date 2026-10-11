@@ -66,6 +66,9 @@ enum s2r_operand_type {
 class traced_instruction;
 
 bool is_reserved_reg(unsigned int reg_id, TraceEnhancedOperandType reg_type);
+// Select the architecture's uniform-zero register encoding. Hopper and older
+// use URZ=63; Blackwell SM120 uses URZ=255, so UR63 is a real register there.
+void set_uniform_zero_register(unsigned int reg_id);
 
 bool has_the_operand_type_been_captured(TraceEnhancedOperandType reg_type);
 

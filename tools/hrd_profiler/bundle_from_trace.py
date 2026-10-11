@@ -507,12 +507,12 @@ def consume_trace_dir(
 # Static device-card L2 cache sizes per arch.
 #   sm_86: RTX 3090 Ti has 6 MiB L2 (Ampere consumer card).
 #   sm_120-laptop: historical RTX 5060 Laptop has 32 MiB L2.
-#   sm_120: active RTX PRO 6000 Workstation has no static fallback; use a
+#   sm_120: active RTX 5090 has no static fallback; use a
 #     live CUDA value or retain a typed geometry-unavailable result.
 _STATIC_CARD_L2_BYTES: dict[str, int] = {
     "sm_86": 6 * 1024 * 1024,
     "sm_120-laptop": 32 * 1024 * 1024,
-    # Active RTX PRO 6000 Workstation sm_120 has no static cache fallback.
+    # Active RTX 5090 sm_120 has no static cache fallback.
 }
 
 

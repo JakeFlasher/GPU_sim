@@ -36,7 +36,7 @@
           "required": ["arch_id", "sku"],
           "properties": {
             "arch_id": { "const": "sm_120" },
-            "sku": { "enum": ["rtx_5060_laptop", "rtx_pro_6000_ws"] }
+            "sku": { "enum": ["rtx_5060_laptop", "rtx_5090"] }
           }
         }
       ]

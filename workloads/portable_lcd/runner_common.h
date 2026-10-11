@@ -302,9 +302,9 @@ inline void infer_gpu_sku(const cudaDeviceProp &dp, char out[64]) {
         // variants do not silently masquerade as a specific SKU.
         if (strstr(dp.name, "5060 Laptop") != nullptr) {
             snprintf(out, 64, "rtx_5060_laptop");
-        } else if (strstr(dp.name, "RTX PRO 6000") != nullptr ||
-                   strstr(dp.name, "RTX_PRO_6000") != nullptr) {
-            snprintf(out, 64, "rtx_pro_6000_blackwell");
+        } else if (strstr(dp.name, "RTX 5090") != nullptr ||
+                   strstr(dp.name, "RTX_5090") != nullptr) {
+            snprintf(out, 64, "rtx_5090_blackwell");
         } else {
             snprintf(out, 64, "cc_12_0_unknown");
         }

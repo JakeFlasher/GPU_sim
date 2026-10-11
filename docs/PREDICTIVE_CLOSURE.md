@@ -118,9 +118,7 @@ parameter set. The v2 fitter and six-family staged evaluation use independent
 probe inputs and post-prediction NCU joins; the current native rows are all
 open intervals, so finite interval coverage is not applicable. Open-tail
 consistency and lower-point APE are diagnostics, not confidence bounds or
-hardware accuracy. Native-preserved compression and hardware design ranking
-remain unproven. See the [R6 corpus result](review_round3_20261002/README.md)
-and the [third-round rebuttal](../plans/third_round_rebuttal_20261002.md).
-See the [active second-round refinement program](../plans/second_round_refinement_20261001.md),
-the [first-round implementation history](../plans/sm86_reification_refactor_20261001.md),
-and [configuration](archprofile.md) rather than older report task lists.
+hardware accuracy. Native-preserved compression and hardware design ranking remain unproven.
+Use [STATUS](STATUS.md), [PROJECT_MEMORY](PROJECT_MEMORY.md), and
+[configuration](archprofile.md) for the live contract; the active SM120 plan
+owns the current implementation queue.

@@ -1,0 +1,1 @@
+{"uuid": "33e16dec-280a-592c-9c8d-edafedacd256", "axes": {"num_tokens": 64, "hidden_size": 256, "intermediate_size": 512}, "inputs": {"hidden_states": {"type": "random"}, "routing_weight": {"type": "random"}, "gate_up_weight": {"type": "random"}, "down_weight": {"type": "random"}}, "tolerance": {"max_atol": 0.005, "max_rtol": 0.02, "required_matched_ratio": 0.99}}

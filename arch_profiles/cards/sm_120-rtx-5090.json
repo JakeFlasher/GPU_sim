@@ -1,0 +1,155 @@
+{
+  "arch_id": "sm_120",
+  "sku": "rtx_5090",
+  "display_name": "NVIDIA GeForce RTX 5090",
+  "die": "GB202",
+  "microarchitecture": "Blackwell",
+  "role": "cloud_live_capture_and_validation_reference",
+  "compute_capability": [
+    12,
+    0
+  ],
+  "aliases": [
+    "sm_120-5090",
+    "rtx_5090"
+  ],
+  "device_name_substrings": [
+    "NVIDIA GeForce RTX 5090"
+  ],
+  "build_arch_family": [
+    "sm_120",
+    "sm_120a",
+    "sm_120f"
+  ],
+  "gencode": "compute_120,code=sm_120",
+  "sm_count": 170,
+  "sm_count_provenance": "NVIDIA RTX Blackwell GPU Architecture v1.1, Table 1/Table 3; validate against the live CUDA device query.",
+  "griddim_penalty_alpha": {
+    "status": "research_gap",
+    "reason": "No RTX 5090 grid-density sweep has been captured.",
+    "challenge": "sm120 cloud capture campaign"
+  },
+  "bare_ldg_e_default": "unknown_typed_unavailable",
+  "cache_layers": [
+    "L2"
+  ],
+  "l2_geometry": {
+    "status": "research_gap",
+    "reason": "Vendor documentation supplies a 96 MiB RTX 5090 L2 capacity, but slice mapping, sector policy, and replacement behavior are not yet measured.",
+    "challenge": "sm120 RTX 5090 cache geometry probe"
+  },
+  "l2_vendor_summary": {
+    "capacity_bytes": 100663296,
+    "sector_bytes": 32,
+    "line_bytes": 128,
+    "provenance": "NVIDIA RTX Blackwell GPU Architecture v1.1, Table 1/Table 3; capacity is vendor information, not a replay-ready geometry card."
+  },
+  "l1_geometry": {
+    "status": "research_gap",
+    "reason": "The CC 12.0 unified L1/texture/shared geometry and cache carveout behavior have not been measured on this RTX 5090.",
+    "challenge": "sm120 RTX 5090 L1/shared carveout probe"
+  },
+  "nvml_reference_operating_point": {
+    "status": "research_gap",
+    "reason": "Clock sweep samples are collection settings, not a calibrated simulator cycle/wall-time crosswalk.",
+    "challenge": "sm120 RTX 5090 clock crosswalk"
+  },
+  "duration_crosswalk": {
+    "status": "research_gap",
+    "reason": "No independent simulator-cycle to wall-clock crosswalk exists for this SKU.",
+    "challenge": "sm120 cloud timing campaign"
+  },
+  "dram_bandwidth": {
+    "status": "research_gap",
+    "reason": "1792 GB/s is a vendor peak specification, not an achieved locked-protocol service rate; no RTX 5090 clock/memory sweep is retained yet.",
+    "challenge": "sm120 cloud DRAM bandwidth probe"
+  },
+  "smsp": {
+    "status": "research_gap",
+    "reason": "SMSP count and issue-port topology are not inferred from the 170-SM product count.",
+    "challenge": "sm120 issue-topology probe"
+  },
+  "occupancy": {
+    "max_resident_warps_per_sm": 48,
+    "max_blocks": 24
+  },
+  "occupancy_provenance": "Retained RTX 5090 cudaDevAttrMaxBlocksPerMultiprocessor=24 in m4/launch_probe.jsonl; CUDA tuning-guide statement of 32 conflicts with this device attribute. Do not reinterpret the direct device attribute as a kernel-specific occupancy result.",
+  "runtime_limits": {
+    "max_resident_warps_per_sm": 48,
+    "max_blocks_per_sm": 24,
+    "max_threads_per_sm": 1536,
+    "max_threads_per_block": 1024,
+    "sm_id_upper_bound": 170,
+    "warp_id_upper_bound": 48,
+    "max_shared_memory_per_sm_bytes": 102400,
+    "max_shared_memory_per_block_bytes": 49152,
+    "max_shared_memory_per_block_optin_bytes": 101376,
+    "shared_memory_carveout_kib": [
+      0,
+      8,
+      16,
+      32,
+      64,
+      100
+    ],
+    "provenance": "Retained live CUDA device attributes in /dev/shm/sm120_rtx_5090_work/m4/launch_probe.jsonl (device row); identifier limits and shared-memory capacities retained. max_blocks_per_sm=24 is a device attribute, not only the M8 occupancy result."
+  },
+  "dep_barriers": {
+    "status": "research_gap",
+    "reason": "Dependency-barrier resource count has not been measured on SM120.",
+    "challenge": "sm120 issue-topology probe"
+  },
+  "barrier_latencies": {
+    "status": "research_gap",
+    "reason": "Barrier issue/read/write latencies have not been measured on SM120.",
+    "challenge": "sm120 synchronization probe"
+  },
+  "dual_issue": {
+    "status": "research_gap",
+    "reason": "Dual-issue behavior is not assumed from the Blackwell generation label.",
+    "challenge": "sm120 issue-topology probe"
+  },
+  "vendor_spec": {
+    "gpc_count": 11,
+    "tpc_count": 85,
+    "cuda_cores_per_sm": 128,
+    "cuda_cores": 21760,
+    "tensor_cores_per_sm": 4,
+    "tensor_cores": 680,
+    "memory_bytes": 34359738368,
+    "memory_type": "GDDR7",
+    "memory_interface_bits": 512,
+    "memory_bandwidth_bytes_per_second": 1792000000000,
+    "boost_clock_mhz": 2407,
+    "shared_memory_per_sm_bytes": 131072,
+    "max_resident_warps_per_sm": 48,
+    "max_blocks_per_sm": 32,
+    "tgp_watts": 575,
+    "board_power_limit_watts": 600,
+    "provenance": "NVIDIA RTX Blackwell GPU Architecture v1.1, Table 1/Table 3; public CUDA 13.2 CC12.0 tuning ceiling; live nvidia-smi reports a 600 W board limit; vendor/runtime facts only."
+  },
+  "evidence_status": "Vendor-spec-only-sm_120-rtx_5090",
+  "predictor_state": {
+    "l1tex_sector_hit_rate": "deferred_until_live_sm120_5090_capture",
+    "l2_sector_hit_rate": "deferred_until_live_sm120_5090_capture",
+    "wall_clock": "deferred_until_live_sm120_5090_capture"
+  },
+  "research_gaps": [
+    "sm120 RTX 5090 L1/L2 geometry and cache policy",
+    "sm120 RTX 5090 instruction issue and tensor-pipeline intervals",
+    "sm120 RTX 5090 async/TMA/cluster completion semantics",
+    "sm120 RTX 5090 clock and wall-time crosswalk"
+  ],
+  "notes": [
+    "This card is intentionally separate from sm_120-laptop; a CC 12.0 token alone must not select between SKUs.",
+    "The card is vendor-informed and not a claim that the simulator already supports SM120 replay.",
+    "The 120a/120f build tokens are compile-family vocabulary; each feature requires a live compile and run probe."
+  ],
+  "documentation_discrepancies": {
+    "resident_blocks_per_sm": {
+      "retained_cuda_device_attribute": 24,
+      "tuning_guide_statement": 32,
+      "resolution": "use_device_attribute_for_this_SKU; discrepancy_unresolved"
+    }
+  }
+}

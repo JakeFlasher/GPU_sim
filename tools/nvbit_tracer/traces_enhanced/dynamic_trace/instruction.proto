@@ -198,6 +198,31 @@ message instruction {
   // memory-service event, or completion timestamp. Absence is the legacy and
   // default-disabled behavior.
   optional uint64 instrumentation_order = 14;
+
+  // Dynamic constant-bank offsets/addresses observed by the injected device
+  // function.  These are deliberately separate from `addresses`: constant
+  // bank operands are not global/shared allocation addresses and must not be
+  // passed through the device-allocation identity gate.
+  repeated uint64 constant_memory_addresses = 15;
+  optional uint32 constant_memory_bank = 16;
+  optional uint64 constant_memory_offset = 17;
+
+  // Dynamic CALL/RET target addresses reconstructed from the runtime register
+  // operands plus the SASS immediate.  The list is lane-indexed over active
+  // lanes in encounter order; it is not a memory payload.
+  repeated uint64 call_return_targets = 18;
+  optional uint64 call_return_immediate = 19;
+
+  // For collective matrix memory operations (LDSM/STSM), `data_width` is
+  // the logical element width while transfer_width is the runtime group
+  // transfer reported by NVBit.  For ordinary operations the two are equal.
+  optional int32 transfer_width = 20;
+
+  // CALL/RET target reconstruction flags. Bit 0 means that the runtime
+  // target includes a register-derived component; bit 1 means the SASS form
+  // is REL. For SM120 REL forms the immediate is function-relative and is
+  // added to the runtime register value without adding the current VPC.
+  optional uint32 call_return_flags = 21;
 }
 
 // Closed 12-token cache-operator vocabulary. The

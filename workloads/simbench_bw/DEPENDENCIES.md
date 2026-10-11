@@ -57,10 +57,10 @@ make -C workloads/simbench_bw cupti-collector-lib
 ```
 
 Default toolchain locations (overridable via env):
-- `CUDA_HOME=/usr/local/cuda`
+- `CUDA_HOME=/usr/local/cuda-13.2`
 - `CUPTI_INCLUDE=$(CUDA_HOME)/extras/CUPTI/include`
 - `CUPTI_LIB=$(CUDA_HOME)/extras/CUPTI/lib64`
-- `COLLECTOR_ARCH=sm_120` (matches the cloud RTX PRO 6000 Blackwell
+- `COLLECTOR_ARCH=sm_120` (matches the cloud RTX 5090 Blackwell
   target; recompile with `COLLECTOR_ARCH=sm_86` for the local RTX 3090 Ti
   smoke-test host on this branch, or `COLLECTOR_ARCH=sm_90a` for H100
   hosts).
@@ -90,7 +90,7 @@ Every measurement manifest carries `compute_capability_major` +
 | Platform | Compute capability |
 |---|---|
 | NVIDIA H100 | 9.0 |
-| RTX PRO 6000 Blackwell | 12.0 |
+| RTX 5090 Blackwell | 12.0 |
 | RTX 3090 Ti | 8.6 |
 
 Any other compute capability at startup refuses to run without

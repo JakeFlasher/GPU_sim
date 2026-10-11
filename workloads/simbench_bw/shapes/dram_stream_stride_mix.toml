@@ -14,7 +14,7 @@ repeat_iters = 30
 
 [[trace_shapes]]
 name = "trace_00"
-axes = { warps = 32, accesses = 128, stride_classes = 2 }
+axes = { warps = 4, accesses = 128, stride_classes = 2 }
 launch_config = { grid = [32, 1, 1], block = [128, 1, 1] }
 predicted_bytes = 1310720
 estimator_source = "static"

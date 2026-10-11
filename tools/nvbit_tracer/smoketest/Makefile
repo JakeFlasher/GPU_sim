@@ -3,14 +3,15 @@
 # Builds the self-contained backprop_enriched smoke test binary used as the
 # NVBit tracer validation target. Single .cu file, no external source pulls.
 #
-# Default architecture: sm_120 (cloud RTX PRO 6000 Blackwell — the
+# Default architecture: sm_120 (cloud GeForce RTX 5090 Blackwell — the
 # project's cloud target; compute 12.0). The local smoke-test host on
 # this branch is RTX 3090 Ti / sm_86 (Ampere); override with
 # `make ARCH=sm_86` to build for local execution. Other valid overrides
 # include `make ARCH=sm_90` for H100.
 
-NVCC ?= nvcc
-CXX  ?= g++
+CUDA_INSTALL_PATH ?= /usr/local/cuda-13.2
+NVCC ?= $(CUDA_INSTALL_PATH)/bin/nvcc
+CXX  ?= /usr/bin/g++-14
 ARCH ?= sm_120
 
 NVCC_FLAGS = -O3 -std=c++20 -arch=$(ARCH) -ccbin=$(CXX) -lineinfo

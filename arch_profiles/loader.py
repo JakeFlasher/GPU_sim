@@ -14,10 +14,10 @@ Design (grounded in the seam research, esp. Q9 "token vocabulary"):
   ``label_admitted.json`` arch enum ``{sm_86, sm_120}`` and the 30-cell sm_120
   cohort byte-stable.
 * A device-tier **SKU** (``rtx_3090_ti``, ``rtx_5060_laptop``,
-  ``rtx_pro_6000_ws``) disambiguates
+  ``rtx_5090``) disambiguates
   hardware facts that differ between two cards sharing a compute capability
   (a bare ``sm_120`` cannot tell a GB206 laptop from a GB202 workstation — the
-  ``sm_120-laptop`` and ``rtx_pro_6000_ws`` aliases exist precisely to
+  ``sm_120-laptop`` and ``rtx_5090`` aliases exist precisely to
   prevent that conflation).
 * ``build_arch_family`` (a compile-time concern) is kept SEPARATE from the
   deploy/collection ``arch_id`` (Q5): a fatbin may legitimately carry server
@@ -26,7 +26,7 @@ Design (grounded in the seam research, esp. Q9 "token vocabulary"):
 The loader intentionally performs **zero** behaviour change for sm_86: every
 sm_86 card field equals the value hardcoded in the live source today, and
 ``tests/test_arch_profile_lockstep.py`` asserts that byte-for-byte. The historical 5060-laptop card carries the measured 26-SM value; the dedicated
-Pro 6000 card carries the vendor-documented 188-SM value. Neither card is a
+RTX 5090 card carries the vendor-documented 170-SM value. Neither card is a
 fallback for the other.
 
 Fields whose real value was never captured on the relevant Blackwell part
@@ -115,6 +115,11 @@ class ArchProfile:
     @property
     def nvml_reference_operating_point(self) -> dict[str, Any] | ResearchGap:
         return _gap_or(self.raw.get("nvml_reference_operating_point"))
+
+    @property
+    def runtime_limits(self) -> dict[str, Any] | ResearchGap:
+        """Observed launch/identifier envelope, distinct from issue/cache hypotheses."""
+        return _gap_or(self.raw.get("runtime_limits"))
 
     @property
     def build_arch_family(self) -> list[str]:
@@ -310,6 +315,102 @@ class ArchContext:
         resolved["dual_issue"] = {"supported": supported}
         return resolved
 
+    def require_runtime_limits(self) -> dict[str, Any]:
+        """Resolve the card's structural CUDA launch envelope.
+
+        This is intentionally independent of ``require_issue_resources`` and
+        never supplies scheduler, cache, or timing defaults. The duplicated
+        occupancy block is checked when present so Python and Rust consumers
+        cannot observe conflicting resident limits.
+        """
+        self._require_profile_binding()
+        value = self.require("runtime_limits")
+        fields = {
+            "max_resident_warps_per_sm",
+            "max_blocks_per_sm",
+            "max_threads_per_sm",
+            "max_threads_per_block",
+            "sm_id_upper_bound",
+            "warp_id_upper_bound",
+            "max_shared_memory_per_sm_bytes",
+            "max_shared_memory_per_block_bytes",
+            "max_shared_memory_per_block_optin_bytes",
+            "shared_memory_carveout_kib",
+            "provenance",
+        }
+        if not isinstance(value, dict) or set(value) != fields:
+            raise ArchProfileError(
+                f"{self.arch_id}/{self.sku}: runtime_limits has invalid shape"
+            )
+        positive = (
+            "max_resident_warps_per_sm",
+            "max_blocks_per_sm",
+            "max_threads_per_sm",
+            "max_threads_per_block",
+            "sm_id_upper_bound",
+            "warp_id_upper_bound",
+            "max_shared_memory_per_sm_bytes",
+            "max_shared_memory_per_block_bytes",
+            "max_shared_memory_per_block_optin_bytes",
+        )
+        normalized: dict[str, Any] = {}
+        for field_name in positive:
+            raw = value[field_name]
+            if isinstance(raw, bool) or not isinstance(raw, (int, float)) or int(raw) != raw or raw <= 0:
+                raise ArchProfileError(
+                    f"{self.arch_id}/{self.sku}: runtime_limits.{field_name} must be positive integer"
+                )
+            normalized[field_name] = int(raw)
+        carveouts = value["shared_memory_carveout_kib"]
+        if (
+            not isinstance(carveouts, list)
+            or not carveouts
+            or any(isinstance(kib, bool) or not isinstance(kib, int) or kib < 0 for kib in carveouts)
+            or any(left >= right for left, right in zip(carveouts, carveouts[1:]))
+            or any(kib * 1024 > normalized["max_shared_memory_per_sm_bytes"] for kib in carveouts)
+        ):
+            raise ArchProfileError(
+                f"{self.arch_id}/{self.sku}: runtime_limits.shared_memory_carveout_kib is invalid"
+            )
+        if normalized["max_threads_per_block"] > normalized["max_threads_per_sm"]:
+            raise ArchProfileError(
+                f"{self.arch_id}/{self.sku}: per-block thread limit exceeds per-SM limit"
+            )
+        if normalized["max_threads_per_sm"] < normalized["max_resident_warps_per_sm"] * 32:
+            raise ArchProfileError(
+                f"{self.arch_id}/{self.sku}: max_threads_per_sm is below resident warp product"
+            )
+        if not (
+            normalized["max_shared_memory_per_block_bytes"]
+            <= normalized["max_shared_memory_per_block_optin_bytes"]
+            <= normalized["max_shared_memory_per_sm_bytes"]
+        ):
+            raise ArchProfileError(
+                f"{self.arch_id}/{self.sku}: shared-memory limits are not monotonic"
+            )
+        sm_count = self.profile.sm_count
+        if not isinstance(sm_count, int) or normalized["sm_id_upper_bound"] < sm_count:
+            raise ArchProfileError(
+                f"{self.arch_id}/{self.sku}: sm identifier bound is below card SM count"
+            )
+        if normalized["warp_id_upper_bound"] < normalized["max_resident_warps_per_sm"]:
+            raise ArchProfileError(
+                f"{self.arch_id}/{self.sku}: warp identifier bound is below resident warp bound"
+            )
+        if not isinstance(value["provenance"], str) or not value["provenance"].strip():
+            raise ArchProfileError(
+                f"{self.arch_id}/{self.sku}: runtime_limits.provenance is empty"
+            )
+        occupancy = self.profile.get("occupancy")
+        if occupancy is not None and not is_research_gap(occupancy):
+            if not isinstance(occupancy, dict) or occupancy.get("max_resident_warps_per_sm") != normalized["max_resident_warps_per_sm"] or occupancy.get("max_blocks") != normalized["max_blocks_per_sm"]:
+                raise ArchProfileError(
+                    f"{self.arch_id}/{self.sku}: runtime_limits and occupancy limits diverge"
+                )
+        normalized["shared_memory_carveout_kib"] = list(carveouts)
+        normalized["provenance"] = value["provenance"]
+        return normalized
+
 
 # ---------------------------------------------------------------------------
 # Loading
@@ -352,18 +453,18 @@ def load_profile(token: str, sku: str | None = None) -> ArchProfile:
 
     ``token`` may be a canonical arch_id, any alias, a device-name substring,
     or a SKU. The canonical arch_id is resolved first via :func:`resolve_arch_id`.
-    A bare ``sm_120`` selects the active Pro 6000 card; the historical laptop
+    A bare ``sm_120`` selects the active RTX 5090 card; the historical laptop
     card requires ``sm_120-laptop`` or its explicit SKU.
     """
     arch_id = resolve_arch_id(token)
     if sku is None:
         sku = resolve_sku(token, strict=False)
-        # The active bare deployment token for CC 12.0 is the cloud Pro 6000
+        # The active bare deployment token for CC 12.0 is the cloud RTX 5090
         # target. The historical laptop card remains available only through
         # its explicit SKU/device alias, so a bare sm_120 cannot silently pick
         # the old 5060 facts.
         if sku is None and str(token).strip().lower() == "sm_120":
-            sku = "rtx_pro_6000_ws"
+            sku = "rtx_5090"
     card = _load_json(_card_path_for(arch_id, sku))
     return ArchProfile(arch_id=card["arch_id"], sku=card.get("sku", ""), raw=card)
 
@@ -464,11 +565,11 @@ def resolve_arch_id(token: str | tuple[int, int]) -> str:
     """Normalise any of the 8 coexisting spellings → canonical bare ``sm_XX``.
 
     Accepts: canonical ids (``sm_86``), device/capability aliases
-    (``sm_120-laptop`` or an explicit Pro 6000 device name), build tokens
+    (``sm_120-laptop`` or an explicit RTX 5090 device name), build tokens
     (``sm_120a``, ``sm_120f``), a
     ``(major, minor)`` compute-capability tuple, or a device-name substring
     ("NVIDIA GeForce RTX 5060 Laptop GPU"). Uncaptured server/workstation
-    SKUs raise :class:`ArchProfileError`; the explicitly carded RTX PRO 6000
+    SKUs raise :class:`ArchProfileError`; the explicitly carded RTX 5090
     Workstation Edition resolves to sm_120.
     """
     aliases = _aliases()
@@ -512,7 +613,7 @@ def resolve_arch_id(token: str | tuple[int, int]) -> str:
 
 
 def resolve_sku(token: str | tuple[int, int], *, strict: bool = True) -> str | None:
-    """Resolve a device-tier SKU (3090 Ti, 5060 laptop, or Pro 6000 WS).
+    """Resolve a device-tier SKU (3090 Ti, 5060 laptop, or RTX 5090 WS).
 
     A bare arch_id or compute capability cannot pin a SKU on its own when a
     capability hosts multiple cards; ``strict=False`` returns None instead of

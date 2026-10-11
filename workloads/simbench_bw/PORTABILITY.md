@@ -13,7 +13,7 @@ SimBench-BW reports numbers on two platforms:
 | Platform              | Arch family     | Target flag                        | Role                                                              |
 |-----------------------|-----------------|------------------------------------|-------------------------------------------------------------------|
 | NVIDIA H100           | Hopper sm_90a   | `-gencode arch=compute_90a,code=sm_90a`       | Secondary cross-generation measurement target when available. |
-| RTX PRO 6000 Blackwell| Blackwell sm_120| `-gencode arch=compute_120,code=sm_120`       | Primary Blackwell measurement target; cloud-rented, with local sm_86 smoke testing only. |
+| RTX 5090 Blackwell| Blackwell sm_120| `-gencode arch=compute_120,code=sm_120`       | Primary Blackwell measurement target; cloud-rented, with local sm_86 smoke testing only. |
 
 See `references/NVIDIA_Manuals/blackwell_compatibility/01_blackwell-architecture-compatibility.md` for
 the authoritative feature-surface record of the Blackwell target. RTX 3090 Ti
@@ -72,7 +72,7 @@ and rejects the row if a branch is present.
 A `tier=H` row compiles only under `sm_90a`. It uses a Hopper-exclusive
 instruction class (e.g. `wgmma.*`, `setmaxnreg`, Hopper-only TMA multicast).
 These rows appear in `suite_results.json` with `platform=h100`; on
-`rtx_pro_6000_blackwell` they appear as `status=unsupported` with
+`rtx_5090_blackwell` they appear as `status=unsupported` with
 `reason=sm_90a_only`.
 
 ### `tier=B` — Blackwell-only
@@ -80,7 +80,7 @@ These rows appear in `suite_results.json` with `platform=h100`; on
 A `tier=B` row requires Blackwell-conditional hardware features (dense FP4 /
 FP6 / NVFP4 block-scaled MMA via `sm_120f`, or sparse mxf4 via `sm_120a`, or
 other `sm_120*`-conditional intrinsics). It does not build on `sm_90a`. These
-rows appear with `platform=rtx_pro_6000_blackwell` when `nvcc` +
+rows appear with `platform=rtx_5090_blackwell` when `nvcc` +
 correctness both pass; on `h100` they are `status=unsupported` with
 `reason=sm_120a_only` (or similar).
 

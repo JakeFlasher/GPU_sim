@@ -37,12 +37,16 @@ extern "C" __global__ void dram_stream_stride_mix_kernel(
     // pattern scattered samples thinly across many mid-range bins
     // (every bin had <50 obs under `trace_l2_accuracy_xl`).
     const int32_t target_lines[3] = {32, 64, 128};
-    const int32_t repeats_per_target = 8;
     const int32_t LINE_FLOATS = 32;
+    const int32_t class_count = stride_classes < 1 ? 1 : (stride_classes > 3 ? 3 : stride_classes);
+    const int32_t access_budget = accesses < 1 ? 1 : accesses;
     const int64_t warp_slot_floats = (int64_t)4096;
     int64_t warp_base = (int64_t)warp_id * warp_slot_floats;
-    for (int t = 0; t < 3; ++t) {
-        int32_t lines = target_lines[t];
+    for (int t = 0; t < class_count; ++t) {
+        int32_t lines = target_lines[t] < access_budget ? target_lines[t] : access_budget;
+        int32_t repeats_per_target = access_budget / lines;
+        if (repeats_per_target < 1) repeats_per_target = 1;
+        if (repeats_per_target > 8) repeats_per_target = 8;
         for (int repeat = 0; repeat < repeats_per_target; ++repeat) {
             for (int li = 0; li < lines; ++li) {
                 int64_t addr = (warp_base + (int64_t)li * LINE_FLOATS + tid) % total;

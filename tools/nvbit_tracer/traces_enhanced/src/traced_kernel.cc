@@ -123,9 +123,24 @@ std::shared_ptr<traced_instruction> create_no_binay_instruction(unsigned int pc,
 
     // Create operands
     for(unsigned i = next_idx_to_check; i < stripped_inst.size(); i++) {
-        if(!stripped_inst[i].empty() && (stripped_inst[i][0]!='&') && (stripped_inst[i][0]!='?') && (stripped_inst[i][0]!=';')) {
-            instruction->add_operand(std::make_unique<traced_operand>(stripped_inst[i]));
+        if (stripped_inst[i].empty() || stripped_inst[i][0] == '&' ||
+            stripped_inst[i][0] == '?' || stripped_inst[i][0] == ';') {
+            continue;
         }
+        // SASS prints Blackwell DEPBAR wait sets with embedded whitespace:
+        // `DEPBAR {5 4 3 2 1 0}`.  The generic space tokenizer would split
+        // this into six malformed operands (`{5`, `4`, ...).  Reassemble the
+        // complete brace-delimited operand before handing it to
+        // traced_operand, which then accepts either comma or whitespace
+        // separators without changing the original instruction text.
+        std::string operand = stripped_inst[i];
+        if (operand.front() == '{' && operand.find('}') == std::string::npos) {
+            while (i + 1 < stripped_inst.size()) {
+                operand += " " + stripped_inst[++i];
+                if (operand.find('}') != std::string::npos) break;
+            }
+        }
+        instruction->add_operand(std::make_unique<traced_operand>(operand));
     }
     instruction->calculate_num_destination_registers();
     return instruction;

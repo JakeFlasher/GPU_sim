@@ -76,12 +76,20 @@ bool get_opcode_map(const std::unordered_map<std::string, OpcodeChar> *&OpcodeMa
   return true;
 }
 
+namespace {
+unsigned int g_uniform_zero_register = URZ;
+}
+
+void set_uniform_zero_register(unsigned int reg_id) {
+  g_uniform_zero_register = reg_id;
+}
+
 bool is_reserved_reg(unsigned int reg_id, TraceEnhancedOperandType reg_type) {
   bool res = false;
   if(reg_type == TraceEnhancedOperandType::REG) {
     res = (reg_id == RZ);
   } else if(reg_type == TraceEnhancedOperandType::UREG) {
-    res = (reg_id == URZ);
+    res = (reg_id == g_uniform_zero_register);
   } else if(reg_type == TraceEnhancedOperandType::PRED) {
     res = (reg_id == PT);
   } else if(reg_type == TraceEnhancedOperandType::UPRED) {

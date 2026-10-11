@@ -24,4 +24,11 @@ message Trace {
   // skip the widened ATOMIC/ASYNC enforcement on pre-transition traces.
   string trace_contract_id = 7;
   repeated MemoryOpClass memory_payload_classes = 8;
+
+  // Additive capability vocabulary for architecture-specific payloads.  These
+  // strings are descriptive capabilities, not admission gates.  In
+  // particular an SM120 trace may advertise that TMA transfers live in the
+  // sidecar, that cache operators are present on ordinary memory records, and
+  // that register snapshots are intentionally unavailable.
+  repeated string trace_capabilities = 9;
 }

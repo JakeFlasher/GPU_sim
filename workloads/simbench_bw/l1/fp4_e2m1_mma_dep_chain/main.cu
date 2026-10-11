@@ -22,9 +22,9 @@
 //
 // Tier=B (sm_120a-only). Locally we cannot launch the kernel (the
 // local host on this branch is RTX 3090 Ti / sm_86 — Ampere; sm_120a
-// binaries require RTX PRO 6000 Blackwell or stronger). The dry-run
+// binaries require RTX 5090 Blackwell or stronger). The dry-run
 // path uses the FP4-aware Python reference directly. End-to-end
-// correctness on RTX PRO 6000 Blackwell remains pending (R3+
+// correctness on RTX 5090 Blackwell remains pending (R3+
 // goal-tracker queued issue).
 
 #include <cuda_runtime.h>

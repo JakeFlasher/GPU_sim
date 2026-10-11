@@ -118,7 +118,7 @@ _CANONICAL_RESERVED_NAMESPACE_COMPONENTS = frozenset({
 })
 _CANONICAL_PLATFORM_KEYS = frozenset({
     "h100",
-    "rtx_pro_6000_blackwell",
+    "rtx_5090_blackwell",
     "rtx_5060_laptop",
     "rtx_3090_ti",
 })

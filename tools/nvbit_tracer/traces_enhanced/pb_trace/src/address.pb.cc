@@ -41,6 +41,9 @@ inline constexpr address::Impl_::Impl_(
         #endif
         ,
         _addrs_cached_byte_size_{0},
+        allocation_identity_status_(
+            &::google::protobuf::internal::fixed_address_empty_string,
+            ::_pbi::ConstantInitialized()),
         data_width_{0},
         udesc_value_{0u},
         base_address_{::uint64_t{0u}},
@@ -48,7 +51,8 @@ inline constexpr address::Impl_::Impl_(
         stride_{0},
         allocation_id_{0u},
         address_space_{static_cast< ::dynamic_trace::MemorySpace >(0)},
-        lane_mask_{0u} {}
+        lane_mask_{0u},
+        transfer_width_{0} {}
 
 template <typename>
 constexpr address::address(::_pbi::ConstantInitialized)
@@ -79,7 +83,7 @@ const ::uint32_t
         protodesc_cold) = {
         0x081, // bitmap
         PROTOBUF_FIELD_OFFSET(::dynamic_trace::address, _impl_._has_bits_),
-        12, // hasbit index offset
+        14, // hasbit index offset
         PROTOBUF_FIELD_OFFSET(::dynamic_trace::address, _impl_.data_width_),
         PROTOBUF_FIELD_OFFSET(::dynamic_trace::address, _impl_.udesc_value_),
         PROTOBUF_FIELD_OFFSET(::dynamic_trace::address, _impl_.compression_format_),
@@ -89,15 +93,19 @@ const ::uint32_t
         PROTOBUF_FIELD_OFFSET(::dynamic_trace::address, _impl_.allocation_id_),
         PROTOBUF_FIELD_OFFSET(::dynamic_trace::address, _impl_.address_space_),
         PROTOBUF_FIELD_OFFSET(::dynamic_trace::address, _impl_.lane_mask_),
-        1,
+        PROTOBUF_FIELD_OFFSET(::dynamic_trace::address, _impl_.allocation_identity_status_),
+        PROTOBUF_FIELD_OFFSET(::dynamic_trace::address, _impl_.transfer_width_),
         2,
-        4,
         3,
         5,
-        0,
+        4,
         6,
+        0,
         7,
         8,
+        9,
+        1,
+        10,
 };
 
 static const ::_pbi::MigrationSchema
@@ -109,15 +117,18 @@ static const ::_pb::Message* PROTOBUF_NONNULL const file_default_instances[] = {
 };
 const char descriptor_table_protodef_address_2eproto[] ABSL_ATTRIBUTE_SECTION_VARIABLE(
     protodesc_cold) = {
-    "\n\raddress.proto\022\rdynamic_trace\"\241\002\n\007addre"
+    "\n\raddress.proto\022\rdynamic_trace\"\231\003\n\007addre"
     "ss\022\022\n\ndata_width\030\001 \001(\005\022\023\n\013udesc_value\030\002 "
     "\001(\r\022\032\n\022compression_format\030\003 \001(\005\022\024\n\014base_"
     "address\030\004 \001(\004\022\016\n\006stride\030\005 \001(\005\022\r\n\005addrs\030\006"
     " \003(\003\022\032\n\rallocation_id\030\007 \001(\rH\000\210\001\001\0226\n\raddr"
     "ess_space\030\010 \001(\0162\032.dynamic_trace.MemorySp"
-    "aceH\001\210\001\001\022\026\n\tlane_mask\030\t \001(\rH\002\210\001\001B\020\n\016_all"
-    "ocation_idB\020\n\016_address_spaceB\014\n\n_lane_ma"
-    "sk*\217\001\n\013MemorySpace\022\034\n\030MEMORY_SPACE_UNSPE"
+    "aceH\001\210\001\001\022\026\n\tlane_mask\030\t \001(\rH\002\210\001\001\022\'\n\032allo"
+    "cation_identity_status\030\n \001(\tH\003\210\001\001\022\033\n\016tra"
+    "nsfer_width\030\013 \001(\005H\004\210\001\001B\020\n\016_allocation_id"
+    "B\020\n\016_address_spaceB\014\n\n_lane_maskB\035\n\033_all"
+    "ocation_identity_statusB\021\n\017_transfer_wid"
+    "th*\217\001\n\013MemorySpace\022\034\n\030MEMORY_SPACE_UNSPE"
     "CIFIED\020\000\022\027\n\023MEMORY_SPACE_GLOBAL\020\001\022\027\n\023MEM"
     "ORY_SPACE_SHARED\020\002\022\026\n\022MEMORY_SPACE_LOCAL"
     "\020\003\022\030\n\024MEMORY_SPACE_GENERIC\020\004b\006proto3"
@@ -126,7 +137,7 @@ static ::absl::once_flag descriptor_table_address_2eproto_once;
 PROTOBUF_CONSTINIT const ::_pbi::DescriptorTable descriptor_table_address_2eproto = {
     false,
     false,
-    476,
+    596,
     descriptor_table_protodef_address_2eproto,
     "address.proto",
     &descriptor_table_address_2eproto_once,
@@ -181,7 +192,8 @@ PROTOBUF_NDEBUG_INLINE address::Impl_::Impl_(
         addrs_ { visibility, arena, from.addrs_ }
         #endif
         ,
-        _addrs_cached_byte_size_{0} {}
+        _addrs_cached_byte_size_{0},
+        allocation_identity_status_(arena, from.allocation_identity_status_) {}
 
 address::address(
     ::google::protobuf::Arena* PROTOBUF_NULLABLE arena,
@@ -200,9 +212,9 @@ address::address(
                offsetof(Impl_, data_width_),
            reinterpret_cast<const char*>(&from._impl_) +
                offsetof(Impl_, data_width_),
-           offsetof(Impl_, lane_mask_) -
+           offsetof(Impl_, transfer_width_) -
                offsetof(Impl_, data_width_) +
-               sizeof(Impl_::lane_mask_));
+               sizeof(Impl_::transfer_width_));
 
   // @@protoc_insertion_point(copy_constructor:dynamic_trace.address)
 }
@@ -219,16 +231,17 @@ PROTOBUF_NDEBUG_INLINE address::Impl_::Impl_(
         addrs_ { visibility, arena }
         #endif
         ,
-        _addrs_cached_byte_size_{0} {}
+        _addrs_cached_byte_size_{0},
+        allocation_identity_status_(arena) {}
 
 inline void address::SharedCtor(::_pb::Arena* PROTOBUF_NULLABLE arena) {
   new (&_impl_) Impl_(internal_visibility(), arena);
   ::memset(reinterpret_cast<char*>(&_impl_) +
                offsetof(Impl_, data_width_),
            0,
-           offsetof(Impl_, lane_mask_) -
+           offsetof(Impl_, transfer_width_) -
                offsetof(Impl_, data_width_) +
-               sizeof(Impl_::lane_mask_));
+               sizeof(Impl_::transfer_width_));
 }
 address::~address() {
   // @@protoc_insertion_point(destructor:dynamic_trace.address)
@@ -241,6 +254,7 @@ inline void address::SharedDtor(MessageLite& self) {
   }
   this_._internal_metadata_.Delete<::google::protobuf::UnknownFieldSet>();
   ABSL_DCHECK(this_.GetArena() == nullptr);
+  this_._impl_.allocation_identity_status_.Destroy();
   this_._impl_.~Impl_();
 }
 
@@ -263,7 +277,7 @@ constexpr auto address::InternalNewImpl_() {
                   ::google::protobuf::Message::internal_visibility()),
   });
   if (arena_bits.has_value()) {
-    return ::google::protobuf::internal::MessageCreator::ZeroInit(
+    return ::google::protobuf::internal::MessageCreator::CopyInit(
         sizeof(address), alignof(address), *arena_bits);
   } else {
     return ::google::protobuf::internal::MessageCreator(&address::PlacementNew_,
@@ -305,16 +319,16 @@ address::GetClassData() const {
   return address_class_data_.base();
 }
 PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1
-const ::_pbi::TcParseTable<4, 9, 0, 0, 2>
+const ::_pbi::TcParseTable<4, 11, 0, 64, 2>
 address::_table_ = {
   {
     PROTOBUF_FIELD_OFFSET(address, _impl_._has_bits_),
     0, // no _extensions_
-    9, 120,  // max_field_number, fast_idx_mask
+    11, 120,  // max_field_number, fast_idx_mask
     offsetof(decltype(_table_), field_lookup_table),
-    4294966784,  // skipmap
+    4294965248,  // skipmap
     offsetof(decltype(_table_), field_entries),
-    9,  // num_field_entries
+    11,  // num_field_entries
     0,  // num_aux_entries
     offsetof(decltype(_table_), field_names),  // no aux_entries
     address_class_data_.base(),
@@ -326,43 +340,49 @@ address::_table_ = {
   }, {{
     {::_pbi::TcParser::MiniParse, {}},
     // int32 data_width = 1;
-    {::_pbi::TcParser::SingularVarintNoZag1<::uint32_t, offsetof(address, _impl_.data_width_), 1>(),
-     {8, 1, 0,
+    {::_pbi::TcParser::SingularVarintNoZag1<::uint32_t, offsetof(address, _impl_.data_width_), 2>(),
+     {8, 2, 0,
       PROTOBUF_FIELD_OFFSET(address, _impl_.data_width_)}},
     // uint32 udesc_value = 2;
-    {::_pbi::TcParser::SingularVarintNoZag1<::uint32_t, offsetof(address, _impl_.udesc_value_), 2>(),
-     {16, 2, 0,
+    {::_pbi::TcParser::SingularVarintNoZag1<::uint32_t, offsetof(address, _impl_.udesc_value_), 3>(),
+     {16, 3, 0,
       PROTOBUF_FIELD_OFFSET(address, _impl_.udesc_value_)}},
     // int32 compression_format = 3;
-    {::_pbi::TcParser::SingularVarintNoZag1<::uint32_t, offsetof(address, _impl_.compression_format_), 4>(),
-     {24, 4, 0,
+    {::_pbi::TcParser::SingularVarintNoZag1<::uint32_t, offsetof(address, _impl_.compression_format_), 5>(),
+     {24, 5, 0,
       PROTOBUF_FIELD_OFFSET(address, _impl_.compression_format_)}},
     // uint64 base_address = 4;
-    {::_pbi::TcParser::SingularVarintNoZag1<::uint64_t, offsetof(address, _impl_.base_address_), 3>(),
-     {32, 3, 0,
+    {::_pbi::TcParser::SingularVarintNoZag1<::uint64_t, offsetof(address, _impl_.base_address_), 4>(),
+     {32, 4, 0,
       PROTOBUF_FIELD_OFFSET(address, _impl_.base_address_)}},
     // int32 stride = 5;
-    {::_pbi::TcParser::SingularVarintNoZag1<::uint32_t, offsetof(address, _impl_.stride_), 5>(),
-     {40, 5, 0,
+    {::_pbi::TcParser::SingularVarintNoZag1<::uint32_t, offsetof(address, _impl_.stride_), 6>(),
+     {40, 6, 0,
       PROTOBUF_FIELD_OFFSET(address, _impl_.stride_)}},
     // repeated int64 addrs = 6;
     {::_pbi::TcParser::FastV64P1,
      {50, 0, 0,
       PROTOBUF_FIELD_OFFSET(address, _impl_.addrs_)}},
     // optional uint32 allocation_id = 7;
-    {::_pbi::TcParser::SingularVarintNoZag1<::uint32_t, offsetof(address, _impl_.allocation_id_), 6>(),
-     {56, 6, 0,
+    {::_pbi::TcParser::SingularVarintNoZag1<::uint32_t, offsetof(address, _impl_.allocation_id_), 7>(),
+     {56, 7, 0,
       PROTOBUF_FIELD_OFFSET(address, _impl_.allocation_id_)}},
     // optional .dynamic_trace.MemorySpace address_space = 8;
-    {::_pbi::TcParser::SingularVarintNoZag1<::uint32_t, offsetof(address, _impl_.address_space_), 7>(),
-     {64, 7, 0,
+    {::_pbi::TcParser::SingularVarintNoZag1<::uint32_t, offsetof(address, _impl_.address_space_), 8>(),
+     {64, 8, 0,
       PROTOBUF_FIELD_OFFSET(address, _impl_.address_space_)}},
     // optional uint32 lane_mask = 9;
-    {::_pbi::TcParser::SingularVarintNoZag1<::uint32_t, offsetof(address, _impl_.lane_mask_), 8>(),
-     {72, 8, 0,
+    {::_pbi::TcParser::SingularVarintNoZag1<::uint32_t, offsetof(address, _impl_.lane_mask_), 9>(),
+     {72, 9, 0,
       PROTOBUF_FIELD_OFFSET(address, _impl_.lane_mask_)}},
-    {::_pbi::TcParser::MiniParse, {}},
-    {::_pbi::TcParser::MiniParse, {}},
+    // optional string allocation_identity_status = 10;
+    {::_pbi::TcParser::FastUS1,
+     {82, 1, 0,
+      PROTOBUF_FIELD_OFFSET(address, _impl_.allocation_identity_status_)}},
+    // optional int32 transfer_width = 11;
+    {::_pbi::TcParser::SingularVarintNoZag1<::uint32_t, offsetof(address, _impl_.transfer_width_), 10>(),
+     {88, 10, 0,
+      PROTOBUF_FIELD_OFFSET(address, _impl_.transfer_width_)}},
     {::_pbi::TcParser::MiniParse, {}},
     {::_pbi::TcParser::MiniParse, {}},
     {::_pbi::TcParser::MiniParse, {}},
@@ -371,26 +391,33 @@ address::_table_ = {
     65535, 65535
   }}, {{
     // int32 data_width = 1;
-    {PROTOBUF_FIELD_OFFSET(address, _impl_.data_width_), _Internal::kHasBitsOffset + 1, 0, (0 | ::_fl::kFcOptional | ::_fl::kInt32)},
+    {PROTOBUF_FIELD_OFFSET(address, _impl_.data_width_), _Internal::kHasBitsOffset + 2, 0, (0 | ::_fl::kFcOptional | ::_fl::kInt32)},
     // uint32 udesc_value = 2;
-    {PROTOBUF_FIELD_OFFSET(address, _impl_.udesc_value_), _Internal::kHasBitsOffset + 2, 0, (0 | ::_fl::kFcOptional | ::_fl::kUInt32)},
+    {PROTOBUF_FIELD_OFFSET(address, _impl_.udesc_value_), _Internal::kHasBitsOffset + 3, 0, (0 | ::_fl::kFcOptional | ::_fl::kUInt32)},
     // int32 compression_format = 3;
-    {PROTOBUF_FIELD_OFFSET(address, _impl_.compression_format_), _Internal::kHasBitsOffset + 4, 0, (0 | ::_fl::kFcOptional | ::_fl::kInt32)},
+    {PROTOBUF_FIELD_OFFSET(address, _impl_.compression_format_), _Internal::kHasBitsOffset + 5, 0, (0 | ::_fl::kFcOptional | ::_fl::kInt32)},
     // uint64 base_address = 4;
-    {PROTOBUF_FIELD_OFFSET(address, _impl_.base_address_), _Internal::kHasBitsOffset + 3, 0, (0 | ::_fl::kFcOptional | ::_fl::kUInt64)},
+    {PROTOBUF_FIELD_OFFSET(address, _impl_.base_address_), _Internal::kHasBitsOffset + 4, 0, (0 | ::_fl::kFcOptional | ::_fl::kUInt64)},
     // int32 stride = 5;
-    {PROTOBUF_FIELD_OFFSET(address, _impl_.stride_), _Internal::kHasBitsOffset + 5, 0, (0 | ::_fl::kFcOptional | ::_fl::kInt32)},
+    {PROTOBUF_FIELD_OFFSET(address, _impl_.stride_), _Internal::kHasBitsOffset + 6, 0, (0 | ::_fl::kFcOptional | ::_fl::kInt32)},
     // repeated int64 addrs = 6;
     {PROTOBUF_FIELD_OFFSET(address, _impl_.addrs_), _Internal::kHasBitsOffset + 0, 0, (0 | ::_fl::kFcRepeated | ::_fl::kPackedInt64)},
     // optional uint32 allocation_id = 7;
-    {PROTOBUF_FIELD_OFFSET(address, _impl_.allocation_id_), _Internal::kHasBitsOffset + 6, 0, (0 | ::_fl::kFcOptional | ::_fl::kUInt32)},
+    {PROTOBUF_FIELD_OFFSET(address, _impl_.allocation_id_), _Internal::kHasBitsOffset + 7, 0, (0 | ::_fl::kFcOptional | ::_fl::kUInt32)},
     // optional .dynamic_trace.MemorySpace address_space = 8;
-    {PROTOBUF_FIELD_OFFSET(address, _impl_.address_space_), _Internal::kHasBitsOffset + 7, 0, (0 | ::_fl::kFcOptional | ::_fl::kOpenEnum)},
+    {PROTOBUF_FIELD_OFFSET(address, _impl_.address_space_), _Internal::kHasBitsOffset + 8, 0, (0 | ::_fl::kFcOptional | ::_fl::kOpenEnum)},
     // optional uint32 lane_mask = 9;
-    {PROTOBUF_FIELD_OFFSET(address, _impl_.lane_mask_), _Internal::kHasBitsOffset + 8, 0, (0 | ::_fl::kFcOptional | ::_fl::kUInt32)},
+    {PROTOBUF_FIELD_OFFSET(address, _impl_.lane_mask_), _Internal::kHasBitsOffset + 9, 0, (0 | ::_fl::kFcOptional | ::_fl::kUInt32)},
+    // optional string allocation_identity_status = 10;
+    {PROTOBUF_FIELD_OFFSET(address, _impl_.allocation_identity_status_), _Internal::kHasBitsOffset + 1, 0, (0 | ::_fl::kFcOptional | ::_fl::kUtf8String | ::_fl::kRepAString)},
+    // optional int32 transfer_width = 11;
+    {PROTOBUF_FIELD_OFFSET(address, _impl_.transfer_width_), _Internal::kHasBitsOffset + 10, 0, (0 | ::_fl::kFcOptional | ::_fl::kInt32)},
   }},
   // no aux_entries
   {{
+    "\25\0\0\0\0\0\0\0\0\0\32\0\0\0\0\0"
+    "dynamic_trace.address"
+    "allocation_identity_status"
   }},
 };
 PROTOBUF_NOINLINE void address::Clear() {
@@ -401,15 +428,24 @@ PROTOBUF_NOINLINE void address::Clear() {
   (void) cached_has_bits;
 
   cached_has_bits = _impl_._has_bits_[0];
-  if (CheckHasBitForRepeated(cached_has_bits, 0x00000001U)) {
-    _impl_.addrs_.Clear();
+  if (BatchCheckHasBit(cached_has_bits, 0x00000003U)) {
+    if (CheckHasBitForRepeated(cached_has_bits, 0x00000001U)) {
+      _impl_.addrs_.Clear();
+    }
+    if (CheckHasBit(cached_has_bits, 0x00000002U)) {
+      _impl_.allocation_identity_status_.ClearNonDefaultToEmpty();
+    }
   }
-  if (BatchCheckHasBit(cached_has_bits, 0x000000feU)) {
+  if (BatchCheckHasBit(cached_has_bits, 0x000000fcU)) {
     ::memset(&_impl_.data_width_, 0, static_cast<::size_t>(
-        reinterpret_cast<char*>(&_impl_.address_space_) -
-        reinterpret_cast<char*>(&_impl_.data_width_)) + sizeof(_impl_.address_space_));
+        reinterpret_cast<char*>(&_impl_.allocation_id_) -
+        reinterpret_cast<char*>(&_impl_.data_width_)) + sizeof(_impl_.allocation_id_));
   }
-  _impl_.lane_mask_ = 0u;
+  if (BatchCheckHasBit(cached_has_bits, 0x00000700U)) {
+    ::memset(&_impl_.address_space_, 0, static_cast<::size_t>(
+        reinterpret_cast<char*>(&_impl_.transfer_width_) -
+        reinterpret_cast<char*>(&_impl_.address_space_)) + sizeof(_impl_.transfer_width_));
+  }
   _impl_._has_bits_.Clear();
   _internal_metadata_.Clear<::google::protobuf::UnknownFieldSet>();
 }
@@ -434,7 +470,7 @@ PROTOBUF_NOINLINE void address::Clear() {
 
   cached_has_bits = this_._impl_._has_bits_[0];
   // int32 data_width = 1;
-  if (CheckHasBit(cached_has_bits, 0x00000002U)) {
+  if (CheckHasBit(cached_has_bits, 0x00000004U)) {
     if (this_._internal_data_width() != 0) {
       target =
           ::google::protobuf::internal::WireFormatLite::WriteInt32ToArrayWithField<1>(
@@ -443,7 +479,7 @@ PROTOBUF_NOINLINE void address::Clear() {
   }
 
   // uint32 udesc_value = 2;
-  if (CheckHasBit(cached_has_bits, 0x00000004U)) {
+  if (CheckHasBit(cached_has_bits, 0x00000008U)) {
     if (this_._internal_udesc_value() != 0) {
       target = stream->EnsureSpace(target);
       target = ::_pbi::WireFormatLite::WriteUInt32ToArray(
@@ -452,7 +488,7 @@ PROTOBUF_NOINLINE void address::Clear() {
   }
 
   // int32 compression_format = 3;
-  if (CheckHasBit(cached_has_bits, 0x00000010U)) {
+  if (CheckHasBit(cached_has_bits, 0x00000020U)) {
     if (this_._internal_compression_format() != 0) {
       target =
           ::google::protobuf::internal::WireFormatLite::WriteInt32ToArrayWithField<3>(
@@ -461,7 +497,7 @@ PROTOBUF_NOINLINE void address::Clear() {
   }
 
   // uint64 base_address = 4;
-  if (CheckHasBit(cached_has_bits, 0x00000008U)) {
+  if (CheckHasBit(cached_has_bits, 0x00000010U)) {
     if (this_._internal_base_address() != 0) {
       target = stream->EnsureSpace(target);
       target = ::_pbi::WireFormatLite::WriteUInt64ToArray(
@@ -470,7 +506,7 @@ PROTOBUF_NOINLINE void address::Clear() {
   }
 
   // int32 stride = 5;
-  if (CheckHasBit(cached_has_bits, 0x00000020U)) {
+  if (CheckHasBit(cached_has_bits, 0x00000040U)) {
     if (this_._internal_stride() != 0) {
       target =
           ::google::protobuf::internal::WireFormatLite::WriteInt32ToArrayWithField<5>(
@@ -490,24 +526,39 @@ PROTOBUF_NOINLINE void address::Clear() {
   }
 
   // optional uint32 allocation_id = 7;
-  if (CheckHasBit(cached_has_bits, 0x00000040U)) {
+  if (CheckHasBit(cached_has_bits, 0x00000080U)) {
     target = stream->EnsureSpace(target);
     target = ::_pbi::WireFormatLite::WriteUInt32ToArray(
         7, this_._internal_allocation_id(), target);
   }
 
   // optional .dynamic_trace.MemorySpace address_space = 8;
-  if (CheckHasBit(cached_has_bits, 0x00000080U)) {
+  if (CheckHasBit(cached_has_bits, 0x00000100U)) {
     target = stream->EnsureSpace(target);
     target = ::_pbi::WireFormatLite::WriteEnumToArray(
         8, this_._internal_address_space(), target);
   }
 
   // optional uint32 lane_mask = 9;
-  if (CheckHasBit(cached_has_bits, 0x00000100U)) {
+  if (CheckHasBit(cached_has_bits, 0x00000200U)) {
     target = stream->EnsureSpace(target);
     target = ::_pbi::WireFormatLite::WriteUInt32ToArray(
         9, this_._internal_lane_mask(), target);
+  }
+
+  // optional string allocation_identity_status = 10;
+  if (CheckHasBit(cached_has_bits, 0x00000002U)) {
+    const ::std::string& _s = this_._internal_allocation_identity_status();
+    ::google::protobuf::internal::WireFormatLite::VerifyUtf8String(
+        _s.data(), static_cast<int>(_s.length()), ::google::protobuf::internal::WireFormatLite::SERIALIZE, "dynamic_trace.address.allocation_identity_status");
+    target = stream->WriteStringMaybeAliased(10, _s, target);
+  }
+
+  // optional int32 transfer_width = 11;
+  if (CheckHasBit(cached_has_bits, 0x00000400U)) {
+    target =
+        ::google::protobuf::internal::WireFormatLite::WriteInt32ToArrayWithField<11>(
+            stream, this_._internal_transfer_width(), target);
   }
 
   if (ABSL_PREDICT_FALSE(this_._internal_metadata_.have_unknown_fields())) {
@@ -543,57 +594,67 @@ PROTOBUF_NOINLINE void address::Clear() {
               this_._internal_addrs(), 1,
               this_._impl_._addrs_cached_byte_size_);
     }
-    // int32 data_width = 1;
+    // optional string allocation_identity_status = 10;
     if (CheckHasBit(cached_has_bits, 0x00000002U)) {
+      total_size += 1 + ::google::protobuf::internal::WireFormatLite::StringSize(
+                                      this_._internal_allocation_identity_status());
+    }
+    // int32 data_width = 1;
+    if (CheckHasBit(cached_has_bits, 0x00000004U)) {
       if (this_._internal_data_width() != 0) {
         total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(
             this_._internal_data_width());
       }
     }
     // uint32 udesc_value = 2;
-    if (CheckHasBit(cached_has_bits, 0x00000004U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000008U)) {
       if (this_._internal_udesc_value() != 0) {
         total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(
             this_._internal_udesc_value());
       }
     }
     // uint64 base_address = 4;
-    if (CheckHasBit(cached_has_bits, 0x00000008U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000010U)) {
       if (this_._internal_base_address() != 0) {
         total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(
             this_._internal_base_address());
       }
     }
     // int32 compression_format = 3;
-    if (CheckHasBit(cached_has_bits, 0x00000010U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000020U)) {
       if (this_._internal_compression_format() != 0) {
         total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(
             this_._internal_compression_format());
       }
     }
     // int32 stride = 5;
-    if (CheckHasBit(cached_has_bits, 0x00000020U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000040U)) {
       if (this_._internal_stride() != 0) {
         total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(
             this_._internal_stride());
       }
     }
     // optional uint32 allocation_id = 7;
-    if (CheckHasBit(cached_has_bits, 0x00000040U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000080U)) {
       total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(
           this_._internal_allocation_id());
     }
+  }
+  if (BatchCheckHasBit(cached_has_bits, 0x00000700U)) {
     // optional .dynamic_trace.MemorySpace address_space = 8;
-    if (CheckHasBit(cached_has_bits, 0x00000080U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000100U)) {
       total_size += 1 +
                     ::_pbi::WireFormatLite::EnumSize(this_._internal_address_space());
     }
-  }
-   {
     // optional uint32 lane_mask = 9;
-    if (CheckHasBit(cached_has_bits, 0x00000100U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000200U)) {
       total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(
           this_._internal_lane_mask());
+    }
+    // optional int32 transfer_width = 11;
+    if (CheckHasBit(cached_has_bits, 0x00000400U)) {
+      total_size += ::_pbi::WireFormatLite::Int32SizePlusOne(
+          this_._internal_transfer_width());
     }
   }
   return this_.MaybeComputeUnknownFieldsSize(total_size,
@@ -619,39 +680,47 @@ void address::MergeImpl(::google::protobuf::MessageLite& to_msg,
       _this->_internal_mutable_addrs()->MergeFrom(from._internal_addrs());
     }
     if (CheckHasBit(cached_has_bits, 0x00000002U)) {
+      _this->_internal_set_allocation_identity_status(from._internal_allocation_identity_status());
+    }
+    if (CheckHasBit(cached_has_bits, 0x00000004U)) {
       if (from._internal_data_width() != 0) {
         _this->_impl_.data_width_ = from._impl_.data_width_;
       }
     }
-    if (CheckHasBit(cached_has_bits, 0x00000004U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000008U)) {
       if (from._internal_udesc_value() != 0) {
         _this->_impl_.udesc_value_ = from._impl_.udesc_value_;
       }
     }
-    if (CheckHasBit(cached_has_bits, 0x00000008U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000010U)) {
       if (from._internal_base_address() != 0) {
         _this->_impl_.base_address_ = from._impl_.base_address_;
       }
     }
-    if (CheckHasBit(cached_has_bits, 0x00000010U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000020U)) {
       if (from._internal_compression_format() != 0) {
         _this->_impl_.compression_format_ = from._impl_.compression_format_;
       }
     }
-    if (CheckHasBit(cached_has_bits, 0x00000020U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000040U)) {
       if (from._internal_stride() != 0) {
         _this->_impl_.stride_ = from._impl_.stride_;
       }
     }
-    if (CheckHasBit(cached_has_bits, 0x00000040U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000080U)) {
       _this->_impl_.allocation_id_ = from._impl_.allocation_id_;
     }
-    if (CheckHasBit(cached_has_bits, 0x00000080U)) {
+  }
+  if (BatchCheckHasBit(cached_has_bits, 0x00000700U)) {
+    if (CheckHasBit(cached_has_bits, 0x00000100U)) {
       _this->_impl_.address_space_ = from._impl_.address_space_;
     }
-  }
-  if (CheckHasBit(cached_has_bits, 0x00000100U)) {
-    _this->_impl_.lane_mask_ = from._impl_.lane_mask_;
+    if (CheckHasBit(cached_has_bits, 0x00000200U)) {
+      _this->_impl_.lane_mask_ = from._impl_.lane_mask_;
+    }
+    if (CheckHasBit(cached_has_bits, 0x00000400U)) {
+      _this->_impl_.transfer_width_ = from._impl_.transfer_width_;
+    }
   }
   _this->_impl_._has_bits_[0] |= cached_has_bits;
   _this->_internal_metadata_.MergeFrom<::google::protobuf::UnknownFieldSet>(
@@ -668,12 +737,15 @@ void address::CopyFrom(const address& from) {
 
 void address::InternalSwap(address* PROTOBUF_RESTRICT PROTOBUF_NONNULL other) {
   using ::std::swap;
+  auto* arena = GetArena();
+  ABSL_DCHECK_EQ(arena, other->GetArena());
   _internal_metadata_.InternalSwap(&other->_internal_metadata_);
   swap(_impl_._has_bits_[0], other->_impl_._has_bits_[0]);
   _impl_.addrs_.InternalSwap(&other->_impl_.addrs_);
+  ::_pbi::ArenaStringPtr::InternalSwap(&_impl_.allocation_identity_status_, &other->_impl_.allocation_identity_status_, arena);
   ::google::protobuf::internal::memswap<
-      PROTOBUF_FIELD_OFFSET(address, _impl_.lane_mask_)
-      + sizeof(address::_impl_.lane_mask_)
+      PROTOBUF_FIELD_OFFSET(address, _impl_.transfer_width_)
+      + sizeof(address::_impl_.transfer_width_)
       - PROTOBUF_FIELD_OFFSET(address, _impl_.data_width_)>(
           reinterpret_cast<char*>(&_impl_.data_width_),
           reinterpret_cast<char*>(&other->_impl_.data_width_));

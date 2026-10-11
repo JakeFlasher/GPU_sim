@@ -219,7 +219,7 @@
   },
   "documents": {
     "memory": "docs/PROJECT_MEMORY.md",
-    "plan": "plans/sm86_completion_frontier_and_native_dispatch_20261002.md",
+    "plan": "/root/gpu_cache_memory_modeling_proposal/PLAN.md",
     "readme": "docs/README.md",
     "status": "docs/STATUS.md"
   },

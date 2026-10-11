@@ -584,6 +584,49 @@ pub(super) fn project(
             );
         }
     }
+    if result.arch() == ArchId::Sm120 {
+        // Architecture-neutral alpha rows.  They intentionally expose only
+        // trace cardinality and the causal issue frontier; no SM120 cache,
+        // scheduler-port, or cycle-domain equivalence is implied.  The warp
+        // instruction count is the one row that can be joined to NCU's
+        // instruction counter without importing an SM86 percentage formula.
+        m.insert(
+            "alpha_warp_instructions".to_owned(),
+            Metric::count(
+                Some("smsp__inst_executed.sum"),
+                "inst",
+                u128::from(result.instructions_issued()),
+                "SM120 alpha trace instruction cardinality; NCU join is observation-only",
+            ),
+        );
+        m.insert(
+            "alpha_modeled_issue_frontier".to_owned(),
+            Metric::count(
+                None,
+                "cycle",
+                u128::from(result.modeled_issue_lower_bound_cycles()),
+                "SM120 alpha causal issue lower bound; not a summed NCU cycle counter",
+            ),
+        );
+        m.insert(
+            "alpha_active_sm_count".to_owned(),
+            Metric::count(
+                None,
+                "sm",
+                u128::from(active_sm_count),
+                "SM IDs represented by the trace; not a full-launch occupancy claim",
+            ),
+        );
+        return Ok(NativeMetrics {
+            schema_version: 1,
+            metric_surface_version: 3,
+            architecture: result.arch().token(),
+            sm_count,
+            active_sm_count,
+            reference_clock_hz: clock,
+            metrics: m,
+        });
+    }
     if result.arch() != ArchId::Sm86 {
         m.insert(
             "native_metrics".to_owned(),

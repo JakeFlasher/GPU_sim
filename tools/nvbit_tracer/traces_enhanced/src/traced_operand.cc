@@ -32,6 +32,7 @@
 #include <iostream>
 #include <cmath>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 
 #include "string_utilities.h"
@@ -109,7 +110,14 @@ traced_operand::traced_operand(std::string operand_string)
         throw std::invalid_argument("operand prefix has no payload");
     }
 
-    if (operand_string[idx_first_reg_num] == 'R')
+    // Rpc is a control-flow register, not general register R0. Preserve the
+    // exact spelling/modifier without inventing a numeric GPR identity.
+    if (operand_string.compare(idx_first_reg_num, 4, "Rpc.") == 0)
+    {
+        m_operand_type = TraceEnhancedOperandType::GENERIC;
+        skip_idx_inc = true;
+    }
+    else if (operand_string[idx_first_reg_num] == 'R')
     {
         m_operand_type = TraceEnhancedOperandType::REG;
     }
@@ -212,9 +220,23 @@ traced_operand::traced_operand(std::string operand_string)
         if(is_other_wait_barriers_identifiers) {
             number_string = ReplaceAll(number_string, "{", "");
             number_string = ReplaceAll(number_string, "}", "");
-            std::vector<std::string> splitted_operands = split_string(number_string, ',');
-            for(unsigned i = 0; i < splitted_operands.size(); i++) {
-                add_inmediate(splitted_operands[i], TraceEnhancedOperandType::IMM_DOUBLE);
+            // Blackwell emits DEPBAR wait sets as either `{5 4 3 2 1 0}`
+            // or `{5,4,3,2,1,0}` depending on the disassembler surface.
+            // The old comma-only split fed the complete space-separated
+            // string to stod/stoull and rejected an otherwise valid control
+            // instruction, forcing tracer_tool into a NO_REGS/raw-SASS
+            // fallback.  Normalize both separators while retaining every
+            // original immediate as an operand value.
+            for (char &character : number_string) {
+                if (character == ',') character = ' ';
+            }
+            std::istringstream values(number_string);
+            std::string value;
+            while (values >> value) {
+                add_inmediate(value, TraceEnhancedOperandType::IMM_DOUBLE);
+            }
+            if (m_operands_inmediates.empty()) {
+                throw std::invalid_argument("empty wait-barrier identifier set");
             }
         }else{
             set_reg_num(number_string, 99999, '-');
@@ -629,8 +651,8 @@ bool traced_operand::Deserialize(const rapidjson::Value &obj)
     const int register_limit =
         operand_type == TraceEnhancedOperandType::REG
             ? RZ
-            : operand_type == TraceEnhancedOperandType::UREG
-                ? URZ
+        : operand_type == TraceEnhancedOperandType::UREG
+                ? URZ_BLACKWELL_PLUS
                 : operand_type == TraceEnhancedOperandType::PRED ||
                         operand_type == TraceEnhancedOperandType::UPRED
                     ? PR

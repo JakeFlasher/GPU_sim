@@ -378,6 +378,8 @@ class  PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED instruction final : public ::google
   // accessors -------------------------------------------------------
   enum : int {
     kAddressesFieldNumber = 5,
+    kConstantMemoryAddressesFieldNumber = 15,
+    kCallReturnTargetsFieldNumber = 18,
     kPcFieldNumber = 1,
     kActiveMaskFieldNumber = 2,
     kPredicateMaskFieldNumber = 3,
@@ -391,6 +393,11 @@ class  PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED instruction final : public ::google
     kMemoryOpAccessKindFieldNumber = 12,
     kInstrumentationOrderFieldNumber = 14,
     kInstructionCacheOpFieldNumber = 13,
+    kConstantMemoryBankFieldNumber = 16,
+    kConstantMemoryOffsetFieldNumber = 17,
+    kCallReturnImmediateFieldNumber = 19,
+    kTransferWidthFieldNumber = 20,
+    kCallReturnFlagsFieldNumber = 21,
   };
   // repeated .dynamic_trace.address addresses = 5;
   [[nodiscard]] int addresses_size()
@@ -412,6 +419,44 @@ class  PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED instruction final : public ::google
   ::dynamic_trace::address* PROTOBUF_NONNULL add_addresses();
   [[nodiscard]] const ::google::protobuf::RepeatedPtrField<::dynamic_trace::address>& addresses()
       const;
+  // repeated uint64 constant_memory_addresses = 15;
+  [[nodiscard]] int constant_memory_addresses_size()
+      const;
+  private:
+  int _internal_constant_memory_addresses_size() const;
+
+  public:
+  void clear_constant_memory_addresses() ;
+  [[nodiscard]] ::uint64_t constant_memory_addresses(int index) const;
+  void set_constant_memory_addresses(int index, ::uint64_t value);
+  void add_constant_memory_addresses(::uint64_t value);
+  [[nodiscard]] const ::google::protobuf::RepeatedField<::uint64_t>& constant_memory_addresses() const;
+  ::google::protobuf::RepeatedField<::uint64_t>* PROTOBUF_NONNULL mutable_constant_memory_addresses();
+
+  private:
+  const ::google::protobuf::RepeatedField<::uint64_t>& _internal_constant_memory_addresses() const;
+  ::google::protobuf::RepeatedField<::uint64_t>* PROTOBUF_NONNULL _internal_mutable_constant_memory_addresses();
+
+  public:
+  // repeated uint64 call_return_targets = 18;
+  [[nodiscard]] int call_return_targets_size()
+      const;
+  private:
+  int _internal_call_return_targets_size() const;
+
+  public:
+  void clear_call_return_targets() ;
+  [[nodiscard]] ::uint64_t call_return_targets(int index) const;
+  void set_call_return_targets(int index, ::uint64_t value);
+  void add_call_return_targets(::uint64_t value);
+  [[nodiscard]] const ::google::protobuf::RepeatedField<::uint64_t>& call_return_targets() const;
+  ::google::protobuf::RepeatedField<::uint64_t>* PROTOBUF_NONNULL mutable_call_return_targets();
+
+  private:
+  const ::google::protobuf::RepeatedField<::uint64_t>& _internal_call_return_targets() const;
+  ::google::protobuf::RepeatedField<::uint64_t>* PROTOBUF_NONNULL _internal_mutable_call_return_targets();
+
+  public:
   // uint32 pc = 1;
   void clear_pc() ;
   [[nodiscard]] ::uint32_t pc() const;
@@ -564,11 +609,71 @@ class  PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED instruction final : public ::google
   void _internal_set_instruction_cache_op(::dynamic_trace::InstructionCacheOp value);
 
   public:
+  // optional uint32 constant_memory_bank = 16;
+  [[nodiscard]] bool has_constant_memory_bank()
+      const;
+  void clear_constant_memory_bank() ;
+  [[nodiscard]] ::uint32_t constant_memory_bank() const;
+  void set_constant_memory_bank(::uint32_t value);
+
+  private:
+  ::uint32_t _internal_constant_memory_bank() const;
+  void _internal_set_constant_memory_bank(::uint32_t value);
+
+  public:
+  // optional uint64 constant_memory_offset = 17;
+  [[nodiscard]] bool has_constant_memory_offset()
+      const;
+  void clear_constant_memory_offset() ;
+  [[nodiscard]] ::uint64_t constant_memory_offset() const;
+  void set_constant_memory_offset(::uint64_t value);
+
+  private:
+  ::uint64_t _internal_constant_memory_offset() const;
+  void _internal_set_constant_memory_offset(::uint64_t value);
+
+  public:
+  // optional uint64 call_return_immediate = 19;
+  [[nodiscard]] bool has_call_return_immediate()
+      const;
+  void clear_call_return_immediate() ;
+  [[nodiscard]] ::uint64_t call_return_immediate() const;
+  void set_call_return_immediate(::uint64_t value);
+
+  private:
+  ::uint64_t _internal_call_return_immediate() const;
+  void _internal_set_call_return_immediate(::uint64_t value);
+
+  public:
+  // optional int32 transfer_width = 20;
+  [[nodiscard]] bool has_transfer_width()
+      const;
+  void clear_transfer_width() ;
+  [[nodiscard]] ::int32_t transfer_width() const;
+  void set_transfer_width(::int32_t value);
+
+  private:
+  ::int32_t _internal_transfer_width() const;
+  void _internal_set_transfer_width(::int32_t value);
+
+  public:
+  // optional uint32 call_return_flags = 21;
+  [[nodiscard]] bool has_call_return_flags()
+      const;
+  void clear_call_return_flags() ;
+  [[nodiscard]] ::uint32_t call_return_flags() const;
+  void set_call_return_flags(::uint32_t value);
+
+  private:
+  ::uint32_t _internal_call_return_flags() const;
+  void _internal_set_call_return_flags(::uint32_t value);
+
+  public:
   // @@protoc_insertion_point(class_scope:dynamic_trace.instruction)
  private:
   class _Internal;
   friend class ::google::protobuf::internal::TcParser;
-  static const ::google::protobuf::internal::TcParseTable<4, 14,
+  static const ::google::protobuf::internal::TcParseTable<5, 21,
                                    1, 0,
                                    2>
       _table_;
@@ -593,6 +698,10 @@ class  PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED instruction final : public ::google
     ::google::protobuf::internal::HasBits<1> _has_bits_;
     ::google::protobuf::internal::CachedSize _cached_size_;
     ::google::protobuf::RepeatedPtrField< ::dynamic_trace::address > addresses_;
+    ::google::protobuf::RepeatedField<::uint64_t> constant_memory_addresses_;
+    ::google::protobuf::internal::CachedSize _constant_memory_addresses_cached_byte_size_;
+    ::google::protobuf::RepeatedField<::uint64_t> call_return_targets_;
+    ::google::protobuf::internal::CachedSize _call_return_targets_cached_byte_size_;
     ::uint32_t pc_;
     ::uint32_t active_mask_;
     ::uint32_t predicate_mask_;
@@ -606,6 +715,11 @@ class  PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED instruction final : public ::google
     int memory_op_access_kind_;
     ::uint64_t instrumentation_order_;
     int instruction_cache_op_;
+    ::uint32_t constant_memory_bank_;
+    ::uint64_t constant_memory_offset_;
+    ::uint64_t call_return_immediate_;
+    ::int32_t transfer_width_;
+    ::uint32_t call_return_flags_;
     PROTOBUF_TSAN_DECLARE_MEMBER
   };
   union { Impl_ _impl_; };
@@ -635,7 +749,7 @@ inline void instruction::clear_pc() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.pc_ = 0u;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000002U);
+                  0x00000008U);
 }
 inline ::uint32_t instruction::pc() const {
   // @@protoc_insertion_point(field_get:dynamic_trace.instruction.pc)
@@ -643,7 +757,7 @@ inline ::uint32_t instruction::pc() const {
 }
 inline void instruction::set_pc(::uint32_t value) {
   _internal_set_pc(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000002U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000008U);
   // @@protoc_insertion_point(field_set:dynamic_trace.instruction.pc)
 }
 inline ::uint32_t instruction::_internal_pc() const {
@@ -657,14 +771,14 @@ inline void instruction::_internal_set_pc(::uint32_t value) {
 
 // optional uint32 active_mask = 2;
 inline bool instruction::has_active_mask() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000004U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000010U);
   return value;
 }
 inline void instruction::clear_active_mask() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.active_mask_ = 0u;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000004U);
+                  0x00000010U);
 }
 inline ::uint32_t instruction::active_mask() const {
   // @@protoc_insertion_point(field_get:dynamic_trace.instruction.active_mask)
@@ -672,7 +786,7 @@ inline ::uint32_t instruction::active_mask() const {
 }
 inline void instruction::set_active_mask(::uint32_t value) {
   _internal_set_active_mask(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000004U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000010U);
   // @@protoc_insertion_point(field_set:dynamic_trace.instruction.active_mask)
 }
 inline ::uint32_t instruction::_internal_active_mask() const {
@@ -686,14 +800,14 @@ inline void instruction::_internal_set_active_mask(::uint32_t value) {
 
 // optional uint32 predicate_mask = 3;
 inline bool instruction::has_predicate_mask() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000008U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000020U);
   return value;
 }
 inline void instruction::clear_predicate_mask() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.predicate_mask_ = 0u;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000008U);
+                  0x00000020U);
 }
 inline ::uint32_t instruction::predicate_mask() const {
   // @@protoc_insertion_point(field_get:dynamic_trace.instruction.predicate_mask)
@@ -701,7 +815,7 @@ inline ::uint32_t instruction::predicate_mask() const {
 }
 inline void instruction::set_predicate_mask(::uint32_t value) {
   _internal_set_predicate_mask(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000008U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000020U);
   // @@protoc_insertion_point(field_set:dynamic_trace.instruction.predicate_mask)
 }
 inline ::uint32_t instruction::_internal_predicate_mask() const {
@@ -718,7 +832,7 @@ inline void instruction::clear_function_unique_id() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.function_unique_id_ = 0;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000010U);
+                  0x00000040U);
 }
 inline ::int32_t instruction::function_unique_id() const {
   // @@protoc_insertion_point(field_get:dynamic_trace.instruction.function_unique_id)
@@ -726,7 +840,7 @@ inline ::int32_t instruction::function_unique_id() const {
 }
 inline void instruction::set_function_unique_id(::int32_t value) {
   _internal_set_function_unique_id(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000010U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000040U);
   // @@protoc_insertion_point(field_set:dynamic_trace.instruction.function_unique_id)
 }
 inline ::int32_t instruction::_internal_function_unique_id() const {
@@ -790,14 +904,14 @@ instruction::_internal_mutable_addresses() {
 
 // optional .dynamic_trace.MemoryOpClass memory_op_class = 6;
 inline bool instruction::has_memory_op_class() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000020U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000080U);
   return value;
 }
 inline void instruction::clear_memory_op_class() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.memory_op_class_ = 0;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000020U);
+                  0x00000080U);
 }
 inline ::dynamic_trace::MemoryOpClass instruction::memory_op_class() const {
   // @@protoc_insertion_point(field_get:dynamic_trace.instruction.memory_op_class)
@@ -805,7 +919,7 @@ inline ::dynamic_trace::MemoryOpClass instruction::memory_op_class() const {
 }
 inline void instruction::set_memory_op_class(::dynamic_trace::MemoryOpClass value) {
   _internal_set_memory_op_class(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000020U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000080U);
   // @@protoc_insertion_point(field_set:dynamic_trace.instruction.memory_op_class)
 }
 inline ::dynamic_trace::MemoryOpClass instruction::_internal_memory_op_class() const {
@@ -819,14 +933,14 @@ inline void instruction::_internal_set_memory_op_class(::dynamic_trace::MemoryOp
 
 // optional int32 data_width = 7;
 inline bool instruction::has_data_width() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000040U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000100U);
   return value;
 }
 inline void instruction::clear_data_width() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.data_width_ = 0;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000040U);
+                  0x00000100U);
 }
 inline ::int32_t instruction::data_width() const {
   // @@protoc_insertion_point(field_get:dynamic_trace.instruction.data_width)
@@ -834,7 +948,7 @@ inline ::int32_t instruction::data_width() const {
 }
 inline void instruction::set_data_width(::int32_t value) {
   _internal_set_data_width(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000040U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000100U);
   // @@protoc_insertion_point(field_set:dynamic_trace.instruction.data_width)
 }
 inline ::int32_t instruction::_internal_data_width() const {
@@ -848,14 +962,14 @@ inline void instruction::_internal_set_data_width(::int32_t value) {
 
 // optional int32 warpid_tb = 8;
 inline bool instruction::has_warpid_tb() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000080U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000200U);
   return value;
 }
 inline void instruction::clear_warpid_tb() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.warpid_tb_ = 0;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000080U);
+                  0x00000200U);
 }
 inline ::int32_t instruction::warpid_tb() const {
   // @@protoc_insertion_point(field_get:dynamic_trace.instruction.warpid_tb)
@@ -863,7 +977,7 @@ inline ::int32_t instruction::warpid_tb() const {
 }
 inline void instruction::set_warpid_tb(::int32_t value) {
   _internal_set_warpid_tb(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000080U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000200U);
   // @@protoc_insertion_point(field_set:dynamic_trace.instruction.warpid_tb)
 }
 inline ::int32_t instruction::_internal_warpid_tb() const {
@@ -877,14 +991,14 @@ inline void instruction::_internal_set_warpid_tb(::int32_t value) {
 
 // optional int32 warpid_sm = 9;
 inline bool instruction::has_warpid_sm() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000100U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000400U);
   return value;
 }
 inline void instruction::clear_warpid_sm() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.warpid_sm_ = 0;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000100U);
+                  0x00000400U);
 }
 inline ::int32_t instruction::warpid_sm() const {
   // @@protoc_insertion_point(field_get:dynamic_trace.instruction.warpid_sm)
@@ -892,7 +1006,7 @@ inline ::int32_t instruction::warpid_sm() const {
 }
 inline void instruction::set_warpid_sm(::int32_t value) {
   _internal_set_warpid_sm(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000100U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000400U);
   // @@protoc_insertion_point(field_set:dynamic_trace.instruction.warpid_sm)
 }
 inline ::int32_t instruction::_internal_warpid_sm() const {
@@ -906,14 +1020,14 @@ inline void instruction::_internal_set_warpid_sm(::int32_t value) {
 
 // optional int32 sm_id = 10;
 inline bool instruction::has_sm_id() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000400U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00001000U);
   return value;
 }
 inline void instruction::clear_sm_id() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.sm_id_ = 0;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000400U);
+                  0x00001000U);
 }
 inline ::int32_t instruction::sm_id() const {
   // @@protoc_insertion_point(field_get:dynamic_trace.instruction.sm_id)
@@ -921,7 +1035,7 @@ inline ::int32_t instruction::sm_id() const {
 }
 inline void instruction::set_sm_id(::int32_t value) {
   _internal_set_sm_id(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000400U);
+  SetHasBit(_impl_._has_bits_[0], 0x00001000U);
   // @@protoc_insertion_point(field_set:dynamic_trace.instruction.sm_id)
 }
 inline ::int32_t instruction::_internal_sm_id() const {
@@ -935,14 +1049,14 @@ inline void instruction::_internal_set_sm_id(::int32_t value) {
 
 // optional uint64 vpc = 11;
 inline bool instruction::has_vpc() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000200U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000800U);
   return value;
 }
 inline void instruction::clear_vpc() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.vpc_ = ::uint64_t{0u};
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000200U);
+                  0x00000800U);
 }
 inline ::uint64_t instruction::vpc() const {
   // @@protoc_insertion_point(field_get:dynamic_trace.instruction.vpc)
@@ -950,7 +1064,7 @@ inline ::uint64_t instruction::vpc() const {
 }
 inline void instruction::set_vpc(::uint64_t value) {
   _internal_set_vpc(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000200U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000800U);
   // @@protoc_insertion_point(field_set:dynamic_trace.instruction.vpc)
 }
 inline ::uint64_t instruction::_internal_vpc() const {
@@ -964,14 +1078,14 @@ inline void instruction::_internal_set_vpc(::uint64_t value) {
 
 // optional .dynamic_trace.MemoryOpAccessKind memory_op_access_kind = 12;
 inline bool instruction::has_memory_op_access_kind() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000800U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00002000U);
   return value;
 }
 inline void instruction::clear_memory_op_access_kind() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.memory_op_access_kind_ = 0;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000800U);
+                  0x00002000U);
 }
 inline ::dynamic_trace::MemoryOpAccessKind instruction::memory_op_access_kind() const {
   // @@protoc_insertion_point(field_get:dynamic_trace.instruction.memory_op_access_kind)
@@ -979,7 +1093,7 @@ inline ::dynamic_trace::MemoryOpAccessKind instruction::memory_op_access_kind() 
 }
 inline void instruction::set_memory_op_access_kind(::dynamic_trace::MemoryOpAccessKind value) {
   _internal_set_memory_op_access_kind(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000800U);
+  SetHasBit(_impl_._has_bits_[0], 0x00002000U);
   // @@protoc_insertion_point(field_set:dynamic_trace.instruction.memory_op_access_kind)
 }
 inline ::dynamic_trace::MemoryOpAccessKind instruction::_internal_memory_op_access_kind() const {
@@ -993,14 +1107,14 @@ inline void instruction::_internal_set_memory_op_access_kind(::dynamic_trace::Me
 
 // optional .dynamic_trace.InstructionCacheOp instruction_cache_op = 13;
 inline bool instruction::has_instruction_cache_op() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00002000U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00008000U);
   return value;
 }
 inline void instruction::clear_instruction_cache_op() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.instruction_cache_op_ = 0;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00002000U);
+                  0x00008000U);
 }
 inline ::dynamic_trace::InstructionCacheOp instruction::instruction_cache_op() const {
   // @@protoc_insertion_point(field_get:dynamic_trace.instruction.instruction_cache_op)
@@ -1008,7 +1122,7 @@ inline ::dynamic_trace::InstructionCacheOp instruction::instruction_cache_op() c
 }
 inline void instruction::set_instruction_cache_op(::dynamic_trace::InstructionCacheOp value) {
   _internal_set_instruction_cache_op(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00002000U);
+  SetHasBit(_impl_._has_bits_[0], 0x00008000U);
   // @@protoc_insertion_point(field_set:dynamic_trace.instruction.instruction_cache_op)
 }
 inline ::dynamic_trace::InstructionCacheOp instruction::_internal_instruction_cache_op() const {
@@ -1022,14 +1136,14 @@ inline void instruction::_internal_set_instruction_cache_op(::dynamic_trace::Ins
 
 // optional uint64 instrumentation_order = 14;
 inline bool instruction::has_instrumentation_order() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00001000U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00004000U);
   return value;
 }
 inline void instruction::clear_instrumentation_order() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.instrumentation_order_ = ::uint64_t{0u};
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00001000U);
+                  0x00004000U);
 }
 inline ::uint64_t instruction::instrumentation_order() const {
   // @@protoc_insertion_point(field_get:dynamic_trace.instruction.instrumentation_order)
@@ -1037,7 +1151,7 @@ inline ::uint64_t instruction::instrumentation_order() const {
 }
 inline void instruction::set_instrumentation_order(::uint64_t value) {
   _internal_set_instrumentation_order(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00001000U);
+  SetHasBit(_impl_._has_bits_[0], 0x00004000U);
   // @@protoc_insertion_point(field_set:dynamic_trace.instruction.instrumentation_order)
 }
 inline ::uint64_t instruction::_internal_instrumentation_order() const {
@@ -1047,6 +1161,253 @@ inline ::uint64_t instruction::_internal_instrumentation_order() const {
 inline void instruction::_internal_set_instrumentation_order(::uint64_t value) {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.instrumentation_order_ = value;
+}
+
+// repeated uint64 constant_memory_addresses = 15;
+inline int instruction::_internal_constant_memory_addresses_size() const {
+  return _internal_constant_memory_addresses().size();
+}
+inline int instruction::constant_memory_addresses_size() const {
+  return _internal_constant_memory_addresses_size();
+}
+inline void instruction::clear_constant_memory_addresses() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.constant_memory_addresses_.Clear();
+  ClearHasBitForRepeated(_impl_._has_bits_[0],
+                  0x00000002U);
+}
+inline ::uint64_t instruction::constant_memory_addresses(int index) const {
+  // @@protoc_insertion_point(field_get:dynamic_trace.instruction.constant_memory_addresses)
+  return _internal_constant_memory_addresses().Get(index);
+}
+inline void instruction::set_constant_memory_addresses(int index, ::uint64_t value) {
+  _internal_mutable_constant_memory_addresses()->Set(index, value);
+  // @@protoc_insertion_point(field_set:dynamic_trace.instruction.constant_memory_addresses)
+}
+inline void instruction::add_constant_memory_addresses(::uint64_t value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _internal_mutable_constant_memory_addresses()->InternalAddWithArena(
+      internal_visibility(), GetArena(), value);
+  SetHasBitForRepeated(_impl_._has_bits_[0], 0x00000002U);
+  // @@protoc_insertion_point(field_add:dynamic_trace.instruction.constant_memory_addresses)
+}
+inline const ::google::protobuf::RepeatedField<::uint64_t>& instruction::constant_memory_addresses() const
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  // @@protoc_insertion_point(field_list:dynamic_trace.instruction.constant_memory_addresses)
+  return _internal_constant_memory_addresses();
+}
+inline ::google::protobuf::RepeatedField<::uint64_t>* PROTOBUF_NONNULL instruction::mutable_constant_memory_addresses()
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  SetHasBitForRepeated(_impl_._has_bits_[0], 0x00000002U);
+  // @@protoc_insertion_point(field_mutable_list:dynamic_trace.instruction.constant_memory_addresses)
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  return _internal_mutable_constant_memory_addresses();
+}
+inline const ::google::protobuf::RepeatedField<::uint64_t>&
+instruction::_internal_constant_memory_addresses() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return _impl_.constant_memory_addresses_;
+}
+inline ::google::protobuf::RepeatedField<::uint64_t>* PROTOBUF_NONNULL
+instruction::_internal_mutable_constant_memory_addresses() {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return &_impl_.constant_memory_addresses_;
+}
+
+// optional uint32 constant_memory_bank = 16;
+inline bool instruction::has_constant_memory_bank() const {
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00010000U);
+  return value;
+}
+inline void instruction::clear_constant_memory_bank() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.constant_memory_bank_ = 0u;
+  ClearHasBit(_impl_._has_bits_[0],
+                  0x00010000U);
+}
+inline ::uint32_t instruction::constant_memory_bank() const {
+  // @@protoc_insertion_point(field_get:dynamic_trace.instruction.constant_memory_bank)
+  return _internal_constant_memory_bank();
+}
+inline void instruction::set_constant_memory_bank(::uint32_t value) {
+  _internal_set_constant_memory_bank(value);
+  SetHasBit(_impl_._has_bits_[0], 0x00010000U);
+  // @@protoc_insertion_point(field_set:dynamic_trace.instruction.constant_memory_bank)
+}
+inline ::uint32_t instruction::_internal_constant_memory_bank() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return _impl_.constant_memory_bank_;
+}
+inline void instruction::_internal_set_constant_memory_bank(::uint32_t value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.constant_memory_bank_ = value;
+}
+
+// optional uint64 constant_memory_offset = 17;
+inline bool instruction::has_constant_memory_offset() const {
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00020000U);
+  return value;
+}
+inline void instruction::clear_constant_memory_offset() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.constant_memory_offset_ = ::uint64_t{0u};
+  ClearHasBit(_impl_._has_bits_[0],
+                  0x00020000U);
+}
+inline ::uint64_t instruction::constant_memory_offset() const {
+  // @@protoc_insertion_point(field_get:dynamic_trace.instruction.constant_memory_offset)
+  return _internal_constant_memory_offset();
+}
+inline void instruction::set_constant_memory_offset(::uint64_t value) {
+  _internal_set_constant_memory_offset(value);
+  SetHasBit(_impl_._has_bits_[0], 0x00020000U);
+  // @@protoc_insertion_point(field_set:dynamic_trace.instruction.constant_memory_offset)
+}
+inline ::uint64_t instruction::_internal_constant_memory_offset() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return _impl_.constant_memory_offset_;
+}
+inline void instruction::_internal_set_constant_memory_offset(::uint64_t value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.constant_memory_offset_ = value;
+}
+
+// repeated uint64 call_return_targets = 18;
+inline int instruction::_internal_call_return_targets_size() const {
+  return _internal_call_return_targets().size();
+}
+inline int instruction::call_return_targets_size() const {
+  return _internal_call_return_targets_size();
+}
+inline void instruction::clear_call_return_targets() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.call_return_targets_.Clear();
+  ClearHasBitForRepeated(_impl_._has_bits_[0],
+                  0x00000004U);
+}
+inline ::uint64_t instruction::call_return_targets(int index) const {
+  // @@protoc_insertion_point(field_get:dynamic_trace.instruction.call_return_targets)
+  return _internal_call_return_targets().Get(index);
+}
+inline void instruction::set_call_return_targets(int index, ::uint64_t value) {
+  _internal_mutable_call_return_targets()->Set(index, value);
+  // @@protoc_insertion_point(field_set:dynamic_trace.instruction.call_return_targets)
+}
+inline void instruction::add_call_return_targets(::uint64_t value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _internal_mutable_call_return_targets()->InternalAddWithArena(
+      internal_visibility(), GetArena(), value);
+  SetHasBitForRepeated(_impl_._has_bits_[0], 0x00000004U);
+  // @@protoc_insertion_point(field_add:dynamic_trace.instruction.call_return_targets)
+}
+inline const ::google::protobuf::RepeatedField<::uint64_t>& instruction::call_return_targets() const
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  // @@protoc_insertion_point(field_list:dynamic_trace.instruction.call_return_targets)
+  return _internal_call_return_targets();
+}
+inline ::google::protobuf::RepeatedField<::uint64_t>* PROTOBUF_NONNULL instruction::mutable_call_return_targets()
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  SetHasBitForRepeated(_impl_._has_bits_[0], 0x00000004U);
+  // @@protoc_insertion_point(field_mutable_list:dynamic_trace.instruction.call_return_targets)
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  return _internal_mutable_call_return_targets();
+}
+inline const ::google::protobuf::RepeatedField<::uint64_t>&
+instruction::_internal_call_return_targets() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return _impl_.call_return_targets_;
+}
+inline ::google::protobuf::RepeatedField<::uint64_t>* PROTOBUF_NONNULL
+instruction::_internal_mutable_call_return_targets() {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return &_impl_.call_return_targets_;
+}
+
+// optional uint64 call_return_immediate = 19;
+inline bool instruction::has_call_return_immediate() const {
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00040000U);
+  return value;
+}
+inline void instruction::clear_call_return_immediate() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.call_return_immediate_ = ::uint64_t{0u};
+  ClearHasBit(_impl_._has_bits_[0],
+                  0x00040000U);
+}
+inline ::uint64_t instruction::call_return_immediate() const {
+  // @@protoc_insertion_point(field_get:dynamic_trace.instruction.call_return_immediate)
+  return _internal_call_return_immediate();
+}
+inline void instruction::set_call_return_immediate(::uint64_t value) {
+  _internal_set_call_return_immediate(value);
+  SetHasBit(_impl_._has_bits_[0], 0x00040000U);
+  // @@protoc_insertion_point(field_set:dynamic_trace.instruction.call_return_immediate)
+}
+inline ::uint64_t instruction::_internal_call_return_immediate() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return _impl_.call_return_immediate_;
+}
+inline void instruction::_internal_set_call_return_immediate(::uint64_t value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.call_return_immediate_ = value;
+}
+
+// optional int32 transfer_width = 20;
+inline bool instruction::has_transfer_width() const {
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00080000U);
+  return value;
+}
+inline void instruction::clear_transfer_width() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.transfer_width_ = 0;
+  ClearHasBit(_impl_._has_bits_[0],
+                  0x00080000U);
+}
+inline ::int32_t instruction::transfer_width() const {
+  // @@protoc_insertion_point(field_get:dynamic_trace.instruction.transfer_width)
+  return _internal_transfer_width();
+}
+inline void instruction::set_transfer_width(::int32_t value) {
+  _internal_set_transfer_width(value);
+  SetHasBit(_impl_._has_bits_[0], 0x00080000U);
+  // @@protoc_insertion_point(field_set:dynamic_trace.instruction.transfer_width)
+}
+inline ::int32_t instruction::_internal_transfer_width() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return _impl_.transfer_width_;
+}
+inline void instruction::_internal_set_transfer_width(::int32_t value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.transfer_width_ = value;
+}
+
+// optional uint32 call_return_flags = 21;
+inline bool instruction::has_call_return_flags() const {
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00100000U);
+  return value;
+}
+inline void instruction::clear_call_return_flags() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.call_return_flags_ = 0u;
+  ClearHasBit(_impl_._has_bits_[0],
+                  0x00100000U);
+}
+inline ::uint32_t instruction::call_return_flags() const {
+  // @@protoc_insertion_point(field_get:dynamic_trace.instruction.call_return_flags)
+  return _internal_call_return_flags();
+}
+inline void instruction::set_call_return_flags(::uint32_t value) {
+  _internal_set_call_return_flags(value);
+  SetHasBit(_impl_._has_bits_[0], 0x00100000U);
+  // @@protoc_insertion_point(field_set:dynamic_trace.instruction.call_return_flags)
+}
+inline ::uint32_t instruction::_internal_call_return_flags() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return _impl_.call_return_flags_;
+}
+inline void instruction::_internal_set_call_return_flags(::uint32_t value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.call_return_flags_ = value;
 }
 
 #ifdef __GNUC__

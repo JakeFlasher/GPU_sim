@@ -45,7 +45,7 @@
     "driver_version": { "type": "string" },
     "gpu_sku": {
       "type": "string",
-      "description": "Short SKU label (e.g. rtx_pro_6000_blackwell, h100_sxm, rtx_3090_ti)."
+      "description": "Short SKU label (e.g. rtx_5090_blackwell, h100_sxm, rtx_3090_ti)."
     },
     "gpu_uuid": {
       "type": "string",

@@ -151,7 +151,7 @@ pub enum TraceError {
         limit: u64,
     },
     #[error(
-        "{path}: unsupported trace_contract_id {got:?}; expected empty legacy identity, sm86_addr_carry_v1, sm86_addr_carry_shmem_split_v2, or sm86_addr_carry_ldgsts_dst_v3"
+        "{path}: unsupported trace_contract_id {got:?}; expected empty legacy identity, sm86_addr_carry_v1, sm86_addr_carry_shmem_split_v2, sm86_addr_carry_ldgsts_dst_v3, or sm120_addr_carry_ldgsts_dst_v3"
     )]
     TraceContractUnsupported { path: PathBuf, got: String },
     #[error(
@@ -762,6 +762,7 @@ impl TraceValidationSummary {
 pub const ADDRESS_CARRYING_TRACE_CONTRACT_ID: &str = "sm86_addr_carry_v1";
 pub const SHARED_MEMORY_SPLIT_TRACE_CONTRACT_ID: &str = "sm86_addr_carry_shmem_split_v2";
 pub const LDGSTS_DESTINATION_TRACE_CONTRACT_ID: &str = "sm86_addr_carry_ldgsts_dst_v3";
+pub const SM120_LDGSTS_DESTINATION_TRACE_CONTRACT_ID: &str = "sm120_addr_carry_ldgsts_dst_v3";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryPayloadContract {
@@ -816,7 +817,8 @@ fn classify_memory_payload_contract(
         SHARED_MEMORY_SPLIT_TRACE_CONTRACT_ID => {
             MemoryPayloadContract::AddressCarryingSharedMemorySplitV2
         }
-        LDGSTS_DESTINATION_TRACE_CONTRACT_ID => {
+        LDGSTS_DESTINATION_TRACE_CONTRACT_ID
+        | SM120_LDGSTS_DESTINATION_TRACE_CONTRACT_ID => {
             MemoryPayloadContract::AddressCarryingLdgstsDestinationV3
         }
         _ => {
@@ -2232,7 +2234,7 @@ pub enum ValidatedSectorError {
 
 #[derive(Debug, Clone, Copy)]
 struct CompactSectorPlan {
-    offset_or_error: usize,
+    offset_or_error: u32,
     len: u16,
     error_phase: u8,
 }
@@ -2242,17 +2244,19 @@ impl CompactSectorPlan {
     const BEFORE_STATIC_ROLE: u8 = 1;
     const AFTER_STATIC_ROLE: u8 = 2;
 
-    const fn ready(start: usize, len: u16) -> Self {
+    fn ready(start: usize, len: u16) -> Self {
         Self {
-            offset_or_error: start,
+            offset_or_error: u32::try_from(start)
+                .unwrap_or_else(|_| unreachable!("validated sector arena exceeded u32")),
             len,
             error_phase: Self::READY,
         }
     }
 
-    const fn error(phase: ValidatedSectorErrorPhase, index: usize) -> Self {
+    fn error(phase: ValidatedSectorErrorPhase, index: usize) -> Self {
         Self {
-            offset_or_error: index,
+            offset_or_error: u32::try_from(index)
+                .unwrap_or_else(|_| unreachable!("validated sector error arena exceeded u32")),
             len: 0,
             error_phase: match phase {
                 ValidatedSectorErrorPhase::BeforeStaticRole => Self::BEFORE_STATIC_ROLE,
@@ -2282,6 +2286,9 @@ pub struct ValidatedMemoryInstruction {
     sectors: CompactSectorPlan,
     projection: u32,
     meta: CompactMemoryMeta,
+    /// Zero means absent; otherwise this is wire enum value + 1. Keeping the
+    /// tiny closed enum in one byte preserves the compact metadata bound.
+    cache_op: u8,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -2426,13 +2433,20 @@ impl AsyncCopyProjection {
 }
 
 impl ValidatedMemoryInstruction {
-    /// Reconstruct only the metadata replay still consumes. Cache-op and mask
-    /// fields were validated before compaction but need not remain resident.
+    /// Reconstruct the metadata replay consumes. Cache operators are retained
+    /// as wire observations; they are not interpreted as a timing policy here.
     pub fn replay_meta(&self) -> MemoryAccessMeta {
         MemoryAccessMeta {
             op_class: self.meta.op_class(),
             access_kind: self.meta.access_kind(),
-            cache_op: None,
+            cache_op: if self.cache_op == 0 {
+                None
+            } else {
+                Some(
+                    pb::InstructionCacheOp::try_from(i32::from(self.cache_op - 1))
+                        .unwrap_or_else(|_| unreachable!("validated cache operator escaped wire enum")),
+                )
+            },
             and_mask: u32::from(self.meta.has_effective_lanes()),
         }
     }
@@ -2750,6 +2764,9 @@ impl ValidatedWarp {
                         route,
                         meta.and_mask != 0,
                     ),
+                    cache_op: meta
+                        .cache_op
+                        .map_or(0, |cache_op| cache_op as u8 + 1),
                 });
                 memory_index
             } else {
@@ -2948,7 +2965,8 @@ impl ValidatedWarp {
     ) -> ValidatedSectorPlan<'a> {
         match memory.sectors.error_phase {
             CompactSectorPlan::READY => {
-                let start = memory.sectors.offset_or_error;
+                let start = usize::try_from(memory.sectors.offset_or_error)
+                    .unwrap_or_else(|_| unreachable!("validated sector arena offset escaped usize"));
                 let end = match start.checked_add(usize::from(memory.sectors.len)) {
                     Some(end) => end,
                     None => unreachable!("validated sector span overflowed"),
@@ -2960,7 +2978,8 @@ impl ValidatedWarp {
             }
             code @ (CompactSectorPlan::BEFORE_STATIC_ROLE
             | CompactSectorPlan::AFTER_STATIC_ROLE) => {
-                let index = memory.sectors.offset_or_error;
+                let index = usize::try_from(memory.sectors.offset_or_error)
+                    .unwrap_or_else(|_| unreachable!("validated sector error index escaped usize"));
                 let Some(error) = self.sector_errors.get(index) else {
                     unreachable!("validated sector error index escaped its arena")
                 };
@@ -8575,6 +8594,43 @@ mod tests {
         assert_eq!(instructions[1].sm_id(), None);
         assert_eq!(instructions[1].warpid_sm(), None);
         assert_eq!(instructions[1].instrumentation_order(), None);
+    }
+
+    #[test]
+    fn sm120_tma_wire_metadata_is_retained_while_route_stays_typed_unsupported() {
+        let instruction = pb::Instruction {
+            pc: 0x80,
+            vpc: Some(0x80),
+            active_mask: Some(u32::MAX),
+            predicate_mask: Some(u32::MAX),
+            function_unique_id: 9,
+            warpid_tb: Some(0),
+            data_width: Some(16),
+            memory_op_class: Some(pb::MemoryOpClass::Tma as i32),
+            instruction_cache_op: Some(pb::InstructionCacheOp::Other as i32),
+            ..Default::default()
+        };
+        let compact = ValidatedWarp::from_message(
+            0,
+            pb::Warp {
+                id: 0,
+                instructions: vec![instruction],
+                ..Default::default()
+            },
+            MemoryPayloadContract::LegacyExclusion,
+            "sm120 tma metadata",
+        )
+        .expect("structural TMA metadata is a valid wire record");
+        let instruction = compact.instructions().next().unwrap();
+        let memory = instruction.memory().expect("TMA memory record retained");
+        let meta = memory.replay_meta();
+        assert_eq!(meta.op_class, pb::MemoryOpClass::Tma);
+        assert_eq!(meta.cache_op, Some(pb::InstructionCacheOp::Other));
+        assert_eq!(
+            compact.memory_route(memory).unwrap(),
+            ValidatedMemoryRoute::Unsupported
+        );
+        assert!(memory.has_effective_lanes());
     }
 
     #[test]

@@ -1,0 +1,1 @@
+{"uuid": "sm120-adapter-L1-060", "axes": {"batch_size": 1, "seq_len_q": 32, "seq_len_k": 32}, "inputs": {"grad_output": {"type": "random"}, "query": {"type": "random"}, "key": {"type": "random"}, "attn_weights": {"type": "random"}, "scaling": {"type": "scalar", "value": 0.08838834764831845}}, "tolerance": {"max_atol": 1e-05, "max_rtol": 0.05}}

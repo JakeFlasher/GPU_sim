@@ -33,19 +33,21 @@ extern "C" int vendor_fp8_matmul_cublaslt_launch(
     cublasLtMatmulDescSetAttribute(opdesc, CUBLASLT_MATMUL_DESC_TRANSA, &transA, sizeof(transA));
     cublasLtMatmulDescSetAttribute(opdesc, CUBLASLT_MATMUL_DESC_TRANSB, &transB, sizeof(transB));
 
-    // A is FP8 E4M3 [M, K] row-major; B is FP8 E4M3 [K, N] row-major; C is FP32 [M, N] row-major.
-    // cuBLASLt expects column-major; host arranges A as [K, M] col-major (== A^T row-major) and
-    // B as [K, N] col-major (== B row-major-transposed). Equivalent layout:
-    //   B^T(col-major) @ A^T(col-major) = (A @ B)^T = C^T(col-major) = C(row-major).
-    cublasLtMatrixLayoutCreate(&a_desc, CUDA_R_8F_E4M3, K, M, K);
-    cublasLtMatrixLayoutCreate(&b_desc, CUDA_R_8F_E4M3, K, N, K);
-    cublasLtMatrixLayoutCreate(&c_desc, CUDA_R_32F,     M, N, M);
+    // Logical A[M,K] row-major; logical B[K,N] has been packed as [N,K]
+    // row-major by the driver. GeForce FP8 requires TN (CUDA 13.2 cuBLAS).
+    // Compute (A*B)^T = B^T*A^T with swapped device operands:
+    // left stored COL[K,N] (logical B), transposed -> [N,K];
+    // right stored COL[K,M] (logical A^T), not transposed -> [K,M];
+    // output COL[N,M] has exactly the requested ROW[M,N] byte layout.
+    cublasLtMatrixLayoutCreate(&a_desc, CUDA_R_8F_E4M3, K, N, K);
+    cublasLtMatrixLayoutCreate(&b_desc, CUDA_R_8F_E4M3, K, M, K);
+    cublasLtMatrixLayoutCreate(&c_desc, CUDA_R_32F,     N, M, N);
 
     const float alpha = 1.0f, beta = 0.0f;
     cublasStatus_t st = cublasLtMatmul(handle, opdesc,
                                         &alpha,
-                                        d_A, a_desc,
-                                        d_B, b_desc,
+                                        d_B, a_desc,
+                                        d_A, b_desc,
                                         &beta,
                                         d_C, c_desc,
                                         d_C, c_desc,

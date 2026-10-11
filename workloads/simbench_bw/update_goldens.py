@@ -122,7 +122,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--candidate", metavar="PATH", required=True,
                    help="Path to the candidate results.json produced by a correctness run")
     p.add_argument("--slug", required=True)
-    p.add_argument("--platform", required=True, choices=["h100", "rtx_pro_6000_blackwell", "rtx_5060_laptop", "rtx_3090_ti"])
+    p.add_argument("--platform", required=True, choices=["h100", "rtx_5090_blackwell", "rtx_5060_laptop", "rtx_3090_ti"])
     p.add_argument(
         "--arch",
         required=True,

@@ -1,0 +1,1 @@
+{"uuid": "sm120-native-Quant_022_fp8_mamba2_out_native", "axes": {"M": 64}, "inputs": {"x": {"type": "custom"}, "w": {"type": "custom"}, "scale_x": {"type": "custom"}, "scale_w": {"type": "custom"}}, "tolerance": {"max_atol": 0.005, "max_rtol": 0.02, "required_matched_ratio": 0.99}}

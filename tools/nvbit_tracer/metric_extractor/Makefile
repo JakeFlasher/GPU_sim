@@ -6,15 +6,16 @@
 #
 # Targets:
 #   make ARCH=sm_86       — build for the 3090 Ti.
-#   make ARCH=sm_120      — build for the RTX PRO 6000 Workstation cloud host.
+#   make ARCH=sm_120      — build for the RTX 5090 cloud host.
 #   make ARCH=sm_100a     — build for B200.
 #   make clean            — remove generated outputs.
 
 .DEFAULT_GOAL := all
 
-NVCC_CCBIN ?= $(CXX)
-NVCC = nvcc -ccbin=$(NVCC_CCBIN) -D_FORCE_INLINES
-PTXAS = ptxas
+CUDA_INSTALL_PATH ?= /usr/local/cuda-13.2
+NVCC_CCBIN ?= /usr/bin/g++-14
+NVCC = $(CUDA_INSTALL_PATH)/bin/nvcc -ccbin=$(NVCC_CCBIN) -D_FORCE_INLINES
+PTXAS = $(CUDA_INSTALL_PATH)/bin/ptxas
 
 DEBUG ?= 0
 
@@ -51,7 +52,7 @@ NVBIT_PATH = ../nvbit_release/core
 INCLUDES = -I$(NVBIT_PATH)
 
 LIBS = -L$(NVBIT_PATH) -lnvbit
-NVCC_LIBPATH = -L $(subst bin/nvcc,lib64,$(shell which nvcc | tr -s /))
+NVCC_LIBPATH = -L$(CUDA_INSTALL_PATH)/lib64 -I$(CUDA_INSTALL_PATH)/include
 
 SOURCES = $(wildcard *.cu)
 OBJECTS = $(SOURCES:.cu=.o)

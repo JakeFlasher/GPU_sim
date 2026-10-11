@@ -84,7 +84,7 @@ class HostInfo:
 
     * ``local_sm_8_6`` — local RTX 3090 Ti (Phase 1 smoke target).
     * ``local_sm_120`` — an SM120 cloud host. The active target is the
-      RTX PRO 6000 Workstation; historical RTX 5060 artifacts remain
+      RTX 5090; historical RTX 5060 artifacts remain
       explicitly labeled and are not substituted for it.
     * ``b200_sm_100a`` — non-root B200 provider (Phase 2 fanout).
     * ``unknown`` — host probe could not classify; surfaces should

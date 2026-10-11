@@ -656,7 +656,7 @@ pub fn project_fixed_latency_operands(
     let Some(opcode) = classify_opcode(opcode_text_token) else {
         return FixedLatencyOperandStatus::NotApplicable;
     };
-    if arch != ArchId::Sm86 {
+    if !matches!(arch, ArchId::Sm86 | ArchId::Sm120) {
         return FixedLatencyOperandStatus::Gap(FixedLatencyOperandGap {
             opcode,
             reason: FixedLatencyOperandGapReason::ArchitectureUnsupported { arch },

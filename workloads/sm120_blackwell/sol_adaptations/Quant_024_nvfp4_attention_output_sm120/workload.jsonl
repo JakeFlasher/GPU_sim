@@ -1,0 +1,1 @@
+{"uuid": "sm120-adapter-Quant_024_nvfp4_attention_output_sm120", "axes": {"B": 1, "L": 128}, "inputs": {"hidden_states": {"type": "custom"}, "weight_fp4": {"type": "custom"}, "weight_scale_fp8": {"type": "custom"}, "weight_global_decode_scale": {"type": "custom"}}, "tolerance": {"max_atol": 0.005, "max_rtol": 0.02, "required_matched_ratio": 0.99}}

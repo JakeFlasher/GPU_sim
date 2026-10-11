@@ -1014,7 +1014,7 @@ DEFAULT_CONTRACT_PATH: Path = (
 # without breaking the runner's contract: an unmapped device is
 # treated as ``"unknown"`` and its bundles fail the join cleanly.
 _DEVICE_TO_ARCH: dict[str, str] = {
-    "NVIDIA RTX PRO 6000 Blackwell Workstation Edition": "sm_120",
+    "NVIDIA GeForce RTX 5090": "sm_120",
     "NVIDIA GeForce RTX 5060 Laptop GPU": "sm_120",
     "NVIDIA GeForce RTX 3090 Ti": "sm_86",
 }

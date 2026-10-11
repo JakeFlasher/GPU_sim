@@ -1,41 +1,33 @@
 # Configuration contracts
 
-[Input index](../arch_profiles/README.md) lists cards/specs/programs/schemas.
-Native cards are architecture-bound inputs, but not every mechanism is carded:
-`sim/arch/src/lib.rs` also contains architecture-local capability definitions.
-Do not silently substitute values across architectures or treat every value as
-an independently measured hardware fact.
+[`arch_profiles/README.md`](../arch_profiles/README.md) indexes cards, specs,
+programs, and schemas. Native cards are architecture-bound inputs; architecture
+local capability code in `sim/arch` may still add behavior. Never substitute a
+value across architectures or present a hypothesis as an independent hardware
+fact.
 
-## Separate four kinds of input
+## Input classes
 
-1. **Native card:** `arch_profiles/cards/sm_86.json` plus p-chase data for
-   L1/L1-L2. Keep source notes and historical operating points clear when
-   reorganizing docs. The retained SM120 card is exploratory, not this run's target.
-2. **Hypothetical resources:** `ArchitectureSpec` under `arch_profiles/specs`.
-   Custom execution consumes width/latency/initiation/capacity and bindings.
-   The native `trace_sass_v1` bridge accepts only documented matching issue widths;
-   unused fields reject. Functional custom programs cannot replace SASS inputs.
-3. **Captured launch metadata:** trace resources and an optional independent
-   CUPTI resource observation. Driver-selected carveout is not the preference
-   percentage. The join validates symbol/geometry/resources; it does not alter
-   replay timing/cache state.
-4. **NCU measurements:** NCU CSV data is compared after replay and never used
-   to tune the same scored workload's inputs or model selection.
+1. **Native cards:** `sm_86.json` is the established RTX 3090 Ti baseline;
+   `sm_120-rtx-5090.json` is the active RTX 5090 exploratory/alpha card;
+   `sm_120-laptop.json` remains a separate historical tier. Research gaps stay
+   explicit and do not inherit SM86 values.
+2. **Hypothetical resources:** `ArchitectureSpec` under `arch_profiles/specs`
+   feeds bounded custom execution. It is not native SASS timing.
+3. **Captured launch metadata:** trace resources and optional independent CUPTI
+   observations. Driver-selected carveout is not a preference percentage.
+4. **NCU measurements:** independent observations joined after replay; they do
+   not tune the same scored workload or select model constants.
 
-The carded 25/8-cycle barrier values and occupancy/resources include declared
-architecture-local hypotheses. `architecture_card` identifies a source, not
-scientific certification. Unavailable capability fields stay typed gaps.
+The SM120 card records live runtime limits and unresolved cache/issue/timing
+fields. A card identifies the input source, not scientific certification.
 
 ## Operational configuration
 
-- Rust version/components: `rust-toolchain.toml`; dependencies: `sim/Cargo.lock`.
-- Native producer build: `tools/nvbit_tracer/pinned_build_env.sh`, which checks
-  CUDA 13.2, GCC 14, protoc 34.1 and protobuf 34.1.0 on this setup.
-- Python test imports: `pytest.ini`; use the existing `.venv` when needed.
-- Agent routing: root `AGENTS.md`; project memory/status are concise entrypoints.
-  Global Codex model/hooks/settings affect other projects and are not rewritten
-  for repository cleanup. Project memory mirrors are outside Git.
-- Local state/captures/builds remain ignored by `.gitignore`; no new lifecycle
-  hooks, mandatory gates or duplicate `.codex` runtime defaults are introduced.
-
-[Runbook](runbook_host.md) owns the commands. Hardware identity observations are experiment inputs, not permanent host identity.
+- Rust components and dependencies: `rust-toolchain.toml`, `sim/Cargo.lock`.
+- NVBit producer environment: `tools/nvbit_tracer/pinned_build_env.sh`.
+- Runbook: `docs/runbook_host.md`.
+- Continuation entrypoints: `docs/PROJECT_MEMORY.md`, `docs/STATUS.md`, and the
+  external active plan.
+- Local captures/builds/toolchains are ignored by `.gitignore`; no lifecycle
+  hook or mandatory gate is part of the project contract.

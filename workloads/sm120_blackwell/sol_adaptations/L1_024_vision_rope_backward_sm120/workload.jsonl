@@ -1,0 +1,1 @@
+{"uuid": "sm120-adapter-L1-024", "axes": {"num_images": 1, "total_patches": 16, "max_grid_size": 8}, "inputs": {"grad_cos": {"type": "custom"}, "grad_sin": {"type": "custom"}, "pos_ids": {"type": "custom"}, "inv_freq": {"type": "custom"}, "emb": {"type": "custom"}}, "tolerance": {"max_atol": 0.02, "max_rtol": 1e-05}}

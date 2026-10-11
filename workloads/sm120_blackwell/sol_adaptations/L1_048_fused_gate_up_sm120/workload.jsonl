@@ -1,0 +1,1 @@
+{"uuid": "sm120-adapter-L1-048", "axes": {"batch_size": 1, "seq_len": 8}, "inputs": {"x": {"type": "random"}, "gate_proj": {"type": "random"}, "up_proj": {"type": "random"}}, "tolerance": {"max_atol": 6.900000000000001e-05, "max_rtol": 0.05}}

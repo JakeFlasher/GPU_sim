@@ -333,7 +333,7 @@
     }
   ],
   "model_seal_sha256": "33d907187be74261dcefa03b3d2f54e073f9701687347d0454c46dfa50ca183f",
-  "runtime_library_path": "/home/jakeshea/GPU_simulator_rebase/.toolchain/pb/lib",
+  "runtime_library_path": "/root/GPU_simulator_rebase/.toolchain/pb/lib",
   "schema_version": "nvbit_runtime_dso_manifest.v1",
   "tracer": {
     "sha256": "3f09ce65a4164abcd01e8d6d9b74befffe49e3d164ae74943dbf1e17ec5f2422",

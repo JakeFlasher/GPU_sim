@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "simbench_bw/schemas/platform_matrix.schema.json",
   "title": "SimBench-BW platform validation matrix",
-  "description": "Declares, per roster row, which platforms the row must pass on. Portable (tier=P) rows must be \"both\". Rows declared sm_120a-only compile-gate to rtx_pro_6000_blackwell; rows declared sm_90a-only compile-gate to h100.",
+  "description": "Declares, per roster row, which platforms the row must pass on. Portable (tier=P) rows must be \"both\". Rows declared sm_120a-only compile-gate to rtx_5090_blackwell; rows declared sm_90a-only compile-gate to h100.",
   "schema_version": 1,
   "type": "object",
   "additionalProperties": false,
@@ -23,8 +23,8 @@
         "slug": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
         "platforms": {
           "type": "string",
-          "enum": ["h100", "rtx_pro_6000_blackwell", "both", "either"],
-          "description": "\"both\" = MUST pass on both; \"either\" = MUST pass on at least one; \"h100\" / \"rtx_pro_6000_blackwell\" = single-platform MUST-pass."
+          "enum": ["h100", "rtx_5090_blackwell", "both", "either"],
+          "description": "\"both\" = MUST pass on both; \"either\" = MUST pass on at least one; \"h100\" / \"rtx_5090_blackwell\" = single-platform MUST-pass."
         },
         "reason": {
           "type": "string",

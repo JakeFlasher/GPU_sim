@@ -1,0 +1,150 @@
+{
+  "name": "043_mla_fused_qkv_rope_split__sm120_adapted",
+  "hf_id": "deepseek-ai/DeepSeek-V3",
+  "description": "Bounded MLA QKV projection and split: B=1,S=8,H=128,query rank=64,heads=4,nope=32,rope=16,KV rank=64. Retains query RMSNorm, separate KV compression, and both positional/non-positional outputs. Not a full-size DeepSeek performance proxy.",
+  "axes": {
+    "batch_size": {
+      "type": "var",
+      "description": "Batch size"
+    },
+    "seq_len": {
+      "type": "var",
+      "description": "Sequence length"
+    },
+    "hidden_size": {
+      "type": "const",
+      "value": 128,
+      "description": "Hidden dimension"
+    },
+    "num_heads": {
+      "type": "const",
+      "value": 4,
+      "description": "Number of attention heads"
+    },
+    "q_lora_rank": {
+      "type": "const",
+      "value": 64,
+      "description": "Query LoRA rank"
+    },
+    "qk_nope_head_dim": {
+      "type": "const",
+      "value": 32,
+      "description": "Query/Key non-positional head dimension"
+    },
+    "qk_rope_head_dim": {
+      "type": "const",
+      "value": 16,
+      "description": "Query/Key RoPE head dimension"
+    },
+    "q_head_dim": {
+      "type": "const",
+      "value": 48,
+      "description": "Total query head dimension (nope + rope)"
+    },
+    "kv_lora_rank": {
+      "type": "const",
+      "value": 64,
+      "description": "KV LoRA rank"
+    },
+    "kv_proj_out_dim": {
+      "type": "const",
+      "value": 80,
+      "description": "KV projection output dimension (kv_lora_rank + qk_rope_head_dim)"
+    },
+    "q_proj_out_dim": {
+      "type": "const",
+      "value": 192,
+      "description": "Q projection output dimension (num_heads * q_head_dim)"
+    }
+  },
+  "custom_inputs_entrypoint": null,
+  "inputs": {
+    "hidden_states": {
+      "shape": [
+        "batch_size",
+        "seq_len",
+        "hidden_size"
+      ],
+      "dtype": "bfloat16",
+      "description": "Input hidden states"
+    },
+    "q_a_proj_weight": {
+      "shape": [
+        "q_lora_rank",
+        "hidden_size"
+      ],
+      "dtype": "bfloat16",
+      "description": "Query A projection weight"
+    },
+    "q_a_layernorm_weight": {
+      "shape": [
+        "q_lora_rank"
+      ],
+      "dtype": "bfloat16",
+      "description": "Query A layernorm weight"
+    },
+    "q_b_proj_weight": {
+      "shape": [
+        "q_proj_out_dim",
+        "q_lora_rank"
+      ],
+      "dtype": "bfloat16",
+      "description": "Query B projection weight"
+    },
+    "kv_a_proj_weight": {
+      "shape": [
+        "kv_proj_out_dim",
+        "hidden_size"
+      ],
+      "dtype": "bfloat16",
+      "description": "KV A projection weight"
+    },
+    "rms_norm_eps": {
+      "shape": null,
+      "dtype": "float32",
+      "description": "RMSNorm epsilon"
+    }
+  },
+  "outputs": {
+    "q_nope": {
+      "shape": [
+        "batch_size",
+        "seq_len",
+        "num_heads",
+        "qk_nope_head_dim"
+      ],
+      "dtype": "bfloat16",
+      "description": "Query non-positional component"
+    },
+    "q_pe": {
+      "shape": [
+        "batch_size",
+        "seq_len",
+        "num_heads",
+        "qk_rope_head_dim"
+      ],
+      "dtype": "bfloat16",
+      "description": "Query positional component"
+    },
+    "compressed_kv": {
+      "shape": [
+        "batch_size",
+        "seq_len",
+        "kv_lora_rank"
+      ],
+      "dtype": "bfloat16",
+      "description": "Compressed KV latent"
+    },
+    "k_pe": {
+      "shape": [
+        "batch_size",
+        "seq_len",
+        "1",
+        "qk_rope_head_dim"
+      ],
+      "dtype": "bfloat16",
+      "description": "Key positional component"
+    }
+  },
+  "reference": "import torch\nimport torch.nn.functional as F\n\n@torch.no_grad()\ndef run(\n    hidden_states: torch.Tensor,\n    q_a_proj_weight: torch.Tensor,\n    q_a_layernorm_weight: torch.Tensor,\n    q_b_proj_weight: torch.Tensor,\n    kv_a_proj_weight: torch.Tensor,\n    rms_norm_eps: float,\n):\n    \"\"\"\n    Fused MLA QKV projection with RoPE split.\n    \n    Query path: hidden -> q_a_proj -> RMSNorm -> q_b_proj -> split(q_nope, q_pe)\n    KV path: hidden -> kv_a_proj -> split(compressed_kv, k_pe)\n    \"\"\"\n    # SM120 bounded geometry; keep the 2:1 non-positional/RoPE split.\n    num_heads = 4\n    qk_rope_head_dim = 16\n    q_head_dim = q_b_proj_weight.shape[0] // num_heads\n    qk_nope_head_dim = q_head_dim - qk_rope_head_dim\n    kv_lora_rank = kv_a_proj_weight.shape[0] - qk_rope_head_dim\n    \n    bsz, seq_len, _ = hidden_states.shape\n    \n    # Query pathway: hidden -> q_a_proj -> layernorm -> q_b_proj -> split\n    # q_a_proj: Linear(7168, 1536)\n    q_latent = F.linear(hidden_states, q_a_proj_weight)  # (bsz, seq_len, 1536)\n    \n    # RMSNorm on q_latent\n    input_dtype = q_latent.dtype\n    q_latent_fp32 = q_latent.to(torch.float32)\n    variance = q_latent_fp32.pow(2).mean(-1, keepdim=True)\n    q_latent_normed = q_latent_fp32 * torch.rsqrt(variance + rms_norm_eps)\n    q_latent = (q_a_layernorm_weight * q_latent_normed.to(input_dtype))\n    \n    # q_b_proj: Linear(1536, 24576)\n    q = F.linear(q_latent, q_b_proj_weight)  # (bsz, seq_len, 24576)\n    q = q.view(bsz, seq_len, num_heads, q_head_dim)  # (bsz, seq_len, 128, 192)\n    \n    # Split query into nope and pe components\n    q_nope = q[..., :qk_nope_head_dim].contiguous()  # (bsz, seq_len, 128, 128)\n    q_pe = q[..., qk_nope_head_dim:].contiguous()  # (bsz, seq_len, 128, 64)\n    \n    # KV pathway: hidden -> kv_a_proj -> split\n    # kv_a_proj: Linear(7168, 576)\n    kv_combined = F.linear(hidden_states, kv_a_proj_weight)  # (bsz, seq_len, 576)\n    \n    # Split into compressed_kv and k_pe\n    compressed_kv = kv_combined[..., :kv_lora_rank].contiguous()  # (bsz, seq_len, 512)\n    k_pe = kv_combined[..., kv_lora_rank:].contiguous()  # (bsz, seq_len, 64)\n    k_pe = k_pe.view(bsz, seq_len, 1, qk_rope_head_dim)  # (bsz, seq_len, 1, 64)\n    \n    return q_nope, q_pe, compressed_kv, k_pe\n"
+}

@@ -1,0 +1,1 @@
+{"uuid": "sm120-adapter-L1_019_vision_rope_backward_sm120", "axes": {"seq_len": 4}, "inputs": {"grad_q_embed": {"type": "random"}, "grad_k_embed": {"type": "random"}, "q": {"type": "random"}, "k": {"type": "random"}, "embeddings": {"type": "random"}}, "tolerance": {"max_atol": 1e-05, "max_rtol": 1e-05}}

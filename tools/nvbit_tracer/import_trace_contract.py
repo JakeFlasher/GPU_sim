@@ -239,11 +239,13 @@ from typing import Any
 ADDRESS_CARRYING_V1_TRACE_CONTRACT_ID = "sm86_addr_carry_v1"
 SHARED_MEMORY_SPLIT_V2_TRACE_CONTRACT_ID = "sm86_addr_carry_shmem_split_v2"
 LDGSTS_DESTINATION_V3_TRACE_CONTRACT_ID = "sm86_addr_carry_ldgsts_dst_v3"
+SM120_LDGSTS_DESTINATION_V3_TRACE_CONTRACT_ID = "sm120_addr_carry_ldgsts_dst_v3"
 _ADDRESS_CARRYING_TRACE_CONTRACT_IDS = frozenset(
     (
         ADDRESS_CARRYING_V1_TRACE_CONTRACT_ID,
         SHARED_MEMORY_SPLIT_V2_TRACE_CONTRACT_ID,
         LDGSTS_DESTINATION_V3_TRACE_CONTRACT_ID,
+        SM120_LDGSTS_DESTINATION_V3_TRACE_CONTRACT_ID,
     )
 )
 
@@ -1232,7 +1234,10 @@ def _check_address_carrying_shape(
                 address_pb2_mod.MEMORY_SPACE_GENERIC,
             )
         )
-        if trace_contract_id == LDGSTS_DESTINATION_V3_TRACE_CONTRACT_ID:
+        if trace_contract_id in (
+            LDGSTS_DESTINATION_V3_TRACE_CONTRACT_ID,
+            SM120_LDGSTS_DESTINATION_V3_TRACE_CONTRACT_ID,
+        ):
             if operand_count != 2:
                 detail = (
                     "expected exactly the ordered source/destination operand pair"
@@ -1695,6 +1700,39 @@ def _check_instruction(
                 == instruction_pb2_mod.MEMORY_OP_CLASS_GLOBAL
             )
         global_class = requires_global_identity
+        identity_status = None
+        if hasattr(addr, "HasField") and addr.HasField("allocation_identity_status"):
+            identity_status = str(addr.allocation_identity_status)
+            if identity_status not in {"resolved", "unresolved_module_global"}:
+                return ValidationResult(
+                    ok=False,
+                    typed_reason="allocation_identity_status_invalid",
+                    detail=(
+                        f"{record_path}: address[{addr_index}] carries unknown "
+                        f"allocation_identity_status={identity_status!r}"
+                    ),
+                )
+        # A module/library-owned global (for example a cuFFT twiddle table)
+        # can be a valid device address without appearing in cuMemAlloc
+        # callbacks.  The producer's explicit disposition retains its address
+        # and declines to fabricate an allocation_id.  This is a typed,
+        # capability-bearing exception; ordinary global records remain strict.
+        if (
+            global_class
+            and address_mask != 0
+            and identity_status == "unresolved_module_global"
+        ):
+            if addr.HasField("allocation_id") and addr.allocation_id != 0:
+                return ValidationResult(
+                    ok=False,
+                    typed_reason="allocation_identity_status_conflict",
+                    detail=(
+                        f"{record_path}: address[{addr_index}] declares "
+                        "unresolved_module_global but also carries a non-zero "
+                        "allocation_id"
+                    ),
+                )
+            continue
         # Required-identity clause: a GLOBAL record with at least
         # one active+predicated lane MUST carry a non-zero
         # `allocation_id`. The producer either stamps the id when

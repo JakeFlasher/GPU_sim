@@ -35,17 +35,28 @@ int main(int argc, char **argv) {
         else if (strcmp(argv[i], "--shape-point") == 0 && i + 1 < argc) shape_point = argv[++i];
         else { fprintf(stderr, "vendor_fp8_matmul_cublaslt_run: unknown arg %s\n", argv[i]); return 2; }
     }
+    if (M <= 0 || N <= 0 || K <= 0 || M % 16 || N % 16 || K % 16) {
+        fprintf(stderr, "FP8 GeForce GEMM requires positive 16-aligned M/N/K\n");
+        return 2;
+    }
     const size_t n_a = (size_t)M * K, n_b = (size_t)K * N, n_c = (size_t)M * N;
+    if (n_a > SIZE_MAX / sizeof(float) || n_b > SIZE_MAX / sizeof(float) || n_c > SIZE_MAX / sizeof(float)) return 2;
     float *A_f = (float *)malloc(n_a * sizeof(float));
     float *B_f = (float *)malloc(n_b * sizeof(float));
     float *h_C = (float *)malloc(n_c * sizeof(float));
+    if (!A_f || !B_f || !h_C) fail("host allocation", 1);
     seed_tensor(A_f, n_a, seed,     -0.5, 0.5);
     seed_tensor(B_f, n_b, seed + 1, -0.5, 0.5);
 
     __nv_fp8_e4m3 *h_A = (__nv_fp8_e4m3 *)malloc(n_a * sizeof(__nv_fp8_e4m3));
     __nv_fp8_e4m3 *h_B = (__nv_fp8_e4m3 *)malloc(n_b * sizeof(__nv_fp8_e4m3));
+    if (!h_A || !h_B) fail("host FP8 allocation", 1);
     for (size_t i = 0; i < n_a; ++i) h_A[i] = __nv_fp8_e4m3(A_f[i]);
-    for (size_t i = 0; i < n_b; ++i) h_B[i] = __nv_fp8_e4m3(B_f[i]);
+    // B is logically [K,N], but the GeForce FP8 TN kernel needs a K-contiguous
+    // operand. Pack [N,K] on the host; do not reinterpret row-major B as COL.
+    for (int n = 0; n < N; ++n)
+        for (int k = 0; k < K; ++k)
+            h_B[(size_t)n * K + k] = __nv_fp8_e4m3(B_f[(size_t)k * N + n]);
 
     __nv_fp8_e4m3 *d_A = nullptr, *d_B = nullptr;
     float *d_C = nullptr;
@@ -61,6 +72,8 @@ int main(int argc, char **argv) {
     rc = cudaMemcpy(h_C, d_C, n_c * sizeof(float), cudaMemcpyDeviceToHost); if (rc) fail("D2H", rc);
 
     printf("{\n  \"schema_version\": 1,\n  \"slug\": \"vendor_fp8_matmul_cublaslt\",\n");
+    printf("  \"implementation\": \"cublaslt_fp8_row_major_v2\",\n");
+    printf("  \"m\": %d, \"n\": %d, \"k\": %d, \"seed\": %u,\n", M, N, K, seed);
     printf("  \"shape_set\": \"correctness_shapes\",\n  \"shape_point\": \"%s\",\n", shape_point);
     printf("  \"output\": [");
     for (int m = 0; m < M; ++m) {

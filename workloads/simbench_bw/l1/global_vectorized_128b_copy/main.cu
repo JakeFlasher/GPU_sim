@@ -11,6 +11,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "../../sm120_event_timing.h"
 
 extern "C" void global_vectorized_128b_copy_launch(const float *d_in, float *d_out,
                                                    int n, cudaStream_t stream);
@@ -88,9 +89,14 @@ int main(int argc, char **argv) {
     rc = cudaMalloc(&d_out, n * sizeof(float)); if (rc) fail("mc out", rc);
     rc = cudaMemcpy(d_in, h_in, n * sizeof(float), cudaMemcpyHostToDevice); if (rc) fail("H2D", rc);
 
-    global_vectorized_128b_copy_launch(d_in, d_out, (int)n, 0);
-    rc = cudaGetLastError(); if (rc) fail("launch", rc);
+    Sm120CudaEventScope event_scope;
+    const int event_reps = sm120_event_reps();
+    for (int rep = 0; rep < event_reps; ++rep) {
+        global_vectorized_128b_copy_launch(d_in, d_out, (int)n, 0);
+        rc = cudaGetLastError(); if (rc) fail("launch", rc);
+    }
     rc = cudaDeviceSynchronize(); if (rc) fail("sync", rc);
+    event_scope.finish("global_vectorized_128b_copy");
     rc = cudaMemcpy(h_out, d_out, n * sizeof(float), cudaMemcpyDeviceToHost); if (rc) fail("D2H", rc);
     size_t mismatch_count = 0;
     for (size_t i = 0; i < n; ++i) {

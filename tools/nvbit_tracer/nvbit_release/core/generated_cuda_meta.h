@@ -1248,6 +1248,96 @@ typedef struct cuMulticastGetGranularity_params_st {
     CUmulticastGranularity_flags option;
 } cuMulticastGetGranularity_params;
 
+typedef struct cuDeviceGetFabricClusterUuid_params_st {
+    CUuuid *uuid;
+    CUdevice dev;
+} cuDeviceGetFabricClusterUuid_params;
+
+typedef struct cuDeviceGetCliqueCount_params_st {
+    size_t *count;
+    CUdevice dev;
+} cuDeviceGetCliqueCount_params;
+
+typedef struct cuDeviceGetCliqueInfo_params_st {
+    CUcliqueInfo *cliqueInfo;
+    size_t *count;
+    CUdevice dev;
+} cuDeviceGetCliqueInfo_params;
+
+typedef struct cuLogicalEndpointIdReserve_params_st {
+    CUlogicalEndpointId *baseLeId;
+    cuuint32_t count;
+} cuLogicalEndpointIdReserve_params;
+
+typedef struct cuLogicalEndpointIdRelease_params_st {
+    CUlogicalEndpointId baseLeId;
+    cuuint32_t count;
+} cuLogicalEndpointIdRelease_params;
+
+typedef struct cuLogicalEndpointCreate_params_st {
+    CUlogicalEndpointId leId;
+    const CUlogicalEndpointProp *prop;
+} cuLogicalEndpointCreate_params;
+
+typedef struct cuLogicalEndpointAddDevice_params_st {
+    CUlogicalEndpointId leId;
+    CUdevice dev;
+} cuLogicalEndpointAddDevice_params;
+
+typedef struct cuLogicalEndpointDestroy_params_st {
+    CUlogicalEndpointId leId;
+} cuLogicalEndpointDestroy_params;
+
+typedef struct cuLogicalEndpointBindAddr_params_st {
+    CUlogicalEndpointId leId;
+    CUdevice dev;
+    cuuint64_t offset;
+    void *ptr;
+    cuuint64_t size;
+    unsigned long long flags;
+} cuLogicalEndpointBindAddr_params;
+
+typedef struct cuLogicalEndpointBindMem_params_st {
+    CUlogicalEndpointId leId;
+    CUdevice dev;
+    cuuint64_t offset;
+    CUmemGenericAllocationHandle memHandle;
+    cuuint64_t memOffset;
+    cuuint64_t size;
+    unsigned long long flags;
+} cuLogicalEndpointBindMem_params;
+
+typedef struct cuLogicalEndpointUnbind_params_st {
+    CUlogicalEndpointId leId;
+    CUdevice dev;
+    cuuint64_t offset;
+    cuuint64_t size;
+} cuLogicalEndpointUnbind_params;
+
+typedef struct cuLogicalEndpointExport_params_st {
+    void *handle;
+    CUlogicalEndpointId leId;
+    CUlogicalEndpointIpcHandleType handleType;
+} cuLogicalEndpointExport_params;
+
+typedef struct cuLogicalEndpointImport_params_st {
+    CUlogicalEndpointId leId;
+    const void *handle;
+    CUlogicalEndpointIpcHandleType handleType;
+} cuLogicalEndpointImport_params;
+
+typedef struct cuLogicalEndpointGetLimits_params_st {
+    cuuint64_t *bindAlignment;
+    cuuint64_t *maxSize;
+    const CUlogicalEndpointProp *prop;
+} cuLogicalEndpointGetLimits_params;
+
+typedef struct cuLogicalEndpointQuery_params_st {
+    CUlogicalEndpointId leId;
+    cuuint32_t count;
+    int *queryStatus;
+} cuLogicalEndpointQuery_params;
+
 typedef struct cuPointerGetAttribute_params_st {
     void *data;
     CUpointer_attribute attribute;
@@ -1298,6 +1388,14 @@ typedef struct cuMemDiscardAndPrefetchBatchAsync_ptsz_params_st {
     unsigned long long flags;
     CUstream hStream;
 } cuMemDiscardAndPrefetchBatchAsync_ptsz_params;
+
+typedef struct cuMemGetLocationInfo_params_st {
+    CUdeviceptr ptr;
+    size_t size;
+    size_t summaryGranularity;
+    size_t samplingGranularity;
+    CUmemLocation *location_out;
+} cuMemGetLocationInfo_params;
 
 typedef struct cuMemRangeGetAttribute_params_st {
     void *data;
@@ -1397,6 +1495,14 @@ typedef struct cuStreamBeginCapture_v2_ptsz_params_st {
     CUstream hStream;
     CUstreamCaptureMode mode;
 } cuStreamBeginCapture_v2_ptsz_params;
+
+typedef struct cuStreamBeginRecaptureToGraph_ptsz_params_st {
+    CUstream hStream;
+    CUstreamCaptureMode mode;
+    CUgraph hGraph;
+    CUgraphRecaptureCallback callbackFunc;
+    void *userData;
+} cuStreamBeginRecaptureToGraph_ptsz_params;
 
 typedef struct cuStreamBeginCaptureToGraph_ptsz_params_st {
     CUstream hStream;
@@ -1670,12 +1776,6 @@ typedef struct cuLaunchCooperativeKernel_ptsz_params_st {
     void **kernelParams;
 } cuLaunchCooperativeKernel_ptsz_params;
 
-typedef struct cuLaunchCooperativeKernelMultiDevice_params_st {
-    CUDA_LAUNCH_PARAMS *launchParamsList;
-    unsigned int numDevices;
-    unsigned int flags;
-} cuLaunchCooperativeKernelMultiDevice_params;
-
 typedef struct cuLaunchHostFunc_ptsz_params_st {
     CUstream hStream;
     CUhostFn fn;
@@ -1741,6 +1841,12 @@ typedef struct cuLaunchGridAsync_params_st {
     int grid_height;
     CUstream hStream;
 } cuLaunchGridAsync_params;
+
+typedef struct cuLaunchCooperativeKernelMultiDevice_params_st {
+    CUDA_LAUNCH_PARAMS *launchParamsList;
+    unsigned int numDevices;
+    unsigned int flags;
+} cuLaunchCooperativeKernelMultiDevice_params;
 
 typedef struct cuParamSetTexRef_params_st {
     CUfunction hfunc;
@@ -2257,10 +2363,24 @@ typedef struct cuGraphAddNode_v2_params_st {
     CUgraphNodeParams *nodeParams;
 } cuGraphAddNode_v2_params;
 
+typedef struct cuGraphAddNode_v3_params_st {
+    CUgraphNode *phGraphNode;
+    CUgraph hGraph;
+    const CUgraphNode *dependencies;
+    const CUgraphEdgeData *dependencyData;
+    size_t numDependencies;
+    CUgraphNodeParams *nodeParams;
+} cuGraphAddNode_v3_params;
+
 typedef struct cuGraphNodeSetParams_params_st {
     CUgraphNode hNode;
     CUgraphNodeParams *nodeParams;
 } cuGraphNodeSetParams_params;
+
+typedef struct cuGraphNodeSetParams_v2_params_st {
+    CUgraphNode hNode;
+    CUgraphNodeParams *nodeParams;
+} cuGraphNodeSetParams_v2_params;
 
 typedef struct cuGraphNodeGetParams_params_st {
     CUgraphNode hNode;
@@ -3841,6 +3961,14 @@ typedef struct cuStreamBeginCaptureToGraph_params_st {
     CUstreamCaptureMode mode;
 } cuStreamBeginCaptureToGraph_params;
 
+typedef struct cuStreamBeginRecaptureToGraph_params_st {
+    CUstream hStream;
+    CUstreamCaptureMode mode;
+    CUgraph hGraph;
+    CUgraphRecaptureCallback callbackFunc;
+    void *userData;
+} cuStreamBeginRecaptureToGraph_params;
+
 typedef struct cuStreamEndCapture_params_st {
     CUstream hStream;
     CUgraph *phGraph;
@@ -4112,6 +4240,10 @@ typedef struct cuCheckpointProcessRestore_params_st {
     int pid;
     CUcheckpointRestoreArgs *args;
 } cuCheckpointProcessRestore_params;
+
+typedef struct cuCheckpointOperationComplete_params_st {
+    CUcheckpointOperationHandle handle;
+} cuCheckpointOperationComplete_params;
 
 typedef struct cuCheckpointProcessUnlock_params_st {
     int pid;

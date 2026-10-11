@@ -1,0 +1,1 @@
+{"uuid": "daf060b0-a805-598b-8351-f17bf4c1bc5b", "axes": {"batch_size": 1, "seq_len": 64}, "inputs": {"attn_output": {"type": "random"}, "o_proj_weight": {"type": "random"}, "o_proj_bias": {"type": "random"}}, "tolerance": {"max_atol": 0.005, "max_rtol": 0.02, "required_matched_ratio": 0.99}}

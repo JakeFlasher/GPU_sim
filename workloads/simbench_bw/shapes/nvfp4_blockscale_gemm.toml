@@ -22,7 +22,7 @@ repeat_iters = 30
 
 [[trace_shapes]]
 name = "trace_00"
-axes = { m = 32, n = 32, k = 32, scale_vec = 16 }
+axes = { m = 32, n = 32, k = 64, scale_vec = 16 }
 launch_config = { grid = [2, 4, 1], block = [32, 1, 1] }
 predicted_bytes = 83886080
 estimator_source = "static"

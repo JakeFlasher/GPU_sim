@@ -1,9 +1,10 @@
 // Host driver for nvfp4_grouped_gemm_moe. Seeds logits / x / w_experts via
 // the same PRNG as references/_common.py::deterministic_seeded_tensor so
-// the GPU output can be compared against the Python reference under the
-// (BF16, fma_chain, grouped_gemm) tolerance.
+// the inputs are reproducible. Projection now quantizes BF16 inputs into
+// block16 E2M1/UE4M3 before SM120 warp MMA; the old BF16-only reference is
+// NOT a numerical oracle for this quantized operation.
 //
-// Matches references/grouped_gemm.py::build_reference for
+// Input seeding follows references/grouped_gemm.py::build_reference for
 // slug == "nvfp4_grouped_gemm_moe":
 //   logits       = seeded((tokens, experts),               seed,           [-2.0,  2.0))
 //   x            = seeded((tokens, hidden),                seed + 1,       [-0.5,  0.5))
@@ -74,6 +75,12 @@ int main(int argc, char **argv) {
         }
     }
 
+    if (tokens <= 0 || tokens > 65535 || experts <= 0 || experts > 65535 ||
+        top_k <= 0 || top_k > experts || hidden <= 0 || hidden % 64 ||
+        intermediate <= 0 || intermediate % 8) {
+        fprintf(stderr, "require 0<tokens,experts<=65535, 0<top-k<=experts, hidden%%64=0 and intermediate%%8=0\n");
+        return 2;
+    }
     const size_t n_logits = (size_t)tokens * experts;
     const size_t n_x      = (size_t)tokens * hidden;
     const size_t n_we     = (size_t)experts * hidden * intermediate;
@@ -118,6 +125,10 @@ int main(int argc, char **argv) {
     printf("{\n");
     printf("  \"schema_version\": 1,\n");
     printf("  \"slug\": \"%s\",\n", slug);
+    printf("  \"implementation\": \"sm120_routed_nvfp4_mma_block16\",\n");
+    printf("  \"quantization\": \"E2M1_RNE_UE4M3_block16_tensor_scale_1\",\n");
+    printf("  \"tokens\": %d, \"experts\": %d, \"top_k\": %d, \"hidden\": %d, \"intermediate\": %d,\n",
+           tokens, experts, top_k, hidden, intermediate);
     printf("  \"shape_set\": \"correctness_shapes\",\n");
     printf("  \"shape_point\": \"%s\",\n", shape_point);
     printf("  \"output\": [");

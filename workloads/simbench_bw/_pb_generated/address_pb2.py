@@ -24,15 +24,15 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\raddress.proto\x12\rdynamic_trace\"\xa1\x02\n\x07\x61\x64\x64ress\x12\x12\n\ndata_width\x18\x01 \x01(\x05\x12\x13\n\x0budesc_value\x18\x02 \x01(\r\x12\x1a\n\x12\x63ompression_format\x18\x03 \x01(\x05\x12\x14\n\x0c\x62\x61se_address\x18\x04 \x01(\x04\x12\x0e\n\x06stride\x18\x05 \x01(\x05\x12\r\n\x05\x61\x64\x64rs\x18\x06 \x03(\x03\x12\x1a\n\rallocation_id\x18\x07 \x01(\rH\x00\x88\x01\x01\x12\x36\n\raddress_space\x18\x08 \x01(\x0e\x32\x1a.dynamic_trace.MemorySpaceH\x01\x88\x01\x01\x12\x16\n\tlane_mask\x18\t \x01(\rH\x02\x88\x01\x01\x42\x10\n\x0e_allocation_idB\x10\n\x0e_address_spaceB\x0c\n\n_lane_mask*\x8f\x01\n\x0bMemorySpace\x12\x1c\n\x18MEMORY_SPACE_UNSPECIFIED\x10\x00\x12\x17\n\x13MEMORY_SPACE_GLOBAL\x10\x01\x12\x17\n\x13MEMORY_SPACE_SHARED\x10\x02\x12\x16\n\x12MEMORY_SPACE_LOCAL\x10\x03\x12\x18\n\x14MEMORY_SPACE_GENERIC\x10\x04\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\raddress.proto\x12\rdynamic_trace\"\x99\x03\n\x07\x61\x64\x64ress\x12\x12\n\ndata_width\x18\x01 \x01(\x05\x12\x13\n\x0budesc_value\x18\x02 \x01(\r\x12\x1a\n\x12\x63ompression_format\x18\x03 \x01(\x05\x12\x14\n\x0c\x62\x61se_address\x18\x04 \x01(\x04\x12\x0e\n\x06stride\x18\x05 \x01(\x05\x12\r\n\x05\x61\x64\x64rs\x18\x06 \x03(\x03\x12\x1a\n\rallocation_id\x18\x07 \x01(\rH\x00\x88\x01\x01\x12\x36\n\raddress_space\x18\x08 \x01(\x0e\x32\x1a.dynamic_trace.MemorySpaceH\x01\x88\x01\x01\x12\x16\n\tlane_mask\x18\t \x01(\rH\x02\x88\x01\x01\x12\'\n\x1a\x61llocation_identity_status\x18\n \x01(\tH\x03\x88\x01\x01\x12\x1b\n\x0etransfer_width\x18\x0b \x01(\x05H\x04\x88\x01\x01\x42\x10\n\x0e_allocation_idB\x10\n\x0e_address_spaceB\x0c\n\n_lane_maskB\x1d\n\x1b_allocation_identity_statusB\x11\n\x0f_transfer_width*\x8f\x01\n\x0bMemorySpace\x12\x1c\n\x18MEMORY_SPACE_UNSPECIFIED\x10\x00\x12\x17\n\x13MEMORY_SPACE_GLOBAL\x10\x01\x12\x17\n\x13MEMORY_SPACE_SHARED\x10\x02\x12\x16\n\x12MEMORY_SPACE_LOCAL\x10\x03\x12\x18\n\x14MEMORY_SPACE_GENERIC\x10\x04\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'address_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_MEMORYSPACE']._serialized_start=325
-  _globals['_MEMORYSPACE']._serialized_end=468
+  _globals['_MEMORYSPACE']._serialized_start=445
+  _globals['_MEMORYSPACE']._serialized_end=588
   _globals['_ADDRESS']._serialized_start=33
-  _globals['_ADDRESS']._serialized_end=322
+  _globals['_ADDRESS']._serialized_end=442
 # @@protoc_insertion_point(module_scope)

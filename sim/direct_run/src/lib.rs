@@ -15,7 +15,6 @@ pub use prepared::{
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-#[cfg(feature = "performance-counters")]
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
@@ -42,6 +41,7 @@ use sim_sm::{
     GpcObservationFrontier, IssueModelParams, L1PayloadAdmissionEvent, L2SourceSplit,
     MAX_MEMORY_ADMISSION_CANDIDATES, MAX_MEMORY_SERVICE_CANDIDATES, MemoryAdmissionCandidate,
     MemoryServiceCandidate, ModeledCompletionFrontier, ReadinessDiagnostics, ReplayMemMode,
+    Sm120AlphaConfig,
     SmActiveObservationFrontier, StreamL2ReplaySession, TailFlags, TraceMetrics, build_schedules,
     replay_trace_kernel, replay_trace_kernel_with_l1_payload_events,
     replay_trace_kernel_with_memory_admission_candidates,
@@ -193,6 +193,10 @@ pub struct RunConfig {
     /// default is an independent sidecar; residual/replacement roles are
     /// experimental and must remain declared in the output.
     pub service_stage_role: ServiceStageRole,
+    /// Explicit alpha timing lane for retained SM120/RTX5090 traces.  This
+    /// never changes the ordinary SM120 fail-closed path and is intentionally
+    /// separate from SM86 compatibility or carded resources.
+    pub sm120_alpha: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -574,6 +578,26 @@ fn resolve_issue_with_metadata(
     card: &ArchCard,
 ) -> Result<(IssueModelParams, Option<u32>), RunError> {
     let arch = card.arch_id().map_err(at("architecture card"))?;
+    if config.sm120_alpha {
+        if arch != sim_arch::ArchId::Sm120 {
+            return Err(RunError::new(
+                "issue configuration",
+                "--sm120-alpha requires an sm_120 architecture card",
+            ));
+        }
+        if config.architecture_spec.is_some() || config.hypothetical_issue_ports.is_some() {
+            return Err(RunError::new(
+                "arguments",
+                "--sm120-alpha cannot combine with --architecture-spec or --hypothetical-issue-ports",
+            ));
+        }
+        let alpha = Sm120AlphaConfig::from_m8_m9();
+        return Ok((
+            IssueModelParams::from_card_alpha(arch, card, alpha)
+                .map_err(at("SM120 alpha issue configuration"))?,
+            None,
+        ));
+    }
     let issue = match card.required_issue_resources() {
         Ok(_) => IssueModelParams::from_card(arch, card).map_err(at("issue configuration"))?,
         Err(CalibError::BlockResearchGap { .. }) if !card.has_any_issue_resource_blocks() => {
@@ -732,9 +756,11 @@ fn load_ncu_observation(
 pub(crate) fn load_control_sidecar(
     path: &Path,
     arch: sim_arch::ArchId,
+    sm120_alpha: bool,
 ) -> Result<ControlSidecar, RunError> {
     let raw = read_direct_input(path, "control bits", MAX_DIRECT_CONTROL_BYTES)?;
-    ControlSidecar::parse_for_arch(path, &raw, arch).map_err(at("control bits"))
+    ControlSidecar::parse_for_arch_with_alpha(path, &raw, arch, sm120_alpha)
+        .map_err(at("control bits"))
 }
 
 /// Bind a canonical direct-replay sidecar to the executable named by the
@@ -985,6 +1011,12 @@ pub struct RunReport {
     pub l1_resident_writeback: bool,
     #[serde(skip_serializing_if = "is_false")]
     pub fast_frontier_only: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub sm120_alpha: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sm120_alpha_config: Option<Sm120AlphaConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sm120_alpha_profile_id: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hypothetical_issue_ports: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1002,6 +1034,10 @@ pub struct RunReport {
     pub ncu_observation: Option<ncu::NcuObservation>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub latent_envelope: Option<LatentEnvelopeReport>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sim_total_wall_ns: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sim_replay_wall_ns: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1335,6 +1371,12 @@ pub struct CoverageReport {
 
 #[derive(Debug, Serialize)]
 pub struct TimingReport {
+    /// Distinguishes the simulator's internal frontier status from physical
+    /// completion semantics.  The SM120 alpha path deliberately reports an
+    /// approximate internal frontier when it flattens async/TMA demands.
+    pub completion_frontier_semantics: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alpha_approximation: Option<AlphaApproximationReport>,
     pub diagnostic_last_issue_cycles: u64,
     pub last_processed_modeled_system_event_time: Option<u64>,
     pub terminal_modeled_event_time: Option<u64>,
@@ -1356,6 +1398,119 @@ pub struct TimingReport {
     pub readiness: ReadinessReport,
 }
 
+#[derive(Debug, Serialize)]
+pub struct Sm120IssueEnvelopeReport {
+    pub status: &'static str,
+    pub profile_id: &'static str,
+    /// Exact values consumed by the flat alpha executor.  These are scenario
+    /// inputs, not confidence bounds or identified physical resources.
+    pub issue_ports_configured: u32,
+    pub dual_issue_configured: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scalar_latency_configured_cycles: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scalar_initiation_configured_cycles: Option<u64>,
+    pub max_resident_warps_configured: u32,
+    pub max_resident_blocks_configured: u32,
+    pub configuration_source: &'static str,
+    pub non_claim: &'static str,
+}
+
+impl Sm120IssueEnvelopeReport {
+    fn from_issue_params(params: IssueModelParams) -> Self {
+        let scalar = params.scalar_execution_pipeline();
+        Self {
+            status: "configured_alpha_inputs",
+            profile_id: Sm120AlphaConfig::PROFILE_ID,
+            issue_ports_configured: params.issue_ports(),
+            dual_issue_configured: params.dual_issue_supported(),
+            scalar_latency_configured_cycles: scalar.map(|value| value.latency_cycles),
+            scalar_initiation_configured_cycles:
+                scalar.map(|value| value.initiation_interval_cycles),
+            max_resident_warps_configured: params.max_resident_warps_per_sm(),
+            max_resident_blocks_configured: params.max_resident_blocks_per_sm(),
+            configuration_source: "IssueModelParams consumed by executor",
+            non_claim: "scenario inputs only; not a confidence interval or physical scheduler topology",
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct Sm120ServiceEnvelopeReport {
+    pub status: &'static str,
+    pub source_domains: Vec<&'static str>,
+    pub route_policy: &'static str,
+    pub residency: &'static str,
+    pub outstanding_demand: &'static str,
+    pub dram_service: &'static str,
+    pub geometry_status: &'static str,
+    pub partition_mapping_status: &'static str,
+    pub mshr_count: &'static str,
+    pub queue_policy: &'static str,
+    pub non_claim: &'static str,
+}
+
+impl Sm120ServiceEnvelopeReport {
+    fn observation_only() -> Self {
+        Self {
+            status: "logical_route_service_no_geometry_fit",
+            source_domains: vec!["trace_memory_coherence", "ncu_raw_l1_l2_dram_sectors"],
+            route_policy: "trace_route_and_static_width",
+            residency: "single_warp_dense_service_arm_only",
+            outstanding_demand: "logical_route_frontier",
+            dram_service: "logical_global_service_envelope",
+            geometry_status: "typed_gap",
+            partition_mapping_status: "typed_gap",
+            mshr_count: "typed_gap",
+            queue_policy: "per_route_logical_fifo",
+            non_claim: "logical service envelope only; no physical cache/DRAM topology or native completion",
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct Sm120CompletionLedgerReport {
+    pub status: &'static str,
+    pub issue: &'static str,
+    pub transaction_complete: &'static str,
+    pub barrier_arrival: &'static str,
+    pub wait_or_test: &'static str,
+    pub destination_visibility: &'static str,
+    pub payload_observation: &'static str,
+    pub affected_async_records: u64,
+    pub non_claim: &'static str,
+}
+
+impl Sm120CompletionLedgerReport {
+    fn provisional(affected_async_records: u64) -> Self {
+        Self {
+            status: "typed_alpha_completion_ledger",
+            issue: "observed_in_trace",
+            transaction_complete: "unobserved_sm120",
+            barrier_arrival: "model_relative_if_decoded",
+            wait_or_test: "model_relative_if_decoded",
+            destination_visibility: "unobserved_without_consumer_payload_observation",
+            payload_observation: "not_present_in_alpha_trace_contract",
+            affected_async_records,
+            non_claim: "ledger separates semantic edges but does not supply native completion timing",
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct AlphaApproximationReport {
+    pub status: &'static str,
+    pub profile_id: &'static str,
+    pub timing_scope: &'static str,
+    pub async_policy: &'static str,
+    pub approximation_kinds: Vec<&'static str>,
+    pub affected_opcode_counts: BTreeMap<String, u64>,
+    pub scheduler_assumptions: Vec<&'static str>,
+    pub issue_envelope: Sm120IssueEnvelopeReport,
+    pub service_envelope: Sm120ServiceEnvelopeReport,
+    pub completion_ledger: Sm120CompletionLedgerReport,
+}
+
 impl TimingReport {
     /// Project the existing simulator-only timing fields into the factorized
     /// frontier contract. Hardware/profiler endpoints are intentionally left
@@ -1367,7 +1522,8 @@ impl TimingReport {
         // do not expose that hypothesis as a prediction lower bound until C3
         // closes an independent async completion witness.
         let async_completion_unvalidated =
-            self.readiness.diagnostics.async_groups.groups_committed != 0;
+            self.readiness.diagnostics.async_groups.groups_committed != 0
+                || self.alpha_approximation.is_some();
         let modeled_event = if async_completion_unvalidated {
             FrontierBound::unknown()
         } else {
@@ -1908,6 +2064,58 @@ fn cache_lookup_prediction_reports(
         .collect()
 }
 
+fn alpha_approximation_report(
+    result: &FullKernelReplayResult,
+) -> Option<AlphaApproximationReport> {
+    if !matches!(
+        result.configuration().issue_params().resource_source(),
+        sim_sm::IssueResourceSource::Sm120Alpha
+    ) {
+        return None;
+    }
+    let mut affected_opcode_counts = BTreeMap::new();
+    let mut approximation_kinds = BTreeSet::new();
+    let mut affected_async_records = 0u64;
+    for (opcode, activity) in &result.trace_metrics().by_opcode {
+        let count = activity.warp_instructions;
+        if count == 0 {
+            continue;
+        }
+        if opcode.starts_with("UTMA") {
+            approximation_kinds.insert("tma_completion_unmodeled");
+            affected_opcode_counts.insert(opcode.clone(), count);
+            affected_async_records = affected_async_records.saturating_add(count);
+        } else if opcode.starts_with("LDGSTS") {
+            approximation_kinds.insert("cp_async_completion_approximated");
+            affected_opcode_counts.insert(opcode.clone(), count);
+            affected_async_records = affected_async_records.saturating_add(count);
+        } else if matches!(opcode.as_str(), "QMMA" | "OMMA" | "HMMA" | "IMMA" | "BMMA") {
+            approximation_kinds.insert("tensor_pipeline_timing_approximated");
+            affected_opcode_counts.insert(opcode.clone(), count);
+        } else if matches!(opcode.as_str(), "MBAR" | "UTMABAR") {
+            approximation_kinds.insert("mbarrier_completion_approximated");
+            affected_opcode_counts.insert(opcode.clone(), count);
+        }
+    }
+    Some(AlphaApproximationReport {
+        status: "provisional_flat_alpha",
+        profile_id: Sm120AlphaConfig::PROFILE_ID,
+        timing_scope: "model_relative_not_hardware_timing",
+        async_policy: "typed_async_completion_separate_from_logical_global_shared_service",
+        approximation_kinds: approximation_kinds.into_iter().collect(),
+        affected_opcode_counts,
+        scheduler_assumptions: vec![
+            "alpha_resource_mapping_assumption",
+            "alpha_control_barrier_domain_assumption",
+        ],
+        issue_envelope: Sm120IssueEnvelopeReport::from_issue_params(
+            result.configuration().issue_params(),
+        ),
+        service_envelope: Sm120ServiceEnvelopeReport::observation_only(),
+        completion_ledger: Sm120CompletionLedgerReport::provisional(affected_async_records),
+    })
+}
+
 fn launch_report(
     result: FullKernelReplayResult,
     arch_card: &ArchCard,
@@ -1974,6 +2182,12 @@ fn launch_report(
     }
     let readiness_schema_version = readiness.schema_version();
     let timing = Some(TimingReport {
+        completion_frontier_semantics: if alpha_approximation_report(&result).is_some() {
+            "model_internal_approximate_not_physical_completion"
+        } else {
+            "model_internal_frontier"
+        },
+        alpha_approximation: alpha_approximation_report(&result),
         diagnostic_last_issue_cycles: result.diagnostic_last_issue_cycles(),
         last_processed_modeled_system_event_time: result.last_processed_modeled_system_event_time(),
         terminal_modeled_event_time: result.terminal_modeled_event_time(),
@@ -2015,6 +2229,12 @@ fn resolve_mode(
     arch_card: &ArchCard,
     issue: IssueModelParams,
 ) -> Result<ReplayMemMode, RunError> {
+    if config.sm120_alpha && config.memory_mode != MemoryMode::Flat {
+        return Err(RunError::new(
+            "arguments",
+            "--sm120-alpha currently supports only --mode flat; SM120 cache/TMA semantics remain unmodeled",
+        ));
+    }
     if config.dirty_writeback_capacity_sectors == Some(0) {
         return Err(RunError::new(
             "arguments",
@@ -2150,7 +2370,6 @@ fn resolve_mode(
 }
 
 pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
-    #[cfg(feature = "performance-counters")]
     let total_started = Instant::now();
     #[cfg(feature = "performance-counters")]
     let performance_enabled = std::env::var_os("SIM_RUN_PERFORMANCE_COUNTERS").is_some();
@@ -2376,6 +2595,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
         && config.kernel_id.is_none()
         && !config.ncu_shaped_metrics
         && !config.fast_frontier_only
+        && !config.sm120_alpha
         && !config.latent_envelope
         && config.dirty_writeback_capacity_sectors.is_none()
         && config.coherence_service_cycles.is_none()
@@ -2442,13 +2662,18 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
     let exec_ns = exec_started.elapsed().as_nanos();
     #[cfg(feature = "performance-counters")]
     let control_started = Instant::now();
-    let control = load_control_sidecar(&config.control_bits, arch)?;
+    let control = load_control_sidecar(&config.control_bits, arch, config.sm120_alpha)?;
     validate_direct_control_identity(&config.control_bits, exec, &control)?;
     #[cfg(feature = "performance-counters")]
     let control_ns = control_started.elapsed().as_nanos();
     #[cfg(feature = "performance-counters")]
     let schedule_started = Instant::now();
-    let schedules = build_schedules(exec, &control).map_err(at("schedule"))?;
+    let schedules = if config.sm120_alpha {
+        sim_sm::build_schedules_sm120_alpha(exec, &control, Sm120AlphaConfig::from_m8_m9())
+            .map_err(at("SM120 alpha schedule"))?
+    } else {
+        build_schedules(exec, &control).map_err(at("schedule"))?
+    };
     #[cfg(feature = "performance-counters")]
     let schedule_ns = schedule_started.elapsed().as_nanos();
 
@@ -2582,6 +2807,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
     };
 
     if config.fast_frontier_only {
+        let fast_replay_started = Instant::now();
         let mut fast_frontier = Vec::with_capacity(kernel_locs.len());
         for loc in kernel_locs {
             let schedule = schedules
@@ -2595,8 +2821,18 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
                         ),
                     )
                 })?;
-            let summary = sim_sm::fast_frontier_for_trace(&trace, &loc, schedule, &arch_card)
-                .map_err(at("fast frontier"))?;
+            let summary = if config.sm120_alpha {
+                sim_sm::sm120_fast_stage_for_trace(
+                    &trace,
+                    &loc,
+                    schedule,
+                    &arch_card,
+                    Sm120AlphaConfig::from_m8_m9(),
+                )
+            } else {
+                sim_sm::fast_frontier_for_trace(&trace, &loc, schedule, &arch_card)
+            }
+            .map_err(at("fast frontier"))?;
             fast_frontier.push(FastFrontierLaunchReport {
                 device_id: loc.device_id(),
                 stream_id: loc.stream_id(),
@@ -2606,6 +2842,10 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
                 summary,
             });
         }
+        let fast_replay_wall_ns =
+            u64::try_from(fast_replay_started.elapsed().as_nanos()).unwrap_or(u64::MAX);
+        let fast_total_wall_ns =
+            u64::try_from(total_started.elapsed().as_nanos()).unwrap_or(u64::MAX);
         return Ok(RunReport {
             schema_version: 1,
             simulator_version: env!("CARGO_PKG_VERSION"),
@@ -2622,6 +2862,13 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
             l1_visibility_protocol: config.l1_visibility_protocol,
             l1_resident_writeback: config.l1_resident_writeback,
             fast_frontier_only: true,
+            sm120_alpha: config.sm120_alpha,
+            sm120_alpha_config: config
+                .sm120_alpha
+                .then(Sm120AlphaConfig::from_m8_m9),
+            sm120_alpha_profile_id: config
+                .sm120_alpha
+                .then_some(Sm120AlphaConfig::PROFILE_ID),
             hypothetical_issue_ports: config
                 .hypothetical_issue_ports
                 .or(architecture_spec_issue_ports),
@@ -2637,11 +2884,12 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
             cache_session: None,
             ncu_observation,
             latent_envelope: None,
+            sim_total_wall_ns: Some(fast_total_wall_ns),
+            sim_replay_wall_ns: Some(fast_replay_wall_ns),
         });
     }
 
     let mut launches = Vec::with_capacity(kernel_locs.len());
-    #[cfg(feature = "performance-counters")]
     let replay_started = Instant::now();
     let cache_session = match config.cache_scope {
         CacheScope::Launch => {
@@ -2787,8 +3035,9 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
             })
         }
     };
-    #[cfg(feature = "performance-counters")]
     let replay_ns = replay_started.elapsed().as_nanos();
+    let replay_wall_ns = u64::try_from(replay_ns).unwrap_or(u64::MAX);
+    let total_wall_ns = u64::try_from(total_started.elapsed().as_nanos()).unwrap_or(u64::MAX);
     let latent_envelope = if config.latent_envelope {
         Some(build_latent_envelope(
             &launches,
@@ -2815,6 +3064,13 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
         l1_visibility_protocol: config.l1_visibility_protocol,
         l1_resident_writeback: config.l1_resident_writeback,
         fast_frontier_only: false,
+        sm120_alpha: config.sm120_alpha,
+        sm120_alpha_config: config
+            .sm120_alpha
+            .then(Sm120AlphaConfig::from_m8_m9),
+        sm120_alpha_profile_id: config
+            .sm120_alpha
+            .then_some(Sm120AlphaConfig::PROFILE_ID),
         hypothetical_issue_ports: config
             .hypothetical_issue_ports
             .or(architecture_spec_issue_ports),
@@ -2831,6 +3087,8 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
         cache_session,
         ncu_observation,
         latent_envelope,
+        sim_total_wall_ns: Some(total_wall_ns),
+        sim_replay_wall_ns: Some(replay_wall_ns),
     };
     if let Some(resources) = external_resources.as_ref() {
         resources.finish()?;
@@ -2874,6 +3132,7 @@ mod tests {
             kernel_id: None,
             ncu_shaped_metrics: false,
             fast_frontier_only: false,
+            sm120_alpha: false,
             memory_service_candidates: None,
             memory_admission_candidates: None,
             memory_admission_feedback: None,

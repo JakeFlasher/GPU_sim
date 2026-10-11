@@ -34,7 +34,26 @@ static __managed__ uint64_t reported_dynamic_instr_counter = 0;
  * on the channel from the GPU to the CPU */
 #define MAX_SRC 5
 
-enum MEM_TYPE { NONE = 0, STANDARD_MEM = 1, CONSTANT_MEM = 2, CALL_OR_RET = 3 };
+enum MEM_TYPE {
+  NONE = 0,
+  STANDARD_MEM = 1,
+  CONSTANT_MEM = 2,
+  CALL_OR_RET = 3,
+  TMA = 4,
+  SM120_SYNC_OPERAND = 5
+};
+// Typed role vocabulary for the SM120 synchronization sidecar. Values are
+// carried in the injection metadata (never inferred from a runtime value).
+enum SM120_SYNC_ROLE : uint32_t {
+  SM120_SYNC_ROLE_NONE = 0,
+  SM120_SYNC_ROLE_BARRIER_ADDRESS = 1,
+  SM120_SYNC_ROLE_COUNT_OR_TX = 2,
+  SM120_SYNC_ROLE_PHASE_OR_STATE = 3,
+  SM120_SYNC_ROLE_RESULT_PREDICATE = 4,
+  SM120_SYNC_ROLE_EXCHANGE_VALUE = 5,
+  SM120_SYNC_ROLE_AUX_REGISTER = 6,
+  SM120_SYNC_ROLE_ARRIVAL_STATE = 7,
+};
 enum TRACED_REG_TYPE {NO_REGS = 0, MEMORY_REF = 1, REGULAR = 2, REGULAR_2_REGS = 3, REGULAR_4_REGS = 4, UNIFORM = 5, UNIFORM_2_REGS = 6, PREDICATE = 7, UNIFORM_PREDICATE = 8};
 
 // STANDARD_MEM op_reg_val_2 packs the structural MREF ordinal plus the
@@ -44,6 +63,17 @@ enum TRACED_REG_TYPE {NO_REGS = 0, MEMORY_REF = 1, REGULAR = 2, REGULAR_2_REGS =
 static constexpr uint32_t MREF_ORDINAL_MASK = 0xffu;
 static constexpr uint32_t MREF_IGNORE_SRC_PRESENT = 1u << 8;
 static constexpr uint32_t MREF_IGNORE_SRC_NEGATED = 1u << 9;
+static constexpr uint32_t MREF_GENERIC_ADDRESS = 1u << 10;
+static constexpr uint32_t RUNTIME_SPACE_GLOBAL = 1;
+// STANDARD_MEM generic records reuse otherwise unused register slots without
+// changing the channel packet size: reg_val_1[lane] = runtime space (wire enum
+// 1=global, 2=shared, 3=local, 4=unresolved); reg_val_2/3 hold raw pointer lo/hi.
+// addrs_or_reg_val_0 contains the converted state-space address.
+
+
+// NVBit 1.8 passes a bounded runtime TMA parameter handle to the injected
+// function. The host parses these bytes with the NVBit TMA APIs after receipt.
+static constexpr uint32_t TMA_PARAM_HANDLE_MAX_BYTES = 128;
 
 typedef struct {
   int cta_id_x;
@@ -68,6 +98,27 @@ typedef struct {
   uint32_t address_lane_mask_present;
   uint32_t num_of_injects;
   uint32_t per_operand_type;
+  uint32_t tma_param_size;
+  uint8_t tma_param_handle[TMA_PARAM_HANDLE_MAX_BYTES];
+  uint32_t tma_ureg_count;
+  uint32_t tma_ureg_values[4];
+
+  // Auxiliary non-allocation operands.  For CONSTANT_MEM, aux_immediate is
+  // the dynamic cbank offset, aux_id is the cbank id, and aux_flags bit 0
+  // records a register-derived offset.  For CALL_OR_RET, aux_immediate is
+  // the SASS target immediate used to reconstruct per-lane targets.
+  uint64_t aux_immediate;
+  uint32_t aux_id;
+  uint32_t aux_flags;
+
+  // Typed synchronization operand metadata. The host packs role/index/phase
+  // and the static operand width into sync_meta; these decoded fields are
+  // carried separately so the sidecar never has to reinterpret a sentinel.
+  uint32_t sync_role;
+  uint32_t sync_operand_index;
+  uint32_t sync_register_id;
+  uint32_t sync_phase;
+  uint32_t sync_width;
 } inst_trace_t;
 
 /* phase-clock record carried through the phase-injection channel.

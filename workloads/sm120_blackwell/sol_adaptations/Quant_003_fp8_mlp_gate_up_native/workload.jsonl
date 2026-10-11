@@ -1,0 +1,1 @@
+{"uuid": "63ad65ea-91c9-5300-948c-d13a37ebabf5", "axes": {"M": 64}, "inputs": {"x": {"type": "custom"}, "scale_x": {"type": "custom"}, "gate_proj_weight": {"type": "custom"}, "scale_gate": {"type": "custom"}, "up_proj_weight": {"type": "custom"}, "scale_up": {"type": "custom"}}, "tolerance": {"max_atol": 0.005, "max_rtol": 0.02, "required_matched_ratio": 0.99}}

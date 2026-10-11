@@ -103,7 +103,7 @@ pub use issue::{
     AccessKind, AsyncInstrumentationOrderDiagnostics, AsyncIssueOverlapDiagnostics,
     AsyncReadinessDiagnostics, BarrierPipelineDiagnostics, ClockIssueDiagnostics,
     ControlPipelineDiagnostics, CtaBarrierDiagnostics, GlobalMemoryIssueDiagnostics, IssueError,
-    IssueModelParams, IssueResourceSource, MAX_MEMORY_ADMISSION_CANDIDATES,
+    IssueModelParams, IssueResourceSource, Sm120AlphaConfig, MAX_MEMORY_ADMISSION_CANDIDATES,
     MAX_MEMORY_ADMISSION_QUEUE_CAPACITY, MAX_MEMORY_ADMISSION_SERVICE_WIDTH_SECTORS,
     MAX_MEMORY_SERVICE_CANDIDATES, MemoryAdmissionCandidate, MemoryAdmissionCandidateDiagnostics,
     MemoryAdmissionCandidateError, MemoryAdmissionCandidateResult,
@@ -119,6 +119,7 @@ pub use metrics::{
 };
 pub use program::{
     FunctionSchedule, IssueSlot, OpClass, PipelineClass, ProgramError, build_schedules,
+    build_schedules_sm120_alpha, build_schedules_with_pipeline_arch,
 };
 pub use replay::{
     CoResidency, FastFrontierCoverage, FastFrontierSummary, FrontEndCounters,
@@ -129,7 +130,8 @@ pub use replay::{
     LaunchSetScopeError, ModeledCompletionFrontier, ReplayConfiguration, ReplayError,
     ReplayLaunchCoverageBinding, ReplayLaunchCoverageBindingError, ReplayMemMode,
     ReplaySessionError, SmActiveObservationFrontier, StreamL2ReplaySession,
-    aggregate_full_launch_set, fast_frontier_for_trace, replay_trace_kernel,
+    aggregate_full_launch_set, fast_frontier_for_trace, sm120_fast_stage_for_trace,
+    replay_trace_kernel,
     replay_trace_kernel_with_l1_payload_events,
     replay_trace_kernel_with_memory_admission_candidates,
     replay_trace_kernel_with_memory_admission_feedback,

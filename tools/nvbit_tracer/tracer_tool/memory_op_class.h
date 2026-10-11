@@ -136,10 +136,10 @@ inline Value classify(std::string_view opcode) {
     return kTexture;
   }
 
-  // GLOBAL. Plain global load/store. `LDGDEPBAR` is a memory-
-  // ordering barrier, not a load — exact-match `LDG`/`STG`
-  // excludes it because its head token is the full `LDGDEPBAR`,
-  // not `LDG`.
+  // Generic LD/ST can target shared, local, or global memory. The producer
+  // resolves their runtime state space before assigning a class; do not infer
+  // it from the descriptor syntax or from a numerical pointer threshold.
+  if (head == "LD" || head == "ST") return kUnspecified;
   if (head == "LDG" || head == "STG") return kGlobal;
 
   // CLUSTER_DSMEM. Distributed shared memory across a thread-block

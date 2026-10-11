@@ -267,6 +267,7 @@ class  PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED Trace final : public ::google::prot
   // accessors -------------------------------------------------------
   enum : int {
     kMemoryPayloadClassesFieldNumber = 8,
+    kTraceCapabilitiesFieldNumber = 9,
     kNameFieldNumber = 1,
     kNvbitVersionFieldNumber = 3,
     kTraceContractIdFieldNumber = 7,
@@ -293,6 +294,31 @@ class  PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED Trace final : public ::google::prot
   private:
   const ::google::protobuf::RepeatedField<int>& _internal_memory_payload_classes() const;
   ::google::protobuf::RepeatedField<int>* PROTOBUF_NONNULL _internal_mutable_memory_payload_classes();
+
+  public:
+  // repeated string trace_capabilities = 9;
+  [[nodiscard]] int trace_capabilities_size()
+      const;
+  private:
+  int _internal_trace_capabilities_size() const;
+
+  public:
+  void clear_trace_capabilities() ;
+  [[nodiscard]] const ::std::string& trace_capabilities(int index) const;
+  ::std::string* PROTOBUF_NONNULL mutable_trace_capabilities(int index);
+  template <typename Arg_ = const ::std::string&, typename... Args_>
+  void set_trace_capabilities(int index, Arg_&& value, Args_... args);
+  ::std::string* PROTOBUF_NONNULL add_trace_capabilities();
+  template <typename Arg_ = const ::std::string&, typename... Args_>
+  void add_trace_capabilities(Arg_&& value, Args_... args);
+  [[nodiscard]] const ::google::protobuf::RepeatedPtrField<::std::string>&
+  trace_capabilities() const;
+  [[nodiscard]] ::google::protobuf::RepeatedPtrField<::std::string>* PROTOBUF_NONNULL
+  mutable_trace_capabilities();
+
+  private:
+  const ::google::protobuf::RepeatedPtrField<::std::string>& _internal_trace_capabilities() const;
+  ::google::protobuf::RepeatedPtrField<::std::string>* PROTOBUF_NONNULL _internal_mutable_trace_capabilities();
 
   public:
   // string name = 1;
@@ -390,8 +416,8 @@ class  PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED Trace final : public ::google::prot
  private:
   class _Internal;
   friend class ::google::protobuf::internal::TcParser;
-  static const ::google::protobuf::internal::TcParseTable<3, 8,
-                                   2, 70,
+  static const ::google::protobuf::internal::TcParseTable<4, 9,
+                                   2, 88,
                                    2>
       _table_;
 
@@ -416,6 +442,7 @@ class  PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED Trace final : public ::google::prot
     ::google::protobuf::internal::CachedSize _cached_size_;
     ::google::protobuf::RepeatedField<int> memory_payload_classes_;
     ::google::protobuf::internal::CachedSize _memory_payload_classes_cached_byte_size_;
+    ::google::protobuf::RepeatedPtrField<::std::string> trace_capabilities_;
     ::google::protobuf::internal::ArenaStringPtr name_;
     ::google::protobuf::internal::ArenaStringPtr nvbit_version_;
     ::google::protobuf::internal::ArenaStringPtr trace_contract_id_;
@@ -454,7 +481,7 @@ inline void Trace::clear_name() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.name_.ClearToEmpty();
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000002U);
+                  0x00000004U);
 }
 inline const ::std::string& Trace::name() const
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
@@ -464,13 +491,13 @@ inline const ::std::string& Trace::name() const
 template <typename Arg_, typename... Args_>
 PROTOBUF_ALWAYS_INLINE void Trace::set_name(Arg_&& arg, Args_... args) {
   ::google::protobuf::internal::TSanWrite(&_impl_);
-  SetHasBit(_impl_._has_bits_[0], 0x00000002U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000004U);
   _impl_.name_.Set(static_cast<Arg_&&>(arg), args..., GetArena());
   // @@protoc_insertion_point(field_set:dynamic_trace.Trace.name)
 }
 inline ::std::string* PROTOBUF_NONNULL Trace::mutable_name()
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
-  SetHasBit(_impl_._has_bits_[0], 0x00000002U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000004U);
   ::std::string* _s = _internal_mutable_name();
   // @@protoc_insertion_point(field_mutable:dynamic_trace.Trace.name)
   return _s;
@@ -490,10 +517,10 @@ inline ::std::string* PROTOBUF_NONNULL Trace::_internal_mutable_name() {
 inline ::std::string* PROTOBUF_NULLABLE Trace::release_name() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   // @@protoc_insertion_point(field_release:dynamic_trace.Trace.name)
-  if (!CheckHasBit(_impl_._has_bits_[0], 0x00000002U)) {
+  if (!CheckHasBit(_impl_._has_bits_[0], 0x00000004U)) {
     return nullptr;
   }
-  ClearHasBit(_impl_._has_bits_[0], 0x00000002U);
+  ClearHasBit(_impl_._has_bits_[0], 0x00000004U);
   auto* released = _impl_.name_.Release();
   if (::google::protobuf::internal::DebugHardenForceCopyDefaultString()) {
     _impl_.name_.Set("", GetArena());
@@ -503,9 +530,9 @@ inline ::std::string* PROTOBUF_NULLABLE Trace::release_name() {
 inline void Trace::set_allocated_name(::std::string* PROTOBUF_NULLABLE value) {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   if (value != nullptr) {
-    SetHasBit(_impl_._has_bits_[0], 0x00000002U);
+    SetHasBit(_impl_._has_bits_[0], 0x00000004U);
   } else {
-    ClearHasBit(_impl_._has_bits_[0], 0x00000002U);
+    ClearHasBit(_impl_._has_bits_[0], 0x00000004U);
   }
   _impl_.name_.SetAllocated(value, GetArena());
   if (::google::protobuf::internal::DebugHardenForceCopyDefaultString() && _impl_.name_.IsDefault()) {
@@ -519,7 +546,7 @@ inline void Trace::clear_binary_version() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.binary_version_ = 0;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000010U);
+                  0x00000020U);
 }
 inline ::int32_t Trace::binary_version() const {
   // @@protoc_insertion_point(field_get:dynamic_trace.Trace.binary_version)
@@ -527,7 +554,7 @@ inline ::int32_t Trace::binary_version() const {
 }
 inline void Trace::set_binary_version(::int32_t value) {
   _internal_set_binary_version(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000010U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000020U);
   // @@protoc_insertion_point(field_set:dynamic_trace.Trace.binary_version)
 }
 inline ::int32_t Trace::_internal_binary_version() const {
@@ -544,7 +571,7 @@ inline void Trace::clear_nvbit_version() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.nvbit_version_.ClearToEmpty();
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000004U);
+                  0x00000008U);
 }
 inline const ::std::string& Trace::nvbit_version() const
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
@@ -554,13 +581,13 @@ inline const ::std::string& Trace::nvbit_version() const
 template <typename Arg_, typename... Args_>
 PROTOBUF_ALWAYS_INLINE void Trace::set_nvbit_version(Arg_&& arg, Args_... args) {
   ::google::protobuf::internal::TSanWrite(&_impl_);
-  SetHasBit(_impl_._has_bits_[0], 0x00000004U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000008U);
   _impl_.nvbit_version_.Set(static_cast<Arg_&&>(arg), args..., GetArena());
   // @@protoc_insertion_point(field_set:dynamic_trace.Trace.nvbit_version)
 }
 inline ::std::string* PROTOBUF_NONNULL Trace::mutable_nvbit_version()
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
-  SetHasBit(_impl_._has_bits_[0], 0x00000004U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000008U);
   ::std::string* _s = _internal_mutable_nvbit_version();
   // @@protoc_insertion_point(field_mutable:dynamic_trace.Trace.nvbit_version)
   return _s;
@@ -580,10 +607,10 @@ inline ::std::string* PROTOBUF_NONNULL Trace::_internal_mutable_nvbit_version() 
 inline ::std::string* PROTOBUF_NULLABLE Trace::release_nvbit_version() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   // @@protoc_insertion_point(field_release:dynamic_trace.Trace.nvbit_version)
-  if (!CheckHasBit(_impl_._has_bits_[0], 0x00000004U)) {
+  if (!CheckHasBit(_impl_._has_bits_[0], 0x00000008U)) {
     return nullptr;
   }
-  ClearHasBit(_impl_._has_bits_[0], 0x00000004U);
+  ClearHasBit(_impl_._has_bits_[0], 0x00000008U);
   auto* released = _impl_.nvbit_version_.Release();
   if (::google::protobuf::internal::DebugHardenForceCopyDefaultString()) {
     _impl_.nvbit_version_.Set("", GetArena());
@@ -593,9 +620,9 @@ inline ::std::string* PROTOBUF_NULLABLE Trace::release_nvbit_version() {
 inline void Trace::set_allocated_nvbit_version(::std::string* PROTOBUF_NULLABLE value) {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   if (value != nullptr) {
-    SetHasBit(_impl_._has_bits_[0], 0x00000004U);
+    SetHasBit(_impl_._has_bits_[0], 0x00000008U);
   } else {
-    ClearHasBit(_impl_._has_bits_[0], 0x00000004U);
+    ClearHasBit(_impl_._has_bits_[0], 0x00000008U);
   }
   _impl_.nvbit_version_.SetAllocated(value, GetArena());
   if (::google::protobuf::internal::DebugHardenForceCopyDefaultString() && _impl_.nvbit_version_.IsDefault()) {
@@ -609,7 +636,7 @@ inline void Trace::clear_accelsim_version() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.accelsim_version_ = 0;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000020U);
+                  0x00000040U);
 }
 inline ::int32_t Trace::accelsim_version() const {
   // @@protoc_insertion_point(field_get:dynamic_trace.Trace.accelsim_version)
@@ -617,7 +644,7 @@ inline ::int32_t Trace::accelsim_version() const {
 }
 inline void Trace::set_accelsim_version(::int32_t value) {
   _internal_set_accelsim_version(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000020U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000040U);
   // @@protoc_insertion_point(field_set:dynamic_trace.Trace.accelsim_version)
 }
 inline ::int32_t Trace::_internal_accelsim_version() const {
@@ -634,7 +661,7 @@ inline void Trace::clear_is_gathered_registers_values() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.is_gathered_registers_values_ = false;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000040U);
+                  0x00000080U);
 }
 inline bool Trace::is_gathered_registers_values() const {
   // @@protoc_insertion_point(field_get:dynamic_trace.Trace.is_gathered_registers_values)
@@ -642,7 +669,7 @@ inline bool Trace::is_gathered_registers_values() const {
 }
 inline void Trace::set_is_gathered_registers_values(bool value) {
   _internal_set_is_gathered_registers_values(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000040U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000080U);
   // @@protoc_insertion_point(field_set:dynamic_trace.Trace.is_gathered_registers_values)
 }
 inline bool Trace::_internal_is_gathered_registers_values() const {
@@ -675,7 +702,7 @@ inline ::google::protobuf::Map<::int64_t, ::dynamic_trace::gpu_device>* PROTOBUF
 }
 inline ::google::protobuf::Map<::int64_t, ::dynamic_trace::gpu_device>* PROTOBUF_NONNULL Trace::mutable_gpu_device()
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
-  SetHasBitForRepeated(_impl_._has_bits_[0], 0x00000080U);
+  SetHasBitForRepeated(_impl_._has_bits_[0], 0x00000100U);
   // @@protoc_insertion_point(field_mutable_map:dynamic_trace.Trace.gpu_device)
   return _internal_mutable_gpu_device();
 }
@@ -685,7 +712,7 @@ inline void Trace::clear_trace_contract_id() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.trace_contract_id_.ClearToEmpty();
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000008U);
+                  0x00000010U);
 }
 inline const ::std::string& Trace::trace_contract_id() const
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
@@ -695,13 +722,13 @@ inline const ::std::string& Trace::trace_contract_id() const
 template <typename Arg_, typename... Args_>
 PROTOBUF_ALWAYS_INLINE void Trace::set_trace_contract_id(Arg_&& arg, Args_... args) {
   ::google::protobuf::internal::TSanWrite(&_impl_);
-  SetHasBit(_impl_._has_bits_[0], 0x00000008U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000010U);
   _impl_.trace_contract_id_.Set(static_cast<Arg_&&>(arg), args..., GetArena());
   // @@protoc_insertion_point(field_set:dynamic_trace.Trace.trace_contract_id)
 }
 inline ::std::string* PROTOBUF_NONNULL Trace::mutable_trace_contract_id()
     ABSL_ATTRIBUTE_LIFETIME_BOUND {
-  SetHasBit(_impl_._has_bits_[0], 0x00000008U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000010U);
   ::std::string* _s = _internal_mutable_trace_contract_id();
   // @@protoc_insertion_point(field_mutable:dynamic_trace.Trace.trace_contract_id)
   return _s;
@@ -721,10 +748,10 @@ inline ::std::string* PROTOBUF_NONNULL Trace::_internal_mutable_trace_contract_i
 inline ::std::string* PROTOBUF_NULLABLE Trace::release_trace_contract_id() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   // @@protoc_insertion_point(field_release:dynamic_trace.Trace.trace_contract_id)
-  if (!CheckHasBit(_impl_._has_bits_[0], 0x00000008U)) {
+  if (!CheckHasBit(_impl_._has_bits_[0], 0x00000010U)) {
     return nullptr;
   }
-  ClearHasBit(_impl_._has_bits_[0], 0x00000008U);
+  ClearHasBit(_impl_._has_bits_[0], 0x00000010U);
   auto* released = _impl_.trace_contract_id_.Release();
   if (::google::protobuf::internal::DebugHardenForceCopyDefaultString()) {
     _impl_.trace_contract_id_.Set("", GetArena());
@@ -734,9 +761,9 @@ inline ::std::string* PROTOBUF_NULLABLE Trace::release_trace_contract_id() {
 inline void Trace::set_allocated_trace_contract_id(::std::string* PROTOBUF_NULLABLE value) {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   if (value != nullptr) {
-    SetHasBit(_impl_._has_bits_[0], 0x00000008U);
+    SetHasBit(_impl_._has_bits_[0], 0x00000010U);
   } else {
-    ClearHasBit(_impl_._has_bits_[0], 0x00000008U);
+    ClearHasBit(_impl_._has_bits_[0], 0x00000010U);
   }
   _impl_.trace_contract_id_.SetAllocated(value, GetArena());
   if (::google::protobuf::internal::DebugHardenForceCopyDefaultString() && _impl_.trace_contract_id_.IsDefault()) {
@@ -794,6 +821,78 @@ inline ::google::protobuf::RepeatedField<int>* PROTOBUF_NONNULL
 Trace::_internal_mutable_memory_payload_classes() {
   ::google::protobuf::internal::TSanRead(&_impl_);
   return &_impl_.memory_payload_classes_;
+}
+
+// repeated string trace_capabilities = 9;
+inline int Trace::_internal_trace_capabilities_size() const {
+  return _internal_trace_capabilities().size();
+}
+inline int Trace::trace_capabilities_size() const {
+  return _internal_trace_capabilities_size();
+}
+inline void Trace::clear_trace_capabilities() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.trace_capabilities_.Clear();
+  ClearHasBitForRepeated(_impl_._has_bits_[0],
+                  0x00000002U);
+}
+inline ::std::string* PROTOBUF_NONNULL Trace::add_trace_capabilities()
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  ::std::string* _s =
+      _internal_mutable_trace_capabilities()->InternalAddWithArena(
+          ::google::protobuf::MessageLite::internal_visibility(), GetArena());
+  SetHasBitForRepeated(_impl_._has_bits_[0], 0x00000002U);
+  // @@protoc_insertion_point(field_add_mutable:dynamic_trace.Trace.trace_capabilities)
+  return _s;
+}
+inline const ::std::string& Trace::trace_capabilities(int index) const
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  // @@protoc_insertion_point(field_get:dynamic_trace.Trace.trace_capabilities)
+  return _internal_trace_capabilities().Get(index);
+}
+inline ::std::string* PROTOBUF_NONNULL Trace::mutable_trace_capabilities(int index)
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  // @@protoc_insertion_point(field_mutable:dynamic_trace.Trace.trace_capabilities)
+  return _internal_mutable_trace_capabilities()->Mutable(index);
+}
+template <typename Arg_, typename... Args_>
+inline void Trace::set_trace_capabilities(int index, Arg_&& value, Args_... args) {
+  ::google::protobuf::internal::AssignToString(*_internal_mutable_trace_capabilities()->Mutable(index), ::std::forward<Arg_>(value),
+                        args... );
+  // @@protoc_insertion_point(field_set:dynamic_trace.Trace.trace_capabilities)
+}
+template <typename Arg_, typename... Args_>
+inline void Trace::add_trace_capabilities(Arg_&& value, Args_... args) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  ::google::protobuf::internal::AddToRepeatedPtrField(
+      ::google::protobuf::MessageLite::internal_visibility(), GetArena(),
+      *_internal_mutable_trace_capabilities(), ::std::forward<Arg_>(value),
+      args... );
+  SetHasBitForRepeated(_impl_._has_bits_[0], 0x00000002U);
+  // @@protoc_insertion_point(field_add:dynamic_trace.Trace.trace_capabilities)
+}
+inline const ::google::protobuf::RepeatedPtrField<::std::string>& Trace::trace_capabilities()
+    const ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  // @@protoc_insertion_point(field_list:dynamic_trace.Trace.trace_capabilities)
+  return _internal_trace_capabilities();
+}
+inline ::google::protobuf::RepeatedPtrField<::std::string>* PROTOBUF_NONNULL
+Trace::mutable_trace_capabilities() ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  SetHasBitForRepeated(_impl_._has_bits_[0], 0x00000002U);
+  // @@protoc_insertion_point(field_mutable_list:dynamic_trace.Trace.trace_capabilities)
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  return _internal_mutable_trace_capabilities();
+}
+inline const ::google::protobuf::RepeatedPtrField<::std::string>&
+Trace::_internal_trace_capabilities() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return _impl_.trace_capabilities_;
+}
+inline ::google::protobuf::RepeatedPtrField<::std::string>* PROTOBUF_NONNULL
+Trace::_internal_mutable_trace_capabilities() {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return &_impl_.trace_capabilities_;
 }
 
 #ifdef __GNUC__

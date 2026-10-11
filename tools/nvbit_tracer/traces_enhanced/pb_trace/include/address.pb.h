@@ -267,6 +267,7 @@ class  PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED address final : public ::google::pr
   // accessors -------------------------------------------------------
   enum : int {
     kAddrsFieldNumber = 6,
+    kAllocationIdentityStatusFieldNumber = 10,
     kDataWidthFieldNumber = 1,
     kUdescValueFieldNumber = 2,
     kBaseAddressFieldNumber = 4,
@@ -275,6 +276,7 @@ class  PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED address final : public ::google::pr
     kAllocationIdFieldNumber = 7,
     kAddressSpaceFieldNumber = 8,
     kLaneMaskFieldNumber = 9,
+    kTransferWidthFieldNumber = 11,
   };
   // repeated int64 addrs = 6;
   [[nodiscard]] int addrs_size()
@@ -293,6 +295,23 @@ class  PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED address final : public ::google::pr
   private:
   const ::google::protobuf::RepeatedField<::int64_t>& _internal_addrs() const;
   ::google::protobuf::RepeatedField<::int64_t>* PROTOBUF_NONNULL _internal_mutable_addrs();
+
+  public:
+  // optional string allocation_identity_status = 10;
+  [[nodiscard]] bool has_allocation_identity_status()
+      const;
+  void clear_allocation_identity_status() ;
+  [[nodiscard]] const ::std::string& allocation_identity_status() const;
+  template <typename Arg_ = const ::std::string&, typename... Args_>
+  void set_allocation_identity_status(Arg_&& arg, Args_... args);
+  ::std::string* PROTOBUF_NONNULL mutable_allocation_identity_status();
+  [[nodiscard]] ::std::string* PROTOBUF_NULLABLE release_allocation_identity_status();
+  void set_allocated_allocation_identity_status(::std::string* PROTOBUF_NULLABLE value);
+
+  private:
+  const ::std::string& _internal_allocation_identity_status() const;
+  PROTOBUF_ALWAYS_INLINE void _internal_set_allocation_identity_status(const ::std::string& value);
+  ::std::string* PROTOBUF_NONNULL _internal_mutable_allocation_identity_status();
 
   public:
   // int32 data_width = 1;
@@ -381,12 +400,24 @@ class  PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED address final : public ::google::pr
   void _internal_set_lane_mask(::uint32_t value);
 
   public:
+  // optional int32 transfer_width = 11;
+  [[nodiscard]] bool has_transfer_width()
+      const;
+  void clear_transfer_width() ;
+  [[nodiscard]] ::int32_t transfer_width() const;
+  void set_transfer_width(::int32_t value);
+
+  private:
+  ::int32_t _internal_transfer_width() const;
+  void _internal_set_transfer_width(::int32_t value);
+
+  public:
   // @@protoc_insertion_point(class_scope:dynamic_trace.address)
  private:
   class _Internal;
   friend class ::google::protobuf::internal::TcParser;
-  static const ::google::protobuf::internal::TcParseTable<4, 9,
-                                   0, 0,
+  static const ::google::protobuf::internal::TcParseTable<4, 11,
+                                   0, 64,
                                    2>
       _table_;
 
@@ -411,6 +442,7 @@ class  PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED address final : public ::google::pr
     ::google::protobuf::internal::CachedSize _cached_size_;
     ::google::protobuf::RepeatedField<::int64_t> addrs_;
     ::google::protobuf::internal::CachedSize _addrs_cached_byte_size_;
+    ::google::protobuf::internal::ArenaStringPtr allocation_identity_status_;
     ::int32_t data_width_;
     ::uint32_t udesc_value_;
     ::uint64_t base_address_;
@@ -419,6 +451,7 @@ class  PROTOBUF_FUTURE_ADD_EARLY_WARN_UNUSED address final : public ::google::pr
     ::uint32_t allocation_id_;
     int address_space_;
     ::uint32_t lane_mask_;
+    ::int32_t transfer_width_;
     PROTOBUF_TSAN_DECLARE_MEMBER
   };
   union { Impl_ _impl_; };
@@ -448,7 +481,7 @@ inline void address::clear_data_width() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.data_width_ = 0;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000002U);
+                  0x00000004U);
 }
 inline ::int32_t address::data_width() const {
   // @@protoc_insertion_point(field_get:dynamic_trace.address.data_width)
@@ -456,7 +489,7 @@ inline ::int32_t address::data_width() const {
 }
 inline void address::set_data_width(::int32_t value) {
   _internal_set_data_width(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000002U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000004U);
   // @@protoc_insertion_point(field_set:dynamic_trace.address.data_width)
 }
 inline ::int32_t address::_internal_data_width() const {
@@ -473,7 +506,7 @@ inline void address::clear_udesc_value() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.udesc_value_ = 0u;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000004U);
+                  0x00000008U);
 }
 inline ::uint32_t address::udesc_value() const {
   // @@protoc_insertion_point(field_get:dynamic_trace.address.udesc_value)
@@ -481,7 +514,7 @@ inline ::uint32_t address::udesc_value() const {
 }
 inline void address::set_udesc_value(::uint32_t value) {
   _internal_set_udesc_value(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000004U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000008U);
   // @@protoc_insertion_point(field_set:dynamic_trace.address.udesc_value)
 }
 inline ::uint32_t address::_internal_udesc_value() const {
@@ -498,7 +531,7 @@ inline void address::clear_compression_format() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.compression_format_ = 0;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000010U);
+                  0x00000020U);
 }
 inline ::int32_t address::compression_format() const {
   // @@protoc_insertion_point(field_get:dynamic_trace.address.compression_format)
@@ -506,7 +539,7 @@ inline ::int32_t address::compression_format() const {
 }
 inline void address::set_compression_format(::int32_t value) {
   _internal_set_compression_format(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000010U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000020U);
   // @@protoc_insertion_point(field_set:dynamic_trace.address.compression_format)
 }
 inline ::int32_t address::_internal_compression_format() const {
@@ -523,7 +556,7 @@ inline void address::clear_base_address() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.base_address_ = ::uint64_t{0u};
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000008U);
+                  0x00000010U);
 }
 inline ::uint64_t address::base_address() const {
   // @@protoc_insertion_point(field_get:dynamic_trace.address.base_address)
@@ -531,7 +564,7 @@ inline ::uint64_t address::base_address() const {
 }
 inline void address::set_base_address(::uint64_t value) {
   _internal_set_base_address(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000008U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000010U);
   // @@protoc_insertion_point(field_set:dynamic_trace.address.base_address)
 }
 inline ::uint64_t address::_internal_base_address() const {
@@ -548,7 +581,7 @@ inline void address::clear_stride() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.stride_ = 0;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000020U);
+                  0x00000040U);
 }
 inline ::int32_t address::stride() const {
   // @@protoc_insertion_point(field_get:dynamic_trace.address.stride)
@@ -556,7 +589,7 @@ inline ::int32_t address::stride() const {
 }
 inline void address::set_stride(::int32_t value) {
   _internal_set_stride(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000020U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000040U);
   // @@protoc_insertion_point(field_set:dynamic_trace.address.stride)
 }
 inline ::int32_t address::_internal_stride() const {
@@ -621,14 +654,14 @@ address::_internal_mutable_addrs() {
 
 // optional uint32 allocation_id = 7;
 inline bool address::has_allocation_id() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000040U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000080U);
   return value;
 }
 inline void address::clear_allocation_id() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.allocation_id_ = 0u;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000040U);
+                  0x00000080U);
 }
 inline ::uint32_t address::allocation_id() const {
   // @@protoc_insertion_point(field_get:dynamic_trace.address.allocation_id)
@@ -636,7 +669,7 @@ inline ::uint32_t address::allocation_id() const {
 }
 inline void address::set_allocation_id(::uint32_t value) {
   _internal_set_allocation_id(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000040U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000080U);
   // @@protoc_insertion_point(field_set:dynamic_trace.address.allocation_id)
 }
 inline ::uint32_t address::_internal_allocation_id() const {
@@ -650,14 +683,14 @@ inline void address::_internal_set_allocation_id(::uint32_t value) {
 
 // optional .dynamic_trace.MemorySpace address_space = 8;
 inline bool address::has_address_space() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000080U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000100U);
   return value;
 }
 inline void address::clear_address_space() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.address_space_ = 0;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000080U);
+                  0x00000100U);
 }
 inline ::dynamic_trace::MemorySpace address::address_space() const {
   // @@protoc_insertion_point(field_get:dynamic_trace.address.address_space)
@@ -665,7 +698,7 @@ inline ::dynamic_trace::MemorySpace address::address_space() const {
 }
 inline void address::set_address_space(::dynamic_trace::MemorySpace value) {
   _internal_set_address_space(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000080U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000100U);
   // @@protoc_insertion_point(field_set:dynamic_trace.address.address_space)
 }
 inline ::dynamic_trace::MemorySpace address::_internal_address_space() const {
@@ -679,14 +712,14 @@ inline void address::_internal_set_address_space(::dynamic_trace::MemorySpace va
 
 // optional uint32 lane_mask = 9;
 inline bool address::has_lane_mask() const {
-  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000100U);
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000200U);
   return value;
 }
 inline void address::clear_lane_mask() {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.lane_mask_ = 0u;
   ClearHasBit(_impl_._has_bits_[0],
-                  0x00000100U);
+                  0x00000200U);
 }
 inline ::uint32_t address::lane_mask() const {
   // @@protoc_insertion_point(field_get:dynamic_trace.address.lane_mask)
@@ -694,7 +727,7 @@ inline ::uint32_t address::lane_mask() const {
 }
 inline void address::set_lane_mask(::uint32_t value) {
   _internal_set_lane_mask(value);
-  SetHasBit(_impl_._has_bits_[0], 0x00000100U);
+  SetHasBit(_impl_._has_bits_[0], 0x00000200U);
   // @@protoc_insertion_point(field_set:dynamic_trace.address.lane_mask)
 }
 inline ::uint32_t address::_internal_lane_mask() const {
@@ -704,6 +737,104 @@ inline ::uint32_t address::_internal_lane_mask() const {
 inline void address::_internal_set_lane_mask(::uint32_t value) {
   ::google::protobuf::internal::TSanWrite(&_impl_);
   _impl_.lane_mask_ = value;
+}
+
+// optional string allocation_identity_status = 10;
+inline bool address::has_allocation_identity_status() const {
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000002U);
+  return value;
+}
+inline void address::clear_allocation_identity_status() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.allocation_identity_status_.ClearToEmpty();
+  ClearHasBit(_impl_._has_bits_[0],
+                  0x00000002U);
+}
+inline const ::std::string& address::allocation_identity_status() const
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  // @@protoc_insertion_point(field_get:dynamic_trace.address.allocation_identity_status)
+  return _internal_allocation_identity_status();
+}
+template <typename Arg_, typename... Args_>
+PROTOBUF_ALWAYS_INLINE void address::set_allocation_identity_status(Arg_&& arg, Args_... args) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  SetHasBit(_impl_._has_bits_[0], 0x00000002U);
+  _impl_.allocation_identity_status_.Set(static_cast<Arg_&&>(arg), args..., GetArena());
+  // @@protoc_insertion_point(field_set:dynamic_trace.address.allocation_identity_status)
+}
+inline ::std::string* PROTOBUF_NONNULL address::mutable_allocation_identity_status()
+    ABSL_ATTRIBUTE_LIFETIME_BOUND {
+  SetHasBit(_impl_._has_bits_[0], 0x00000002U);
+  ::std::string* _s = _internal_mutable_allocation_identity_status();
+  // @@protoc_insertion_point(field_mutable:dynamic_trace.address.allocation_identity_status)
+  return _s;
+}
+inline const ::std::string& address::_internal_allocation_identity_status() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return _impl_.allocation_identity_status_.Get();
+}
+inline void address::_internal_set_allocation_identity_status(const ::std::string& value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.allocation_identity_status_.Set(value, GetArena());
+}
+inline ::std::string* PROTOBUF_NONNULL address::_internal_mutable_allocation_identity_status() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  return _impl_.allocation_identity_status_.Mutable( GetArena());
+}
+inline ::std::string* PROTOBUF_NULLABLE address::release_allocation_identity_status() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  // @@protoc_insertion_point(field_release:dynamic_trace.address.allocation_identity_status)
+  if (!CheckHasBit(_impl_._has_bits_[0], 0x00000002U)) {
+    return nullptr;
+  }
+  ClearHasBit(_impl_._has_bits_[0], 0x00000002U);
+  auto* released = _impl_.allocation_identity_status_.Release();
+  if (::google::protobuf::internal::DebugHardenForceCopyDefaultString()) {
+    _impl_.allocation_identity_status_.Set("", GetArena());
+  }
+  return released;
+}
+inline void address::set_allocated_allocation_identity_status(::std::string* PROTOBUF_NULLABLE value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  if (value != nullptr) {
+    SetHasBit(_impl_._has_bits_[0], 0x00000002U);
+  } else {
+    ClearHasBit(_impl_._has_bits_[0], 0x00000002U);
+  }
+  _impl_.allocation_identity_status_.SetAllocated(value, GetArena());
+  if (::google::protobuf::internal::DebugHardenForceCopyDefaultString() && _impl_.allocation_identity_status_.IsDefault()) {
+    _impl_.allocation_identity_status_.Set("", GetArena());
+  }
+  // @@protoc_insertion_point(field_set_allocated:dynamic_trace.address.allocation_identity_status)
+}
+
+// optional int32 transfer_width = 11;
+inline bool address::has_transfer_width() const {
+  bool value = CheckHasBit(_impl_._has_bits_[0], 0x00000400U);
+  return value;
+}
+inline void address::clear_transfer_width() {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.transfer_width_ = 0;
+  ClearHasBit(_impl_._has_bits_[0],
+                  0x00000400U);
+}
+inline ::int32_t address::transfer_width() const {
+  // @@protoc_insertion_point(field_get:dynamic_trace.address.transfer_width)
+  return _internal_transfer_width();
+}
+inline void address::set_transfer_width(::int32_t value) {
+  _internal_set_transfer_width(value);
+  SetHasBit(_impl_._has_bits_[0], 0x00000400U);
+  // @@protoc_insertion_point(field_set:dynamic_trace.address.transfer_width)
+}
+inline ::int32_t address::_internal_transfer_width() const {
+  ::google::protobuf::internal::TSanRead(&_impl_);
+  return _impl_.transfer_width_;
+}
+inline void address::_internal_set_transfer_width(::int32_t value) {
+  ::google::protobuf::internal::TSanWrite(&_impl_);
+  _impl_.transfer_width_ = value;
 }
 
 #ifdef __GNUC__

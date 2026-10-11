@@ -1200,7 +1200,14 @@ impl From<sim_sm::IssueModelParams> for IssueConfigurationWire {
             non_memory_write_barrier_latency_cycles: params.non_memory_write_barrier_latency(),
             read_barrier_latency_cycles: params.read_barrier_latency(),
             max_resident_warps_per_sm: params.max_resident_warps_per_sm(),
-            latency_provenance: "architecture_card",
+            latency_provenance: if matches!(
+                params.resource_source(),
+                sim_sm::IssueResourceSource::Sm120Alpha
+            ) {
+                "sm120_alpha_m8_m9_envelope"
+            } else {
+                "architecture_card"
+            },
             issue_hypothesis_provenance: params.resource_source().source_label(),
         }
     }

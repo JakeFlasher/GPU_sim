@@ -78,7 +78,7 @@
         "arch": {
           "type": "string",
           "enum": ["sm_86", "sm_120"],
-          "description": "Compute capability tag of the local device. CLAUDE.md's Two-Device Local Development Model uses sm_86 (RTX 3090 Ti) and the active sm_120 RTX PRO 6000 Workstation target; cross-arch admission is one-arch-at-a-time."
+          "description": "Compute capability tag of the local device. CLAUDE.md's Two-Device Local Development Model uses sm_86 (RTX 3090 Ti) and the active sm_120 RTX 5090 Workstation target; cross-arch admission is one-arch-at-a-time."
         },
         "ncu_metric_version": {
           "type": "string",

@@ -1,6 +1,6 @@
 # SimBench-BW platform validation matrix.
 #
-# Derived from roster.toml tier. P/P-strict -> both; H -> h100; B -> rtx_pro_6000_blackwell.
+# Derived from roster.toml tier. P/P-strict -> both; H -> h100; B -> rtx_5090_blackwell.
 # verify_coverage.py --check-platform-matrix asserts every tier=P row is "both".
 
 schema_version = 1
@@ -41,22 +41,22 @@ platforms = "both"
 
 [[rows]]
 slug = "fp6_e3m2_mma_dep_chain"
-platforms = "rtx_pro_6000_blackwell"
+platforms = "rtx_5090_blackwell"
 reason = "Blackwell-only: requires FP6 mma on sm_120a"
 
 [[rows]]
 slug = "fp6_e2m3_saturation"
-platforms = "rtx_pro_6000_blackwell"
+platforms = "rtx_5090_blackwell"
 reason = "Blackwell-only: requires FP6 mma on sm_120a"
 
 [[rows]]
 slug = "fp4_e2m1_mma_dep_chain"
-platforms = "rtx_pro_6000_blackwell"
+platforms = "rtx_5090_blackwell"
 reason = "Blackwell-only: requires FP4 dense mma on sm_120a"
 
 [[rows]]
 slug = "nvfp4_blockscale_gemm"
-platforms = "rtx_pro_6000_blackwell"
+platforms = "rtx_5090_blackwell"
 reason = "Blackwell-only: requires NVFP4 block-scaled mma on sm_120a / sm_120f"
 
 [[rows]]
@@ -73,7 +73,7 @@ platforms = "both"
 
 [[rows]]
 slug = "sparse_2to4_fp8_gemm"
-platforms = "rtx_pro_6000_blackwell"
+platforms = "rtx_5090_blackwell"
 reason = "Blackwell-only: requires sparse FP8 / mxf4 block_scale on sm_120a"
 
 [[rows]]
@@ -154,15 +154,18 @@ platforms = "both"
 
 [[rows]]
 slug = "dsmem_pairwise_latency"
-platforms = "both"
+platforms = "h100"
+reason = "Hopper-only DSMEM peer mapping via cluster.map_shared_rank; SM120 retains an explicit cluster-size-1 baseline counterpart in the cloud ledger"
 
 [[rows]]
 slug = "dsmem_ring_bandwidth"
-platforms = "both"
+platforms = "h100"
+reason = "Hopper-only DSMEM ring/remote cluster path; SM120 retains an explicit cluster-size-1 baseline counterpart in the cloud ledger"
 
 [[rows]]
 slug = "cluster_remote_reduction"
-platforms = "both"
+platforms = "h100"
+reason = "Hopper remote-DSM cluster reduction; SM120 cloud baseline is cluster_size=1 and does not claim remote DSMEM"
 
 [[rows]]
 slug = "sampling_topk_temperature_bf16"
@@ -266,8 +269,8 @@ platforms = "both"
 
 [[rows]]
 slug = "nvfp4_grouped_gemm_moe"
-platforms = "rtx_pro_6000_blackwell"
-reason = "Blackwell-only: requires NVFP4 block-scaled mma on sm_120a / sm_120f"
+platforms = "rtx_5090_blackwell"
+reason = "Native contract currently unsupported; retained SM120A BF16 stand-in is not NVFP4 evidence; use CUTLASS 79/80 for native NVFP4"
 
 [[rows]]
 slug = "conformer_depthwise_glu_bf16"
@@ -275,7 +278,8 @@ platforms = "both"
 
 [[rows]]
 slug = "cluster_rmsnorm_dsmem_bf16"
-platforms = "both"
+platforms = "h100"
+reason = "Hopper remote-DSM cluster RMSNorm; SM120 cloud baseline is cluster_size=1 and does not claim remote DSMEM"
 
 [[rows]]
 slug = "mamba_selective_scan_bf16"

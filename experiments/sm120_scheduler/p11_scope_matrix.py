@@ -1,0 +1,19 @@
+#!/usr/bin/env python3
+"""Execute one-launch P11 dependency/ILP/overlap matrix."""
+from __future__ import annotations
+import argparse,json,os,subprocess,time
+from pathlib import Path
+CASES=[('p11_dep_fma_short',['fma','1','16','256','1','1','1','1','0']),('p11_dep_fma_long',['fma','1','16','1024','1','1','1','1','0']),('p11_ilp_fma',['fma','8','16','128','1','1','1','1','0']),('p11_dep_mad_short',['mad','1','16','256','1','1','1','1','0']),('p11_dep_mad_long',['mad','1','16','1024','1','1','1','1','0']),('p11_ilp_mad',['mad','8','16','128','1','1','1','1','0']),('p11_samewarp_mix',['mix','4','16','256','1','1','1','1','0']),('p11_warp_mix',['warp_mix','4','16','256','2','3','1','1','0']),('p11_fma_warp_pressure',['fma','1','16','256','8','255','1','1','0']),('p11_mad_warp_pressure',['mad','1','16','256','8','255','1','1','0'])]
+METRICS='gpu__time_duration.sum,sm__cycles_elapsed.avg,smsp__inst_executed.sum,smsp__inst_issued.sum,smsp__warps_active.sum,smsp__warps_eligible.sum,smsp__warp_issue_stalled_not_selected_per_warp_active,smsp__warp_issue_stalled_short_scoreboard_per_warp_active,smsp__warp_issue_stalled_math_pipe_throttle_per_warp_active,smsp__warp_issue_stalled_barrier_per_warp_active'
+def main():
+ p=argparse.ArgumentParser();p.add_argument('--binary',type=Path,required=True);p.add_argument('--repo',type=Path,default=Path('/root/GPU_simulator_rebase'));p.add_argument('--out-root',type=Path,required=True);p.add_argument('--out',type=Path,required=True);p.add_argument('--mode',choices=['timing','ncu','nvbit'],required=True);p.add_argument('--ncu',type=Path,default=Path('/usr/local/cuda-13.2/bin/ncu'));a=p.parse_args();a.out_root.mkdir(parents=True,exist_ok=True);rows=[];tr=a.repo/'tools/nvbit_tracer/tracer_tool/tracer_tool.so';pb=a.repo/'.toolchain/pb/lib'
+ for n,args in CASES:
+  if a.mode=='timing':
+   q=subprocess.run([str(a.binary),*args],capture_output=True,text=True,timeout=180,check=False);obs=[json.loads(x) for x in q.stdout.splitlines() if x.startswith('{')];r={'name':n,'args':args,'returncode':q.returncode,'observations':obs}
+  elif a.mode=='ncu':
+   raw=a.out_root/(n+'.raw.csv');cmd=[str(a.ncu),'--csv','--page','raw','--print-units','base','--profile-from-start','off','--target-processes','all','--launch-count','1','--metrics',METRICS,'--log-file',str(raw),str(a.binary),*args];q=subprocess.run(cmd,capture_output=True,text=True,timeout=300,check=False);r={'name':n,'args':args,'returncode':q.returncode,'raw_csv':str(raw),'raw_csv_present':raw.is_file() and raw.stat().st_size>0};(a.out_root/(n+'.stdout')).write_text(q.stdout or '');(a.out_root/(n+'.stderr')).write_text(q.stderr or '')
+  else:
+   dst=a.out_root/n;dst.mkdir(parents=True,exist_ok=True);e=os.environ.copy();e.update({'CUDA_INJECTION64_PATH':str(tr),'USER_DEFINED_FOLDERS':'1','TRACES_FOLDER':str(dst),'ACTIVE_FROM_START':'1','NVBIT_ALPHA_NO_HASH':'1','SM120_MEMORY_TENSOR_ONLY':'1','SM120_CAPTURE_OPERANDS':'0','SM120_ALLOW_UNREGISTERED_GLOBALS':'0','SKIP_ENHANCED_TRACER':'1'});e['LD_LIBRARY_PATH']=':'.join([str(pb),'/usr/local/cuda-13.2/targets/x86_64-linux/lib',e.get('LD_LIBRARY_PATH','')]);q=subprocess.run([str(a.binary),*args],cwd=a.repo,env=e,capture_output=True,text=True,timeout=300,check=False);r={'name':n,'args':args,'returncode':q.returncode,'capture_dir':str(dst),'dynamic_trace_present':(dst/'dynamic_trace.pb').is_file()}
+  rows.append(r);print(n,q.returncode,r.get('raw_csv_present',r.get('dynamic_trace_present',len(r.get('observations',[])))),flush=True)
+ result={'schema_version':1,'model':f'sm120_p11_scope_{a.mode}_v1','rows':rows,'mode':a.mode,'scope_contract':'one measured launch'};a.out.parent.mkdir(parents=True,exist_ok=True);a.out.write_text(json.dumps(result,indent=2,sort_keys=True)+'\n');print(json.dumps({'rows':len(rows),'success':sum(r['returncode']==0 for r in rows)}))
+if __name__=='__main__':main()

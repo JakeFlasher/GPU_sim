@@ -50,19 +50,18 @@
 #include "utils.h"
 
 /*
- * Synchronization-only port of NVBit 1.8.1's channel implementation.
+ * NVBit channel synchronization compatible with CUDA 13.2 injected code.
  *
  * The public NVBit 1.8 pthread API is intentionally retained here. In
  * particular, this file retains the pthread-based registration surface; the
  * separate 1.8.1 thread-registration rename is out of scope for this patch.
  *
  * The device channel uses a byte reservation counter (head_bytes), a byte
- * publication counter (tail_bytes), and a sealed-round marker. Producers
- * publish payload completion with device-scope atomics. The flusher publishes
- * the completed prefix to the host through a system-scope atomic doorbell, and
- * the host acknowledges it with release semantics. This closes the GPU
- * producer/CPU reader ordering gap present in NVBit 1.8's volatile-pointer
- * implementation.
+ * publication counter (tail_bytes). Producers fence payload writes before
+ * publishing completion. Atomic polling prevents device counter loads from
+ * being hoisted out of wait loops. The mapped host doorbell uses volatile
+ * device accesses with a system fence before notification; host-side atomic
+ * publication and the NVBit 1.8 pthread interface are retained.
  */
 class ChannelDev {
   private:
@@ -77,117 +76,71 @@ class ChannelDev {
     uint8_t* buff{nullptr};
     uint32_t buff_size{0};
 
-    // Reservation/publication counters in bytes from buff's base.
+    // Reservation/publication counters in bytes from buff's base.  A single
+    // producer lock makes reservation and publication one ordered operation;
+    // without it, two warps can publish out of order and a rollover flusher
+    // can wait forever for an exact prefix length.
     alignas(8) unsigned long long head_bytes{0};
     alignas(8) unsigned long long tail_bytes{0};
+    unsigned int push_lock{0};
 
   public:
     ChannelDev() = default;
 
+    // Use the original NVBit channel device protocol here. CUDA 13.2 can
+    // compile cuda::atomic_ref for an ordinary SM120 kernel, but NVBit's
+    // device-function linker rejects the generated atomic_ref image with
+    // CUDA_ERROR_INVALID_SOURCE. The legacy atomicAdd/fence protocol is the
+    // NVBit-compatible path exercised by the SM120 capture workloads.
     __device__ __forceinline__ void push(const void* packet, uint32_t nbytes) {
-        using dev_atomic_u64 =
-            cuda::atomic_ref<unsigned long long, cuda::thread_scope_device>;
-
         if (nbytes == 0 || nbytes > buff_size) {
             return;
         }
 
-        dev_atomic_u64 head(head_bytes);
-        dev_atomic_u64 tail(tail_bytes);
-
-        unsigned long long curr = 0;
-        while (true) {
-            curr = head.fetch_add(static_cast<unsigned long long>(nbytes),
-                                  cuda::memory_order_relaxed);
-
-            if (curr + nbytes <= buff_size) {
-                break;
-            }
-
-            // The first reservation that starts in this round and crosses the
-            // end owns the flush. Reservations that start after the boundary
-            // wait for the sealed round to reset.
-            if (curr <= buff_size) {
-                while (tail.load(cuda::memory_order_acquire) != curr) {
-                }
-                flush_bytes(curr);
-            } else {
-                while (head.load(cuda::memory_order_acquire) > buff_size) {
-                }
-            }
+        while (atomicCAS(&push_lock, 0U, 1U) != 0U) {
         }
 
-        memcpy(buff + curr, packet, nbytes);
+        if (head_bytes + nbytes > buff_size) {
+            flush_bytes(tail_bytes);
+        }
 
-        // The release publication is paired with the flusher's acquire load.
-        tail.fetch_add(static_cast<unsigned long long>(nbytes),
-                       cuda::memory_order_release);
+        const unsigned long long curr = head_bytes;
+        memcpy(buff + curr, packet, nbytes);
+        __threadfence_system();
+        head_bytes = curr + nbytes;
+        tail_bytes = head_bytes;
+        __threadfence();
+        atomicExch(&push_lock, 0U);
     }
 
     __device__ __forceinline__ void flush() {
-        using dev_atomic_u64 =
-            cuda::atomic_ref<unsigned long long, cuda::thread_scope_device>;
-
-        dev_atomic_u64 head(head_bytes);
-        dev_atomic_u64 tail(tail_bytes);
-
-        while (true) {
-            const unsigned long long h =
-                head.load(cuda::memory_order_acquire);
-
-            if (h == 0) {
-                return;
-            }
-
-            if (h > buff_size) {
-                // Another flusher sealed this round.
-                while (head.load(cuda::memory_order_acquire) > buff_size) {
-                }
-                return;
-            }
-
-            // Seal the current round so later producers cannot join it.
-            const unsigned long long sealed =
-                static_cast<unsigned long long>(buff_size) + 1ULL;
-            unsigned long long expected = h;
-            if (head.compare_exchange_strong(
-                    expected, sealed, cuda::memory_order_acq_rel,
-                    cuda::memory_order_acquire)) {
-                while (tail.load(cuda::memory_order_acquire) != h) {
-                }
-                flush_bytes(h);
-                return;
-            }
+        // Called by the stream-ordered flush kernel after producers finish.
+        while (atomicCAS(&push_lock, 0U, 1U) != 0U) {
         }
+        flush_bytes(tail_bytes);
+        __threadfence();
+        atomicExch(&push_lock, 0U);
     }
 
   private:
     __device__ __forceinline__ void flush_bytes(unsigned long long nbytes) {
-        using dev_atomic_u64 =
-            cuda::atomic_ref<unsigned long long, cuda::thread_scope_device>;
-        using sys_atomic_i32 = cuda::atomic_ref<int, cuda::thread_scope_system>;
-
-        dev_atomic_u64 head(head_bytes);
-        dev_atomic_u64 tail(tail_bytes);
-        sys_atomic_i32 db(*doorbell);
-
         if (nbytes == 0) {
             return;
         }
 
         // Ensure every reservation in the sealed prefix has published its
         // payload before notifying the CPU.
-        while (tail.load(cuda::memory_order_acquire) != nbytes) {
-        }
-
-        db.store(static_cast<int>(nbytes), cuda::memory_order_release);
+        __threadfence_system();
+        volatile int* db = doorbell;
+        *db = static_cast<int>(nbytes);
 
         // The host drains the announced prefix and release-stores zero.
-        while (db.load(cuda::memory_order_acquire) != 0) {
+        while (*db != 0) {
         }
 
-        tail.store(0, cuda::memory_order_relaxed);
-        head.store(0, cuda::memory_order_release);
+        tail_bytes = 0;
+        __threadfence();
+        head_bytes = 0;
     }
 
     /* called by the ChannelHost init */
@@ -199,6 +152,7 @@ class ChannelDev {
         buff_size = new_buff_size;
         head_bytes = 0;
         tail_bytes = 0;
+        push_lock = 0;
     }
 
     friend class ChannelHost;

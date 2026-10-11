@@ -18,11 +18,13 @@ use std::collections::BTreeMap;
 
 use sim_arch::{ArchError, ArchId, CapabilityError};
 use sim_mem::{
-    LdgstsL1Policy, MemRole, classify_ldgsts_l1_policy, mem_role_of_checked, opcode_head,
+    CacheOpToken, LdgstsL1Policy, MemRole, classify_ldgsts_l1_policy, mem_role_of_checked,
+    opcode_head,
 };
 use sim_trace::ExecInfo;
 
 use crate::control_bits::{ControlBits, ControlSidecar, DepBarrier, FunctionControl, WaitMask};
+use crate::issue::Sm120AlphaConfig;
 use crate::sass_operands::{FixedLatencyOperandStatus, project_fixed_latency_operands};
 
 #[derive(Debug, thiserror::Error)]
@@ -85,6 +87,10 @@ pub enum ProgramError {
     MemRoleClassification(#[from] sim_mem::MemRoleError),
     #[error("LDGSTS source-cache classification failed during schedule join: {0}")]
     LdgstsCacheClassification(#[source] sim_mem::CacheOpError),
+    #[error("SM120 alpha lane does not model asynchronous/TMA opcode {opcode:?}")]
+    AlphaAsyncUnsupported { opcode: String },
+    #[error("SM120 alpha schedule requires an sm_120 sidecar, got {got:?}")]
+    AlphaArchitectureMismatch { got: ArchId },
     #[error("sidecar arch {arch:?} is not of the form sm_<digits>")]
     SidecarArchUnparseable { arch: String },
     #[error(
@@ -470,6 +476,108 @@ fn classify(
     }
 }
 
+/// Conservative SM120 alpha static routing.  These routes intentionally do
+/// not ask `sim_mem` for an architecture capability: the alpha lane has no
+/// cache geometry/semantic claim and Flat replay only needs a stable global,
+/// local, shared, or atomic class for trace accounting.
+fn alpha_mem_role(opcode_text: &str) -> MemRole {
+    match opcode_head(opcode_text) {
+        "LDG" => MemRole::EligibleLoad(CacheOpToken::LdgECg),
+        // TMA/cp.async completion and cache routing are a separate SM120
+        // feature lane.  Keep the static spelling opaque here so a dynamic
+        // async record is rejected by replay rather than silently priced by
+        // the old Ampere transport helper.
+        "LDGSTS" => MemRole::None,
+        "LDL" => MemRole::EligibleLoad(CacheOpToken::Ldl),
+        "STL" => MemRole::EligibleLoad(CacheOpToken::Stl),
+        "STG" => MemRole::Store,
+        "ATOM" | "ATOMG" => MemRole::BypassLoad(CacheOpToken::Atom),
+        "RED" | "REDG" => MemRole::Reduction,
+        _ => MemRole::None,
+    }
+}
+
+fn alpha_ldgsts_l1_policy(opcode_text: &str) -> Option<LdgstsL1Policy> {
+    let _ = opcode_text;
+    None
+}
+
+fn alpha_op_class(opcode_text: &str) -> OpClass {
+    match opcode_head(opcode_text) {
+        "BAR" => OpClass::BlockBarrier,
+        // Full-replay-only alpha async protocol. Keep the existing explicit
+        // group/DEPBAR parser; the fast frontier is frozen and does not use
+        // this schedule path.
+        "LDGDEPBAR" => OpClass::AsyncCopyCommit,
+        "UTMALDG" | "UTMACMDFLUSH" => OpClass::AsyncCopyCommit,
+        "SYNCS" if opcode_text.contains("PHASECHK") => OpClass::AsyncCopyWait,
+        _ => match parse_dependency_barrier(opcode_text) {
+            Some(DependencyBarrierOperand::AsyncCopyWait(_)) => OpClass::AsyncCopyWait,
+            Some(DependencyBarrierOperand::OrdinaryWait(_)) | None => OpClass::Other,
+        },
+    }
+}
+
+/// M8/M9-derived scalar/barrier cadence.  Uncharacterized tensor, SFU,
+/// branch, and async-control forms remain dispatch-only rather than borrowing
+/// an SM86 interval.
+fn classify_pipeline_sm120_alpha(
+    _pc: u64,
+    opcode_text: &str,
+    _control: ControlBits,
+    _predicate: Option<&str>,
+    config: Sm120AlphaConfig,
+) -> Result<PipelineClass, ProgramError> {
+    let head = opcode_head(opcode_text);
+    if head == "BAR" {
+        return Ok(PipelineClass::Barrier {
+            warp_initiation_interval_cycles: config.barrier_warp_initiation_interval_cycles,
+            generation_rearm_cycles: config.barrier_generation_rearm_cycles,
+        });
+    }
+    let (latency_cycles, initiation_interval_cycles) = if matches!(head, "FFMA" | "FADD" | "FMUL" | "HFMA2" | "HADD2" | "HMUL2") {
+        (config.fma_latency_cycles, config.fma_initiation_interval_cycles)
+    } else if head == "IMAD" {
+        (config.mad_latency_cycles, config.mad_initiation_interval_cycles)
+    } else if matches!(head, "IADD" | "IADD3" | "UIADD3" | "UIADD") {
+        (config.add_latency_cycles, config.add_initiation_interval_cycles)
+    } else if matches!(head, "LOP3" | "LEA" | "SHF") {
+        (config.scalar_latency_cycles, config.scalar_initiation_interval_cycles)
+    } else {
+        return Ok(PipelineClass::DispatchOnly);
+    };
+    if latency_cycles > 0 {
+        return Ok(PipelineClass::ScalarAlu {
+            latency_cycles,
+            initiation_interval_cycles,
+            in_flight_capacity: config.scalar_in_flight_capacity,
+        });
+    }
+    Ok(PipelineClass::DispatchOnly)
+}
+
+/// The retained high-word control decoder is not a proven SM120 stall
+/// encoding. P9's dependent arithmetic probes show that applying its scalar
+/// stall/yield field on top of the calibrated family pipeline double-counts
+/// readiness. Keep the decoded field for non-scalar/control classes until a
+/// scope-aligned SM120 control experiment establishes its meaning.
+pub(crate) fn sm120_alpha_scalar_control_stall_suppressed(opcode_text: &str) -> bool {
+    matches!(
+        opcode_head(opcode_text),
+        "IADD"
+            | "IADD3"
+            | "IMAD"
+            | "FADD"
+            | "FFMA"
+            | "FMUL"
+            | "HFMA2"
+            | "HADD2"
+            | "HMUL2"
+            | "UIADD3"
+            | "UIADD"
+    )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DependencyBarrierOperand {
     AsyncCopyWait(u32),
@@ -765,6 +873,49 @@ pub fn build_schedules(
     sidecar: &ControlSidecar,
 ) -> Result<BTreeMap<i32, FunctionSchedule>, ProgramError> {
     let sidecar_arch = sidecar_arch_id(&sidecar.arch)?;
+    build_schedules_with_pipeline_arch(exec, sidecar, sidecar_arch)
+}
+
+/// Build a trace schedule while keeping the deployment architecture in the
+/// returned [`FunctionSchedule`] but selecting an explicit, opt-in pipeline
+/// hypothesis for the timing classifier.  This seam is retained for
+/// architecture-specific experiments; the SM120 alpha lane uses the separate
+/// [`build_schedules_sm120_alpha`] entry point so it cannot accidentally
+/// select an SM86 pipeline.
+///
+/// Memory-family classification always uses `sidecar.arch`; only pipeline
+/// cadence/latency classification uses `pipeline_arch`.  Keeping these two
+/// identities separate prevents the alpha issue hypothesis from changing
+/// address-space or SM120-specific opcode routing.
+pub fn build_schedules_with_pipeline_arch(
+    exec: &ExecInfo,
+    sidecar: &ControlSidecar,
+    pipeline_arch: ArchId,
+) -> Result<BTreeMap<i32, FunctionSchedule>, ProgramError> {
+    build_schedules_with_pipeline_arch_and_alpha(exec, sidecar, pipeline_arch, None)
+}
+
+/// Build an explicitly opt-in SM120 alpha schedule.  The returned schedule
+/// retains `sm_120`; the scalar/barrier cadence comes only from the supplied
+/// M8/M9 envelope and never from an SM86 capability table.
+pub fn build_schedules_sm120_alpha(
+    exec: &ExecInfo,
+    sidecar: &ControlSidecar,
+    config: Sm120AlphaConfig,
+) -> Result<BTreeMap<i32, FunctionSchedule>, ProgramError> {
+    build_schedules_with_pipeline_arch_and_alpha(exec, sidecar, ArchId::Sm120, Some(config))
+}
+
+fn build_schedules_with_pipeline_arch_and_alpha(
+    exec: &ExecInfo,
+    sidecar: &ControlSidecar,
+    pipeline_arch: ArchId,
+    alpha: Option<Sm120AlphaConfig>,
+) -> Result<BTreeMap<i32, FunctionSchedule>, ProgramError> {
+    let sidecar_arch = sidecar_arch_id(&sidecar.arch)?;
+    if alpha.is_some() && sidecar_arch != ArchId::Sm120 {
+        return Err(ProgramError::AlphaArchitectureMismatch { got: sidecar_arch });
+    }
     let sidecar_version = sidecar_arch.numeric();
     // Preserve the existing cross-artifact mismatch precedence before asking
     // whether a same-architecture sidecar has a supported control layout.
@@ -777,7 +928,14 @@ pub fn build_schedules(
             });
         }
     }
-    sidecar_arch.control_layout().require("control_layout")?;
+    // The production SM120 control-layout capability is still a typed gap.
+    // The only exception is the explicit alpha builder, which uses the
+    // retained high-word decoder as a hypothesis while preserving `sm_120` in
+    // the returned schedule.
+    if alpha.is_none() {
+        sidecar_arch.control_layout().require("control_layout")?;
+    }
+    let decode_arch = sidecar_arch;
     let mut schedules = BTreeMap::new();
     for (&fuid, kernel) in &exec.kernels {
         let function = sidecar
@@ -820,35 +978,58 @@ pub fn build_schedules(
             .by_pc
             .iter()
             .map(|(&pc, inst)| {
-                let mem_role = mem_role_of_checked(&inst.opcode_text, sidecar.arch.as_str())?;
-                let ldgsts_l1_policy = classify_ldgsts_l1_policy(&inst.opcode_text, sidecar_arch)
-                    .map_err(ProgramError::LdgstsCacheClassification)?;
-                let op_class = classify(
-                    &inst.opcode_text,
-                    inst.control,
-                    inst.predicate.as_deref(),
-                    sidecar_arch,
-                )?;
-                let mut pipeline_class = classify_pipeline(
-                    pc,
-                    &inst.opcode_text,
-                    inst.control,
-                    inst.predicate.as_deref(),
-                    sidecar_arch,
-                )?;
+                let mem_role = if alpha.is_some() {
+                    alpha_mem_role(&inst.opcode_text)
+                } else {
+                    mem_role_of_checked(&inst.opcode_text, decode_arch.token())?
+                };
+                let ldgsts_l1_policy = if alpha.is_some() {
+                    alpha_ldgsts_l1_policy(&inst.opcode_text)
+                } else {
+                    classify_ldgsts_l1_policy(&inst.opcode_text, decode_arch)
+                        .map_err(ProgramError::LdgstsCacheClassification)?
+                };
+                let op_class = if alpha.is_some() {
+                    alpha_op_class(&inst.opcode_text)
+                } else {
+                    classify(
+                        &inst.opcode_text,
+                        inst.control,
+                        inst.predicate.as_deref(),
+                        decode_arch,
+                    )?
+                };
+                let mut pipeline_class = if let Some(alpha) = alpha {
+                    classify_pipeline_sm120_alpha(
+                        pc,
+                        &inst.opcode_text,
+                        inst.control,
+                        inst.predicate.as_deref(),
+                        alpha,
+                    )?
+                } else {
+                    classify_pipeline(
+                        pc,
+                        &inst.opcode_text,
+                        inst.control,
+                        inst.predicate.as_deref(),
+                        pipeline_arch,
+                    )?
+                };
                 // Keep the sidecar predicate available while selecting the
                 // compact-loop special case.  The resulting IssueSlot does
                 // not duplicate this guard string, so selection happens here
                 // rather than in a later pass over the slots.
-                if let Some(interval) = compact_backward_predicate_interval(
+                if alpha.is_none()
+                    && let Some(interval) = compact_backward_predicate_interval(
                     pc,
                     &inst.opcode_text,
                     pipeline_class,
                     function,
                     inst.predicate.as_deref(),
-                    sidecar_arch,
+                    pipeline_arch,
                 )? {
-                    pipeline_class = PipelineClass::Branch {
+                        pipeline_class = PipelineClass::Branch {
                         next_issue_interval_cycles: interval,
                     };
                 }
@@ -900,7 +1081,7 @@ pub fn build_schedules(
                         .next()
                         .is_some_and(|opcode| opcode.starts_with("HMMA.16816"))
                 {
-                    slot.pipeline_class = PipelineClass::Tensor {
+                        slot.pipeline_class = PipelineClass::Tensor {
                         initiation_interval_cycles: effective_dense_hmma_interval(
                             dense_tensor_sites,
                             initiation_interval_cycles,

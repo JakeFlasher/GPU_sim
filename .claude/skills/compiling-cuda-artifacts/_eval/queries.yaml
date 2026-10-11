@@ -25,7 +25,7 @@ queries:
       - .claude/knowledge/nvcc/nvcc-flags.md
     helpful_cards:
       - .claude/knowledge/blackwell/blackwell-compatibility.md
-      - .claude/knowledge/blackwell/rtx_pro_6000_blackwell_capabilities.md
+      - .claude/knowledge/blackwell/blackwell-tuning.md
     forbidden_behavior:
       - says sm_120 alone is sufficient (sm_120a opt-in required)
   - prompt: "I compiled for sm_90 but my GPU is sm_120 — will it JIT or fail?"

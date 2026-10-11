@@ -1,0 +1,1 @@
+{"uuid": "sm120-adapter-L2-044", "axes": {"batch_size": 1, "num_chunks": 1}, "inputs": {"hidden_states": {"type": "random"}, "dt": {"type": "random"}, "A_log": {"type": "random"}, "B": {"type": "random"}, "C": {"type": "random"}}, "tolerance": {"max_atol": 1e-05, "max_rtol": 0.05, "required_match_ratio": 0.98}}

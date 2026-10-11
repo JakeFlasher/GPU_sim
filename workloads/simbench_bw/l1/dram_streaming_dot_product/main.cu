@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "../../sm120_event_timing.h"
 
 extern "C" void dram_streaming_dot_product_launch(
     const float *d_a, const float *d_b, float *d_partial_sums,
@@ -90,6 +91,9 @@ int main(int argc, char **argv) {
             return 2;
         }
     }
+    const bool repeated_event_mode = getenv("SM120_EVENT_REPS") != nullptr;
+    const int event_reps = sm120_event_reps();
+    if (repeated_event_mode) reps = 1;
     if ((threads & (threads - 1)) != 0) {
         fprintf(stderr,
                 "dram_streaming_dot_product_run: out_of_domain: --threads must be "
@@ -176,13 +180,19 @@ int main(int argc, char **argv) {
         if (rc) fail("sync warmup", rc);
     }
 
-    for (int r = 0; r < reps; ++r) {
+    Sm120CudaEventScope event_scope;
+    for (int r = 0; r < (repeated_event_mode ? event_reps : reps); ++r) {
+        if (repeated_event_mode) {
+            rc = cudaMemset(d_partial, 0, partial_bytes);
+            if (rc) fail("reset repeated partials", rc);
+        }
         dram_streaming_dot_product_launch(d_a, d_b, d_partial, n, passes,
                                           blocks, threads, 0);
         rc = cudaGetLastError(); if (rc) fail("launch", rc);
     }
     rc = cudaDeviceSynchronize();
     if (rc) fail("sync", rc);
+    event_scope.finish("dram_streaming_dot_product");
 
     float *h_partial = (float *)malloc((size_t)blocks * sizeof(float));
     if (!h_partial) {

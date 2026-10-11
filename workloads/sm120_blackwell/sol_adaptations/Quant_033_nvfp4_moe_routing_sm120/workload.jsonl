@@ -1,0 +1,1 @@
+{"uuid": "sm120-adapter-Quant_033_nvfp4_moe_routing_sm120", "axes": {"num_tokens": 128}, "inputs": {"hidden_states": {"type": "custom"}, "gate_weight_fp4": {"type": "custom"}, "gate_scale": {"type": "custom"}, "gate_global_scale": {"type": "custom"}}, "tolerance": {"max_atol": 0.005, "max_rtol": 0.02, "required_matched_ratio": 0.99}}

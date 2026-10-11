@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "../../sm120_event_timing.h"
 
 extern "C" void warp_divergence_reconvergence_launch(const float *d_in, float *d_out, float *d_sink,
                                                       int warps, int branches, int iterations,
@@ -47,8 +48,13 @@ int main(int argc, char **argv) {
     rc = cudaMalloc(&d_sink, sizeof(float));     if (rc) fail("mc sink", rc);
     rc = cudaMemcpy(d_in, h_in, n * sizeof(float), cudaMemcpyHostToDevice); if (rc) fail("H2D", rc);
 
-    warp_divergence_reconvergence_launch(d_in, d_out, d_sink, warps, branches, iterations, 0);
+    Sm120CudaEventScope event_scope;
+    const int event_reps = sm120_event_reps();
+    for (int rep = 0; rep < event_reps; ++rep) {
+        warp_divergence_reconvergence_launch(d_in, d_out, d_sink, warps, branches, iterations, 0);
+    }
     rc = cudaDeviceSynchronize(); if (rc) fail("sync", rc);
+    event_scope.finish("warp_divergence_reconvergence");
     rc = cudaMemcpy(h_out, d_out, n * sizeof(float), cudaMemcpyDeviceToHost); if (rc) fail("D2H", rc);
 
     printf("{\n  \"schema_version\": 1,\n  \"slug\": \"warp_divergence_reconvergence\",\n");

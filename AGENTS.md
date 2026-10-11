@@ -11,7 +11,7 @@ production deployment; staging is not permission for destructive actions.
   boundaries. Read only the relevant contract/source after that.
 - Branch is `GPUSim_main`; inspect Git rather than assuming an `alpha` branch.
 - Native: NVBit/SASS -> enhanced protobuf -> `sim/trace` -> `sim-sm` /
-  `sim-mem` / `sim-engine` -> `sim-run`. Hardware anchor is SM86.
+  `sim-mem` / `sim-engine` -> `sim-run`. SM86 is the compatibility baseline; the active alpha evidence lane is SM120 on the RTX 5090.
 - Custom: `simt_u32_v1` plus `sim-sm::custom`; `simt_its_v1` is a separate
   single-group functional executor, not native SASS or a timing backend.
 - Active contracts are in `docs/README.md`, `docs/STATUS.md`, and

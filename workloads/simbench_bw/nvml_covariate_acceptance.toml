@@ -42,8 +42,8 @@ min_residual_variance_reduction_pct = 10.0
 # predict 3090 Ti behavior under any DVFS regime. Cloud-die calibration
 # is also explicitly deferred per the cross-die discipline; the cloud
 # entry remains a placeholder until the cloud calibration round closes
-# that scope. The active cloud RTX PRO 6000 calibration is collected by
-# `/home/jakeshea/sm120_rtx_pro_6000_capture` and is not substituted here.
+# that scope. The active cloud RTX 5090 calibration is collected by
+# `/root/sm120_rtx_5090_capture` and is not substituted here.
 #
 # To regenerate: run the per-host NVML telemetry sweep on the local
 # RTX 3090 Ti host and write the empirical means here as floats /

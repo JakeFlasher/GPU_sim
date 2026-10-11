@@ -82,4 +82,20 @@ message address {
   // complete instruction mask. The value must be a subset of the instruction
   // mask; consumers reject any widening.
   optional uint32 lane_mask = 9;
+
+  // Allocation identity disposition for a retained global address.  A
+  // missing field is the legacy/not-applicable state; `resolved` means the
+  // address carries a valid allocation_id, `unresolved_module_global` means
+  // the explicit SM120 module-global disposition retained an address without
+  // an allocation id, `unresolved_global` means strict mode retained an
+  // address while emitting an unmapped sidecar, and `cross_allocation` means
+  // active lanes span multiple allocation identities. These are typed payload
+  // states, not silent omissions.
+  optional string allocation_identity_status = 10;
+
+  // Physical/runtime transfer width.  This is distinct from data_width for
+  // collective matrix operations: PTX ldmatrix documents 16-bit elements and
+  // group-of-four 16-byte row transfers, so collapsing the two loses the
+  // operation's transaction semantics.
+  optional int32 transfer_width = 11;
 }

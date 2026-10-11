@@ -13,7 +13,7 @@
 #             clusters, DSMEM, setmaxnreg). The H100 device-family is
 #             reachable via this slice; sm_90a is forbidden.
 #   SM120  -- Workstation Blackwell BASE arch (NOT sm_120a). The cubin
-#             slice that runs cleanly on RTX PRO 6000 Blackwell (CC 12.0)
+#             slice that runs cleanly on GeForce RTX 5090 (CC 12.0)
 #             without enabling architecture-conditional Blackwell
 #             features (FP4/FP6/FP8 MMA, tcgen05/TMEM, sparse mxf4).
 #             sm_120a / sm_120f are forbidden.

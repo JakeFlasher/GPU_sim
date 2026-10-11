@@ -1,0 +1,1 @@
+{"uuid": "sm120-native-Quant_015_fp8_mla_output_native", "axes": {"batch_size": 1, "seq_len": 64}, "inputs": {"hidden_states": {"type": "custom"}, "weight": {"type": "custom"}, "scale_x": {"type": "custom"}, "scale_w": {"type": "custom"}}, "tolerance": {"max_atol": 0.005, "max_rtol": 0.02, "required_matched_ratio": 0.99}}
