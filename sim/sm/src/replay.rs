@@ -38,6 +38,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 
@@ -174,6 +176,8 @@ pub enum ReplayError {
     Trace(#[from] TraceError),
     #[error("TMA sidecar {path}: {message}")]
     TmaSidecar { path: PathBuf, message: String },
+    #[error("sync sidecar {path}: {message}")]
+    SyncSidecar { path: PathBuf, message: String },
     #[error(transparent)]
     Issue(#[from] IssueError),
     #[error(transparent)]
@@ -3175,10 +3179,12 @@ struct TmaObservationKey {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct TmaObservation {
-    bytes: Option<u64>,
-    is_load: bool,
-    is_store: bool,
+pub(crate) struct TmaObservation {
+    pub(crate) bytes: Option<u64>,
+    pub(crate) is_load: bool,
+    pub(crate) is_store: bool,
+    pub(crate) zero_byte: bool,
+    pub(crate) oob_or_empty: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -3192,6 +3198,47 @@ struct TmaSidecarRow {
     function_id: i32,
     opcode: String,
     byte_count: Option<u64>,
+    zero_byte_disposition: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct SyncObservation {
+    pub(crate) records: u64,
+    pub(crate) before_records: u64,
+    pub(crate) after_records: u64,
+    pub(crate) value_incomplete_records: u64,
+    pub(crate) mbarrier_address_records: u64,
+    pub(crate) mbarrier_register_records: u64,
+    pub(crate) arrival_records: u64,
+    pub(crate) phase_check_records: u64,
+    pub(crate) wait_records: u64,
+    pub(crate) exchange_records: u64,
+    pub(crate) barrier_addresses: BTreeSet<u32>,
+}
+
+type TmaObservationMap = BTreeMap<TmaObservationKey, TmaObservation>;
+type SyncObservationMap = BTreeMap<TmaObservationKey, SyncObservation>;
+
+static TMA_SIDECAR_CACHE: OnceLock<Mutex<BTreeMap<(PathBuf, i64, i32), Arc<TmaObservationMap>>>> =
+    OnceLock::new();
+static SYNC_SIDECAR_CACHE: OnceLock<Mutex<BTreeMap<(PathBuf, i64, i32), Arc<SyncObservationMap>>>> =
+    OnceLock::new();
+
+#[derive(Debug, Deserialize)]
+struct SyncSidecarRow {
+    device_id: i64,
+    kernel_id: i32,
+    cta: [u32; 3],
+    warp_id: i32,
+    warp_instruction_index: usize,
+    function_id: i32,
+    pc: u64,
+    opcode: String,
+    operand_kind: Option<String>,
+    phase: Option<String>,
+    value_complete: Option<bool>,
+    barrier_address_present: Option<bool>,
+    barrier_address_u32: Option<u64>,
 }
 
 /// Stream the producer's per-instruction TMA observations for one launch.
@@ -3202,11 +3249,32 @@ fn load_tma_observations(
     root: &Path,
     device_id: i64,
     kernel_id: i32,
-) -> Result<BTreeMap<TmaObservationKey, TmaObservation>, ReplayError> {
+) -> Result<Arc<TmaObservationMap>, ReplayError> {
+    let cache_key = (root.to_path_buf(), device_id, kernel_id);
+    let cache = TMA_SIDECAR_CACHE.get_or_init(|| Mutex::new(BTreeMap::new()));
+    {
+        let cached = cache.lock().map_err(|error| ReplayError::TmaSidecar {
+            path: root.join("extra_info/tma_trace.jsonl"),
+            message: format!("sidecar cache lock poisoned: {error}"),
+        })?;
+        if let Some(observations) = cached.get(&cache_key) {
+            return Ok(Arc::clone(observations));
+        }
+    }
     let path = root.join("extra_info/tma_trace.jsonl");
     let file = match File::open(&path) {
         Ok(file) => file,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let observations = Arc::new(BTreeMap::new());
+            cache
+                .lock()
+                .map_err(|error| ReplayError::TmaSidecar {
+                    path: path.clone(),
+                    message: format!("sidecar cache lock poisoned: {error}"),
+                })?
+                .insert(cache_key, Arc::clone(&observations));
+            return Ok(observations);
+        }
         Err(error) => {
             return Err(ReplayError::TmaSidecar {
                 path,
@@ -3237,6 +3305,8 @@ fn load_tma_observations(
             bytes: row.byte_count,
             is_load: head == "UTMALDG",
             is_store: head == "UTMASTG",
+            zero_byte: row.byte_count == Some(0),
+            oob_or_empty: row.zero_byte_disposition.as_deref() == Some("oob_or_empty_transfer"),
         };
         if !observation.is_load && !observation.is_store {
             return Err(ReplayError::TmaSidecar {
@@ -3262,7 +3332,203 @@ fn load_tma_observations(
             });
         }
     }
+    let observations = Arc::new(observations);
+    cache
+        .lock()
+        .map_err(|error| ReplayError::TmaSidecar {
+            path: path.clone(),
+            message: format!("sidecar cache lock poisoned: {error}"),
+        })?
+        .insert(cache_key, Arc::clone(&observations));
     Ok(observations)
+}
+
+/// Stream sync/mbarrier operand observations for one launch.  A single
+/// dynamic sync instruction may emit several rows (address, register, and
+/// before/after phases), so rows are aggregated by the same instruction
+/// identity used by the TMA sidecar rather than rejected as duplicates.
+fn load_sync_observations(
+    root: &Path,
+    device_id: i64,
+    kernel_id: i32,
+) -> Result<Arc<SyncObservationMap>, ReplayError> {
+    let cache_key = (root.to_path_buf(), device_id, kernel_id);
+    let cache = SYNC_SIDECAR_CACHE.get_or_init(|| Mutex::new(BTreeMap::new()));
+    {
+        let cached = cache.lock().map_err(|error| ReplayError::SyncSidecar {
+            path: root.join("extra_info/sync_trace.jsonl"),
+            message: format!("sidecar cache lock poisoned: {error}"),
+        })?;
+        if let Some(observations) = cached.get(&cache_key) {
+            return Ok(Arc::clone(observations));
+        }
+    }
+    let path = root.join("extra_info/sync_trace.jsonl");
+    let file = match File::open(&path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let observations = Arc::new(BTreeMap::new());
+            cache
+                .lock()
+                .map_err(|error| ReplayError::SyncSidecar {
+                    path: path.clone(),
+                    message: format!("sidecar cache lock poisoned: {error}"),
+                })?
+                .insert(cache_key, Arc::clone(&observations));
+            return Ok(observations);
+        }
+        Err(error) => {
+            return Err(ReplayError::SyncSidecar {
+                path,
+                message: error.to_string(),
+            });
+        }
+    };
+    let mut observations: BTreeMap<TmaObservationKey, SyncObservation> = BTreeMap::new();
+    for (line_index, line) in BufReader::new(file).lines().enumerate() {
+        let line = line.map_err(|error| ReplayError::SyncSidecar {
+            path: path.clone(),
+            message: format!("line {}: {error}", line_index + 1),
+        })?;
+        let row: SyncSidecarRow =
+            serde_json::from_str(&line).map_err(|error| ReplayError::SyncSidecar {
+                path: path.clone(),
+                message: format!("line {}: {error}", line_index + 1),
+            })?;
+        if row.device_id != device_id || row.kernel_id != kernel_id {
+            continue;
+        }
+        let pc = u32::try_from(row.pc).map_err(|_| ReplayError::SyncSidecar {
+            path: path.clone(),
+            message: format!("line {} PC exceeds u32", line_index + 1),
+        })?;
+        let key = TmaObservationKey {
+            cta: row.cta,
+            warp: row.warp_id,
+            instruction: row.warp_instruction_index,
+            pc,
+            function: row.function_id,
+        };
+        let observation = observations.entry(key).or_default();
+        observation.records =
+            observation
+                .records
+                .checked_add(1)
+                .ok_or_else(|| ReplayError::SyncSidecar {
+                    path: path.clone(),
+                    message: format!("line {} record count overflow", line_index + 1),
+                })?;
+        match row.phase.as_deref() {
+            Some("before") => {
+                observation.before_records =
+                    observation.before_records.checked_add(1).ok_or_else(|| {
+                        ReplayError::SyncSidecar {
+                            path: path.clone(),
+                            message: format!("line {} before count overflow", line_index + 1),
+                        }
+                    })?;
+            }
+            Some("after") => {
+                observation.after_records =
+                    observation.after_records.checked_add(1).ok_or_else(|| {
+                        ReplayError::SyncSidecar {
+                            path: path.clone(),
+                            message: format!("line {} after count overflow", line_index + 1),
+                        }
+                    })?;
+            }
+            Some(_) | None => {}
+        }
+        if row.value_complete == Some(false) {
+            observation.value_incomplete_records = observation
+                .value_incomplete_records
+                .checked_add(1)
+                .ok_or_else(|| ReplayError::SyncSidecar {
+                    path: path.clone(),
+                    message: format!("line {} incomplete-value count overflow", line_index + 1),
+                })?;
+        }
+        match row.operand_kind.as_deref() {
+            Some("mbarrier_address") => {
+                observation.mbarrier_address_records = observation
+                    .mbarrier_address_records
+                    .checked_add(1)
+                    .ok_or_else(|| ReplayError::SyncSidecar {
+                        path: path.clone(),
+                        message: format!("line {} address-operand count overflow", line_index + 1),
+                    })?
+            }
+            Some("mbarrier_register") => {
+                observation.mbarrier_register_records = observation
+                    .mbarrier_register_records
+                    .checked_add(1)
+                    .ok_or_else(|| ReplayError::SyncSidecar {
+                        path: path.clone(),
+                        message: format!("line {} register-operand count overflow", line_index + 1),
+                    })?
+            }
+            Some(_) | None => {}
+        }
+        let opcode = row.opcode.as_str();
+        if opcode.starts_with("SYNCS.ARRIVE") || opcode.starts_with("ARRIVES.") {
+            observation.arrival_records =
+                observation.arrival_records.checked_add(1).ok_or_else(|| {
+                    ReplayError::SyncSidecar {
+                        path: path.clone(),
+                        message: format!("line {} arrival count overflow", line_index + 1),
+                    }
+                })?;
+        }
+        if opcode.starts_with("SYNCS.PHASECHK") {
+            observation.phase_check_records = observation
+                .phase_check_records
+                .checked_add(1)
+                .ok_or_else(|| ReplayError::SyncSidecar {
+                    path: path.clone(),
+                    message: format!("line {} phase-check count overflow", line_index + 1),
+                })?;
+            if opcode.contains("TRYWAIT") {
+                observation.wait_records =
+                    observation.wait_records.checked_add(1).ok_or_else(|| {
+                        ReplayError::SyncSidecar {
+                            path: path.clone(),
+                            message: format!("line {} wait count overflow", line_index + 1),
+                        }
+                    })?;
+            }
+        }
+        if opcode.starts_with("SYNCS.EXCH") {
+            observation.exchange_records =
+                observation.exchange_records.checked_add(1).ok_or_else(|| {
+                    ReplayError::SyncSidecar {
+                        path: path.clone(),
+                        message: format!("line {} exchange count overflow", line_index + 1),
+                    }
+                })?;
+        }
+        if row.barrier_address_present == Some(true)
+            && let Some(address) = row.barrier_address_u32
+        {
+            let address = u32::try_from(address).map_err(|_| ReplayError::SyncSidecar {
+                path: path.clone(),
+                message: format!("line {} barrier address exceeds u32", line_index + 1),
+            })?;
+            observation.barrier_addresses.insert(address);
+        }
+    }
+    let observations = Arc::new(observations);
+    cache
+        .lock()
+        .map_err(|error| ReplayError::SyncSidecar {
+            path: path.clone(),
+            message: format!("sidecar cache lock poisoned: {error}"),
+        })?
+        .insert(cache_key, Arc::clone(&observations));
+    Ok(observations)
+}
+
+fn is_sync_sidecar_opcode(opcode: &str) -> bool {
+    opcode.starts_with("SYNCS.") || opcode.starts_with("ARRIVES.")
 }
 
 /// Decode one launch into per-SM block replays on the traced placement.
@@ -3344,6 +3610,7 @@ fn extract_per_sm_blocks(
         sectors_decoded: decode_sectors,
         ..TraceMetrics::default()
     };
+    let sidecar_join_started = Instant::now();
     let tma_observations = if !decode_sectors && schedule.arch == ArchId::Sm120 {
         Some(load_tma_observations(
             td.root(),
@@ -3353,6 +3620,17 @@ fn extract_per_sm_blocks(
     } else {
         None
     };
+    let sync_observations = if !decode_sectors && schedule.arch == ArchId::Sm120 {
+        Some(load_sync_observations(
+            td.root(),
+            loc.device_id(),
+            loc.kernel().id,
+        )?)
+    } else {
+        None
+    };
+    trace_metrics.sidecar_join_wall_ns =
+        u64::try_from(sidecar_join_started.elapsed().as_nanos()).unwrap_or(u64::MAX);
 
     for path in td.threadblock_paths(loc)? {
         let tb = td.validated_threadblock(&path)?;
@@ -3449,11 +3727,22 @@ fn extract_per_sm_blocks(
                         pc: inst.pc(),
                         function: inst.function_unique_id(),
                     };
-                    trace_metrics.observe_tma_sidecar_payload(
-                        observations
-                            .get(&key)
-                            .and_then(|observation| observation.bytes),
-                    )?;
+                    trace_metrics.observe_tma_sidecar_payload(observations.get(&key))?;
+                }
+                if !decode_sectors
+                    && let Some(observations) = sync_observations.as_ref()
+                    && schedule
+                        .issue_slot(u64::from(inst.pc()))
+                        .is_some_and(|slot| is_sync_sidecar_opcode(slot.opcode_text()))
+                {
+                    let key = TmaObservationKey {
+                        cta: block_id,
+                        warp: warp_id,
+                        instruction: record_ix,
+                        pc: inst.pc(),
+                        function: inst.function_unique_id(),
+                    };
+                    trace_metrics.observe_sync_sidecar(observations.get(&key))?;
                 }
                 if let Some(sm) = inst.sm_id() {
                     match block_sm {
@@ -3506,7 +3795,9 @@ fn extract_per_sm_blocks(
                         record_ix,
                         &mut sectors,
                         block_id,
-                        tma_observations.as_ref(),
+                        tma_observations
+                            .as_ref()
+                            .map(|observations| &**observations),
                     )?
                 };
                 let active_mask_present = inst.active_mask_present();

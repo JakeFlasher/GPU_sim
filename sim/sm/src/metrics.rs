@@ -350,12 +350,33 @@ pub struct TraceMetrics {
     /// Actual per-lane successors, independent of branch predicates.
     pub branch_targets: BranchTargets,
     pub sectors_decoded: bool,
+    /// Host wall time spent locating/parsing the typed TMA/sync sidecars for
+    /// this launch. This is a replay-cost diagnostic, not a GPU timestamp.
+    pub sidecar_join_wall_ns: u64,
     /// TMA payload observations joined from the producer sidecar. Missing
     /// sidecar records remain explicitly unavailable; these counters never
     /// enter NCU comparison or synthesize completion timestamps.
     pub tma_sidecar_records_observed: u64,
     pub tma_sidecar_payload_bytes_observed: u64,
     pub tma_sidecar_records_missing: u64,
+    pub tma_sidecar_load_records: u64,
+    pub tma_sidecar_store_records: u64,
+    pub tma_sidecar_zero_byte_records: u64,
+    pub tma_sidecar_oob_or_empty_records: u64,
+    /// Typed synchronization-sidecar observations. These are semantic
+    /// joins only; they do not manufacture mbarrier completion timestamps.
+    pub sync_sidecar_records_observed: u64,
+    pub sync_sidecar_records_missing: u64,
+    pub sync_sidecar_before_records: u64,
+    pub sync_sidecar_after_records: u64,
+    pub sync_sidecar_value_incomplete_records: u64,
+    pub sync_sidecar_mbarrier_address_records: u64,
+    pub sync_sidecar_mbarrier_register_records: u64,
+    pub sync_sidecar_arrival_records: u64,
+    pub sync_sidecar_phase_check_records: u64,
+    pub sync_sidecar_wait_records: u64,
+    pub sync_sidecar_exchange_records: u64,
+    pub sync_sidecar_barrier_addresses: u64,
 }
 
 /// Warp-local control-transfer observations. Counts include fallthrough;
@@ -583,19 +604,89 @@ fn decoded_sector_stats(kind: AccessKind, sector_arena: &[i64]) -> Option<(u64, 
 impl TraceMetrics {
     pub(crate) fn observe_tma_sidecar_payload(
         &mut self,
-        payload_bytes: Option<u64>,
+        observation: Option<&crate::replay::TmaObservation>,
     ) -> Result<(), crate::IssueError> {
         add(
             &mut self.tma_sidecar_records_observed,
-            u64::from(payload_bytes.is_some()),
+            u64::from(observation.is_some()),
         )?;
+        let Some(observation) = observation else {
+            return add(&mut self.tma_sidecar_records_missing, 1);
+        };
         add(
             &mut self.tma_sidecar_payload_bytes_observed,
-            payload_bytes.unwrap_or(0),
+            observation.bytes.unwrap_or(0),
         )?;
         add(
-            &mut self.tma_sidecar_records_missing,
-            u64::from(payload_bytes.is_none()),
+            &mut self.tma_sidecar_load_records,
+            u64::from(observation.is_load),
+        )?;
+        add(
+            &mut self.tma_sidecar_store_records,
+            u64::from(observation.is_store),
+        )?;
+        add(
+            &mut self.tma_sidecar_zero_byte_records,
+            u64::from(observation.zero_byte),
+        )?;
+        add(
+            &mut self.tma_sidecar_oob_or_empty_records,
+            u64::from(observation.oob_or_empty),
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn observe_sync_sidecar(
+        &mut self,
+        observation: Option<&crate::replay::SyncObservation>,
+    ) -> Result<(), crate::IssueError> {
+        let Some(observation) = observation else {
+            return add(&mut self.sync_sidecar_records_missing, 1);
+        };
+        add(&mut self.sync_sidecar_records_observed, observation.records)?;
+        add(
+            &mut self.sync_sidecar_before_records,
+            observation.before_records,
+        )?;
+        add(
+            &mut self.sync_sidecar_after_records,
+            observation.after_records,
+        )?;
+        add(
+            &mut self.sync_sidecar_value_incomplete_records,
+            observation.value_incomplete_records,
+        )?;
+        add(
+            &mut self.sync_sidecar_mbarrier_address_records,
+            observation.mbarrier_address_records,
+        )?;
+        add(
+            &mut self.sync_sidecar_mbarrier_register_records,
+            observation.mbarrier_register_records,
+        )?;
+        add(
+            &mut self.sync_sidecar_arrival_records,
+            observation.arrival_records,
+        )?;
+        add(
+            &mut self.sync_sidecar_phase_check_records,
+            observation.phase_check_records,
+        )?;
+        add(
+            &mut self.sync_sidecar_wait_records,
+            observation.wait_records,
+        )?;
+        add(
+            &mut self.sync_sidecar_exchange_records,
+            observation.exchange_records,
+        )?;
+        add(
+            &mut self.sync_sidecar_barrier_addresses,
+            u64::try_from(observation.barrier_addresses.len()).map_err(|_| {
+                crate::IssueError::CounterOverflow {
+                    counter: "sync_sidecar_barrier_addresses",
+                }
+            })?,
         )?;
         Ok(())
     }

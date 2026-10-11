@@ -81,11 +81,16 @@ also completes **327/327** required rows and **11,529/11,529** launches in both
 modes, including nested FlashInfer/SOL/Quant paths; its rows are under
 `/dev/shm/sm120_alpha_q17_canonical_{full,fast}.*`.
 
-**Q17.3.3 is active:** consume typed TMA/sync sidecars in Rust full replay;
-remove the universal 8-KiB UTMA fallback while retaining lower-bound and native
-completion non-claims. Do not resurrect the withdrawn 3,900-cycle P10 post-hoc
-offset or use NCU values from scored captures as model inputs. Update this
-memory and `docs/STATUS.md` after the next real evidence/code milestone.
+**Q17.3.3 is complete:** Rust full replay consumes and process-caches typed
+TMA/sync sidecars, uses observed per-instruction payload bytes, and emits
+load/store, zero-byte/OOB, mbarrier, phase, wait and missing counters. The
+latest canonical full-then-fast pair joins 1,932 TMA observations and 402,208
+sync observations with zero missing joins; this remains semantic observation,
+not native completion timing. Q17.3.7 admits no model change, and Q17.3.8
+records phase/RSS/sidecar cost without a defensible suite-median speedup. Q18.1
+is next: independent full-workload cache/service curves. Do not resurrect the
+withdrawn 3,900-cycle P10 post-hoc offset or use NCU values from scored captures
+as model inputs.
 
 ## Evidence/research directories
 

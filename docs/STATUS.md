@@ -22,12 +22,15 @@ diagnostic. The state-reconciliation commit contains the coherent card, trace, r
 async-ledger, producer, workload, and reporting changes. The checkout is clean
 relative to that commit.
 
-Q16.1–Q16.3 are historical semantic-ledger slices. **Q17.1–Q17.3.6 are
-complete:** the three replay seams were closed, canonical recursive discovery
-now covers all 327 required rows, and both full and fast replay complete 327/327
-captures (11,529 launches each). Q17.3.3 is the next active seam: consume
-typed TMA/sync sidecars without inventing native completion timing. The
-withdrawn 3,900-cycle P10 post-hoc offset is not reused.
+Q16.1–Q16.3 are historical semantic-ledger slices. **Q17.1–Q17.3 are
+complete with explicit native gaps:** the three replay seams were closed,
+canonical recursive discovery covers all 327 required rows, Rust full replay
+consumes typed TMA/sync sidecars without inventing native completion timing,
+and the latest full-then-fast pair completes 327/327 captures and 11,529
+launches in each mode. No endpoint coefficient or scored model change was
+admitted. Q18.1 is now the active queue for independent effective
+cache/service curves over full real workloads. The withdrawn 3,900-cycle P10
+post-hoc offset is not reused.
 
 ## Latest evidence
 
@@ -44,6 +47,22 @@ withdrawn 3,900-cycle P10 post-hoc offset is not reused.
 | Q17 residual closure | 302/302 full and 302/302 fast; 10,796 launches each | no residual categories; common 289-capture full-cycle delta is zero |
 | Q17 corpus medians | full 42,690 / fast 90,320.5 model cycles per capture sum | model-relative baselines, not correctness claims |
 | Q17 canonical replay | 327/327 full and 327/327 fast; 11,529 launches each | recursive nested paths included; no full replay failures |
+
+The latest typed-sidecar full-then-fast pair joined
+1,932 TMA rows (675 loads, 1,257 stores, 336 zero-byte/OOB rows;
+11,242,496 payload bytes) and 402,208 sync rows (272,024 before, 130,184
+after, 5,458 arrivals, 390,552 phase checks, 202,056 waits, and 136,062
+distinct barrier addresses). All 34 sidecar-bearing captures and 64 affected
+launches had zero missing joins. These fields are observations and semantic
+joins only; they do not supply native TMA/mbarrier completion timestamps.
+
+Q17.3 replay-cost measurements are retained at
+`/dev/shm/rust_research/q17_3_8_replay_cost_20261011.json`. The process-local
+sidecar cache is retained for repeated launch identities, but the uncontrolled
+paired comparison does not support a suite-median speedup claim. Q18.1 is the
+next active research slice: independent aligned/offset/stride and working-set
+service curves over full real workload families, with no physical cache
+topology inference.
 
 Artifacts for the newest rows are `q10_scheduler/summary.json`,
 `q11_multiwarp/reconcile.json`, `q12_density/reconcile.json`,
