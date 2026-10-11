@@ -22,9 +22,10 @@ diagnostic. The state-reconciliation commit contains the coherent card, trace, r
 async-ledger, producer, workload, and reporting changes. The checkout is clean
 relative to that commit.
 
-The active goal is **Q16.1**: separate TMA load/store payload observations and
-mbarrier phase observations in replay output. Q16.2 (a legal cluster/TMA or
-bulk-async shape) and Q16.3 (semantic reconciliation) remain queued.
+Q16.1–Q16.3 are historical semantic-ledger slices. **Q17.1–Q17.2 are
+complete:** the three retained-corpus replay seams were closed and the full
+302-capture corpus now completes in both full and fast modes. Q17.3 is the
+next active goal for an independent full-suite model/performance improvement.
 
 ## Latest evidence
 
@@ -38,6 +39,8 @@ bulk-async shape) and Q16.3 (semantic reconciliation) remain queued.
 | Q14 `.ca`/`.cg` | 13.63% / 28.58% full APE | route sensitivity without physical-topology identification |
 | Q15 TMA64 | NCU 6,741.87; full 5,318; fast 4,193 cycles | corrected process-start range; native completion time unknown |
 | Q15 cluster2 | NCU 5,528.05; full 80; fast 4,004 cycles | ranks 0/1 observed; internal cluster/TMA timing unknown |
+| Q17 residual closure | 302/302 full and 302/302 fast; 10,796 launches each | no residual categories; common 289-capture full-cycle delta is zero |
+| Q17 corpus medians | full 42,690 / fast 90,320.5 model cycles per capture sum | model-relative baselines, not correctness claims |
 
 Artifacts for the newest rows are `q10_scheduler/summary.json`,
 `q11_multiwarp/reconcile.json`, `q12_density/reconcile.json`,
@@ -59,6 +62,6 @@ Artifacts for the newest rows are `q10_scheduler/summary.json`,
 ## Operational entrypoints
 
 Read `docs/PROJECT_MEMORY.md`, then the active plan, then only the source seam
-for Q16.1. Use `docs/runbook_host.md` for commands and keep raw outputs under
+for Q17.3. Use `docs/runbook_host.md` for commands and keep raw outputs under
 the evidence root. Update this file and `PROJECT_MEMORY.md` after each real
 milestone; do not replace implementation with a status-only report.

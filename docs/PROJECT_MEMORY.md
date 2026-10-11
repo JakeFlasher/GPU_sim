@@ -63,13 +63,25 @@ The latest retained evidence is under `/dev/shm/sm120_rtx_5090_work`:
   5,528.05 cycles. TMA payload-after-sync (8,192 bytes) and cluster ranks
   `(0,1)` were observed; native completion timestamps remain unavailable.
 
-## Next concrete seam
+## Latest residual closure and next seam
 
-**Q16.1 is active:** separate TMA load/store payload observations and
-mbarrier phase observations in replay output. Q16.2 is queued for a legal
-cluster/TMA or bulk-async shape; Q16.3 will reconcile the semantic ledger
-without claiming native completion timing. Update this memory and
-`docs/STATUS.md` after the next real evidence/code milestone.
+Q17.1–Q17.2 closed the retained-corpus replay residuals without fixture gates:
+SM120 uses the architecture-neutral write-lookup projection until an
+independent cache sweep measures a real window; explicit
+`unresolved_module_global` addresses are retained without fabricated ids; and
+unqualified PTX-generic `ATOM`/`RED` routes follow dynamic Global/Shared space.
+The protobuf binding was regenerated from the current tracer schema.
+
+Fresh release replay now completes **302/302** captures and **10,796/10,796**
+launches in both full and fast modes, with no residual categories. The common
+289-capture full-cycle delta is zero. Raw rows and medians are in
+`/dev/shm/rust_research/full_workload_replay_summary_q17_20261011.json` and
+the adjacent `/dev/shm/sm120_alpha_q17_*` files.
+
+**Q17.3 is active:** select the next independent full-suite model/performance
+improvement, preserving the separation between NCU comparison targets and
+simulator inputs. Update this memory and `docs/STATUS.md` after the next real
+evidence/code milestone.
 
 ## Evidence/research directories
 
