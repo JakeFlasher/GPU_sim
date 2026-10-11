@@ -38,8 +38,9 @@ complete as a measured cost slice on the scheduler controls. Q20.1–Q20.3 are
 complete: two new prospective L3 families were captured, replayed full then
 fast, compared without NCU tuning, and cost-measured. Q21.1–Q21.2 are complete;
 final reconciliation is in
-`/dev/shm/rust_research/q21_final_reconciliation_20261011.{json,md}` and commit
-`994dd13f` leaves the repository clean. The withdrawn 3,900-cycle
+`/dev/shm/rust_research/q21_final_reconciliation_20261011.{json,md}` and the
+latest clean-state commit is `960d51c4` (reconciliation landed in `994dd13f`).
+The withdrawn 3,900-cycle
 P10 post-hoc offset is not reused.
 
 ## Latest evidence
