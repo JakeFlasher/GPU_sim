@@ -88,9 +88,14 @@ latest canonical full-then-fast pair joins 1,932 TMA observations and 402,208
 sync observations with zero missing joins; this remains semantic observation,
 not native completion timing. Q17.3.7 admits no model change, and Q17.3.8
 records phase/RSS/sidecar cost without a defensible suite-median speedup. Q18.1
-is next: independent full-workload cache/service curves. Do not resurrect the
+is complete as an independent control slice. Do not resurrect the
 withdrawn 3,900-cycle P10 post-hoc offset or use NCU values from scored captures
-as model inputs.
+as model inputs. Q18.1 has since collected four real CUDA/NVBit/NCU working-set
+controls and full-then-fast replay; Q18.2 compared that mechanism-local
+response with all 327 canonical families and admitted no global service term.
+Q18.3 measured full/fast phase and RSS cost for those captures without a
+scope-changing optimization. Q19.1 is the active dependency/scheduler
+behavior envelope.
 
 ## Evidence/research directories
 

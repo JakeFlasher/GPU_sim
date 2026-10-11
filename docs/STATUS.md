@@ -28,9 +28,12 @@ canonical recursive discovery covers all 327 required rows, Rust full replay
 consumes typed TMA/sync sidecars without inventing native completion timing,
 and the latest full-then-fast pair completes 327/327 captures and 11,529
 launches in each mode. No endpoint coefficient or scored model change was
-admitted. Q18.1 is now the active queue for independent effective
-cache/service curves over full real workloads. The withdrawn 3,900-cycle P10
-post-hoc offset is not reused.
+admitted. Q18.1 is complete as an independent control evidence slice and Q18.2
+is complete with a no-change decision after comparing its mechanism-local
+response against the complete canonical workload population. Q18.3 is complete
+as a measured cost slice with no scope-changing optimization. Q19.1 is now
+active for an independent dependency/scheduler behavior envelope. The withdrawn 3,900-cycle
+P10 post-hoc offset is not reused.
 
 ## Latest evidence
 
@@ -60,9 +63,20 @@ Q17.3 replay-cost measurements are retained at
 `/dev/shm/rust_research/q17_3_8_replay_cost_20261011.json`. The process-local
 sidecar cache is retained for repeated launch identities, but the uncontrolled
 paired comparison does not support a suite-median speedup claim. Q18.1 is the
-next active research slice: independent aligned/offset/stride and working-set
-service curves over full real workload families, with no physical cache
-topology inference.
+completed independent control slice; Q18.2 is the active comparison of its
+aligned/offset/stride and working-set response against full real workload
+families, with no physical cache topology inference.
+
+Q18.1 captured four real CUDA control shapes touching 4 KiB, 64 KiB, 512 KiB,
+and 4 MiB with NVBit, independent NCU and uninstrumented CUDA-event scopes;
+each was replayed full first then fast. Evidence and raw capture paths are in
+`/dev/shm/rust_research/q18_cache_service_shapes_20261011.json`. These controls
+are an independent behavioral envelope, not a fixture gate or cache-topology
+identification; Q18.2 compared them with all 327 canonical workload families.
+The control model/NCU ratios span 0.123–0.647 and full-suite family medians
+span 0.129–3.199, so no global service term is portable. The comparison is in
+`/dev/shm/rust_research/q18_compare_full_suite_20261011.{json,md}`; Q18.3 now
+measures replay cost on these new captures.
 
 Artifacts for the newest rows are `q10_scheduler/summary.json`,
 `q11_multiwarp/reconcile.json`, `q12_density/reconcile.json`,
