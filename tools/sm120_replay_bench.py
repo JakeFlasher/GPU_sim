@@ -841,8 +841,9 @@ def join_ncu_rows(
     demangled names therefore leave a small but material ordered-join failure
     surface in captures with library/generated kernels.  A unique
     ``(grid, block)`` match is an independent structural identity already
-    present in both artifacts; ambiguous shape matches still use ordered
-    fallback and remain labelled as diagnostic.  This is post-replay
+    present in both artifacts. Ambiguous shape matches choose the nearest
+    unused row in launch order and remain explicitly labelled as
+    ``shape_ordered`` rather than being promoted to identity. This is post-replay
     association only: no NCU value enters simulator execution.
     """
 
@@ -871,6 +872,7 @@ def join_ncu_rows(
 
     unused = set(range(len(ncu_rows)))
     joined: list[dict[str, Any]] = []
+    last_candidate = -1
     for index, launch in enumerate(sim_launches):
         sim_name = str(launch.get("kernel_name", ""))
         sim_norm = normalized_kernel_name(sim_name)
@@ -884,9 +886,11 @@ def join_ncu_rows(
             candidate = exact[0]
         else:
             shaped = shape_candidates(launch, unused)
-            if len(shaped) == 1:
-                candidate = shaped[0]
-                status = "shape_identity"
+            if shaped:
+                forward = [item for item in shaped if item > last_candidate]
+                pool = forward or shaped
+                candidate = min(pool, key=lambda item: abs(item - index))
+                status = "shape_identity" if len(shaped) == 1 else "shape_ordered"
             elif index in unused:
                 candidate = index
                 status = "ordered_fallback"
@@ -895,6 +899,7 @@ def join_ncu_rows(
                 status = "unmatched"
         if candidate is not None:
             unused.discard(candidate)
+            last_candidate = candidate
             ncu = ncu_rows[candidate]
             joined.append(
                 {
