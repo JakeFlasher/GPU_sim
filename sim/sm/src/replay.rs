@@ -35,9 +35,11 @@
 //! wire walk or lane-address reconstruction.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::fs::File;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use sim_arch::card::{ArchCard, CalibError};
 use sim_arch::{ArchId, LdgstsDestinationWavefrontProjection, Sku};
@@ -68,6 +70,7 @@ use crate::causal_frontier::{
 };
 #[cfg(feature = "campaign")]
 use crate::evidence::AdmittedLaunchEvidence;
+use crate::issue::Sm120AlphaConfig;
 use crate::issue::{
     AccessKind, AsyncCopyCohortDescriptor, AsyncCopyCohortReplay, AsyncCopyCohortSpan,
     AsyncInstrumentationOrderDiagnostics, BlockReplay, InstrumentationOrderAnchor, IssueError,
@@ -77,9 +80,8 @@ use crate::issue::{
     validate_memory_service_candidates,
 };
 use crate::metrics::TraceMetrics;
-use crate::issue::Sm120AlphaConfig;
 use crate::program::{
-    sm120_alpha_scalar_control_stall_suppressed, FunctionSchedule, OpClass, PipelineClass,
+    FunctionSchedule, OpClass, PipelineClass, sm120_alpha_scalar_control_stall_suppressed,
 };
 use crate::sass_operands::{FixedLatencyOperandStatus, SassRegister, SassSourceOperand};
 use crate::system::{
@@ -170,6 +172,8 @@ pub enum MemoryRouteError {
 pub enum ReplayError {
     #[error(transparent)]
     Trace(#[from] TraceError),
+    #[error("TMA sidecar {path}: {message}")]
+    TmaSidecar { path: PathBuf, message: String },
     #[error(transparent)]
     Issue(#[from] IssueError),
     #[error(transparent)]
@@ -991,15 +995,23 @@ struct FastDynamicWarp<'a> {
 }
 
 fn fast_cycle_add(base: u64, delta: u64) -> Result<u64, ReplayError> {
-    base.checked_add(delta).ok_or_else(|| ReplayError::FastFrontier {
-        detail: "fast replay cycle overflow".to_owned(),
-    })
+    base.checked_add(delta)
+        .ok_or_else(|| ReplayError::FastFrontier {
+            detail: "fast replay cycle overflow".to_owned(),
+        })
 }
 
 fn fast_register_overlap(left: SassRegister, right: SassRegister) -> bool {
-    if left.file() != right.file() { return false; }
-    let (Some(left), Some(right)) = (left.index().map(|i| (u32::from(i), u32::from(left.span_registers()))),
-                                    right.index().map(|i| (u32::from(i), u32::from(right.span_registers())))) else {
+    if left.file() != right.file() {
+        return false;
+    }
+    let (Some(left), Some(right)) = (
+        left.index()
+            .map(|i| (u32::from(i), u32::from(left.span_registers()))),
+        right
+            .index()
+            .map(|i| (u32::from(i), u32::from(right.span_registers()))),
+    ) else {
         return false;
     };
     left.0 < right.0 + right.1 && right.0 < left.0 + left.1
@@ -1008,7 +1020,11 @@ fn fast_register_overlap(left: SassRegister, right: SassRegister) -> bool {
 fn fast_register_mask(register: SassRegister, mask: u32) -> u32 {
     match register.file() {
         crate::sass_operands::SassRegisterFile::Uniform
-        | crate::sass_operands::SassRegisterFile::UniformPredicate if mask != 0 => u32::MAX,
+        | crate::sass_operands::SassRegisterFile::UniformPredicate
+            if mask != 0 =>
+        {
+            u32::MAX
+        }
         _ => mask,
     }
 }
@@ -1023,28 +1039,40 @@ fn fast_pipeline_index(pipeline: PipelineClass) -> usize {
 }
 
 impl FastDynamicWarp<'_> {
-    fn ready_at(&self, dispatch: u64, pipes: &[u64; 4], pending: &[u64], rearm: u64)
-        -> Option<u64>
-    {
-        if self.done || self.waiting_at_barrier { return None; }
+    fn ready_at(
+        &self,
+        dispatch: u64,
+        pipes: &[u64; 4],
+        pending: &[u64],
+        rearm: u64,
+    ) -> Option<u64> {
+        if self.done || self.waiting_at_barrier {
+            return None;
+        }
         let slot = self.slot?;
         let mask = self.masks[self.next];
         let mut ready = self.ready.max(dispatch);
         if mask != 0 {
             ready = ready.max(pipes[fast_pipeline_index(slot.pipeline_class())]);
-            let waits = slot.control().wait_mask().bits()
-                | slot.ordinary_dependency_wait_mask().bits();
+            let waits =
+                slot.control().wait_mask().bits() | slot.ordinary_dependency_wait_mask().bits();
             for (index, &clear) in self.barriers.iter().enumerate() {
-                if waits & (1 << index) != 0 { ready = ready.max(clear); }
+                if waits & (1 << index) != 0 {
+                    ready = ready.max(clear);
+                }
             }
             if let Some(projection) = slot.fixed_latency_operands().projected() {
-                let sources = projection.sources().iter().filter_map(|source| match source {
-                    SassSourceOperand::Register(operand) => Some(operand.register()),
-                    _ => None,
-                });
+                let sources = projection
+                    .sources()
+                    .iter()
+                    .filter_map(|source| match source {
+                        SassSourceOperand::Register(operand) => Some(operand.register()),
+                        _ => None,
+                    });
                 // RAW and WAW are both completion dependencies. Include predicate
                 // inputs, ignore constant registers, and preserve lane identity.
-                for register in sources.chain(projection.predicate_sources().iter().map(|o| o.register()))
+                for register in sources
+                    .chain(projection.predicate_sources().iter().map(|o| o.register()))
                     .chain(projection.destinations().iter().map(|o| o.register()))
                 {
                     let lanes = fast_register_mask(register, mask);
@@ -1055,14 +1083,21 @@ impl FastDynamicWarp<'_> {
                     }
                 }
             }
-            if let PipelineClass::ScalarAlu { in_flight_capacity, .. } = slot.pipeline_class() {
+            if let PipelineClass::ScalarAlu {
+                in_flight_capacity, ..
+            } = slot.pipeline_class()
+            {
                 // Candidate queries must never remove another candidate's pending
                 // completions at a speculative future timestamp.
-                while pending.iter().filter(|&&done| done > ready).count() >= in_flight_capacity.max(1) as usize {
+                while pending.iter().filter(|&&done| done > ready).count()
+                    >= in_flight_capacity.max(1) as usize
+                {
                     ready = pending.iter().copied().filter(|&done| done > ready).min()?;
                 }
             }
-            if slot.op_class() == OpClass::BlockBarrier { ready = ready.max(rearm); }
+            if slot.op_class() == OpClass::BlockBarrier {
+                ready = ready.max(rearm);
+            }
         }
         Some(ready)
     }
@@ -1078,31 +1113,64 @@ fn fast_dynamic_sm_frontier(
     params: &IssueModelParams,
     residency: SharedMemoryResidency,
 ) -> Result<(u64, u64, u64, u64), ReplayError> {
-    struct BlockState { first: usize, end: usize, slots: u64, rearm: u64 }
+    struct BlockState {
+        first: usize,
+        end: usize,
+        slots: u64,
+        rearm: u64,
+    }
     let mut warps = Vec::new();
     let mut block_states = Vec::new();
     for block in blocks {
         let first = warps.len();
         let mut slots = 0u64;
         for warp in &block.warps {
-            slots |= 1u64.checked_shl(warp.warp_slot as u32).ok_or_else(|| ReplayError::FastFrontier {
-                detail: "fast warp slot exceeds its resident bitmap".to_owned(),
+            slots |= 1u64.checked_shl(warp.warp_slot as u32).ok_or_else(|| {
+                ReplayError::FastFrontier {
+                    detail: "fast warp slot exceeds its resident bitmap".to_owned(),
+                }
             })?;
-            let lane_masks = masks.get(&(block.launch_index, warp.warp_slot)).ok_or_else(|| ReplayError::FastFrontier {
-                detail: "fast warp lane masks are missing".to_owned(),
-            })?;
+            let lane_masks = masks
+                .get(&(block.launch_index, warp.warp_slot))
+                .ok_or_else(|| ReplayError::FastFrontier {
+                    detail: "fast warp lane masks are missing".to_owned(),
+                })?;
             if lane_masks.len() != warp.insts.len() {
-                return Err(ReplayError::FastFrontier { detail: "fast warp lane-mask length mismatch".to_owned() });
+                return Err(ReplayError::FastFrontier {
+                    detail: "fast warp lane-mask length mismatch".to_owned(),
+                });
             }
-            let slot = warp.insts.first().map(|inst| schedule.issue_slot(u64::from(inst.pc))
-                .ok_or_else(|| ReplayError::FastFrontier { detail: "fast schedule PC missing".to_owned() })).transpose()?;
+            let slot = warp
+                .insts
+                .first()
+                .map(|inst| {
+                    schedule.issue_slot(u64::from(inst.pc)).ok_or_else(|| {
+                        ReplayError::FastFrontier {
+                            detail: "fast schedule PC missing".to_owned(),
+                        }
+                    })
+                })
+                .transpose()?;
             warps.push(FastDynamicWarp {
-                warp, masks: lane_masks, next: 0, slot, ready: 0, completion: 0,
-                waiting_at_barrier: false, barrier_arrival: 0, done: slot.is_none(),
-                registers: Vec::new(), barriers: [0; 6],
+                warp,
+                masks: lane_masks,
+                next: 0,
+                slot,
+                ready: 0,
+                completion: 0,
+                waiting_at_barrier: false,
+                barrier_arrival: 0,
+                done: slot.is_none(),
+                registers: Vec::new(),
+                barriers: [0; 6],
             });
         }
-        block_states.push(BlockState { first, end: warps.len(), slots, rearm: 0 });
+        block_states.push(BlockState {
+            first,
+            end: warps.len(),
+            slots,
+            rearm: 0,
+        });
     }
     let mut active: Vec<usize> = Vec::new();
     let mut next_block = 0;
@@ -1112,10 +1180,18 @@ fn fast_dynamic_sm_frontier(
     let mut pending: [Vec<u64>; 4] = std::array::from_fn(|_| Vec::new());
     let mut held = [None; 4];
     let mut barrier_server = 0u64;
-    let barrier_rearm = schedule.by_pc.values().filter_map(|slot| match slot.pipeline_class() {
-        PipelineClass::Barrier { generation_rearm_cycles, .. } => Some(generation_rearm_cycles),
-        _ => None,
-    }).max().unwrap_or(0);
+    let barrier_rearm = schedule
+        .by_pc
+        .values()
+        .filter_map(|slot| match slot.pipeline_class() {
+            PipelineClass::Barrier {
+                generation_rearm_cycles,
+                ..
+            } => Some(generation_rearm_cycles),
+            _ => None,
+        })
+        .max()
+        .unwrap_or(0);
     let mut now = 0u64;
     let mut frontier = 0u64;
     let (mut memory_records, mut async_records, mut barrier_records) = (0u64, 0u64, 0u64);
@@ -1126,7 +1202,10 @@ fn fast_dynamic_sm_frontier(
             let members = &warps[state.first..state.end];
             if members.iter().all(|w| w.done) {
                 let end = members.iter().map(|w| w.completion).max().unwrap_or(now);
-                if end <= now { active_slots &= !state.slots; return false; }
+                if end <= now {
+                    active_slots &= !state.slots;
+                    return false;
+                }
                 next_event = Some(next_event.map_or(end, |prior: u64| prior.min(end)));
             }
             true
@@ -1137,40 +1216,64 @@ fn fast_dynamic_sm_frontier(
         while next_block < blocks.len() {
             let state = &block_states[next_block];
             let occupied = active_slots | state.slots;
-            let shared_fits = (active.len() as u64 + 1).checked_mul(residency.bytes_per_cta())
+            let shared_fits = (active.len() as u64 + 1)
+                .checked_mul(residency.bytes_per_cta())
                 .is_some_and(|bytes| bytes <= residency.max_bytes_per_sm());
             if active.len() >= params.max_resident_blocks_per_sm() as usize
                 || occupied.count_ones() > params.max_resident_warps_per_sm()
-                || active_slots & state.slots != 0 || !shared_fits
-            { break; }
-            for warp in &mut warps[state.first..state.end] { warp.ready = now; warp.completion = now; }
+                || active_slots & state.slots != 0
+                || !shared_fits
+            {
+                break;
+            }
+            for warp in &mut warps[state.first..state.end] {
+                warp.ready = now;
+                warp.completion = now;
+            }
             active_slots = occupied;
             active.push(next_block);
             next_block += 1;
         }
         if active.is_empty() {
-            if next_block == blocks.len() { break; }
-            return Err(ReplayError::FastFrontier { detail: "fast CTA exceeds resident resource limits".to_owned() });
+            if next_block == blocks.len() {
+                break;
+            }
+            return Err(ReplayError::FastFrontier {
+                detail: "fast CTA exceeds resident resource limits".to_owned(),
+            });
         }
-        for completions in &mut pending { completions.retain(|&done| done > now); }
+        for completions in &mut pending {
+            completions.retain(|&done| done > now);
+        }
         let mut picks = [None; 4];
         for &block in &active {
             let state = &block_states[block];
             for index in state.first..state.end {
                 let warp = &warps[index];
                 let smsp = warp.warp.warp_slot as usize % 4;
-                let Some(ready) = warp.ready_at(dispatch[smsp], &pipes[smsp], &pending[smsp], state.rearm) else { continue };
+                let Some(ready) =
+                    warp.ready_at(dispatch[smsp], &pipes[smsp], &pending[smsp], state.rearm)
+                else {
+                    continue;
+                };
                 if ready > now {
                     next_event = Some(next_event.map_or(ready, |prior| prior.min(ready)));
-                } else if picks[smsp].is_none() || held[smsp] == Some(index)
+                } else if picks[smsp].is_none()
+                    || held[smsp] == Some(index)
                     || (picks[smsp] != held[smsp] && picks[smsp].is_some_and(|prior| index > prior))
-                { picks[smsp] = Some(index); }
+                {
+                    picks[smsp] = Some(index);
+                }
             }
         }
         if picks.iter().all(Option::is_none) {
-            now = next_event.filter(|&next| next > now).ok_or_else(|| ReplayError::FastFrontier {
-                detail: "fast replay cannot progress: incomplete CTA barrier or schedule".to_owned(),
-            })?;
+            now =
+                next_event
+                    .filter(|&next| next > now)
+                    .ok_or_else(|| ReplayError::FastFrontier {
+                        detail: "fast replay cannot progress: incomplete CTA barrier or schedule"
+                            .to_owned(),
+                    })?;
             continue;
         }
         // Every pick below issues at `now`; committing one partition cannot
@@ -1179,7 +1282,9 @@ fn fast_dynamic_sm_frontier(
             let Some(index) = pick else { continue };
             let warp = &mut warps[index];
             let inst = warp.warp.insts[warp.next];
-            let slot = warp.slot.ok_or_else(|| ReplayError::FastFrontier { detail: "fast schedule PC missing".to_owned() })?;
+            let slot = warp.slot.ok_or_else(|| ReplayError::FastFrontier {
+                detail: "fast schedule PC missing".to_owned(),
+            })?;
             let mask = warp.masks[warp.next];
             let pipeline = slot.pipeline_class();
             let control = slot.control();
@@ -1192,22 +1297,35 @@ fn fast_dynamic_sm_frontier(
             dispatch[smsp] = issued_end;
             frontier = frontier.max(issued_end);
             let projection = slot.fixed_latency_operands().projected();
-            let done = if mask == 0 { issued_end } else { fast_cycle_add(now, latency)? };
+            let done = if mask == 0 {
+                issued_end
+            } else {
+                fast_cycle_add(now, latency)?
+            };
             if mask != 0 {
-                if !matches!(pipeline, PipelineClass::Barrier { .. } | PipelineClass::Branch { .. }) {
+                if !matches!(
+                    pipeline,
+                    PipelineClass::Barrier { .. } | PipelineClass::Branch { .. }
+                ) {
                     pipes[smsp][fast_pipeline_index(pipeline)] = fast_cycle_add(now, interval)?;
                 }
-                if matches!(pipeline, PipelineClass::ScalarAlu { .. }) { pending[smsp].push(done); }
+                if matches!(pipeline, PipelineClass::ScalarAlu { .. }) {
+                    pending[smsp].push(done);
+                }
                 // Completed writes no longer constrain future reads. Partial
                 // predication overwrites only executing lanes, not the whole register.
                 warp.registers.retain(|&(_, _, ready)| ready > now);
                 if let Some(projection) = projection {
                     for destination in projection.destinations() {
                         let register = destination.register();
-                        if register.is_constant() { continue; }
+                        if register.is_constant() {
+                            continue;
+                        }
                         let lanes = fast_register_mask(register, mask);
                         for (prior, prior_lanes, _) in &mut warp.registers {
-                            if *prior == register { *prior_lanes &= !lanes; }
+                            if *prior == register {
+                                *prior_lanes &= !lanes;
+                            }
                         }
                         warp.registers.retain(|&(_, lanes, _)| lanes != 0);
                         warp.registers.push((register, lanes, done));
@@ -1217,21 +1335,37 @@ fn fast_dynamic_sm_frontier(
             // Share Flat-mode dependency latency arithmetic with full replay.
             // Cache queues and native async visibility are still not modeled here.
             let write = (mask != 0 && slot.op_class() != OpClass::AsyncCopyCommit)
-                .then_some(control.write_barrier()).flatten();
-            if let Some(ready) = crate::issue::data_ready_time(inst.kind, &[], now, params, None, write, false)? {
-                if let Some(barrier) = write { warp.barriers[barrier.index()] = warp.barriers[barrier.index()].max(ready); }
+                .then_some(control.write_barrier())
+                .flatten();
+            if let Some(ready) =
+                crate::issue::data_ready_time(inst.kind, &[], now, params, None, write, false)?
+            {
+                if let Some(barrier) = write {
+                    warp.barriers[barrier.index()] = warp.barriers[barrier.index()].max(ready);
+                }
             }
-            if mask != 0 && let Some(barrier) = control.read_barrier() {
-                warp.barriers[barrier.index()] = warp.barriers[barrier.index()].max(fast_cycle_add(now, params.read_barrier_latency())?);
+            if mask != 0
+                && let Some(barrier) = control.read_barrier()
+            {
+                warp.barriers[barrier.index()] = warp.barriers[barrier.index()]
+                    .max(fast_cycle_add(now, params.read_barrier_latency())?);
             }
-            let suppress = mask != 0 && projection.is_some()
+            let suppress = mask != 0
+                && projection.is_some()
                 && sm120_alpha_scalar_control_stall_suppressed(slot.opcode_text());
-            let stall = if suppress { 1 } else { u64::from(control.stall()).max(1) };
+            let stall = if suppress {
+                1
+            } else {
+                u64::from(control.stall()).max(1)
+            };
             warp.ready = fast_cycle_add(now, stall.max(if control.yield_flag() { 2 } else { 1 }))?;
             warp.completion = warp.completion.max(done);
             match inst.kind {
                 AccessKind::NonMemory | AccessKind::PredicatedOffMemory => {}
-                AccessKind::GlobalAsyncCopy { .. } => { memory_records += 1; async_records += 1; }
+                AccessKind::GlobalAsyncCopy { .. } => {
+                    memory_records += 1;
+                    async_records += 1;
+                }
                 _ => memory_records += 1,
             }
             warp.next += 1;
@@ -1240,10 +1374,23 @@ fn fast_dynamic_sm_frontier(
                 barrier_server = fast_cycle_add(barrier_server.max(now), interval)?;
                 warp.barrier_arrival = barrier_server;
                 warp.waiting_at_barrier = true;
-            } else if warp.next == warp.warp.insts.len() { warp.done = true; }
-            warp.slot = warp.warp.insts.get(warp.next).map(|next| schedule.issue_slot(u64::from(next.pc))
-                .ok_or_else(|| ReplayError::FastFrontier { detail: "fast schedule PC missing".to_owned() })).transpose()?;
-            held[smsp] = (!warp.done && !warp.waiting_at_barrier && !control.yield_flag()).then_some(index);
+            } else if warp.next == warp.warp.insts.len() {
+                warp.done = true;
+            }
+            warp.slot = warp
+                .warp
+                .insts
+                .get(warp.next)
+                .map(|next| {
+                    schedule.issue_slot(u64::from(next.pc)).ok_or_else(|| {
+                        ReplayError::FastFrontier {
+                            detail: "fast schedule PC missing".to_owned(),
+                        }
+                    })
+                })
+                .transpose()?;
+            held[smsp] =
+                (!warp.done && !warp.waiting_at_barrier && !control.yield_flag()).then_some(index);
         }
         for &block in &active {
             let state = &mut block_states[block];
@@ -1251,8 +1398,12 @@ fn fast_dynamic_sm_frontier(
             if members.iter().any(|w| w.waiting_at_barrier)
                 && members.iter().all(|w| w.done || w.waiting_at_barrier)
             {
-                let arrival = members.iter().filter(|w| w.waiting_at_barrier)
-                    .map(|w| w.barrier_arrival).max().unwrap_or(now);
+                let arrival = members
+                    .iter()
+                    .filter(|w| w.waiting_at_barrier)
+                    .map(|w| w.barrier_arrival)
+                    .max()
+                    .unwrap_or(now);
                 let release = fast_cycle_add(arrival, 1)?;
                 state.rearm = fast_cycle_add(arrival, barrier_rearm)?;
                 for warp in members.iter_mut().filter(|w| w.waiting_at_barrier) {
@@ -1817,12 +1968,21 @@ pub fn sm120_fast_stage_for_trace(
     let mut masks = BTreeMap::new();
     for (launch_index, block) in td.validated_threadblocks_in_launch_order(loc)? {
         for warp in block.warps() {
-            let Some(slot) = warp.instructions().find_map(|inst| inst.warpid_sm()) else { continue };
-            let lane_masks = warp.instructions().map(|inst| {
-                if inst.predicate_mask_present() { inst.predicate_on_mask() }
-                else if inst.active_mask_present() { inst.active_mask() }
-                else { u32::MAX }
-            }).collect::<Vec<_>>();
+            let Some(slot) = warp.instructions().find_map(|inst| inst.warpid_sm()) else {
+                continue;
+            };
+            let lane_masks = warp
+                .instructions()
+                .map(|inst| {
+                    if inst.predicate_mask_present() {
+                        inst.predicate_on_mask()
+                    } else if inst.active_mask_present() {
+                        inst.active_mask()
+                    } else {
+                        u32::MAX
+                    }
+                })
+                .collect::<Vec<_>>();
             masks.insert((launch_index, slot), lane_masks);
         }
     }
@@ -1864,34 +2024,63 @@ pub fn sm120_fast_stage_for_trace(
     let mut barrier_records = 0_u64;
     let mut resource_class_counts: BTreeMap<String, u64> = BTreeMap::new();
     let add = |counter: &'static str, value: &mut u64, amount: u64| {
-        *value = value.checked_add(amount).ok_or_else(|| ReplayError::FastFrontier {
-            detail: format!("{counter} overflows u64"),
-        })?;
+        *value = value
+            .checked_add(amount)
+            .ok_or_else(|| ReplayError::FastFrontier {
+                detail: format!("{counter} overflows u64"),
+            })?;
         Ok::<(), ReplayError>(())
     };
 
     for blocks in extracted.per_sm_blocks.values() {
-        add("blocks_seen", &mut summary.blocks_seen, u64::try_from(blocks.len()).map_err(|_| ReplayError::FastFrontier { detail: "block count exceeds u64".to_owned() })?)?;
+        add(
+            "blocks_seen",
+            &mut summary.blocks_seen,
+            u64::try_from(blocks.len()).map_err(|_| ReplayError::FastFrontier {
+                detail: "block count exceeds u64".to_owned(),
+            })?,
+        )?;
         for block in blocks {
-            add("warps_seen", &mut summary.warps_seen, u64::try_from(block.warps.len()).unwrap_or(u64::MAX))?;
-            add("eligible_warps", &mut summary.eligible_warps, u64::try_from(block.warps.len()).unwrap_or(u64::MAX))?;
-            add("candidate_regions", &mut summary.candidate_regions, u64::try_from(block.warps.len()).unwrap_or(u64::MAX))?;
+            add(
+                "warps_seen",
+                &mut summary.warps_seen,
+                u64::try_from(block.warps.len()).unwrap_or(u64::MAX),
+            )?;
+            add(
+                "eligible_warps",
+                &mut summary.eligible_warps,
+                u64::try_from(block.warps.len()).unwrap_or(u64::MAX),
+            )?;
+            add(
+                "candidate_regions",
+                &mut summary.candidate_regions,
+                u64::try_from(block.warps.len()).unwrap_or(u64::MAX),
+            )?;
             for warp in &block.warps {
                 for instruction in &warp.insts {
-                    let class_name = schedule.issue_slot(u64::from(instruction.pc)).map(|slot| match slot.pipeline_class() {
-                        PipelineClass::DispatchOnly => "dispatch",
-                        PipelineClass::Branch { .. } => "branch",
-                        PipelineClass::Barrier { .. } => "barrier",
-                        PipelineClass::Tensor { .. } => "tensor",
-                        PipelineClass::Sfu { .. } => "uniform_sfu",
-                        PipelineClass::ScalarAlu { .. } => "scalar",
-                    }).unwrap_or("unknown");
-                    *resource_class_counts.entry(class_name.to_owned()).or_default() += 1;
+                    let class_name = schedule
+                        .issue_slot(u64::from(instruction.pc))
+                        .map(|slot| match slot.pipeline_class() {
+                            PipelineClass::DispatchOnly => "dispatch",
+                            PipelineClass::Branch { .. } => "branch",
+                            PipelineClass::Barrier { .. } => "barrier",
+                            PipelineClass::Tensor { .. } => "tensor",
+                            PipelineClass::Sfu { .. } => "uniform_sfu",
+                            PipelineClass::ScalarAlu { .. } => "scalar",
+                        })
+                        .unwrap_or("unknown");
+                    *resource_class_counts
+                        .entry(class_name.to_owned())
+                        .or_default() += 1;
                 }
             }
         }
         let (frontier, memory, async_count, barriers) = fast_dynamic_sm_frontier(
-            blocks, schedule, &masks, &params, extracted.shared_memory_residency,
+            blocks,
+            schedule,
+            &masks,
+            &params,
+            extracted.shared_memory_residency,
         )?;
         summary.maximum_exact_final_cycle = summary.maximum_exact_final_cycle.max(frontier);
         memory_records = memory_records.saturating_add(memory);
@@ -1902,14 +2091,13 @@ pub fn sm120_fast_stage_for_trace(
     // branches present in the static function table.
     let line_cycles = extracted.front_end.compulsory_instruction_read_sectors;
     if alpha_config.front_end_line_cycles_denominator == 0 {
-        return Err(ReplayError::FastFrontier { detail: "front-end line denominator is zero".to_owned() });
+        return Err(ReplayError::FastFrontier {
+            detail: "front-end line denominator is zero".to_owned(),
+        });
     }
     let scaled_lines = line_cycles
         .checked_mul(alpha_config.front_end_line_cycles_numerator)
-        .and_then(|value| {
-            value
-                .checked_add(alpha_config.front_end_line_cycles_denominator - 1)
-        })
+        .and_then(|value| value.checked_add(alpha_config.front_end_line_cycles_denominator - 1))
         .ok_or_else(|| ReplayError::FastFrontier {
             detail: "front-end line penalty overflows u64".to_owned(),
         })?
@@ -1928,10 +2116,19 @@ pub fn sm120_fast_stage_for_trace(
         .ok_or_else(|| ReplayError::FastFrontier {
             detail: "front-end-adjusted SM120 stage cycles overflow u64".to_owned(),
         })?;
-    summary.refusal_reasons.insert("stage_resource_classes".to_owned(), resource_class_counts.values().sum());
-    summary.refusal_reasons.insert("memory_service_pending".to_owned(), memory_records);
-    summary.refusal_reasons.insert("async_completion_pending".to_owned(), async_records);
-    summary.refusal_reasons.insert("barrier_visibility_pending".to_owned(), barrier_records);
+    summary.refusal_reasons.insert(
+        "stage_resource_classes".to_owned(),
+        resource_class_counts.values().sum(),
+    );
+    summary
+        .refusal_reasons
+        .insert("memory_service_pending".to_owned(), memory_records);
+    summary
+        .refusal_reasons
+        .insert("async_completion_pending".to_owned(), async_records);
+    summary
+        .refusal_reasons
+        .insert("barrier_visibility_pending".to_owned(), barrier_records);
     Ok(summary)
 }
 
@@ -2968,6 +3165,106 @@ fn checked_collection_len(collection: &'static str, len: usize) -> Result<u64, R
     u64::try_from(len).map_err(|_| ReplayError::CollectionLengthOutOfRange { collection, len })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct TmaObservationKey {
+    cta: [u32; 3],
+    warp: i32,
+    instruction: usize,
+    pc: u32,
+    function: i32,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TmaObservation {
+    bytes: Option<u64>,
+    is_load: bool,
+    is_store: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct TmaSidecarRow {
+    device_id: i64,
+    kernel_id: i32,
+    cta: [u32; 3],
+    warp_id: i32,
+    warp_instruction_index: usize,
+    pc: u64,
+    function_id: i32,
+    opcode: String,
+    byte_count: Option<u64>,
+}
+
+/// Stream the producer's per-instruction TMA observations for one launch.
+/// The large address arrays in the JSONL are intentionally ignored; replay
+/// needs only the byte count and opcode identity. Missing sidecars are a typed
+/// unavailable observation rather than a synthetic payload witness.
+fn load_tma_observations(
+    root: &Path,
+    device_id: i64,
+    kernel_id: i32,
+) -> Result<BTreeMap<TmaObservationKey, TmaObservation>, ReplayError> {
+    let path = root.join("extra_info/tma_trace.jsonl");
+    let file = match File::open(&path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(BTreeMap::new()),
+        Err(error) => {
+            return Err(ReplayError::TmaSidecar {
+                path,
+                message: error.to_string(),
+            });
+        }
+    };
+    let mut observations = BTreeMap::new();
+    for (line_index, line) in BufReader::new(file).lines().enumerate() {
+        let line = line.map_err(|error| ReplayError::TmaSidecar {
+            path: path.clone(),
+            message: format!("line {}: {error}", line_index + 1),
+        })?;
+        let row: TmaSidecarRow =
+            serde_json::from_str(&line).map_err(|error| ReplayError::TmaSidecar {
+                path: path.clone(),
+                message: format!("line {}: {error}", line_index + 1),
+            })?;
+        if row.device_id != device_id || row.kernel_id != kernel_id {
+            continue;
+        }
+        let pc = u32::try_from(row.pc).map_err(|_| ReplayError::TmaSidecar {
+            path: path.clone(),
+            message: format!("line {} PC exceeds u32", line_index + 1),
+        })?;
+        let head = opcode_head(&row.opcode);
+        let observation = TmaObservation {
+            bytes: row.byte_count,
+            is_load: head == "UTMALDG",
+            is_store: head == "UTMASTG",
+        };
+        if !observation.is_load && !observation.is_store {
+            return Err(ReplayError::TmaSidecar {
+                path,
+                message: format!(
+                    "line {} has unsupported opcode {:?}",
+                    line_index + 1,
+                    row.opcode
+                ),
+            });
+        }
+        let key = TmaObservationKey {
+            cta: row.cta,
+            warp: row.warp_id,
+            instruction: row.warp_instruction_index,
+            pc,
+            function: row.function_id,
+        };
+        if observations.insert(key, observation).is_some() {
+            return Err(ReplayError::TmaSidecar {
+                path,
+                message: format!("line {} duplicates instruction identity", line_index + 1),
+            });
+        }
+    }
+    Ok(observations)
+}
+
 /// Decode one launch into per-SM block replays on the traced placement.
 /// `decode_sectors` selects the L1-mode classification (lane decode +
 /// unique-sector expansion) over the flat-mode class check.
@@ -3047,6 +3344,15 @@ fn extract_per_sm_blocks(
         sectors_decoded: decode_sectors,
         ..TraceMetrics::default()
     };
+    let tma_observations = if !decode_sectors && schedule.arch == ArchId::Sm120 {
+        Some(load_tma_observations(
+            td.root(),
+            loc.device_id(),
+            loc.kernel().id,
+        )?)
+    } else {
+        None
+    };
 
     for path in td.threadblock_paths(loc)? {
         let tb = td.validated_threadblock(&path)?;
@@ -3070,6 +3376,7 @@ fn extract_per_sm_blocks(
             }
         }
         let mut block_sm: Option<i32> = None;
+        let block_id = tb.block_id();
         let mut seen_warp_slots = BTreeSet::new();
         let mut warps = Vec::with_capacity(tb.warps().len());
         for warp in tb.warps() {
@@ -3126,6 +3433,28 @@ fn extract_per_sm_blocks(
                     });
                 }
                 instruction_sectors.insert((inst.function_unique_id(), inst.pc() / 32));
+                if !decode_sectors
+                    && let Some(observations) = tma_observations.as_ref()
+                    && preflight.is_none()
+                    && schedule
+                        .issue_slot(u64::from(inst.pc()))
+                        .is_some_and(|slot| {
+                            matches!(opcode_head(slot.opcode_text()), "UTMALDG" | "UTMASTG")
+                        })
+                {
+                    let key = TmaObservationKey {
+                        cta: block_id,
+                        warp: warp_id,
+                        instruction: record_ix,
+                        pc: inst.pc(),
+                        function: inst.function_unique_id(),
+                    };
+                    trace_metrics.observe_tma_sidecar_payload(
+                        observations
+                            .get(&key)
+                            .and_then(|observation| observation.bytes),
+                    )?;
+                }
                 if let Some(sm) = inst.sm_id() {
                     match block_sm {
                         None => block_sm = Some(sm),
@@ -3176,6 +3505,8 @@ fn extract_per_sm_blocks(
                         warp_id,
                         record_ix,
                         &mut sectors,
+                        block_id,
+                        tma_observations.as_ref(),
                     )?
                 };
                 let active_mask_present = inst.active_mask_present();
@@ -3245,8 +3576,13 @@ fn extract_per_sm_blocks(
                 insts.push(ReplayInst {
                     pc: inst.pc(),
                     kind,
-                    lane_mask: if inst.predicate_mask_present() { inst.predicate_on_mask() }
-                        else if inst.active_mask_present() { inst.active_mask() } else { u32::MAX },
+                    lane_mask: if inst.predicate_mask_present() {
+                        inst.predicate_on_mask()
+                    } else if inst.active_mask_present() {
+                        inst.active_mask()
+                    } else {
+                        u32::MAX
+                    },
                 });
             }
             branch_successors.finish(&mut trace_metrics.branch_targets)?;
@@ -4204,10 +4540,7 @@ fn replay_kernel_with_schedule_and_l2_and_candidates_with_payload_events(
                     slot.op_class(),
                     OpClass::AsyncCopyCommit | OpClass::AsyncCopyWait
                 )
-                || matches!(
-                    opcode_head(slot.opcode_text()),
-                    "UTMALDG" | "UTMASTG"
-                )
+                || matches!(opcode_head(slot.opcode_text()), "UTMALDG" | "UTMASTG")
         });
     let decode_sectors = !matches!(mode, ReplayMemMode::Flat) || alpha_flat_sector_decode;
     let ExtractedKernel {
@@ -4647,10 +4980,7 @@ fn require_sm86_special_role(
         .get(&u64::from(pc))
         .ok_or(ReplayError::UnsupportedMemoryPath { arch, class })?;
     let head = opcode_head(&slot.opcode_text);
-    if alpha_sm120
-        && class == pb::MemoryOpClass::AsyncCopy
-        && head == "LDGSTS"
-    {
+    if alpha_sm120 && class == pb::MemoryOpClass::AsyncCopy && head == "LDGSTS" {
         // Alpha treats an observed async/TMA source as a flat global demand;
         // no SM86 LDGSTS completion or cache route is attached.
         return Ok(());
@@ -4777,7 +5107,9 @@ enum StaticMemoryRoute {
     /// Unqualified ATOM/RED use PTX generic addressing. Their dynamic address
     /// operand can resolve to either global or shared memory, so the static
     /// mnemonic supplies the operation class but not one fixed route.
-    GenericAtomic { class: pb::MemoryOpClass },
+    GenericAtomic {
+        class: pb::MemoryOpClass,
+    },
     UnsupportedClass(pb::MemoryOpClass),
 }
 
@@ -4942,9 +5274,11 @@ fn validate_static_memory_route(
             if matches!(route, ReplayMemoryRoute::Global | ReplayMemoryRoute::Shared) {
                 Ok(())
             } else {
-                Err(contextualize(MemoryRouteError::StaticGenericAtomicRouteInvalid {
-                    got: route.canonical_space(),
-                }))
+                Err(contextualize(
+                    MemoryRouteError::StaticGenericAtomicRouteInvalid {
+                        got: route.canonical_space(),
+                    },
+                ))
             }
         }
         Some(StaticMemoryRoute::UnsupportedClass(expected)) if expected != meta.op_class => {
@@ -5180,6 +5514,8 @@ fn classify_compact_flat(
     warp_id: i32,
     record_ix: usize,
     sector_arena: &mut Vec<i64>,
+    block_id: [u32; 3],
+    tma_observations: Option<&BTreeMap<TmaObservationKey, TmaObservation>>,
 ) -> Result<AccessKind, ReplayError> {
     let Some(preflight) = preflight else {
         if arch == ArchId::Sm120
@@ -5190,21 +5526,42 @@ fn classify_compact_flat(
         {
             // TMA operands are carried by tensor-map/mbarrier sidecars rather
             // than ordinary dynamic address operands in the compact trace.
-            // Keep a typed full-replay async transaction using the observed
-            // P6 8-KiB payload class; this is a logical completion work token,
-            // not a native engine timestamp.
+            // Consume the matching per-instruction payload observation when
+            // present. A missing sidecar is explicitly unavailable and carries
+            // zero logical completion work; it no longer fabricates 8 KiB.
+            let key = TmaObservationKey {
+                cta: block_id,
+                warp: warp_id,
+                instruction: record_ix,
+                pc,
+                function: warp.function_unique_id(),
+            };
+            let payload_bytes = tma_observations
+                .and_then(|observations| observations.get(&key))
+                .and_then(|observation| observation.bytes)
+                .unwrap_or(0);
+            let payload_work = u32::try_from(payload_bytes).map_err(|_| {
+                ReplayError::AsyncCopyCompletionWorkOutOfRange {
+                    path: path.to_path_buf(),
+                    warp_id,
+                    record_ix,
+                    completion_work: payload_bytes,
+                    max_completion_work: ASYNC_COPY_COMPLETION_VALUE_MASK,
+                }
+            })?;
+            let completion_work = encode_async_copy_payload_work(payload_work).ok_or(
+                ReplayError::AsyncCopyCompletionWorkOutOfRange {
+                    path: path.to_path_buf(),
+                    warp_id,
+                    record_ix,
+                    completion_work: payload_bytes,
+                    max_completion_work: ASYNC_COPY_COMPLETION_VALUE_MASK,
+                },
+            )?;
             return Ok(AccessKind::GlobalAsyncCopy {
                 off: 0,
                 len: 0,
-                completion_work: encode_async_copy_payload_work(8192).ok_or(
-                    ReplayError::AsyncCopyCompletionWorkOutOfRange {
-                        path: path.to_path_buf(),
-                        warp_id,
-                        record_ix,
-                        completion_work: 8192,
-                        max_completion_work: ASYNC_COPY_COMPLETION_VALUE_MASK,
-                    },
-                )?,
+                completion_work,
                 // TMA tensor-map transfers use the distinct logical bypass
                 // service arm in full replay. This is a calibration-domain
                 // route, not a physical cache policy claim.

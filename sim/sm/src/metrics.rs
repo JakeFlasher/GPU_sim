@@ -350,6 +350,12 @@ pub struct TraceMetrics {
     /// Actual per-lane successors, independent of branch predicates.
     pub branch_targets: BranchTargets,
     pub sectors_decoded: bool,
+    /// TMA payload observations joined from the producer sidecar. Missing
+    /// sidecar records remain explicitly unavailable; these counters never
+    /// enter NCU comparison or synthesize completion timestamps.
+    pub tma_sidecar_records_observed: u64,
+    pub tma_sidecar_payload_bytes_observed: u64,
+    pub tma_sidecar_records_missing: u64,
 }
 
 /// Warp-local control-transfer observations. Counts include fallthrough;
@@ -575,6 +581,24 @@ fn decoded_sector_stats(kind: AccessKind, sector_arena: &[i64]) -> Option<(u64, 
 }
 
 impl TraceMetrics {
+    pub(crate) fn observe_tma_sidecar_payload(
+        &mut self,
+        payload_bytes: Option<u64>,
+    ) -> Result<(), crate::IssueError> {
+        add(
+            &mut self.tma_sidecar_records_observed,
+            u64::from(payload_bytes.is_some()),
+        )?;
+        add(
+            &mut self.tma_sidecar_payload_bytes_observed,
+            payload_bytes.unwrap_or(0),
+        )?;
+        add(
+            &mut self.tma_sidecar_records_missing,
+            u64::from(payload_bytes.is_none()),
+        )?;
+        Ok(())
+    }
     /// Lift the existing trace metrics into the factorized latent contract.
     /// Dynamic route identity remains unknown. The aggregate candidate-class
     /// vocabulary is not a single per-event route and cannot populate it.
@@ -1312,4 +1336,3 @@ impl SmActivity {
         }
     }
 }
-

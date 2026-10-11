@@ -831,8 +831,7 @@ fn classify_memory_payload_contract(
         SHARED_MEMORY_SPLIT_TRACE_CONTRACT_ID => {
             MemoryPayloadContract::AddressCarryingSharedMemorySplitV2
         }
-        LDGSTS_DESTINATION_TRACE_CONTRACT_ID
-        | SM120_LDGSTS_DESTINATION_TRACE_CONTRACT_ID => {
+        LDGSTS_DESTINATION_TRACE_CONTRACT_ID | SM120_LDGSTS_DESTINATION_TRACE_CONTRACT_ID => {
             MemoryPayloadContract::AddressCarryingLdgstsDestinationV3
         }
         _ => {
@@ -2458,8 +2457,9 @@ impl ValidatedMemoryInstruction {
                 None
             } else {
                 Some(
-                    pb::InstructionCacheOp::try_from(i32::from(self.cache_op - 1))
-                        .unwrap_or_else(|_| unreachable!("validated cache operator escaped wire enum")),
+                    pb::InstructionCacheOp::try_from(i32::from(self.cache_op - 1)).unwrap_or_else(
+                        |_| unreachable!("validated cache operator escaped wire enum"),
+                    ),
                 )
             },
             and_mask: u32::from(self.meta.has_effective_lanes()),
@@ -2559,6 +2559,10 @@ pub struct ValidatedWarp {
 }
 
 impl ValidatedWarp {
+    pub const fn function_unique_id(&self) -> i32 {
+        self.function_unique_id
+    }
+
     fn from_message(
         map_key: i32,
         warp: pb::Warp,
@@ -2779,9 +2783,7 @@ impl ValidatedWarp {
                         route,
                         meta.and_mask != 0,
                     ),
-                    cache_op: meta
-                        .cache_op
-                        .map_or(0, |cache_op| cache_op as u8 + 1),
+                    cache_op: meta.cache_op.map_or(0, |cache_op| cache_op as u8 + 1),
                 });
                 memory_index
             } else {
@@ -2980,8 +2982,9 @@ impl ValidatedWarp {
     ) -> ValidatedSectorPlan<'a> {
         match memory.sectors.error_phase {
             CompactSectorPlan::READY => {
-                let start = usize::try_from(memory.sectors.offset_or_error)
-                    .unwrap_or_else(|_| unreachable!("validated sector arena offset escaped usize"));
+                let start = usize::try_from(memory.sectors.offset_or_error).unwrap_or_else(|_| {
+                    unreachable!("validated sector arena offset escaped usize")
+                });
                 let end = match start.checked_add(usize::from(memory.sectors.len)) {
                     Some(end) => end,
                     None => unreachable!("validated sector span overflowed"),
