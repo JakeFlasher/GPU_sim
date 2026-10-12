@@ -1,11 +1,11 @@
 # SimBench-BW canonical roster.
 #
-# Exactly 72 rows. Schema: schemas/roster.schema.json.
+# Workload inputs for CUDA builds and captures.
 #
 # Maintenance discipline:
 # - Adding or removing a row is a schema-version-relevant change; update the
 #   schema_version field at the top and any consumer whose cached column set
-#   depends on row count (for example the full-corpus replay driver).
+#   depends on row count.
 # - Per-row tier drives the kernel build target set in common.mk
 #   (arch_gate -> ARCH_GATE tokens).
 # - primary_subsystems and secondary_subsystems use the S1-S20 identifiers
@@ -756,6 +756,29 @@ probe_dependencies = []
 status = "scaffold"
 wave = "6"
 split = "calibration"
+
+[[rows]]
+slug = "register_spill_local_mem"
+level = "L1"
+domain = "micro"
+family = "register"
+primary_precision = "FP32"
+primary_subsystems = ["S15", "S16", "S12"]
+secondary_subsystems = ["S20"]
+arch_gate = ["sm_86", "sm_90a", "sm_120"]
+tier = "P"
+trace_budget_mib = 32
+walltime_target_ms = 0.04
+sm_meaningful = "Y"
+deterministic = "D"
+reference_family = "mma_microbench"
+reference_type = "fp32_gpu"
+seed_policy = { kind = "fixed", seed = 42 }
+citation = "Register banks + .local traffic"
+probe_dependencies = []
+status = "scaffold"
+wave = "6"
+split = "holdout"
 
 [[rows]]
 slug = "local_dynamic_index_array"
@@ -1973,6 +1996,29 @@ wave = "6"
 split = "calibration"
 
 [[rows]]
+slug = "vendor_gemm_cublas"
+level = "L1"
+domain = "control"
+family = "vendor_cublas"
+primary_precision = "BF16"
+primary_subsystems = ["S2"]
+secondary_subsystems = ["S7", "S8", "S15"]
+arch_gate = ["sm_86", "sm_90a", "sm_120"]
+tier = "control"
+trace_budget_mib = 64
+walltime_target_ms = 0.05
+sm_meaningful = "N"
+deterministic = "D"
+reference_family = "control"
+reference_type = "cpu"
+seed_policy = { kind = "fixed", seed = 42 }
+citation = "cuBLAS BF16 GEMM realism control; migrated from historical AI-kernel lineage/gemm_cublas.cu"
+probe_dependencies = []
+status = "scaffold"
+wave = "6"
+split = "calibration"
+
+[[rows]]
 slug = "vendor_sgemm_cublas"
 level = "L1"
 domain = "control"
@@ -1990,6 +2036,29 @@ reference_family = "control"
 reference_type = "cpu"
 seed_policy = { kind = "fixed", seed = 42 }
 citation = "cuBLAS FP32 GEMM realism control; CUBLAS_PEDANTIC_MATH forces the FFMA SIMT path and keeps the vendor baseline trace parser-clean"
+probe_dependencies = []
+status = "scaffold"
+wave = "6"
+split = "calibration"
+
+[[rows]]
+slug = "vendor_sgemm_strided_batched_cublas"
+level = "L1"
+domain = "control"
+family = "vendor_cublas"
+primary_precision = "FP32"
+primary_subsystems = ["S2"]
+secondary_subsystems = ["S7", "S8", "S15"]
+arch_gate = ["sm_86", "sm_90a", "sm_120"]
+tier = "control"
+trace_budget_mib = 64
+walltime_target_ms = 0.05
+sm_meaningful = "N"
+deterministic = "D"
+reference_family = "control"
+reference_type = "cpu"
+seed_policy = { kind = "fixed", seed = 42 }
+citation = "cuBLAS FP32 strided-batched GEMM realism control; cublasSgemmStridedBatched under CUBLAS_PEDANTIC_MATH forces FFMA SIMT path (no HMMA, no TF32) so the trace stays clean under the canonical NVBit parser; serves as the second vendor_baselines slug for the submission-track split-by-slug invariant"
 probe_dependencies = []
 status = "scaffold"
 wave = "6"

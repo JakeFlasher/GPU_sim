@@ -44,12 +44,7 @@ from ..core import (
     BenchmarkConfig,
     EvaluationStatus,
 )
-from ..driver import (
-    CAPTURE_REQUEST_ENV,
-    CaptureAdapterError,
-    ProblemPackager,
-    handle_capture_request,
-)
+from ..driver import ProblemPackager
 
 console = Console(stderr=True)
 
@@ -71,9 +66,7 @@ def _normalise_definition_for_pydantic(
     ``Definition`` Pydantic model declares those fields as
     ``Optional[NonEmptyString]`` (empty string fails validation;
     ``None`` is the documented sentinel for absence). Normalise
-    here so the CLI accepts the upstream data verbatim. Mirrors
-    the scaffold-side normalizer at
-    ``scripts/baselines_scaffold/validate.py:_normalise_definition_for_pydantic``.
+    here so the CLI accepts the upstream data verbatim.
     """
     normalised = dict(definition_dict)
     for field in _DEFINITION_OPTIONAL_NONEMPTY_FIELDS:
@@ -300,52 +293,6 @@ def cli(
         raise click.ClickException(
             "Provide PROBLEM_DIR with solution.json or --solution"
         )
-
-    # The reference-capture adapter is selected only by a machine-readable
-    # request file in the environment.  Keeping this off the application argv
-    # lets the capture consumer forward the matrix argv byte-for-byte (including
-    # logical workload identity) without inventing a shape argument.  When the
-    # variable is absent, execution continues on the canonical judge path below.
-    capture_request_file = os.environ.get(CAPTURE_REQUEST_ENV)
-    if capture_request_file:
-        executable = Path(sys.argv[0]).expanduser().resolve()
-        if not executable.is_file():
-            executable = Path(__file__).resolve()
-        try:
-            outcome = handle_capture_request(
-                request_file=Path(capture_request_file),
-                definition_file=definition_file,
-                workload_file=workload_file,
-                solution_file=solution_file,
-                config_file=config_file,
-                compile_timeout=compile_timeout,
-                timeout=timeout,
-                adapter_executable=executable,
-            )
-        except CaptureAdapterError as exc:
-            raise click.ClickException(
-                f"capture adapter refused [{exc.code}] {exc.detail}"
-            ) from exc
-
-        if outcome["action"] == "execute":
-            if verbose and outcome.get("stderr"):
-                console.print(f"[dim]{outcome['stderr']}[/dim]")
-            rendered = outcome["result"]
-            exit_code = int(outcome.get("returncode", 1))
-            if rendered.get("status") != "captured" and exit_code == 0:
-                exit_code = 1
-        else:
-            rendered = outcome["manifest"]
-            exit_code = 0
-        if json_output:
-            print(json.dumps(rendered, sort_keys=True, allow_nan=False))
-        else:
-            console.print(
-                f"[green]Capture {outcome['action']}:[/green] {outcome['status']}"
-            )
-        if exit_code:
-            raise click.exceptions.Exit(exit_code)
-        return
 
     # Load data models
     definition = _load_definition(definition_file)

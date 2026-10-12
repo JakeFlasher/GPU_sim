@@ -27,11 +27,21 @@ identity joins and 11,432 ordered fallbacks) with no unmatched rows.  NCU
 values remain comparison targets only; native async completion timestamps and
 proprietary physical topology remain explicit gaps.
 
+The post-cleanup corpus driver replayed all **339** recursive trace roots
+(327 canonical workload rows plus 12 controls) in the required order: **339/339
+full** and **339/339 fast**, with **11,558 launches** in each mode and no
+failures.  The driver-boundary wall totals were 788.418 s full and 640.985 s
+fast; these are replay-process measurements, not bare-metal or NCU timing
+claims.  Outputs are under
+`/dev/shm/sm120_rtx_5090_work/cleanup_20261012/replay_all/summary.json`.
+NCU was not supplied to this replay.
+
 ## Active implementation
 
 - `sim-run --sm120-alpha --mode flat` is the primary full replay.
 - `sim-run --sm120-alpha --fast-frontier-only` is complementary diagnostics.
-- `tools/sm120_replay_bench.py` drives complete-corpus replay and joins.
+- `tools/sm120_replay_bench.py` joins replay rows with independent observations.
+- `tools/sm120_corpus_replay.py` runs every recursive trace full first, then fast, without NCU inputs.
 - `tools/sm120_trace_features.py`, `sm120_async_state_model.py`,
   `sm120_dependency_features.py`, and `sm120_memory_service_model.py` provide
   conservative trace-derived features and typed service envelopes.

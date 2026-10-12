@@ -18,7 +18,10 @@ Canonical recursive replay completes 327/327 captures and 11,529/11,529
 launches in both modes.  The trace-scoped sidecar index joins 1,932 TMA rows
 and 402,208 synchronization rows with zero missing joins or payload-byte
 fields.  The corrected unit-aware comparator joins every launch pair with no
-unmatched rows.
+unmatched rows. The post-cleanup corpus driver replayed 339/339 full and
+339/339 fast roots (11,558 launches per mode; 327 canonical rows plus 12
+controls) with no failures. Outputs are under
+`/dev/shm/sm120_rtx_5090_work/cleanup_20261012/replay_all/`.
 
 Residual native limitations remain explicit: proprietary issue-port and cache
 policy details are not inferred, and native TMA/mbarrier completion timestamps

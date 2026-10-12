@@ -1,0 +1,38 @@
+schema_version = 1
+slug = "register_spill_local_mem"
+
+# Register-spill microbench. The spill phenomenon (the per-thread live set
+# forced to local memory) is controlled by the BUILD-TIME per-thread register
+# cap (Makefile SPILL_MAXREG; the -maxrregcount ladder enforced by
+# NOT by the runtime `live_regs` axis. The axes below
+# (warps / live_regs / iterations) set the WORK ENVELOPE only -- grid blocks,
+# dependency-chain length, and the seeded-tensor reference size
+# (total = warps * live_regs * iterations); they do not control register
+# pressure. `register_cap` is the build-variant axis that drives spill.
+
+[[timing_shapes]]
+name = "timing_00"
+axes = { warps = 4096, live_regs = 64, iterations = 256 }
+launch_config = { grid = [128, 1, 1], block = [256, 1, 1] }
+warm_up_iters = 5
+repeat_iters = 30
+
+[[trace_shapes]]
+name = "trace_00"
+axes = { warps = 64, live_regs = 16, iterations = 16 }
+launch_config = { grid = [4, 1, 1], block = [128, 1, 1] }
+predicted_bytes = 2621440
+estimator_source = "static"
+
+[[trace_shapes]]
+name = "trace_l2_accuracy_xl"
+axes = { warps = 64, live_regs = 32, iterations = 64 }
+launch_config = { grid = [8, 1, 1], block = [128, 1, 1] }
+predicted_bytes = 20971520
+estimator_source = "static"
+
+[[correctness_shapes]]
+name = "correctness_00"
+axes = { warps = 4, live_regs = 8, iterations = 4 }
+launch_config = { grid = [4, 1, 1], block = [32, 1, 1] }
+digest_kind = "hash"
