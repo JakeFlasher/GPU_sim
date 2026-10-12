@@ -6,6 +6,7 @@
 **Corpus:** `/root/sm120_rtx_5090_capture`
 **Replay workspace:** `/dev/shm/sm120_rtx_5090_work`  
 **Cleanup baseline:** `14b40f26`
+**Latest cleanup/replay commit:** `9bfd1a63`
 
 ## Alpha evidence policy
 
