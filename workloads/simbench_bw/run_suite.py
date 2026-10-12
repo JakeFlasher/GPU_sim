@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """SimBench-BW orchestrator.
 
+This producer supports workload-local correctness and regression utilities for
+kernel development, but those modes are not simulator acceptance evidence. The
+SM120 alpha lane uses real trace/timing capture and then the complete-corpus
+Rust replay path; NCU remains a post-replay comparison target.
+
 Dispatches per-kernel runs across the roster in one of four modes:
 
     correctness  Run the kernel binary + its correctness reference; compare outputs

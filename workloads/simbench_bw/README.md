@@ -15,5 +15,8 @@ Do not add local-label admission ledgers, fixture bundles, golden outputs, or
 small synthetic gates here.  Runtime parsers may reject malformed input, but
 those errors are implementation behavior rather than evidence gates.
 
+The producer's optional kernel-local correctness/regression modes are not
+simulator acceptance evidence and are not used by the SM120 alpha replay plan.
+
 The top-level roster and shape files describe workload inputs only.  The active
 simulator runbook is [`../../docs/runbook_host.md`](../../docs/runbook_host.md).
