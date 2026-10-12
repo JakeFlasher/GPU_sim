@@ -1,1 +1,0 @@
-{"kernel_name":"void rmsnorm_fwd_bf16(__nv_bfloat16 const*, __nv_bfloat16*, float const*, int, int, float)","grid_x":1024,"grid_y":1,"grid_z":1,"block_x":256,"block_y":1,"block_z":1,"shared_mem_static_bytes":1024,"shared_mem_dynamic_bytes":0,"regs_per_thread":24}

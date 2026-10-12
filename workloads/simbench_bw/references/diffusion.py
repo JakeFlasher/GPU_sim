@@ -56,7 +56,7 @@ FAMILY_NAME = "diffusion"
 # The roster declares `reference_type = "fp32_gpu"` for these rows
 # (the production path runs the FP32 reference on a separate GPU stream
 # rather than CPU); the family does NOT export a uniform
-# `REFERENCE_BACKEND` so `verify_coverage.check_reference_type_runtime`
+# `REFERENCE_BACKEND` so `the runtime reference path`
 # stays opt-out for this family. The Python reference body still
 # computes a deterministic FP32 anchor that the kernel must match
 # under the family's tolerance band.

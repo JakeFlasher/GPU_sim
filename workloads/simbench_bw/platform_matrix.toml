@@ -1,7 +1,7 @@
 # SimBench-BW platform validation matrix.
 #
 # Derived from roster.toml tier. P/P-strict -> both; H -> h100; B -> rtx_5090_blackwell.
-# verify_coverage.py --check-platform-matrix asserts every tier=P row is "both".
+# full-corpus replay consumes the declared platform matrix as workload metadata.
 
 schema_version = 1
 

@@ -13,7 +13,7 @@ Dispatches per-kernel runs across the roster in one of four modes:
                  exits with code 3 ("sampling_required") and writes a
                  trace_volume_exceeded.json sidecar.
     regression   Selective rerun based on a PR diff or explicit --kernel list;
-                 compares against workloads/simbench_bw/golden/.
+                 compares against the captured workload corpus.
 
 Startup is gated by a device-identity check via cudaGetDeviceProperties (through
 the local libcudart.so). The identity fields are written into every
@@ -7730,7 +7730,7 @@ SHARED_ASSET_PATTERNS = (
     "workloads/simbench_bw/common.mk",
     "workloads/simbench_bw/run_suite.py",
     "workloads/simbench_bw/validate.py",
-    "workloads/simbench_bw/verify_coverage.py",
+    "the full-corpus replay driver",
     "workloads/simbench_bw/trace_size_estimator.py",
     "workloads/simbench_bw/update_goldens.py",
 )

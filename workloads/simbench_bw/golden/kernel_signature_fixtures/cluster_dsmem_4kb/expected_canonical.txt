@@ -1,1 +1,0 @@
-{"kernel_name":"void cluster_remote_reduction(float const*, float*, int)","grid_x":16,"grid_y":1,"grid_z":1,"block_x":128,"block_y":1,"block_z":1,"shared_mem_static_bytes":4096,"shared_mem_dynamic_bytes":2048,"regs_per_thread":32}

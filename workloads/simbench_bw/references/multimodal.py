@@ -32,7 +32,7 @@ FAMILY_NAME = "multimodal"
 # R29 lands a pure-Python cross-attention reference for the one
 # covered row; the roster row is relabelled `reference_type = "cpu"`
 # in the same commit so this family opts into
-# `verify_coverage.py::check_reference_type_runtime`.
+# the runtime reference path.
 REFERENCE_BACKEND: str = "cpu"
 
 FAMILY_COVERS_SLUGS: tuple[str, ...] = (

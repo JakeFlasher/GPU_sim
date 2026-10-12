@@ -32,7 +32,7 @@ from _common import compare_with_tolerance, deterministic_seeded_tensor
 FAMILY_NAME = "embedding"
 
 # Declares that every slug in this family uses a pure-Python CPU
-# reference path. See `verify_coverage.py::check_reference_type_runtime`
+# reference path. See the runtime reference path
 # — a roster row with `reference_type != "cpu"` under this family would
 # fail the hook. Both embedding rows are already `reference_type = "cpu"`
 # in roster.toml.

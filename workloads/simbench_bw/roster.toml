@@ -5,7 +5,7 @@
 # Maintenance discipline:
 # - Adding or removing a row is a schema-version-relevant change; update the
 #   schema_version field at the top and any consumer whose cached column set
-#   depends on row count (for example verify_coverage.py --check-roster).
+#   depends on row count (for example the full-corpus replay driver).
 # - Per-row tier drives the kernel build target set in common.mk
 #   (arch_gate -> ARCH_GATE tokens).
 # - primary_subsystems and secondary_subsystems use the S1-S20 identifiers

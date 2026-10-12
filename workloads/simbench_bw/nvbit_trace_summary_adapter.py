@@ -6,7 +6,7 @@ Provides three surfaces consumed by `merge_evidence.py join-cupti-nvbit`,
 1. `compute_kernel_signature_sha256(inputs)` — production NVBit-side
    reference implementation of `workloads/simbench_bw/schemas/
    kernel_signature.spec.md`. Conformance-tested against every fixture
-   under `golden/kernel_signature_fixtures/` by
+   under `the captured workload corpus` by
    `tests/test_kernel_signature_conformance_nvbit_side.py`. The
    implementation mirrors the spec byte-for-byte: tuple-ordered field
    iteration, JSON canonical serialization with `ensure_ascii=False`
@@ -85,7 +85,7 @@ def _repo_relative_or_absolute(path: Path) -> str:
 # Production NVBit-side reference implementation of
 # `kernel_signature.spec.md`. Mirrors the spec's field order verbatim;
 # any drift is caught by the conformance test parametrized against
-# `golden/kernel_signature_fixtures/`.
+# `the captured workload corpus`.
 # ---------------------------------------------------------------------------
 
 KERNEL_SIGNATURE_FIELD_ORDER: tuple[str, ...] = (
@@ -117,7 +117,7 @@ def _spec_strict_escape_kernel_name(s: str) -> str:
     implementation `cupti_activity_collector.cu::json_escape_kernel_name`
     byte-for-byte; the cross-implementation conformance suites
     enforce this equivalence against every fixture under
-    `golden/kernel_signature_fixtures/`.
+    `the captured workload corpus`.
 
     Python's stdlib `json.dumps(s, ensure_ascii=False)` deviates from
     the spec by emitting RFC 8259's short escapes (`\\t`, `\\n`,

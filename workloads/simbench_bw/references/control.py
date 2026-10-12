@@ -38,7 +38,7 @@ from _common import compare_with_tolerance, deterministic_seeded_tensor
 FAMILY_NAME = "control"
 
 # Declares that every slug in this family uses a pure-Python CPU
-# reference path. `verify_coverage.py::check_reference_type_runtime`
+# reference path. the runtime reference path
 # reads this attribute and refuses roster drift — a row declaring
 # `reference_type = "fp32_gpu"` for a slug this family covers would
 # fail the check. R28-review closes the R27-review blocking
