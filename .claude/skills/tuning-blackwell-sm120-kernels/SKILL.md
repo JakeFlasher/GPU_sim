@@ -6,11 +6,11 @@ description: Handle an explicitly Blackwell-targeted CUDA capability or tuning q
 # Blackwell-targeted work
 
 Only select a Blackwell target when the task requires it. The active Blackwell target is SM120 on the RTX 5090; the SM86 lane remains a separate baseline and no cross-generation fallback is allowed.
-Use `references/NVIDIA_Manuals/blackwell_tuning/`, `blackwell_compatibility/`
-and `ptx_isa/`, and verify version-sensitive claims with current NVIDIA sources.
+Use the tracked `references/NVIDIA_Manuals/blackwell_tuning/`,
+`blackwell_compatibility/`, and `ptx_isa/` material, and verify version-sensitive
+claims with current NVIDIA sources.
 Do not assume SM100 and SM120 expose identical instructions or cluster limits.
 
-The inherited [historical notes](references/historical-notes.md) are opt-in
-context, not verified device capabilities or a default cloud target. The
-optional `.claude/knowledge/` card tree is absent here. Consult `docs/STATUS.md`
-before interpreting any local simulator output as Blackwell validation.
+The optional `.claude/knowledge/` card tree is absent here. Consult
+`docs/STATUS.md` before interpreting any local simulator output as a Blackwell
+capability or timing claim.

@@ -218,7 +218,7 @@ The scripts use three SOL (Speed-of-Light) roofline models:
 2. **Fused (`fused_sol_time_ms`)**: Intermediate tensors excluded from memory cost (assumed cached)
 3. **Fused+Prefetched**: Single roofline for entire graph with perfect overlap
 
-See [SOL_Guide.md](../SOL_Guide.md) for detailed explanation.
+See `../docs/SOL_GUIDE.md` for the retained methodology explanation.
 
 ---
 

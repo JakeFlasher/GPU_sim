@@ -235,7 +235,8 @@ Both compute `Σ model_io_elems` per layer:
 
 These always produce the same total, so fused and fused_prefetched runtime/cycles are identical.
 
-For discussion of multi-stream concurrency and PDL modeling implications, see [SOL_CONCURRENCY_AND_PDL.md](./SOL_CONCURRENCY_AND_PDL.md).
+Multi-stream concurrency and PDL implications are outside the retained
+simulator replay contract; evaluate them with the live workload measurements.
 
 ## Practical Guidance
 

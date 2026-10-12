@@ -114,7 +114,8 @@ bash scripts/run_tests.sh quick
 bash scripts/run_tests.sh
 ```
 
-See [`TESTING_GUIDE.md`](TESTING_GUIDE.md) for details.
+The retained examples above are the supported usage path; no separate testing
+guide is shipped in this checkout.
 
 ## Python API (snippets)
 

@@ -416,7 +416,6 @@ impl ArchId {
     /// TF32 m16n8k8 has a separate 32-cycle interval, with no static-site
     /// halving. The independent eight-accumulator probe approaches that
     /// cadence; its dependent-loop time is not result latency.
-    /// See workloads/research_probes/tf32_issue_probe/README.md.
     pub const fn tensor_issue_intervals(self) -> Capability<TensorIssueIntervals> {
         match self {
             Self::Sm86 => Capability::available(
@@ -1160,8 +1159,8 @@ pub struct TensorIssueIntervals {
     pub hmma_sparse_16832_f16_bf16: u64,
     pub imma_16816_s8: u64,
     /// Dense SM86 INT8 `IMMA.16832.S8.S8` initiation interval.  This is
-    /// distinct from the m16n8k16 INT8 form and is backed by the independent
-    /// eight-accumulator probe in workloads/research_probes/imma_issue_probe.
+    /// distinct from the m16n8k16 INT8 form and is backed by an independent
+    /// eight-accumulator throughput probe.
     pub imma_16832_s8: u64,
 }
 
