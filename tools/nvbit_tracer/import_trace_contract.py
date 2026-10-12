@@ -1847,7 +1847,7 @@ def validate_threadblock(
 
     ``label`` prefixes the offending record path on failure so the
     detail string locates the bad record across both the in-memory
-    test fixtures (``label='threadblock'``) and the on-disk walk
+    record path (``label='threadblock'``) and the on-disk walk
     (``label=<file path>``).
 
     ``allocations`` is the optional table loaded from

@@ -1,7 +1,7 @@
 # Finite value-dependent execution-trace contract
 
 Alpha invocations are unbound by default. Use `--bound` only for the
-historical manifest/digest promotion form; no hash is emitted by the default
+historical manifest promotion form; no hash is emitted by the default
 development result.
 
 `register_value_adapter.py --dynamic-index` emits
@@ -47,4 +47,4 @@ that admission contract.
 The interpreter now refuses `register_value_missing` when an ordinary GPR is
 read before a captured or explicitly supplied value exists. Unknown register
 state is never defaulted to zero. Use `sm86_value_trace.py --registers` for an
-explicit initial register map when a fixture requires one.
+explicit initial register map when a captured trace requires one.

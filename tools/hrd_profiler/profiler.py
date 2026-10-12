@@ -361,7 +361,7 @@ def _classify_observation(
 def _normalize_launch_to_observations(launch: Any) -> Sequence[Any]:
     """Resolve a launch entry to its per-access observation
     iterable. The HRD producer's `_BuildResult.launches` may be
-    either a bare ``list[dict]`` (legacy synthetic test fixtures
+    either a bare ``list[dict]`` (legacy list-shaped inputs
     that predate the per-launch-record migration) or a per-launch
     record dict carrying an ``observations`` key (the current
     delivery surface).
@@ -408,7 +408,7 @@ def compute_hrd_profile(
     ``launches``
         Sequence of per-launch entries. Each entry is either a
         bare ``list[dict]`` of per-access observation dicts
-        (legacy / synthetic-fixture shape) or a per-launch record
+        (legacy list-shaped input) or a per-launch record
         dict with an ``observations`` key carrying the same list
         plus the aggregated diagnostic fields (cold_count,
         finite_miss_count, etc.). Both shapes are accepted; the

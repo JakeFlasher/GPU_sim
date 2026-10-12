@@ -111,7 +111,7 @@ def _walk_threadblock(
     ``cta_key`` is a stable string identity for THIS threadblock
     (the admitted relative path with its leading ``threadblocks/``
     component removed). Path-derived keying avoids
-    relying on ``tb.block_id`` (which synthetic test fixtures may
+    relying on ``tb.block_id`` (which legacy inputs may
     not set) and additionally encodes device/stream/kernel
     context so cross-launch caller code can stay correct.
 

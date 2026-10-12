@@ -433,7 +433,7 @@ def _build_bundle(
     capacity_bytes: int,
 ) -> dict[str, Any]:
     """Inner builder; takes a precomputed event list. Split out
-    so test fixtures can exercise the projection logic without
+    so real captured traces exercise the projection logic without
     going through the proto walker."""
     projections: list[dict[str, Any]] = []
     admitted_hit_rates: list[float] = []
