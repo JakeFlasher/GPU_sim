@@ -57,26 +57,10 @@
       "max": 3000
     }
   },
-  "l2_high_footprint_correction": {
-    "allowlist": [
-      "register_spill_local_mem",
-      "l2_thrash_pointer_chase"
-    ],
-    "factors": {
-      "register_spill_local_mem": 0.26,
-      "l2_thrash_pointer_chase": 0.54
-    },
-    "min_observations": 10000000
-  },
-  "evidence_status": "Verified-live-sm_86",
-  "predictor_state": {
-    "l2_sector_hit_rate": "validated (frozen v5 head sha256 d28665f6; full median-abs 0.05923, geomean-rel 0.06420, holdout 0.05524 \u2014 3/3 hard gates pass)",
-    "l1tex_sector_hit_rate": "scored + coverage-gated, NOT accuracy-gated (relative-error geomean 0.89; median abs residual ~4%)",
-    "wall_clock": "labels + honest refutation only (cycle gate near-miss geomean 0.158 vs 0.15; deploy-ns crosswalk passes 13/13)"
-  },
+  "evidence_status": "compatibility_reference",
   "notes": [
-    "Every field above equals the value hardcoded in the live source today; test_arch_profile_lockstep.py asserts byte-identity so this card introduces ZERO behaviour change for the validated sm_86 lane.",
-    "num_l2_slices=6, l1 geometry, and NVML op-point are the only fully-populated cards in the suite; both SM120 cards leave several fields as research_gap."
+    "SM86 values are retained for compatibility replay and are not SM120 acceptance evidence.",
+    "num_l2_slices=6, L1 geometry, and retained operating-point fields are compatibility inputs; unresolved SM120 fields remain explicit research gaps."
   ],
   "latencies_cycles": {
     "l1_hit": {

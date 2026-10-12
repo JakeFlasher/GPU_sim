@@ -19,10 +19,8 @@ Design (grounded in the seam research, esp. Q9 "token vocabulary"):
   deploy/collection ``arch_id`` (Q5): a fatbin may legitimately carry server
   slices ``sm_90a`` / ``sm_120a`` that are never valid deploy arches.
 
-The loader intentionally performs **zero** behaviour change for sm_86: every
-sm_86 card field equals the value hardcoded in the live source today, and
-``tests/test_arch_profile_lockstep.py`` asserts that byte-for-byte. The
-dedicated RTX 5090 card carries the vendor-documented 170-SM value.
+The loader intentionally preserves the retained sm_86 compatibility values;
+the dedicated RTX 5090 card carries the vendor-documented 170-SM value.
 
 Fields whose real value was never captured on the relevant Blackwell part
 (SM120 cache geometry, NVML anchor, bare-LDG default) are represented as an
@@ -215,9 +213,9 @@ class ArchContext:
     def require_issue_resources(self) -> dict[str, dict[str, Any]]:
         """Resolve the complete carded issue-resource scaffold without defaults.
 
-        Production cards currently omit these blocks. Synthetic tests may exercise
-        the strict shape, but absence or any whole/nested research gap remains a
-        typed failure and never falls back to another architecture.
+        Production cards currently omit these blocks. Absence or any
+        whole/nested research gap remains a typed failure and never falls back
+        to another architecture.
         """
         self._require_profile_binding()
 

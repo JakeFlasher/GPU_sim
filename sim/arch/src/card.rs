@@ -11,10 +11,8 @@
 //! SM120 cards ship `l1_geometry` itself as a research_gap
 //! object), so gap-able blocks deserialize through [`Carded`]. An object
 //! carrying BOTH a payload and a `status` key is rejected outright rather
-//! than silently admitted as either arm. The Python side enforces
-//! card↔evidence lockstep (`arch_profiles/tests/test_arch_profile_lockstep.py`);
-//! this crate's own lockstep test asserts the Rust loader sees the identical
-//! sm_86 values.
+//! than silently admitted as either arm. The Python and Rust loaders share the same card shape and preserve
+//! compatibility values without cross-architecture fallback.
 
 use std::collections::BTreeSet;
 use std::io::Read;
