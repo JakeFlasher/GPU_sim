@@ -7722,10 +7722,8 @@ void nvbit_at_ctx_term(CUcontext ctx) {
       dyn_trace.set_accelsim_version(TRACER_VERSION);
       // GATHER_REGISTERS is retained as a compatibility knob, but this
       // tracer does not serialize register snapshots into the protobuf
-      // instruction stream.  Never advertise the capability merely because
-      // the environment variable was set; the separate record_reg_vals NVBit
-      // example has its own text artifact and is normalized by
-      // register_value_adapter.py with an explicit partial-identity claim.
+      // instruction stream. Never advertise the capability merely because
+      // the environment variable was set.
       if (gather_registers) {
         fprintf(stderr,
                 "WARNING: GATHER_REGISTERS requested, but enhanced protobuf "

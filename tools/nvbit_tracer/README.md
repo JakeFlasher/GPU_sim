@@ -1,8 +1,8 @@
 # NVBit tracer
 
 This tree builds the NVBit instrumentation producer used by the Rust trace
-reader. It contains the tracer, protobuf schema, opcode tables, metric
-extractor, and small CUDA smoke workloads.
+reader. It contains the tracer, protobuf schema, opcode tables, and metric
+extractor.
 
 ## Build
 
@@ -62,11 +62,6 @@ when one is available. JIT, deleted and opaque origins can remain
 `no_stable_static_module` rather than a guessed benchmark path. Active graph
 launch capture is separately rejected as `graph_node_capture_unsupported`;
 it does not produce a successful graph-node trace.
-
-The bounded ownership regression is runnable on an SM86 host with
-`bash tools/nvbit_tracer/smoketest/module_origin.sh`; it exercises same-name
-module handles, context-independent libraries, unload/reload, and an
-anonymous in-memory cubin.
 
 Set `SIMBENCH_NVBIT_ASYNC_ORDER=1` to retain the optional host creation order
 for selected asynchronous-copy instructions. It is an ordering token, not a

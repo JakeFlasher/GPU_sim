@@ -1,47 +1,17 @@
-# Python dependencies for the tier-2 (calibration plan) calibration fit + the
-# associated test/scanner surfaces.
-#
-# Per DEC-T8 (resolved in plans/tier2_rd_calibration_cross_arch_plan.md
-# lines 1486-1511): scikit-learn is permitted for the
-# IsotonicCalibrator implementation; PlattCalibrator + BetaCalibrator
-# resolved sklearn version under
-# calibrator_libraries.isotonic.version.
-#
-# Pinned to lower bounds matching the versions actually used to
-# repo's preferred dependency manager (uv, pip, conda); the
-# tier-2 (calibration plan) fit + test commands below assume uv with this manifest.
-#
-# Recommended fit invocation:
-#   uv run --with-requirements requirements.txt \
-#
-# Recommended test invocation:
-#   uv run --with-requirements requirements.txt \
-#       workloads/simbench_bw/tests/test_comparison_runner_calibration_loocv_reason.py \
-#
-# Equivalent ad hoc invocation when the manifest is not handy:
-#   uv run --with numpy --with scipy --with scikit-learn \
-#     --with jsonschema --with pytest python -m pytest ...
+# Runtime dependencies for the retained trace, sidecar, and whole-workload
+# observation tools. The alpha simulator lane does not install or invoke a
+# synthetic test harness.
 
 numpy==2.4.5
 scipy==1.17.1
 scikit-learn==1.8.0
 jsonschema==4.26.0
-pytest==9.0.3
 
-# Canonical TOML emission (tomli_w.dumps), used by the cohort / manifest
-# producers and the canonical-serialization helpers. Required for the full
-# host-only test + scanner surface (not just the calibration fit), so the
-# documented `uv run --with-requirements requirements.txt ...` invocation
-# resolves the whole suite on any machine.
+# Canonical TOML emission used by cohort and sidecar producers.
 tomli_w==1.2.0
 
-# protobuf Python runtime for the NVBit dynamic-trace contract bindings
-# (tools/nvbit_tracer/import_trace_contract.py imports google.protobuf; the
-# sharing_locality / order_projections / hrd_profiler observation-builder test
-# surfaces consume the tracked *_pb2 authorities). The binding bytes live under
-# workloads/simbench_bw/_pb_generated/ and are restored byte-exactly from Git
-# when missing; consumers never generate them in the canonical checkout. The
-# runtime import requires this package. The bindings' gencode is 7.34.1, and
+# protobuf Python runtime for the NVBit dynamic-trace contract bindings.
+# The bindings' gencode is 7.34.1, and
 # protobuf's cross-version rule
 # requires the runtime be >= the linked gencode, so pin the runtime to the
 # gencode version the committed bindings were generated against.

@@ -158,7 +158,8 @@ $(NVBIT_TOOL): $(OBJECTS) $(HOST_OBJECTS) $(NVBIT_PATH)/libnvbit.a $(NVBIT_CHANN
 
 # allocation_registry.cc is host-only C++ (no CUDA / NVBit / nvcc).
 # Build it with g++ + -fPIC so it can link into the shared tracer .so
-# AND into the host-only unit-test binary below.
+# and into host-side inspection binaries when a separate local tool supplies
+# them.
 allocation_registry.o: allocation_registry.cc allocation_registry.h Makefile
 	$(CXX) -std=c++20 -Wall -Wextra -fPIC $(OPTFLAGS) -MMD -MP -MF $(@:.o=.d) -MT $@ -c $< -o $@
 
@@ -243,7 +244,7 @@ trace_printer: traces_enhanced
 	$(NVCC) $(NVCC_HOST_FLAGS) -std=c++20 $(TRACER_INCLUDES) $(OPTFLAGS) -o $(TRACE_PRINTER) $(TRACES_ENHANCED_OBJ) $(TRACES_ENHANCED_PROTOCOL_BUFFER_OBJ) trace_printer.cc $(PROTOBUF_LIBS_NVCC)
 
 clean:
-	rm -f *.so *.o *.d trace_printer $(PHASE_CLASSIFIER_TEST_BIN) $(MEMORY_OP_CLASS_TEST_BIN) $(MEMORY_OP_ACCESS_KIND_TEST_BIN) $(ALLOCATION_REGISTRY_TEST_BIN) $(EXCLUSION_AGGREGATOR_TEST_BIN) $(PATH_RESOLVER_TEST_BIN) $(ACTIVE_LAUNCH_GATE_TEST_BIN) $(MODULE_ORIGIN_RESOLVER_TEST_BIN) $(PHASE_RECORD_WRITER_TEST_BIN)
+	rm -f *.so *.o *.d trace_printer
 	$(MAKE) clean -C $(TRACES_ENHANCED_DIR)
 
 .PHONY: all traces_enhanced clean

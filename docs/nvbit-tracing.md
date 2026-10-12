@@ -41,6 +41,6 @@ NCU and NVBit should normally be run in separate executions because both
 instrument the target. Match them by workload, arguments, build, GPU, and
 launch order recorded in ordinary experiment metadata.
 
-Wire-format compatibility tests and bounds checks are normal correctness
-checks. They should describe malformed data clearly, never create a lifecycle
-state that prevents unrelated experiments.
+Wire-format bounds handling is runtime behavior. Malformed data should produce
+clear errors and must never create a lifecycle state that prevents unrelated
+experiments.

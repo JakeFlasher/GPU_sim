@@ -27,9 +27,6 @@ tools/nvbit_tracer/tracer_tool/*.o
 tools/nvbit_tracer/tracer_tool/*.d
 tools/nvbit_tracer/tracer_tool/*.so
 tools/nvbit_tracer/tracer_tool/trace_printer
-tools/nvbit_tracer/tracer_tool/tests/*_test
-tools/nvbit_tracer/smoketest/backprop_enriched
-tools/nvbit_tracer/smoketest/phase_injection_microbench
 tools/nvbit_tracer/metric_extractor/*.o
 tools/nvbit_tracer/metric_extractor/*.so
 tools/nvbit_tracer/metric_extractor/test_classifier
