@@ -3,12 +3,7 @@
 # synthetic test harness.
 
 numpy==2.4.5
-scipy==1.17.1
-scikit-learn==1.8.0
 jsonschema==4.26.0
-
-# Canonical TOML emission used by cohort and sidecar producers.
-tomli_w==1.2.0
 
 # protobuf Python runtime for the NVBit dynamic-trace contract bindings.
 # The bindings' gencode is 7.34.1, and
