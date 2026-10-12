@@ -122,8 +122,8 @@ from tools.sector_stream.consume_trace import AdmittedSectorStream  # noqa: E402
 
 # C-AC-H budget constants come from `tools/cloud/trace_budgets.py`
 # (Loop 2 R11). Add the cloud directory to sys.path so the import
-# works whether run_suite.py is executed as a script or imported by
-# pytest. The import is deliberately not at top-of-file because the
+# works whether run_suite.py is executed as a script or imported by another
+# host harness. The import is deliberately not at top-of-file because the
 # `tools/cloud/` directory is not on sys.path by default; this
 # follows the same pattern as the SUITE_ROOT insertion above.
 _TOOLS_CLOUD_DIR = SUITE_ROOT.parent.parent / "tools" / "cloud"
