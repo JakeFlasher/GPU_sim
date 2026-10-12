@@ -61,7 +61,7 @@ The local 3090 Ti (sm_86) compiles and smoke-runs this baseline;
 final SOL scoring is on B200 (sm_100a). Differences worth noting
 for this pattern:
 
-- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5060)
+- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5090)
   bandwidth: the matmul dominance means this kernel is
   compute-bound on the FP32 SM pipe, not bandwidth-bound. B200's
   HBM3e advantage matters less here than it would for an RMSNorm

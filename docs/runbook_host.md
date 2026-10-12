@@ -1,203 +1,59 @@
-# Host runbook
+# SM120 host runbook
 
-Commands below are direct. Set paths for the installed tools on the current
-host; exact patch versions are not workflow requirements.
+The active lane is the RTX 5090 (`sm_120`) full-trace replay.  The complete
+capture corpus is `/root/sm120_rtx_5090_capture`; independent NCU/CUPTI records
+are joined after replay and are never simulator inputs.  Full replay is always
+run before the complementary fast frontier.
 
-## Inspect the host
+## Build
 
 ```bash
-nvidia-smi
-nvcc --version
-ncu --version
-protoc --version
+cd /root/GPU_simulator_rebase/sim
+cargo build --workspace --all-features
+cargo build --workspace --all-features --release
 ```
 
-Administrative access may be used when needed:
+## Replay the complete corpus
+
+Use the retained-corpus driver from the repository root:
 
 ```bash
-sudo -n true
+cd /root/GPU_simulator_rebase
+python3 tools/sm120_replay_bench.py \
+  --capture-root /root/sm120_rtx_5090_capture \
+  --work-root /dev/shm/sm120_rtx_5090_work \
+  --mode full
+python3 tools/sm120_replay_bench.py \
+  --capture-root /root/sm120_rtx_5090_capture \
+  --work-root /dev/shm/sm120_rtx_5090_work \
+  --mode fast
 ```
 
-## Build the Rust simulator
+The full run must report every captured row and launch.  The fast run is a
+performance diagnostic only.  Keep replay rows, joins, residuals, and timings
+under the work root; do not add small synthetic fixtures or acceptance gates.
+
+## Direct replay
 
 ```bash
-cd sim
-cargo build
-cargo build --release -p sim-run
-```
-
-Replay the release binary directly after a change and inspect its JSON and
-stderr. Run a package-specific test only when the changed behavior needs a
-contract check.
-
-## Bounded workload execution (A8)
-
-Use the shared launcher for live workload runs. It records stdout/stderr,
-checks free GPU memory, terminates the complete child process group after a
-deadline, and distinguishes OOM, out-of-domain shape/device, timeout, and
-ordinary runtime failure. It never silently changes the requested shape:
-
-```bash
-.venv/bin/python tools/run_sm86_workload.py \
-  --workload-id gemm_hmma_bf16_sm80 \
-  --output-dir results/alpha/run/gemm_hmma_bf16_sm80 \
-  --timeout-seconds 120 \
-  --expected-device-memory-mib 512 \
-  --reserve-free-memory-mib 1024 -- \
-  workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run \
-  --correctness_shape --seed 42 --warmup 1 --reps 2 \
-  --output_dir results/alpha/run/gemm_hmma_bf16_sm80/workload
-```
-
-The result document is `run.json`; a non-passing status is a recorded
-experiment outcome, not permission to substitute another workload.
-
-## Build the NVBit tracer
-
-The repository includes the NVBit source drop and enhanced protobuf sources.
-
-```bash
-source tools/nvbit_tracer/pinned_build_env.sh
-make -C tools/nvbit_tracer -j"$(nproc)"
-```
-
-Override tool locations in the environment when the defaults are not suitable:
-
-```bash
-make -C tools/nvbit_tracer \
-  CUDA_INSTALL_PATH=/usr/local/cuda-13.2 \
-  PROTOC="$PWD/.toolchain/pb/bin/protoc" \
-  NVCC_CCBIN=/usr/bin/g++-14
-```
-
-## Capture an NVBit trace
-
-```bash
-source tools/nvbit_tracer/pinned_build_env.sh
-mkdir -p traces/my_run
-CUDA_INJECTION64_PATH="$PWD/tools/nvbit_tracer/tracer_tool/tracer_tool.so" \
-USER_DEFINED_FOLDERS=1 TRACES_FOLDER="$PWD/traces/my_run" \
-  /absolute/path/to/workload [workload arguments]
-```
-
-Inspect it with:
-
-```bash
-tools/nvbit_tracer/tracer_tool/trace_printer traces/my_run
-```
-
-## Collect NCU metrics
-
-```bash
-.venv/bin/python tools/local_labels/collect_ncu.py \
-  --output results/my_run \
-  --metrics gpc__cycles_elapsed.max,smsp__inst_executed.sum \
-  -- /absolute/path/to/workload [workload arguments]
-```
-
-For the driver-selected shared-memory configuration, use the retained CUPTI
-resource-only injector. CUDA documents the carveout as a preference, while
-CUPTI's `sharedMemoryExecuted` field records the configuration actually chosen
-by the driver:
-
-```bash
-tools/local_labels/build_cupti_launch_resources.sh /tmp/cupti_launch_resources.so
-SIM_RESOURCE_OUTPUT=results/my_run/launch_resources.jsonl \
-CUDA_INJECTION64_PATH=/tmp/cupti_launch_resources.so \
-  /absolute/path/to/workload [workload arguments]
-
-sim/target/release/sim-run --trace TRACE_DIR --control CONTROL_BITS.json \
-  --arch-card arch_profiles/cards/sm_86.json \
-  --pchase-card data/pchase/sm_86_static_card.json --mode l1-l2 \
-  --launch-resources results/my_run/launch_resources.jsonl
-```
-
-The joined rows are marked `observed_external` and never alter replay timing
-or cache state. The probe enables only CUPTI kernel-activity records.
-
-To inspect the unknown-preserving mechanism envelope on a retained replay,
-add `--latent-envelope` to `sim-run`. The ordinary output is unchanged without
-the flag; the opt-in document reports candidate-class intervals, simulator
-frontiers, and a simulator-only endpoint descriptor, never NCU labels or a
-physical-pipe assignment.
-
-To add the first abstract service-rate and NCU observer projection, combine
-the flag with the versioned profile:
-
-```bash
-sim/target/release/sim-run --trace TRACE_DIR --control CONTROL_BITS.json \
-  --arch-card arch_profiles/cards/sm_86.json --mode flat \
-  --latent-envelope \
-  --predictive-service-profile docs/sm86_service_rate_profile_20261001.json
-```
-
-The resulting service interval and NCU candidate interval are model outputs;
-the profile is explicitly marked as an abstract/pending-probe source and does
-not alter replay scheduling.
-
-For memory-domain checks, use the reproducible SM86 probe (small first, then
-168-block scaling). It compares trace-derived instruction/load/ATOM/RED sectors
-and cold RMW read demand against the paired NCU CSV without fitting NCU values:
-
-```bash
-workloads/research_probes/sm86_metric_domains/run.py \
-  --output results/captures/sm86_metric_domains_$(date +%Y%m%d_%H%M%S)_small \
-  --size small
-```
-
-Repeat with `--size large` in a fresh output directory. The generated replay
-JSON keeps `atomic_rmw_read_sectors`, `reduction_rmw_read_sectors`, and
-terminal-dirty residency separate from the still-unmodeled physical writeback
-and coherence boundary.
-
-For the store/writeback boundary probe, select the dedicated store suite; it
-adds 4 MiB and 16 MiB streams and records NCU DRAM writes separately from the
-simulator's eventual dirty-demand bound:
-
-```bash
-workloads/research_probes/sm86_metric_domains/run.py \
-  --suite writeback --size large \
-  --output results/captures/sm86_writeback_$(date +%Y%m%d_%H%M%S)_large
-```
-
-The command preserves the NCU report, exported CSV, command, return code, and
-captured stdout/stderr. It does not require a pre-existing descriptor or
-approval document.
-
-## Compare predictions and observations
-
-```bash
-.venv/bin/python -m eval.direct_score \
-  --observed observed.json \
-  --predicted predicted.json
-```
-
-Use repeated runs when variance matters. Record tool versions and GPU state in
-experiment notes when they affect interpretation.
-
-For a model-relative issue-resource sweep, append:
-
-```bash
---hypothetical-issue-ports 2
-```
-
-The accepted range is `1..=4`. This changes only the modeled issue transaction
-width, labels the JSON output as hypothetical, and does not modify the
-architecture card or claim a physical GPU resource.
-
-For the narrow production resource-profile bridge, use the explicit
-trace-safe schema instead of a scalar override:
-
-```bash
-sim/target/release/sim-run \
+sim/target/release/sim-run --sm120-alpha --mode flat \
   --trace TRACE_DIR --control CONTROL_BITS.json \
-  --arch-card arch_profiles/cards/sm_86.json \
-  --architecture-spec arch_profiles/specs/sm86_trace_issue_profile.json \
-  --pchase-card data/pchase/sm_86_static_card.json --mode l1-l2
+  --arch-card arch_profiles/cards/sm_120-rtx-5090.json
+sim/target/release/sim-run --sm120-alpha --fast-frontier-only \
+  --trace TRACE_DIR --control CONTROL_BITS.json \
+  --arch-card arch_profiles/cards/sm_120-rtx-5090.json
 ```
 
-The bridge currently consumes only matching `alu`/`memory` issue widths from a
-`trace_sass_v1` profile. Functional custom ISAs and multi-group specs fail
-closed rather than being applied to a fixed SASS trace; latency, initiation,
-in-flight, extra-resource, and operation-binding fields are rejected because
-this bridge does not consume them.
+## Independent NCU comparison
+
+Use the NCU/trace artifacts already captured in
+`/root/sm120_rtx_5090_capture`.  Join by launch identity, report the timing
+domain and unit explicitly, and keep unmatched rows and native timing gaps
+visible.  Never fit, offset, or feed NCU values into a replay.
+
+## Tracer maintenance
+
+The NVBit producer remains under `tools/nvbit_tracer`.  Build it with the
+pinned CUDA/protobuf environment when a new real workload capture is required;
+write new captures directly to the corpus/work roots.  Do not create local
+fixture bundles or small acceptance workloads.

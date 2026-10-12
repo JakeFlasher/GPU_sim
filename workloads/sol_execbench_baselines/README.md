@@ -132,7 +132,7 @@ our `solution.json` supplies the kernel sources. The solution's
 
 See [`../../AGENTS.md`](../../AGENTS.md) for binding rules. Highlights:
 
-- No NCU; no `nvidia-smi` clock-locking on any device (including local 5060).
+- No NCU; no `nvidia-smi` clock-locking on any device (including local 5090).
 - No privileged CUPTI; no host-driver work.
 - CUDA C++ / CUTLASS C++ / CuTe C++ only — no Python DSLs, no Triton.
   Submission `spec.languages` ∈ `["cutlass"]` or `["cuda_cpp"]`.
@@ -140,5 +140,5 @@ See [`../../AGENTS.md`](../../AGENTS.md) for binding rules. Highlights:
 - Default-stream discipline (use `at::cuda::getCurrentCUDAStream()`).
 - Precision is contractual — match problem dtype, document FP8 / NVFP4
   scale layout.
-- sm_120 (local 5060) vs sm_100a (B200) are different targets — local
+- sm_120 (local 5090) vs sm_100a (B200) are different targets — local
   pass proves compile / smoke viability only. Use evidence labels.

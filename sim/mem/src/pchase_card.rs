@@ -1,6 +1,6 @@
 //! Geometry/latency resolvers over the committed P-chase static card
 //! (`data/pchase/sm_86_static_card.json`) — a lockstep port of
-//! `tools/cache_predictor/l1_warp_pool_walker.py`'s card resolvers.
+//! `the native L1 replay model`'s card resolvers.
 //!
 //! The resolver follows the Python implementation's input semantics:
 //! - a `kind: "value"` marker alone is never trusted — the value field must

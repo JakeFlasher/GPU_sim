@@ -53,7 +53,7 @@ compile-checked and natively-correctness-validated on.
 Final SOL scoring is on B200 (sm_100a). Differences worth
 noting:
 
-- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5060):
+- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5090):
   this kernel reads each input element once and writes
   each output element once. Three loads (BF16 +
   BF16 + fp32) + one fp32 write per element. B200's HBM3e

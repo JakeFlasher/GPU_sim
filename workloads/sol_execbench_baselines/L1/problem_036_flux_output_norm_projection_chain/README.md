@@ -130,7 +130,7 @@ The local 3090 Ti (sm_86) is the host this baseline was
 compile-checked and natively-correctness-validated on. Final
 SOL scoring is on B200 (sm_100a). Differences worth noting:
 
-- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5060):
+- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5090):
   The Kernel 2 weight matrix is `6144 × 3072 × 4 = 72 MiB`
   fp32 — well over the 3090 Ti's 6 MiB L2 partition. B200's
   larger L2 will capture more cross-CTA weight reuse;

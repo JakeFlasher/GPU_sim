@@ -101,7 +101,7 @@ def _assert_dossier_cutlass_path_contract(problems_dir: Path) -> None:
 
 FORBIDDEN_SURFACE_BLOCK = """\
   - Python / Triton / CuTe DSL Python / cuTile Python / cudnn_frontend Python / torch.compile submissions (CLAUDE.md Rule 5).
-  - NCU / `nv-nsight-cu-cli` / `.ncu-rep`/`.ncu-repz` artefacts on any device, including local 5060 (CLAUDE.md Rule 1).
+  - NCU / `nv-nsight-cu-cli` / `.ncu-rep`/`.ncu-repz` artefacts on any device, including local 5090 (CLAUDE.md Rule 1).
   - `nvidia-smi --lock-gpu-clocks` / `--lock-memory-clocks` / persistence / power / MIG / compute-mode mutation (CLAUDE.md Rule 2).
   - Privileged CUPTI: Events, Metrics, Range Profiling, PM Sampling, PerfWorks (CLAUDE.md Rule 3; CUPTI Activity remains allowed).
   - Host-driver work: NVIDIA driver install, DKMS, MOK, `modprobe nvidia`, kernel-module parameter toggles, reboot workflows (CLAUDE.md Rule 4).
@@ -260,7 +260,7 @@ def _arch_portability_section(category: str, slug: str) -> str:
     base = f"baselines/{_category_dir(category)}/{slug}"
     return (
         f"## Architecture portability per `CLAUDE.md` § Architecture Portability Discipline\n\n"
-        f"The 5060 (sm_120) compiles and smoke-runs this baseline for "
+        f"The 5090 (sm_120) compiles and smoke-runs this baseline for "
         f"correctness verification; final SOL scoring is on B200 (sm_100a). "
         f"Treat the two targets as different: TCGen05 / TMA / DSMEM / "
         f"TMEM behaviors are sm_100a-only, and HBM3e bandwidth / L2 size "

@@ -115,7 +115,7 @@ The local 3090 Ti (sm_86) is the host this baseline was
 compile-checked and natively-correctness-validated on. Final SOL
 scoring is on B200 (sm_100a). Differences worth noting:
 
-- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5060):
+- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5090):
   the three fp32 GEMMs operate on `[qkv_out_size=1024,
   hidden_size=1024]` weight tiles (4 MiB fp32 each, 12 MiB
   total) that fit twice over within the 3090 Ti's 6 MiB L2

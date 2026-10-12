@@ -4,14 +4,14 @@ Reads an upstream `hrd_profile.json` plus a manifest-pairing tuple,
 runs the cumulative-window MRC sampler decision tree, and writes a
 strict-valid `convergence_confidence.json` bundle. `--arch` admits
 both local-development arches structurally (`sm_86` desktop +
-`sm_120-laptop`) per CLAUDE.md "Two-Device Local Development
+`sm_120`) per CLAUDE.md "Two-Device Local Development
 Model"; the Python producer is arch-independent in implementation.
 Live v3 sm_86 evidence is recorded in
 `tools/BLOCKED_ON_3090TI.md` task17 Section (f) (admission record,
 source-commit equality, digest round-trip). The remaining
 `Cross-arch-verified` work is a future sm_120 v3 leg replaying the
-same producer against a fresh sm_120-laptop HRD bundle on the
-5060 laptop. Operator-facing entry point declared in
+same producer against a fresh sm_120 HRD bundle on the
+RTX 5090. Operator-facing entry point declared in
 `tools/arch_capabilities.json` per the C-AC-E manifest discipline.
 
 The CLI mirrors the controller helper
@@ -72,11 +72,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
                    help="Path to write convergence_confidence.json")
     p.add_argument("--arch", required=True, choices=_SUPPORTED_ARCHES,
                    help=(
-                       "Target arch (sm_86 + sm_120-laptop admitted "
+                       "Target arch (sm_86 + sm_120 admitted "
                        "structurally; live v3 sm_86 evidence "
                        "recorded in tools/BLOCKED_ON_3090TI.md "
                        "task17 Section (f); remaining sm_120 v3 leg "
-                       "is a future 5060-laptop replay)"
+                       "is a future 5090 replay)"
                    ))
     p.add_argument("--slug", required=True)
     p.add_argument("--shape-point", required=True)

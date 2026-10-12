@@ -46,7 +46,7 @@ DISTANCE_METRIC: str = "max_abs_mrc_quantile_delta"
 HIERARCHY_LAYERS: tuple[str, ...] = ("sector", "line")
 SCHEMA_VERSION: int = 1
 
-TARGET_ARCH = "sm_120-laptop"
+TARGET_ARCH = "sm_120"
 
 
 def is_usable_admitted_bin(

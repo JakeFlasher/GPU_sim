@@ -91,9 +91,9 @@ def resolved_arch_yaml() -> Optional[Path]:
 def local_arch_config_available() -> bool:
     """True when the live host's arch yaml resolves to a real file.
 
-    The function used to check a static ``5060.yaml`` path; it now
+    The function used to check a static ``5090.yaml`` path; it now
     consults the resolver so that the wrong-arch path returns False
-    instead of falsely advertising a 5060 yaml on a 3090 Ti host.
+    instead of falsely advertising a 5090 yaml on a 3090 Ti host.
     """
     return resolved_arch_yaml() is not None
 

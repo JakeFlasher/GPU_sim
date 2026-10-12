@@ -44,7 +44,7 @@ runtime libraries resolve for both the injected tracer and `trace_printer`:
 ```bash
 source tools/nvbit_tracer/pinned_build_env.sh
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-OUT="$REPO_ROOT/results/captures/manual"
+OUT="/dev/shm/sm120_rtx_5090_work/manual"
 mkdir -p "$OUT"
 CUDA_INJECTION64_PATH="$REPO_ROOT/tools/nvbit_tracer/tracer_tool/tracer_tool.so" \
 USER_DEFINED_FOLDERS=1 TRACES_FOLDER="$OUT" \

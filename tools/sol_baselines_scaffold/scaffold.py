@@ -752,7 +752,7 @@ def _emit_parent_readme(
     L2 carveout, and TCGen05 / TMEM divergence. The caveats are
     arch-agnostic — they describe the divergence axes between any
     local NCU-permitted host (sm_86 on the 3090 Ti, sm_120 on the
-    5060 Laptop) and the B200 (sm_100a) Phase-2 target.
+    RTX 5090) and the B200 (sm_100a) Phase-2 target.
     """
     if (parent_dir / "README.md").is_file():
         # Pre-existing README (e.g. landed pilot upgraded in place) —

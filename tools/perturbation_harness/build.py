@@ -3,7 +3,7 @@
 Generates perturbation source files from
 `workloads/simbench_bw/l1/dram_stream_stride_mix/dram_stream_stride_mix.cu`
 + `main.cu`, compiles each variant with nvcc against
-`sm_120-laptop`, runs the binary to collect output, calls
+`sm_120`, runs the binary to collect output, calls
 `sass_confirm` for the SASS modifier audit, calls
 `correctness_check` for the per-mode delta, and assembles the
 `perturbation_run_ledger.json` via `ledger.build_bundle`.
@@ -81,7 +81,7 @@ NVCC_COMMON = ["-std=c++17", "-Xptxas=-v", "-lineinfo"]
 
 def nvcc_gencode_for_target_arch(target_arch: str) -> list[str]:
     """Per-target-arch nvcc -gencode flags. The Ampere-desktop and
-    Blackwell-laptop arches use different compute capability tokens;
+    Blackwell arches use different compute capability tokens;
     the perturbation harness binaries must be built with the matching
     -gencode pair so the resulting cubin runs on the live host. The
     multi-surface-lockstep partner is the schema's `$defs.target_arch_enum`
@@ -89,7 +89,7 @@ def nvcc_gencode_for_target_arch(target_arch: str) -> list[str]:
     a new value added to one MUST be added to all three."""
     if target_arch == "sm_86":
         return ["-gencode", "arch=compute_86,code=sm_86"]
-    if target_arch == "sm_120-laptop":
+    if target_arch == "sm_120":
         return ["-gencode", "arch=compute_120,code=sm_120"]
     raise ValueError(
         f"unknown target_arch {target_arch!r}; supported: "
@@ -379,8 +379,8 @@ def _build_one_perturbation(
 
     The `target_arch` parameter selects the per-arch -gencode flag set
     via `nvcc_gencode_for_target_arch` (sm_86 → compute_86/sm_86;
-    sm_120-laptop → compute_120/sm_120). The default preserves the
-    pre-widening sm_120-laptop behavior.
+    sm_120 → compute_120/sm_120). The default preserves the
+    pre-widening sm_120 behavior.
     """
     binary_name = _binary_name(family, parameter, target_arch, slug=slug)
     sources_dir = perturbation_dir / "sources"
@@ -701,7 +701,7 @@ def run_perturbation_harness(
 
     The `target_arch` parameter selects the per-arch -gencode flag set
     threaded through `_build_one_perturbation`. The default preserves
-    the pre-widening sm_120-laptop behavior; the simbench controller
+    the pre-widening sm_120 behavior; the simbench controller
     selects per-host via `_perturbation_target_arch_for_props(props)`.
     """
     if target_arch not in SUPPORTED_TARGET_ARCHES:
@@ -886,9 +886,9 @@ def _device_block_for_target_arch(target_arch: str) -> dict[str, Any]:
             "sm_count": 0,
             "l2_cache_size_bytes": 0,
         }
-    if target_arch == "sm_120-laptop":
+    if target_arch == "sm_120":
         return {
-            "device_name": "NVIDIA GeForce RTX 5060 Laptop GPU",
+            "device_name": "NVIDIA GeForce RTX 5090 GPU",
             "compute_capability_major": 12,
             "compute_capability_minor": 0,
             "sm_count": 0,

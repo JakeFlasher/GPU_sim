@@ -36,7 +36,7 @@ from pathlib import Path
 
 FORBIDDEN_SURFACE_BLOCK = """\
   - Python / Triton / CuTe DSL Python / cuTile Python / cudnn_frontend Python / torch.compile submissions (CLAUDE.md Rule 5).
-  - NCU / `nv-nsight-cu-cli` / `.ncu-rep`/`.ncu-repz` artefacts on any device, including local 5060 (CLAUDE.md Rule 1).
+  - NCU / `nv-nsight-cu-cli` / `.ncu-rep`/`.ncu-repz` artefacts on any device, including local 5090 (CLAUDE.md Rule 1).
   - `nvidia-smi --lock-gpu-clocks` / `--lock-memory-clocks` / persistence / power / MIG / compute-mode mutation (CLAUDE.md Rule 2).
   - Privileged CUPTI: Events, Metrics, Range Profiling, PM Sampling, PerfWorks (CLAUDE.md Rule 3; CUPTI Activity remains allowed).
   - Host-driver work: NVIDIA driver install, DKMS, MOK, `modprobe nvidia`, kernel-module parameter toggles, reboot workflows (CLAUDE.md Rule 4).
@@ -47,7 +47,7 @@ FORBIDDEN_SURFACE_BLOCK = """\
 ARCH_PORTABILITY_TEMPLATE = """\
 ## Architecture portability per `CLAUDE.md` § Architecture Portability Discipline
 
-`sm_120` (local RTX 5060, GB206 die) compiles and smoke-runs; `sm_100a` (B200, GB100 die) is the scoring target. {arch_notes}
+`sm_120` (local RTX 5090, GB206 die) compiles and smoke-runs; `sm_100a` (B200, GB100 die) is the scoring target. {arch_notes}
 
 Evidence-label conventions per `CLAUDE.md` live in `baselines/<category>/<slug>/README.md`, NOT in this pattern card."""
 

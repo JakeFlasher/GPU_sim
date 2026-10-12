@@ -50,7 +50,7 @@ is preserved.
 
 ## Architecture-coupling caveats
 
-The local 5060 (sm_120) compiles and smoke-runs this baseline;
+The local 5090 (sm_120) compiles and smoke-runs this baseline;
 Phase-2 counter-free profiling and SOL Score submission run on B200
 (sm_100a). Differences worth noting for this pattern:
 
@@ -64,7 +64,7 @@ Phase-2 counter-free profiling and SOL Score submission run on B200
   may itself use cluster-cooperative GEMM kernels under the hood.
   Re-validate on B200.
 - **L2 carveout**: the 36-MiB `process_weight` matrix may fit in
-  B200's L2 carveout but exceeds the 5060's L2; cuBLAS kernel
+  B200's L2 carveout but exceeds the 5090's L2; cuBLAS kernel
   selection differs between the two.
 - **TCGen05 / TMEM divergence**: with float32 IEEE compute, this
   kernel does NOT use 5th-gen tensor cores on either arch (cuBLAS

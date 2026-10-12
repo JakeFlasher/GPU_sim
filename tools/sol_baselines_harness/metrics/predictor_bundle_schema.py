@@ -3,7 +3,7 @@
 Validates the shape + invariants of a predictor bundle
 emitted by the future cache_prediction surface. Mirrors
 the sibling project's
-`/home/jakeshea/3090ti_5060laptop_cross_study/workloads/simbench_bw/schemas/cache_predictor.schema.json`
+`/home/jakeshea/3090ti_5090_cross_study/workloads/simbench_bw/schemas/cache_predictor.schema.json`
 contract: one bundle per `(slug, shape_point,
 binary_sha256, source_commit,
 kernel_signature_sha256)` cell records a predictor

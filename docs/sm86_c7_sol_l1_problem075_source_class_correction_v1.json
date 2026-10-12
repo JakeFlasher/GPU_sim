@@ -1,8 +1,0 @@
-{
-  "candidate":"L1/problem_075_grouped_query_self_attention_with_rope/cuda_cpp",
-  "phase":"C7-S34BC1",
-  "schema":"sm86_c7_sol_l1_problem075_source_class_correction_v1",
-  "source_observation":{"declared_class":"custom_cuda (prior marker census)","effective_class":"pure_aten","kernel_cu":"stub translation unit only; no custom __global__ definition","main_cpp":"ATen/cuBLAS projections, RoPE, GQA expansion, materialized attention scores, softmax, attention output, and output projection; no custom CUDA launcher","solution_marker_false_positive":"the only __global__ marker is stub/comment or embedded source text","sm86_compile_marker":true,"entry_point":"main.cpp::run","reference_contract":"grouped-query self-attention with RoPE and materialized attention-weight output"},
-  "disposition":{"build_attempted":false,"native_trace_admitted":false,"reason":"source-class correction; pure-ATen row retained without duplicate tracing","timing_or_ncu_claimed":false},
-  "status":"complete_source_class_correction_pure_aten_blocker"
-}

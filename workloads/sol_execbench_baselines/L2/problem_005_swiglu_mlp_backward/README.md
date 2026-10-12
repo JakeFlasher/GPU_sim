@@ -49,10 +49,10 @@ The local 3090 Ti (sm_86) is the host this baseline was compile-
 checked and natively-correctness-validated on. Final SOL scoring is
 on B200 (sm_100a). Differences worth noting:
 
-- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5060): the six
+- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5090): the six
   GEMMs are heavyweight on the I=53248 side; B200's HBM3e bandwidth
   reshapes the bandwidth-vs-compute envelope substantially relative
-  to the 3090 Ti / 5060 GDDR-class memory subsystems.
+  to the 3090 Ti / 5090 GDDR-class memory subsystems.
 - DSMEM and cluster-cooperative GEMMs (sm_100a-only) are out of
   scope at the cuBLAS-dispatch portability level; cuBLAS picks an
   appropriate kernel on each host transparently.
@@ -60,7 +60,7 @@ on B200 (sm_100a). Differences worth noting:
   per-intermediate footprints near 900 MiB, well outside the 3090
   Ti's 6 MB L2 — the GEMMs stream through HBM3e / GDDR6X.
 - TCGen05 / TMEM divergence: cuBLAS on B200 picks the TCGen05 /
-  TMEM tensor-core path; on the 3090 Ti and 5060 the same call
+  TMEM tensor-core path; on the 3090 Ti and 5090 the same call
   resolves to Ampere / Ada tensor cores. Portability is at the
   call-site level, not the schedule level.
 - Memory ceiling: with peak resident memory around 15 GiB at the

@@ -4,26 +4,19 @@
 # Per DEC-T8 (resolved in plans/tier2_rd_calibration_cross_arch_plan.md
 # lines 1486-1511): scikit-learn is permitted for the
 # IsotonicCalibrator implementation; PlattCalibrator + BetaCalibrator
-# in workloads/simbench_bw/calibration_head.py are hand-rolled
-# (numpy only). The calibration_head_v1.json sidecar records the
 # resolved sklearn version under
 # calibrator_libraries.isotonic.version.
 #
 # Pinned to lower bounds matching the versions actually used to
-# produce data/local_labels/calibration_head_v1.json +
-# data/local_labels/calibration_evaluation_v1.json. Use the
 # repo's preferred dependency manager (uv, pip, conda); the
 # tier-2 (calibration plan) fit + test commands below assume uv with this manifest.
 #
 # Recommended fit invocation:
 #   uv run --with-requirements requirements.txt \
-#     python -m tools.local_labels.fit_calibration_head
 #
 # Recommended test invocation:
 #   uv run --with-requirements requirements.txt \
-#     python -m pytest workloads/simbench_bw/tests/test_calibration_head.py \
 #       workloads/simbench_bw/tests/test_comparison_runner_calibration_loocv_reason.py \
-#       tools/local_labels/test_fit_calibration_head.py -q
 #
 # Equivalent ad hoc invocation when the manifest is not handy:
 #   uv run --with numpy --with scipy --with scikit-learn \

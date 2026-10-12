@@ -13,21 +13,16 @@ Design (grounded in the seam research, esp. Q9 "token vocabulary"):
   which already declares the bare form canonical, and keeps the frozen
   ``label_admitted.json`` arch enum ``{sm_86, sm_120}`` and the 30-cell sm_120
   cohort byte-stable.
-* A device-tier **SKU** (``rtx_3090_ti``, ``rtx_5060_laptop``,
-  ``rtx_5090``) disambiguates
-  hardware facts that differ between two cards sharing a compute capability
-  (a bare ``sm_120`` cannot tell a GB206 laptop from a GB202 workstation — the
-  ``sm_120-laptop`` and ``rtx_5090`` aliases exist precisely to
-  prevent that conflation).
+* A device-tier **SKU** (``rtx_3090_ti`` or ``rtx_5090``) selects the card
+  facts used by the deployment.
 * ``build_arch_family`` (a compile-time concern) is kept SEPARATE from the
   deploy/collection ``arch_id`` (Q5): a fatbin may legitimately carry server
   slices ``sm_90a`` / ``sm_120a`` that are never valid deploy arches.
 
 The loader intentionally performs **zero** behaviour change for sm_86: every
 sm_86 card field equals the value hardcoded in the live source today, and
-``tests/test_arch_profile_lockstep.py`` asserts that byte-for-byte. The historical 5060-laptop card carries the measured 26-SM value; the dedicated
-RTX 5090 card carries the vendor-documented 170-SM value. Neither card is a
-fallback for the other.
+``tests/test_arch_profile_lockstep.py`` asserts that byte-for-byte. The
+dedicated RTX 5090 card carries the vendor-documented 170-SM value.
 
 Fields whose real value was never captured on the relevant Blackwell part
 (SM120 cache geometry, NVML anchor, bare-LDG default) are represented as an
@@ -453,16 +448,12 @@ def load_profile(token: str, sku: str | None = None) -> ArchProfile:
 
     ``token`` may be a canonical arch_id, any alias, a device-name substring,
     or a SKU. The canonical arch_id is resolved first via :func:`resolve_arch_id`.
-    A bare ``sm_120`` selects the active RTX 5090 card; the historical laptop
-    card requires ``sm_120-laptop`` or its explicit SKU.
+    A bare ``sm_120`` selects the active RTX 5090 card.
     """
     arch_id = resolve_arch_id(token)
     if sku is None:
         sku = resolve_sku(token, strict=False)
-        # The active bare deployment token for CC 12.0 is the cloud RTX 5090
-        # target. The historical laptop card remains available only through
-        # its explicit SKU/device alias, so a bare sm_120 cannot silently pick
-        # the old 5060 facts.
+        # The active bare deployment token for CC 12.0 is the RTX 5090 target.
         if sku is None and str(token).strip().lower() == "sm_120":
             sku = "rtx_5090"
     card = _load_json(_card_path_for(arch_id, sku))
@@ -564,13 +555,9 @@ def _aliases() -> dict[str, Any]:
 def resolve_arch_id(token: str | tuple[int, int]) -> str:
     """Normalise any of the 8 coexisting spellings → canonical bare ``sm_XX``.
 
-    Accepts: canonical ids (``sm_86``), device/capability aliases
-    (``sm_120-laptop`` or an explicit RTX 5090 device name), build tokens
-    (``sm_120a``, ``sm_120f``), a
-    ``(major, minor)`` compute-capability tuple, or a device-name substring
-    ("NVIDIA GeForce RTX 5060 Laptop GPU"). Uncaptured server/workstation
-    SKUs raise :class:`ArchProfileError`; the explicitly carded RTX 5090
-    Workstation Edition resolves to sm_120.
+    Accepts canonical ids, an explicit RTX 5090 device name, build tokens,
+    a compute-capability tuple, or a device-name substring. Uncaptured
+    server/workstation SKUs raise :class:`ArchProfileError`.
     """
     aliases = _aliases()
 
@@ -594,7 +581,7 @@ def resolve_arch_id(token: str | tuple[int, int]) -> str:
                 f"non-local (server/workstation) card without an ArchProfile"
             )
 
-    # exact token → canonical id (covers sm_86, sm_120, sm_120-laptop, sm_120a…)
+    # exact token → canonical id
     exact = aliases["token_to_arch_id"]
     if raw in exact:
         return exact[raw]
@@ -613,7 +600,7 @@ def resolve_arch_id(token: str | tuple[int, int]) -> str:
 
 
 def resolve_sku(token: str | tuple[int, int], *, strict: bool = True) -> str | None:
-    """Resolve a device-tier SKU (3090 Ti, 5060 laptop, or RTX 5090 WS).
+    """Resolve a device-tier SKU (3090 Ti or RTX 5090).
 
     A bare arch_id or compute capability cannot pin a SKU on its own when a
     capability hosts multiple cards; ``strict=False`` returns None instead of
@@ -628,10 +615,7 @@ def resolve_sku(token: str | tuple[int, int], *, strict: bool = True) -> str | N
 
     if low in aliases["sku_tokens"]:
         return low
-    token_sku = {
-        "sm_86": "rtx_3090_ti",
-        "sm_120-laptop": "rtx_5060_laptop",
-    }.get(low)
+    token_sku = {"sm_86": "rtx_3090_ti", "sm_120": "rtx_5090"}.get(low)
     if token_sku is not None:
         return token_sku
     for sub, sku in aliases["device_substring_to_sku"].items():

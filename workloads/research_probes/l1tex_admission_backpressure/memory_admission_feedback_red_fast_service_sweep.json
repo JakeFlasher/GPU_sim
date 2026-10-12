@@ -1,9 +1,0 @@
-{
-  "schema_version": 1,
-  "candidates": [
-    {"candidate_id": 137, "scope": "sm", "operation": "reduction", "queue_capacity_instructions": 32, "admission_latency_cycles": 8, "l2_hit_sector_units": 1, "l2_hit_sector_cycles": 1, "l2_miss_sector_units": 1, "l2_miss_sector_cycles": 8, "l2_miss_service_width_sectors": 1},
-    {"candidate_id": 138, "scope": "sm", "operation": "reduction", "queue_capacity_instructions": 32, "admission_latency_cycles": 8, "l2_hit_sector_units": 1, "l2_hit_sector_cycles": 1, "l2_miss_sector_units": 1, "l2_miss_sector_cycles": 8, "l2_miss_service_width_sectors": 2},
-    {"candidate_id": 139, "scope": "sm", "operation": "reduction", "queue_capacity_instructions": 32, "admission_latency_cycles": 8, "l2_hit_sector_units": 1, "l2_hit_sector_cycles": 1, "l2_miss_sector_units": 1, "l2_miss_sector_cycles": 8, "l2_miss_service_width_sectors": 4},
-    {"candidate_id": 140, "scope": "sm", "operation": "reduction", "queue_capacity_instructions": 32, "admission_latency_cycles": 8, "l2_hit_sector_units": 1, "l2_hit_sector_cycles": 1, "l2_miss_sector_units": 1, "l2_miss_sector_cycles": 8, "l2_miss_service_width_sectors": 8}
-  ]
-}

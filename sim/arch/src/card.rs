@@ -1601,12 +1601,12 @@ mod tests {
         assert_eq!(identity.deploy(), ArchId::Sm86);
         assert_eq!(identity.sku(), Sku::Rtx3090Ti);
 
-        let sm120 = ArchCard::load(&card_path("sm_120-laptop.json")).expect("load sm_120 card");
+        let sm120 = ArchCard::load(&card_path("sm_120-rtx-5090.json")).expect("load sm_120 card");
         let identity = sm120
             .identity(BuildArch::Sm120f)
             .expect("valid sm_120 build identity");
         assert_eq!(identity.deploy(), ArchId::Sm120);
-        assert_eq!(identity.sku(), Sku::Rtx5060Laptop);
+        assert_eq!(identity.sku(), Sku::Rtx5090);
         assert!(matches!(
             sm120.require_runtime_limits(),
             Err(CalibError::BlockResearchGap {
@@ -1758,7 +1758,7 @@ mod tests {
 
     #[test]
     fn card_build_family_is_closed_and_identity_enforces_membership() {
-        let sm120 = ArchCard::load(&card_path("sm_120-laptop.json")).unwrap();
+        let sm120 = ArchCard::load(&card_path("sm_120-rtx-5090.json")).unwrap();
         assert_eq!(
             sm120.checked_build_arch_family().unwrap(),
             vec![BuildArch::Sm120, BuildArch::Sm120a, BuildArch::Sm120f]
@@ -1767,7 +1767,7 @@ mod tests {
             assert_eq!(sm120.identity(build).unwrap().build(), build);
         }
 
-        let missing_requested = load_mutated_card("sm_120-laptop.json", |card| {
+        let missing_requested = load_mutated_card("sm_120-rtx-5090.json", |card| {
             card["build_arch_family"]
                 .as_array_mut()
                 .unwrap()
@@ -1783,7 +1783,7 @@ mod tests {
         ));
 
         assert!(matches!(
-            load_mutated_card("sm_120-laptop.json", |card| {
+            load_mutated_card("sm_120-rtx-5090.json", |card| {
                 card["build_arch_family"] = serde_json::json!([]);
             }),
             Err(CalibError::BuildArchFamilyEmpty {
@@ -1791,14 +1791,14 @@ mod tests {
             })
         ));
         assert!(matches!(
-            load_mutated_card("sm_120-laptop.json", |card| {
+            load_mutated_card("sm_120-rtx-5090.json", |card| {
                 card["build_arch_family"] =
                     serde_json::json!(["sm_120", "sm_120a", "sm_120f", "sm_120"]);
             }),
             Err(CalibError::BuildArchFamilyDuplicate { token }) if token == "sm_120"
         ));
         assert!(matches!(
-            load_mutated_card("sm_120-laptop.json", |card| {
+            load_mutated_card("sm_120-rtx-5090.json", |card| {
                 card["build_arch_family"] = serde_json::json!(["sm_120", "sm_86"]);
             }),
             Err(CalibError::BuildArchFamilyArchitectureMismatch {
@@ -1807,7 +1807,7 @@ mod tests {
             }) if token == "sm_86"
         ));
         assert!(matches!(
-            load_mutated_card("sm_120-laptop.json", |card| {
+            load_mutated_card("sm_120-rtx-5090.json", |card| {
                 card["build_arch_family"] = serde_json::json!(["sm_120", "sm_120z"]);
             }),
             Err(CalibError::BuildArchFamilyTokenInvalid { token, .. })
@@ -1822,7 +1822,7 @@ mod tests {
             sm86.bare_ldg_e_declaration().unwrap(),
             BareLdgECardDeclaration::CacheAtAllLevels
         );
-        let sm120 = ArchCard::load(&card_path("sm_120-laptop.json")).unwrap();
+        let sm120 = ArchCard::load(&card_path("sm_120-rtx-5090.json")).unwrap();
         assert_eq!(
             sm120.bare_ldg_e_declaration().unwrap(),
             BareLdgECardDeclaration::TypedUnavailable
@@ -1851,7 +1851,7 @@ mod tests {
             })
         ));
         assert!(matches!(
-            load_mutated_card("sm_120-laptop.json", |card| {
+            load_mutated_card("sm_120-rtx-5090.json", |card| {
                 card["bare_ldg_e_default"] = serde_json::json!("ca");
             }),
             Err(CalibError::BareLdgCapabilityMismatch {
@@ -1866,7 +1866,7 @@ mod tests {
     fn coherent_post_load_relabel_cannot_launder_latency_evidence() {
         let mut card = ArchCard::load(&card_path("sm_86.json")).unwrap();
         card.arch_id = "sm_120".to_owned();
-        card.sku = "rtx_5060_laptop".to_owned();
+        card.sku = "rtx_5090".to_owned();
         card.compute_capability = (12, 0);
         card.build_arch_family = vec!["sm_120".to_owned()];
         card.bare_ldg_e_default = Some("unknown_typed_unavailable".to_owned());
@@ -1971,7 +1971,7 @@ mod tests {
 
     #[test]
     fn production_cards_expose_consumed_sm86_resources_and_keep_sm120_typed() {
-        for name in ["sm_86.json", "sm_120-laptop.json", "sm_120-rtx-5090.json"] {
+        for name in ["sm_86.json", "sm_120-rtx-5090.json"] {
             let value: serde_json::Value =
                 serde_json::from_slice(&std::fs::read(card_path(name)).unwrap()).unwrap();
             let blocks = [
@@ -2352,7 +2352,7 @@ mod tests {
     /// typed BlockResearchGap on access, never as an opaque parse failure.
     #[test]
     fn sm120_partial_card_loads_with_typed_block_gaps() {
-        let card = ArchCard::load(&card_path("sm_120-laptop.json")).expect("load sm_120 card");
+        let card = ArchCard::load(&card_path("sm_120-rtx-5090.json")).expect("load sm_120 card");
         assert_eq!(card.arch_id().unwrap(), ArchId::Sm120);
         // l2_geometry is populated on this card.
         let l2 = card.require_l2_geometry().unwrap();
@@ -2374,8 +2374,7 @@ mod tests {
             card.require_latency(LatencyKind::L1Hit),
             Err(CalibError::LatenciesMissing { .. })
         ));
-        // DRAM bandwidth is a research gap (no locked operating point on
-        // the DVFS-spanning laptop part) → typed, never inherited.
+        // DRAM bandwidth is a research gap → typed, never inherited.
         assert!(matches!(
             card.require_dram_bandwidth(),
             Err(CalibError::BlockResearchGap { .. })
@@ -2384,7 +2383,7 @@ mod tests {
 
     #[test]
     fn explicit_latency_block_gap_loads_and_fails_typed() {
-        let card = load_mutated_card("sm_120-laptop.json", |card| {
+        let card = load_mutated_card("sm_120-rtx-5090.json", |card| {
             card["latencies_cycles"] = serde_json::json!({
                 "status": "research_gap",
                 "reason": "sm_120 latency table is not measured",

@@ -5,11 +5,10 @@
 //! FOLLOWED BY the canonical per-lane positional check the Python gate runs
 //! after reconstruction (`lane_position_mismatch`: slot i is sentinel iff
 //! bit i of `active_mask & predicate_mask` is clear). The two
-//! implementations MUST stay in lockstep: the Python side is the admission
-//! gate for traces, this side is what the simulator actually replays. The
-//! shared golden fixture `tools/nvbit_tracer/lane_reconstruction_golden.json`
-//! is consumed by BOTH test suites; extend it in the same commit as any
-//! semantic change to either decoder.
+//! implementations MUST stay in lockstep: the Python side is the producer
+//! decoder, and this side is what the simulator actually replays. Replay
+//! evidence comes from the complete captured workload corpus rather than a
+//! hand-authored golden fixture.
 //!
 //! Compressed reconstruction uses checked i64 arithmetic in both runtimes.
 //! Any record whose reconstruction leaves that domain is a typed

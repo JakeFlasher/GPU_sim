@@ -306,7 +306,7 @@ def _host_arch_token(kind: str) -> str:
     Delegates to ``arch_resolver.arch_tag_from_host_kind`` so the
     manifest / report / scoring layers share the same arch-tag
     vocabulary. Covers (at minimum) ``sm_86`` (3090 Ti), ``sm_90``
-    (H100), ``sm_100a`` (B200), ``sm_120`` (5060), and the
+    (H100), ``sm_100a`` (B200), ``sm_120`` (5090), and the
     generic ``local_sm_X`` / ``local_sm_X_Y`` fallback for any
     other compute capability the host probe classifies; unknown
     inputs return ``sm_unknown``.

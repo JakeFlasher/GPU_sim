@@ -76,7 +76,7 @@ The local 3090 Ti (sm_86) is the host this baseline was
 compile-checked and natively-correctness-validated on. Final
 SOL scoring is on B200 (sm_100a). Differences worth noting:
 
-- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5060):
+- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5090):
   the larger weight tensors (`gate_proj` and `up_proj` each at
   `24576 × 3072 × 2 bytes = 144 MiB` bf16) substantially
   exceed the 3090 Ti's 6 MiB L2 partition. B200's HBM3e + larger

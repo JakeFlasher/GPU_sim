@@ -50,8 +50,6 @@ tools/blackwell_probes/tests/*_test_host_sim
 tools/blackwell_probes/*.o
 tools/blackwell_probes/latency/latency_probes
 tools/blackwell_probes/results/
-tools/local_labels/_sm120_get_l2_cache_size
-tools/local_labels/microfixtures/build/
 tools/pchase/build/
 
 workloads/ai-kernels/conv2d
@@ -90,23 +88,8 @@ results/
 dual_source_evidence/
 perturbation_build/
 data/annex/
-data/local_labels/campaign/golden_traces/
 
 # Raw local-label captures. Aggregated campaign files remain trackable.
-data/local_labels/sweeps/**/cell=*/cfg=*/**/*.ncu-rep
-data/local_labels/sweeps/**/cell=*/cfg=*/**/label_*_*.json
-data/local_labels/sm_86/*/trace_l2_accuracy_xl/*.ncu-rep
-data/local_labels/sm_86/*/trace_l2_accuracy_xl/label_*_*.json
-data/local_labels/sm_86/*/trace_l2_accuracy_xl/label_run_manifest_*_*.json
-data/local_labels/sm_86/*/timing_shape/*.ncu-rep
-data/local_labels/sm_86/*/timing_shape/label_*_*.json
-data/local_labels/sm_86/*/timing_shape/label_run_manifest_*_*.json
-data/local_labels/sm_86/*/trace_l2_accuracy_lg/*.ncu-rep
-data/local_labels/sm_86/*/trace_l2_accuracy_lg/label_*_*.json
-data/local_labels/sm_86/*/trace_l2_accuracy_lg/label_run_manifest_*_*.json
-data/local_labels/sm_86/*/correctness_shape/*.ncu-rep
-data/local_labels/sm_86/*/correctness_shape/label_*_*.json
-data/local_labels/sm_86/*/correctness_shape/label_run_manifest_*_*.json
 
 # Optional local paper tree
 IEEE_conference_latex/

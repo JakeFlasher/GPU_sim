@@ -1,5 +1,5 @@
 //! Cache-operator classification from SASS opcode text — a lockstep port
-//! of `tools/cache_predictor/l1_cache_op_classifier.py`'s token rules
+//! of `the trace producer cache-op decoder`'s token rules
 //! (closed 12-token vocabulary, priority-ordered matching, and the sm_86
 //! bare-`LDG.E` → `.CA` default), applied to the control-bits sidecar's
 //! per-pc `opcode_text` instead of a separate cuobjdump pass.

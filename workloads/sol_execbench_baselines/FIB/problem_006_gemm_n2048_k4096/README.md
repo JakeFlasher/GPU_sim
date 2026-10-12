@@ -37,7 +37,7 @@ only. The B200 (sm_100a) path is unvalidated until Phase 2.
   is compute-bound for large M but bandwidth-bound for small M;
   B200's HBM3e has roughly 20× the bandwidth of the 3090 Ti's
   GDDR6X and ~15× the bandwidth of the future cross-arch sm_120
-  RTX 5060's GDDR7.
+  RTX 5090's GDDR7.
 - Sm80 TensorOp path; no sm_100a-only features (TCGen05 / TMEM /
   TMA / cluster / DSMEM). The Phase-2 retest may reach a different
   occupancy on Blackwell.

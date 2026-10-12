@@ -50,7 +50,7 @@ noting for this pattern:
   cores at all (no MACs; cos/sin are SFU intrinsics). TCGen05 and
   TMEM are not exercised; the kernel is portable across sm_86 / 89
   / 90 / 100 / 120 without architecture-dependent codegen.
-- GDDR7 vs GDDR6X: the consumer Blackwell 5060 also uses GDDR7;
+- GDDR7 vs GDDR6X: the consumer Blackwell 5090 also uses GDDR7;
   the 3090 Ti uses GDDR6X. The pattern is bandwidth-bound so this
   affects local wall-clock but not correctness.
 

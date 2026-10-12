@@ -74,7 +74,7 @@ compile-checked and natively-correctness-validated on.
 Final SOL scoring is on B200 (sm_100a). Differences worth
 noting:
 
-- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5060):
+- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5090):
   Kernel A is bandwidth-bound. The two BF16x2 streams
   (`grad_output`, `hidden_states`) plus the BF16x2 write
   (`grad_hidden_states`) dominate runtime. B200's HBM3e

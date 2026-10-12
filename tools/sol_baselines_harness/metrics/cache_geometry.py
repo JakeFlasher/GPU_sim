@@ -21,7 +21,7 @@ live CUDA reading: a declared `l2_capacity_bytes` that disagrees
 with the runtime value is rejected with a typed reason.
 
 The resolver/validator split mirrors the cross-study sibling
-`/home/jakeshea/3090ti_5060laptop_cross_study/tools/hrd_profiler/
+`/home/jakeshea/3090ti_5090_cross_study/tools/hrd_profiler/
 cache_model_spec.py:80-282` - the shape is lifted with the
 typed-reason vocabulary renamed to the solbench `cache_geometry_*`
 namespace and the field set adapted to the cache-geometry surface
@@ -54,7 +54,7 @@ DEFAULT_SECTORS_PER_LINE: int = (
 #
 # sm_86 (RTX 3090 Ti GA102) is the historical Ampere host — kept
 # as a legacy compatibility entry for the landed evidence trail
-# under ``.harness_traces/``. sm_120-laptop (RTX 5060 Laptop GB206) is
+# under ``.harness_traces/``. sm_120 (RTX 5090 GB206) is
 # retained historical data; the active sm_120 card is the RTX 5090
 # Workstation and intentionally has typed gaps below. Undocumented fields are explicitly
 # ``None`` rather than guessed; ``resolve_cache_geometry`` routes
@@ -77,198 +77,10 @@ _STATIC_DEVICE_CARDS: dict[str, dict[str, Any]] = {
         # the historical behavior byte-for-byte.
         "l2_constant_memory_counts_for_read_score": False,
     },
-    "sm_120-laptop": {
-        "arch": "sm_120",
-        "sku": "rtx_5060_laptop",
-        # L1 + shared unified cache: NVIDIA Blackwell consumer
-        # documentation describes CC 12.0 with a 128 KB unified
-        # L1/texture/shared cache per SM and a maximum runtime-
-        # selectable shared capacity of 100 KB
-        # (carveouts 0/8/16/32/64/100). The predictor's L1
-        # field uses the unified-cache upper bound.
-        "l1_kb_per_sm": 128,
-        # GB206 L2 capacity (32 MiB) corroborated by the live
-        # CUDA runtime probe (cudaDeviceProp.l2CacheSize ==
-        # 33554432 on the RTX 5060 Laptop GPU). Provided here
-        # for offline contexts; the resolver still prefers the
-        # runtime reading.
-        "l2_capacity_bytes": 32 * 1024 * 1024,  # 32 MiB
-        # Number of L2 slices on GB206: NCU device-attribute probe
-        # on the live RTX 5060 Laptop returned
-        # device__attribute_l2s_count = 24
-        # (corroborated by device__attribute_fbp_count = 2 and
-        # device__attribute_num_l2s_per_fbp = 12; 2 * 12 = 24).
-        "num_l2_slices": 24,
-        # Sector and line sizes are 32 B / 128 B across every
-        # NVIDIA arch Ampere through Blackwell, including
-        # consumer Blackwell.
-        "sector_size_bytes": 32,
-        "line_size_bytes": 128,
-        # L2 associativity for GB206 is not documented by NVIDIA
-        # publicly and NCU does not expose it as a device attribute.
-        # an earlier sweep ran an empirical sweep
-        # (sm120_l2_associativity_probe/sweep_associativity.py) over
-        # candidates {4, 8, 16, 32, 64} against 33 historical-label
-        # cells with clean Tier-2 traces. L2 prediction MAPE
-        # plateaus at associativity_l2 = 32 (12.8% friendly L2);
-        # higher candidates (64) yielded identical numbers,
-        # indicating saturation. 32-way is consistent with
-        # consumer-Blackwell L2 architecture (Hopper datacenter
-        # L2 is 32-way per slice).
-        "associativity_l2": 32,
-        # Constant-memory L2 read-score denominator flag.
-        # DISABLED for sm_120 tonight, despite Blackwell-consumer's
-        # texture-source-unit counter including constant-cache
-        # routed traffic.
-        #
-        # Extension A initially flipped this to True; the
-        # land revealed that routing constant-memory accesses to
-        # the regular L2 LRU simulator produces ~98% hit rates
-        # because all constant loads alias to a tiny working set
-        # in the LRU model. NCU's actual hit rate for the same
-        # cells is 8-76%, reflecting the parallel constant cache's
-        # ~8 KiB capacity + broadcast semantics that the regular
-        # L2 simulator cannot model. The errors per cell vary
-        # markedly (0.22 / 0.29 / 0.53pp), so the isotonic
-        # calibrator cannot recover them via a monotonic
-        # correction.
-        #
-        # Disabled here pending Extension A2: a dedicated
-        # ConstantCacheSimulator (per-SM, ~8 KiB capacity,
-        # fully-associative, empirically calibrated against the
-        # 3 revealed cells + holdout). The plumbing through
-        # cache_access_policy.route_access /
-        # cache_predictor._replay_records_through_caches /
-        # cache_geometry.resolve_cache_geometry stays in place
-        # so A2 can be flipped on without further plumbing
-        # changes.
-        "l2_constant_memory_counts_for_read_score": False,
-    },
     "sm_120": {
-        "arch": "sm_120",
-        "sku": "rtx_5090",
-        # RTX 5090 cache geometry is intentionally typed unavailable until
-        # the cloud host supplies a live device/NCU probe. Never reuse the
-        # historical GB206 laptop values above.
-        "l1_kb_per_sm": None,
-        "l2_capacity_bytes": None,
-        "num_l2_slices": None,
-        "sector_size_bytes": None,
-        "line_size_bytes": None,
-        "associativity_l2": None,
-        "l2_constant_memory_counts_for_read_score": None,
-    },
-    # sm_100a (B200 GB100) — populate when B200 access is
-    # available (256 KB L1/SM with carveout, 126 MB L2 in 2 die-
-    # partitions ~63 MB each per the Blackwell tuning guide).
-}
-
-
-# Per-field provenance for ``_STATIC_DEVICE_CARDS``. Every
-# populated field MUST carry a provenance entry naming the
-# documentation source or live probe that justifies the value.
-# Fields explicitly set to ``None`` in the card do NOT need a
-# provenance row — they route to ``typed_unavailable``. The pinning
-# test asserts coverage (every non-``None`` field has a provenance
-# string).
-_STATIC_DEVICE_CARD_PROVENANCE: dict[str, dict[str, str]] = {
-    "sm_86": {
         "l1_kb_per_sm": (
-            "NVIDIA Ampere GA102 whitepaper: 192 KB unified L1/shared "
-            "per SM."
-        ),
-        "l2_capacity_bytes": (
-            "NVIDIA Ampere GA102 whitepaper: 6 MiB L2 cache; "
-            "corroborated by cudaDeviceProp.l2CacheSize on RTX 3090 Ti."
-        ),
-        "num_l2_slices": (
-            "NVIDIA Ampere GA102 whitepaper: 6 L2 partitions on GA102."
-        ),
-        "sector_size_bytes": (
-            "NVIDIA Ampere whitepaper: 32 B sector; constant across "
-            "Ampere through Blackwell."
-        ),
-        "line_size_bytes": (
-            "NVIDIA Ampere whitepaper: 128 B line; constant across "
-            "Ampere through Blackwell."
-        ),
-        "associativity_l2": (
-            "NVIDIA Ampere whitepaper: 16-way L2 slice associativity."
-        ),
-        "l2_constant_memory_counts_for_read_score": (
-            "Ampere sm_86 LSU-pipe source-unit counter "
-            "(lts__t_sectors_srcunit_tex_op_read on Ampere) does NOT "
-            "include constant-cache-routed traffic; the constant cache "
-            "is a separate source-unit class on Ampere. Routing keeps "
-            "constant-memory loads architecturally L2-bound but "
-            "EXCLUDES them from the L2 read-score denominator so "
-            "the simulator's class matches the label's class."
-        ),
-    },
-    "sm_120-laptop": {
-        "l1_kb_per_sm": (
-            "NVIDIA Blackwell-consumer compute-capability spec (CC "
-            "12.0): 128 KB unified L1/texture/shared cache per SM with "
-            "configurable shared carveouts up to 100 KB. See "
-            "references/NVIDIA_Manuals/cuda_guide/03-02-06_configuring-"
-            "l1-shared-memory-balance.md."
-        ),
-        "l2_capacity_bytes": (
-            "Live cudaDeviceProp.l2CacheSize probe on the RTX 5060 "
-            "Laptop GPU (NVIDIA Blackwell consumer GB206) returned "
-            "33554432 bytes = 32 MiB; corroborated by NVIDIA Blackwell-"
-            "consumer documentation for GB206."
-        ),
-        "num_l2_slices": (
-            "Live NCU device-attribute probe on the RTX 5060 Laptop "
-            "GPU (NVIDIA Blackwell consumer GB206): "
-            "`device__attribute_l2s_count = 24`. Corroborated by "
-            "`device__attribute_fbp_count = 2` and "
-            "`device__attribute_num_l2s_per_fbp = 12` (2 * 12 = 24). "
-            "Captured 2026-05-26 via "
-            "`ncu --metrics device__attribute_l2s_count,device__"
-            "attribute_fbp_count,device__attribute_num_l2s_per_fbp "
-            "<sm_120-binary>` on the live host. Resolves DEC-B "
-            "`num_l2_slices` (Tier-1 source per plan)."
-        ),
-        "sector_size_bytes": (
-            "NVIDIA Blackwell tuning guide: 32 B sector; constant "
-            "across Ampere through Blackwell."
-        ),
-        "line_size_bytes": (
-            "NVIDIA Blackwell tuning guide: 128 B line; constant "
-            "across Ampere through Blackwell."
-        ),
-        "associativity_l2": (
-            "Empirical sweep on 2026-05-26 over candidates "
-            "{4, 8, 16, 32, 64} via "
-            "`tools/sol_baselines_harness/calibration/cache_prediction/"
-            "sm120_l2_associativity_probe/sweep_associativity.py`. "
-            "Drove the set-associative simulator on 33 sm_120 "
-            "historical-label cells with clean Tier-2 NVBit traces; "
-            "fit an isotonic calibrator on the 26 calibration_only "
-            "cells and evaluated friendly-cohort L2 MAPE on the 7 "
-            "validation_only cells. L2 prediction MAPE plateaus at "
-            "associativity_l2 = 32 (friendly L2 = 0.1282 in fraction "
-            "domain); the assoc=64 candidate yields identical "
-            "numbers, indicating saturation. 32-way is consistent "
-            "with NVIDIA's Hopper datacenter L2 (32-way per slice). "
-            "This resolves DEC-B's second variable empirically; per "
-            "the plan's DEC-B Tradeoff Summary, the sweep was "
-            "operator-authorized as an empirical model-selection "
-            "step (joel.baker concurrence, 2026-05-26), NOT an "
-            "estimate-from-sm_86. See the design notes for details."
-        ),
-        "l2_constant_memory_counts_for_read_score": (
-            "DISABLED (False) for sm_120 pending Extension A2: a "
-            "dedicated constant-cache submodel. Extension A "
-            "landed the geometry flag + route_access kwarg + "
-            "predictor threading, then revealed that routing "
-            "constant-memory accesses to the regular L2 LRU simulator "
-            "produces ~98% hit rates (LRU alias collapse) while NCU's "
-            "actual constant-cache hit rates for the same cells span "
-            "8-76% with per-cell variance no monotonic isotonic fit "
-            "can recover. Flag stays False until an A2 model lands."
+            "NVIDIA Blackwell consumer compute-capability documentation: "
+            "CC 12.0 exposes a 128 KB unified L1/texture/shared cache per SM."
         ),
     },
 }

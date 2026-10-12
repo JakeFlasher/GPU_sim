@@ -312,7 +312,7 @@ pub struct Instruction {
     /// Cache-operator dimension orthogonal to both memory_op_class
     /// (memory space) AND memory_op_access_kind (load/store/atomic/
     /// async-copy direction). The producer-side SASS classifier at
-    /// tools/cache_predictor/l1_cache_op_classifier.py maps the
+    /// the trace producer cache-op decoder maps the
     /// opcode head (LDG.E.CA / LDG.E.STRONG.SM / LDGSTS / LDL /
     /// STL / ATOM / TEX / etc.) to one of the closed 12-token
     /// underscore-vocabulary InstructionCacheOp values. The
@@ -336,7 +336,7 @@ pub struct Instruction {
     /// available after the existing tags 1-12.
     ///
     /// Three-surface lockstep with the JSON classifier manifest
-    /// schema (tools/cache_predictor/cache_op_map.schema.json) +
+    /// schema (the trace cache-op schema) +
     /// the cache_predictor._TYPED_REASONS frozenset + the
     /// comparison_runner module-level constants is enforced by the
     /// structural lockstep test at
@@ -510,7 +510,7 @@ impl MemoryOpAccessKind {
 /// build time route unknown values through their catch-all path.
 /// The 12 named values mirror the JSON schema's
 /// `instruction_cache_op` enum at
-/// tools/cache_predictor/cache_op_map.schema.json (closed-set
+/// the trace cache-op schema (closed-set
 /// lockstep enforced by a structural cross-surface parity test).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]

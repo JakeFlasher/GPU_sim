@@ -66,11 +66,11 @@ The local 3090 Ti (sm_86) is the host this baseline was compile-
 checked and natively-correctness-validated on. Final SOL scoring is
 on B200 (sm_100a). Differences worth noting:
 
-- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5060): the
+- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5090): the
   QKV projections and the three MLP projections are bandwidth-
   bound for the [intermediate_size, hidden_size] = [14336, 4096]
   weight matrices (~220 MiB). B200's HBM3e reshapes the
-  bandwidth-vs-compute envelope relative to the 3090 Ti / 5060
+  bandwidth-vs-compute envelope relative to the 3090 Ti / 5090
   GDDR-class memory subsystems.
 - DSMEM and cluster-cooperative attention (sm_100a-only) are out
   of scope at the cuBLAS-dispatch portability level; cuBLAS picks
@@ -83,5 +83,5 @@ on B200 (sm_100a). Differences worth noting:
 - TCGen05 / TMEM divergence: the four projection GEMMs and the
   two attention matmuls dispatch via cuBLAS, which on B200 chooses
   TCGen05 / TMEM tensor-core kernels automatically; on the 3090 Ti
-  and 5060 the same call resolves to Ampere / Ada tensor cores.
+  and 5090 the same call resolves to Ampere / Ada tensor cores.
   Portability is at the call-site level, not the schedule level.

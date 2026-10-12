@@ -37,7 +37,7 @@ scoring is on B200 (sm_100a). Differences worth noting:
 - HBM3e vs GDDR6X / GDDR7 bandwidth: this kernel is tiny (64 fp32
   outputs) so memory bandwidth is irrelevant — the entire output
   fits in a single L2 line. B200's HBM3e and the future cross-arch
-  sm_120 RTX 5060's GDDR7 don't materially change the picture.
+  sm_120 RTX 5090's GDDR7 don't materially change the picture.
 - DSMEM and cluster-cooperative reduction (sm_100a-only) are out of
   scope; this kernel uses no shared memory and no warp shuffles.
 - L2 carveout: the 64-element output is trivially L2-resident on

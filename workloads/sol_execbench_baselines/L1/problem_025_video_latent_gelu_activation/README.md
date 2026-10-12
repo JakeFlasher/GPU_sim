@@ -54,7 +54,7 @@ noting for this pattern:
   cores (no MACs). TCGen05 / TMEM are not exercised; the kernel is
   portable across sm_86 / 89 / 90 / 100 / 120 without
   architecture-dependent codegen.
-- GDDR7 vs GDDR6X: the consumer 5060 has GDDR7. Bandwidth-bound
+- GDDR7 vs GDDR6X: the consumer 5090 has GDDR7. Bandwidth-bound
   kernels see a wall-clock difference, not a correctness one.
 
 ## Counter-free artifacts

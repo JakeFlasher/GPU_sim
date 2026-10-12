@@ -978,7 +978,7 @@ def build_launches_from_admitted_sources(
     total_threadblocks = 0
     # Independent build-path diagnostic for the bundle-provenance
     # scanner at
-    # `tools/sm_86_predictor_accuracy_recovery/test_bundle_provenance_scanner.py`:
+    # the complete-corpus replay report:
     # counts launches that actually received a non-None
     # inbound_state (i.e., second-and-later launches in a stream
     # when carryover=True). Stays 0 when carryover=False, when a

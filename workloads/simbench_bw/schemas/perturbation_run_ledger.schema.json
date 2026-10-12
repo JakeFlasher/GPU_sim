@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "simbench_bw/schemas/perturbation_run_ledger.schema.json",
   "title": "Perturbation Run Ledger Bundle (per-kernel-per-launch)",
-  "description": "One bundle per (slug, shape_point, binary_sha256, source_commit, kernel_signature_sha256) tuple. Implements the perturbation-harness clause: produces matched .ca/.cg/.cs cache-modifier perturbation binaries plus a working_set_sweep ladder for a target kernel, confirms each perturbation under SASS modifier audit, and records a per-mode correctness_delta against the deterministic baseline reference. Every closed branch uses additionalProperties: false. Loop-scope families on sm_120-laptop: cache_modifier_ca, cache_modifier_cg, cache_modifier_cs, working_set_sweep (R45 added cache_modifier_cs to close the microbench-suite-coverage criterion's cache-modifier-variants family). Cache-modifier admission requires sass_match_count >= sass_expected_match_count = 2 inside the target kernel SASS section; one-of-two and zero-of-two outcomes route to the modifier_optimized_away typed-unavailable arm. Per-mode correctness_delta one-of-three: abs_and_rel (FP via JSON-output), exact_match (INT via JSON-output), sha256_f32le (digest mode for large outputs). The negative invariant: an admitted perturbation record without sass_confirmation_hash, sass_artifact_path, sass_expected_match_count, or sass_match_count fails the schema validator.",
+  "description": "One bundle per (slug, shape_point, binary_sha256, source_commit, kernel_signature_sha256) tuple. Implements the perturbation-harness clause: produces matched .ca/.cg/.cs cache-modifier perturbation binaries plus a working_set_sweep ladder for a target kernel, confirms each perturbation under SASS modifier audit, and records a per-mode correctness_delta against the deterministic baseline reference. Every closed branch uses additionalProperties: false. Loop-scope families on sm_120: cache_modifier_ca, cache_modifier_cg, cache_modifier_cs, working_set_sweep (R45 added cache_modifier_cs to close the microbench-suite-coverage criterion's cache-modifier-variants family). Cache-modifier admission requires sass_match_count >= sass_expected_match_count = 2 inside the target kernel SASS section; one-of-two and zero-of-two outcomes route to the modifier_optimized_away typed-unavailable arm. Per-mode correctness_delta one-of-three: abs_and_rel (FP via JSON-output), exact_match (INT via JSON-output), sha256_f32le (digest mode for large outputs). The negative invariant: an admitted perturbation record without sass_confirmation_hash, sass_artifact_path, sass_expected_match_count, or sass_match_count fails the schema validator.",
   "schema_version": 1,
   "type": "object",
   "additionalProperties": false,
@@ -110,7 +110,7 @@
       "type": "string",
       "enum": [
         "sm_86",
-        "sm_120-laptop"
+        "sm_120"
       ]
     },
     "family": {

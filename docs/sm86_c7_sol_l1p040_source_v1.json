@@ -1,7 +1,0 @@
-{
-  "candidate":"L1/problem_040_conv2d_residual_block/cuda_cpp",
-  "environment":{"cuda_available":true,"torch":"2.12.0+cu130","torch_cuda_runtime":"13.0","gpu":"NVIDIA GeForce RTX 3090 Ti","capability":"8.6","permitted_environment":"tools/sol_execbench/.venv","host_compiler":"/usr/bin/g++-14","nvcc_expected":"CUDA 13.2"},
-  "phase":"C7-S34AH1","schema":"sm86_c7_sol_l1p040_source_v1",
-  "source_contract":{"source":"workloads/sol_execbench_baselines/L1/problem_040_conv2d_residual_block/cuda_cpp","entry_point":"main.cpp::run","class":"custom_cuda","sm86_marker":"solution.json compile option arch=compute_86,code=sm_86","custom_kernels":["problem_040_conv2d_residual_block_conv_in_kernel","problem_040_conv2d_residual_block_conv_out_plus_residual_kernel"],"constants":{"in_channels":3,"hidden_channels":32,"out_channels":3,"kernel_size":3,"padding":1,"block":"16x16"},"inputs":"x [B,3,H,W] FP32; conv weights/biases FP32","output":"output [B,3,H,W] FP32 destination","math":"two direct zero-padded 3x3 convolutions with residual addition","oracle":"independent definition.json conv2d/conv2d/residual reference","workload_shapes":[[8,512,512],[32,256,256],[2,256,256],[4,512,512],[1,128,128]]},
-  "selection_basis":"Next executable L1 custom-CUDA row after per-head RMSNorm; no timing or NCU values transferred","status":"complete_source_contract_and_sm86_environment_review"
-}

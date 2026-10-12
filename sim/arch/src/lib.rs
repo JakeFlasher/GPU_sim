@@ -709,7 +709,6 @@ impl BuildArch {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Sku {
     Rtx3090Ti,
-    Rtx5060Laptop,
     Rtx5090,
 }
 
@@ -717,7 +716,6 @@ impl Sku {
     pub fn parse(token: &str) -> Result<Self, ArchError> {
         match token {
             "rtx_3090_ti" => Ok(Self::Rtx3090Ti),
-            "rtx_5060_laptop" => Ok(Self::Rtx5060Laptop),
             "rtx_5090" => Ok(Self::Rtx5090),
             other => Err(ArchError::UnknownSku {
                 token: other.to_owned(),
@@ -728,7 +726,6 @@ impl Sku {
     pub const fn token(self) -> &'static str {
         match self {
             Self::Rtx3090Ti => "rtx_3090_ti",
-            Self::Rtx5060Laptop => "rtx_5060_laptop",
             Self::Rtx5090 => "rtx_5090",
         }
     }
@@ -736,7 +733,6 @@ impl Sku {
     pub const fn arch(self) -> ArchId {
         match self {
             Self::Rtx3090Ti => ArchId::Sm86,
-            Self::Rtx5060Laptop => ArchId::Sm120,
             Self::Rtx5090 => ArchId::Sm120,
         }
     }
@@ -1317,15 +1313,6 @@ mod tests {
             BuildArch::parse("sm_999"),
             Err(ArchError::UnknownBuildToken { .. })
         ));
-    }
-
-    #[test]
-    fn sku_and_architecture_mismatch_is_typed() {
-        assert!(matches!(
-            ArchIdentity::new(ArchId::Sm86, Sku::Rtx5060Laptop, BuildArch::Sm86),
-            Err(ArchError::SkuArchitectureMismatch { .. })
-        ));
-        assert!(ArchIdentity::new(ArchId::Sm120, Sku::Rtx5060Laptop, BuildArch::Sm120f).is_ok());
     }
 
     #[test]

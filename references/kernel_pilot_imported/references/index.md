@@ -54,7 +54,7 @@ layer from the upstream kernel-pilot repo and re-run the post-pivot trim.
 | Hardware | Architecture | Status | Path |
 |---|---|---|---|
 | 3090Ti / A100 | sm_86 / sm_80 (Ampere) | local-test refs | solbench's `references/NVIDIA_Manuals/ampere_{compatibility,tuning}/` (11+11 = 22 files; kernel-pilot did not ship Ampere guides) |
-| RTX 5060 laptop | sm_120 (consumer Blackwell) | local dev proxy KEPT | `ako4all/{cuda-cpp,cutlass-cpp}/sm120-optimization-guide.md` |
+| RTX 5090 | sm_120 (consumer Blackwell) | local dev proxy KEPT | `ako4all/{cuda-cpp,cutlass-cpp}/sm120-optimization-guide.md` |
 | Blackwell variant | sm_103 | context KEPT | `ako4all/{cuda-cpp,cutlass-cpp}/sm103-optimization-guide.md` |
 | B200 (cloud) | sm_100a (datacenter Blackwell) | cloud scoring KEPT | `ako4all/{cuda-cpp,cutlass-cpp}/sm100-optimization-guide.md` (also see solbench's `references/NVIDIA_Manuals/blackwell_tuning/` — 12 authoritative files) |
 | RTX 4090 / L40S | sm_89 (Ada) | DROPPED | Not in solbench hardware path |

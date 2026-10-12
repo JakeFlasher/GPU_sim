@@ -1,8 +1,0 @@
-{
-  "candidate":"L1/problem_078_group_norm_fusion/cuda_cpp",
-  "environment":{"cuda_available":true,"torch":"2.12.0+cu130","torch_cuda_runtime":"13.0","gpu":"NVIDIA GeForce RTX 3090 Ti","capability":"8.6","permitted_environment":"tools/sol_execbench/.venv","host_compiler":"/usr/bin/g++-14","nvcc_expected":"CUDA 13.2"},
-  "phase":"C7-S34BD1","schema":"sm86_c7_sol_l1p078_source_v1",
-  "source_contract":{"source":"workloads/sol_execbench_baselines/L1/problem_078_group_norm_fusion/cuda_cpp","entry_point":"main.cpp::run","class":"custom_cuda","sm86_marker":"solution.json compile option arch=compute_86,code=sm_86","custom_kernel":"problem_078_group_norm_kernel","constants":{"num_groups":32,"block_threads":256,"one_cta_per_batch_group":true,"statistics_dtype":"FP32"},"inputs":"x [B,C,H,W] contiguous FP32; weight/bias [C] FP32; eps host FP32 scalar","outputs":"output [B,C,H,W] contiguous FP32 destination tensor","math":"FP32 group mean/variance/rsqrt over C/32*H*W and per-channel affine transform","oracle":"independent definition.json/reference.py GroupNorm reference","workload_shapes":[[16,640,32,32],[2,640,32,32],[4,1280,16,16],[4,320,64,64],[4,1280,8,8],[8,1280,16,16],[2,320,128,128],[8,320,64,64],[4,640,32,32],[2,640,211,53],[32,1280,8,8],[2,320,449,7],[1,1280,32,32],[2,1280,16,16],[8,640,32,32],[16,1280,16,16]]},
-  "selection_basis":"Next genuine L1 custom-CUDA row after the problem075 source correction; no timing or NCU values transferred",
-  "status":"complete_source_contract_and_sm86_environment_review"
-}

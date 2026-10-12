@@ -1,5 +1,5 @@
 //! Shared L2 slice model — a lockstep port of the sectored set-associative
-//! replay core in `tools/cache_replay/sector_cache_replay.py`
+//! replay core in `the native L2 replay model`
 //! (`replay_access_stream` + `_install_way`), the engine behind the
 //! Phase-1 L2 predictor. Like the L1 port, only the CACHE STATE MACHINE
 //! is taken: the Python module replayed a timeless trace-order stream,
@@ -3949,7 +3949,7 @@ mod tests {
     /// Cross-language lockstep corpus (BL-20260507 pattern): the SAME
     /// deterministic LCG streams, replayed through the canonical Python
     /// engine, produce these (hits, total) pins —
-    /// `tools/cache_replay/test_l2_rust_parity.py` asserts the Python
+    /// `the native replay corpus` asserts the Python
     /// side AND that these rows exist here. Regenerate BOTH files in
     /// one commit.
     #[test]

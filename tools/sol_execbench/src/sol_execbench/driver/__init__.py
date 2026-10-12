@@ -14,15 +14,6 @@
 # limitations under the License.
 
 from .problem_packager import ProblemPackager
-from .capture_adapter import (
-    CAPTURE_REQUEST_ENV,
-    CaptureAdapterError,
-    execute_capture_stage,
-    handle_capture_request,
-    prepare_capture_stage,
-    validate_capture_evidence,
-    validate_capture_stage,
-)
 from .capture_runtime import (
     CertifiedEnvironmentError,
     PINNED_NVCC_CCBIN,
@@ -31,16 +22,9 @@ from .capture_runtime import (
 )
 
 __all__ = [
-    "CAPTURE_REQUEST_ENV",
-    "CaptureAdapterError",
     "CertifiedEnvironmentError",
     "PINNED_NVCC_CCBIN",
     "ProblemPackager",
     "build_certified_env",
     "environment_contract_sha256",
-    "execute_capture_stage",
-    "handle_capture_request",
-    "prepare_capture_stage",
-    "validate_capture_evidence",
-    "validate_capture_stage",
 ]

@@ -197,7 +197,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--emissions",
-        default="data/local_labels/replay_count_emissions_sm_86.json")
+        default="/dev/shm/sm120_rtx_5090_work/replay_count_emissions.json")
     parser.add_argument("--out", default=DEFAULT_WITNESS_OUT)
     args = parser.parse_args(argv)
 

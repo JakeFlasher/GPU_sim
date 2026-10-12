@@ -16,7 +16,7 @@ Read these before using CUTLASS as prior art:
 - `../ako4all/cutlass-cpp-kernel-reference.md`
 - `../ako4all/cutlass-cpp/cutlass-cpp-overview.md`
 - `../ako4all/nvidia-architecture-reference.md`
-- `../ako4all/cuda-cpp/sm100-optimization-guide.md` + `../ako4all/cutlass-cpp/sm100-optimization-guide.md` for B200 (sm_100 cloud scoring target) and `sm120-optimization-guide.md` (RTX 5060 local proxy). sm_90 guide was dropped (Hopper not in solbench hardware path)
+- `../ako4all/cuda-cpp/sm100-optimization-guide.md` + `../ako4all/cutlass-cpp/sm100-optimization-guide.md` for B200 (sm_100 cloud scoring target) and `sm120-optimization-guide.md` (RTX 5090 local proxy). sm_90 guide was dropped (Hopper not in solbench hardware path)
 
 ## Code Map
 

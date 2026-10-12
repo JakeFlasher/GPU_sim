@@ -40,13 +40,13 @@ fused kernel collapses the chain.
 
 ## Architecture-coupling caveats
 
-The local 5060 (sm_120) compiles and smoke-runs this baseline; final
+The local 5090 (sm_120) compiles and smoke-runs this baseline; final
 SOL scoring is on B200 (sm_100a). Differences worth noting for this
 pattern:
 
 - HBM3e vs GDDR7 bandwidth: this kernel is bandwidth-bound (read
   `[B, 2048]` BF16, write `[B, 2048]` BF16). B200's HBM3e has roughly
-  20× the bandwidth of the 5060's GDDR7, so local wall-time is a weak
+  20× the bandwidth of the 5090's GDDR7, so local wall-time is a weak
   proxy for B200 SOL Score — the kernel will be even more
   bandwidth-dominant there.
 - DSMEM and cluster-cooperative reduction (sm_100a-only) are out of
@@ -54,7 +54,7 @@ pattern:
   shuffles only.
 - L2 carveout: at modest batch sizes the entire row stays in L1 / L2;
   for very large batches B200's larger L2 may absorb a working set
-  the 5060's smaller L2 cannot.
+  the 5090's smaller L2 cannot.
 - TCGen05 / TMEM divergence: 5th-gen tensor cores and TMEM register
   surface only exist on sm_100a; this kernel does not use tensor cores
   (the math is pointwise BF16/FP32 multiplies and adds), so the

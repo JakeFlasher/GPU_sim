@@ -39,11 +39,11 @@ The local 3090 Ti (sm_86) is the host this baseline was compile-
 checked and natively-correctness-validated on. Final SOL scoring is
 on B200 (sm_100a). Differences worth noting:
 
-- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5060): the
+- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5090): the
   atomic write path is bandwidth-light per atomic (single bf16) but
   contention-heavy at the same destination row. B200's larger L2
   partition and HBM3e bandwidth handle contention better than the
-  3090 Ti / 5060 GDDR-class memory subsystems.
+  3090 Ti / 5090 GDDR-class memory subsystems.
 - DSMEM and cluster-cooperative reduction (sm_100a-only) are out
   of scope; the kernel does not stage source rows in shared memory.
 - L2 carveout / cache: the per-row `output[token_indices[i]]` write

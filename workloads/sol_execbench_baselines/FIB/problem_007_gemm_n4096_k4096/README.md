@@ -42,9 +42,9 @@ The local 3090 Ti (sm_86) is the host this baseline was compile-
 checked and natively-correctness-validated on. Final SOL scoring is
 on B200 (sm_100a). Differences worth noting:
 
-- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5060): B200's
+- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5090): B200's
   HBM3e (~8 TB/s) reshapes the K-reduction streaming bandwidth
-  envelope relative to the 3090 Ti / 5060 hosts. Large-M cases here
+  envelope relative to the 3090 Ti / 5090 hosts. Large-M cases here
   are bandwidth-bound on the 3090 Ti; the same M on B200 will be
   compute-bound earlier.
 - DSMEM and cluster-cooperative B-tile staging (sm_100a-only) are

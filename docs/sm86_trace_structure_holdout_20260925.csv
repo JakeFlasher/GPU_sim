@@ -1,4 +1,0 @@
-workload,instructions,ncu_instructions,cfg_unique_edges,cfg_observed_edges,cfg_active_lane_transitions,cfg_disjoint_path_switches,coherence_decoded_lines,coherence_cross_sm_lines,coherence_cross_sm_sectors,coherence_cross_sm_read_write_lines,coherence_cross_sm_write_write_lines,coherence_unknown_records,physical_unique_pct,physical_ambiguous_pct,physical_unknown_pct
-gemm_hmma_bf16_sm80,197120,197120.0,139.0,196608.0,6291456.0,0.0,4096.0,4096.0,16384.0,0.0,2048.0,0.0,65.1948051948052,30.38961038961039,4.415584415584416
-rmsnorm_fwd_bf16_sm80,264704,264704.0,74.0,264192.0,8454144.0,0.0,8256.0,64.0,256.0,0.0,0.0,0.0,87.81431334622825,11.798839458413926,0.38684719535783363
-silu_fwd_bf16_sm80,417792,417792.0,50.0,409600.0,13107200.0,0.0,8192.0,0.0,0.0,0.0,0.0,0.0,72.54901960784314,23.529411764705884,3.9215686274509802

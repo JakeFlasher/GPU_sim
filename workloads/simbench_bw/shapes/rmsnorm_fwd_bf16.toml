@@ -40,7 +40,7 @@ name = "correctness_calibration"
 axes = { rows = 32, hidden = 512 }
 launch_config = { grid = [32, 1, 1], block = [256, 1, 1] }
 # Larger sample size than the standard timing shapes so the calibrated
-# tolerance captures the laptop's DVFS-induced timing tail. The
+# tolerance captures the active GPU's DVFS-induced timing tail. The
 # correctness_calibration shape is consumed only by the calibration
 # helper (single-side, not a join input), so the larger repeat_iters
 # is calibration-recipe-internal and does not affect the offline-join

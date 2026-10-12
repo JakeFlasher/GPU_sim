@@ -141,7 +141,7 @@
     "sm120 RTX 5090 clock and wall-time crosswalk"
   ],
   "notes": [
-    "This card is intentionally separate from sm_120-laptop; a CC 12.0 token alone must not select between SKUs.",
+    "This card is the active SM120 deployment target for the RTX 5090.",
     "The card is vendor-informed and not a claim that the simulator already supports SM120 replay.",
     "The 120a/120f build tokens are compile-family vocabulary; each feature requires a live compile and run probe."
   ],

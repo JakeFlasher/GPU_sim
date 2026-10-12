@@ -7,7 +7,7 @@
 > and CUDA Graphs are forbidden without a per-problem note. solbench is also counter-free
 > (no NCU per Rule 1); counter-free profiling lives in `scripts/baselines_harness/`.
 >
-> **Local-test architecture context:** sm_120 is RTX 5060 (laptop dev proxy);
+> **Local-test architecture context:** sm_120 is RTX 5090 local proxy;
 > sm_103 is a Blackwell datacenter variant. solbench's scoring target is sm_100a (B200).
 > For sm_80 / sm_86 (Ampere A100 / 3090Ti) local validation, solbench's own
 > `references/NVIDIA_Manuals/ampere_tuning/` (12 files) and

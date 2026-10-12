@@ -44,7 +44,7 @@ Phase 2. Differences worth noting for this pattern:
   bound (read two `[B, 7168]` BF16 tensors + 1D weight, write
   `[B, 7168]` BF16). B200's HBM3e has roughly 20× the bandwidth
   of the 3090 Ti's GDDR6X and ~15× the bandwidth of the future
-  cross-arch sm_120 RTX 5060's GDDR7, so local wall-time is a
+  cross-arch sm_120 RTX 5090's GDDR7, so local wall-time is a
   weak proxy for B200 SOL Score — the kernel will be even more
   bandwidth-dominant there.
 - DSMEM and cluster-cooperative reduction (sm_100a-only) are out

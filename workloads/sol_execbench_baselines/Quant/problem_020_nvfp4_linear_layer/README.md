@@ -55,7 +55,7 @@ the reference's `torch._scaled_mm` BF16-emulated path. `max_relative_error`
 
 ## Architecture-coupling caveats
 
-The local 5060 (sm_120) compiles, runs correctness, AND wins speed on
+The local 5090 (sm_120) compiles, runs correctness, AND wins speed on
 every canonical workload. The CUTLASS template targets sm_120's
 native FP4 block-scaled tensor cores via the `_120a` arch variant
 (MMA atom `SM120_16x8x64_TN_VS<e2m1, e2m1, f32, ue4m3, 16>`). Final
@@ -64,19 +64,19 @@ SOL scoring is on B200 (sm_100a); differences worth noting:
 - **TCGen05 / TMEM divergence**: sm_100a has 5th-gen tensor cores
   with a dedicated TMEM register surface; the CUTLASS sm_120 dense
   block-scaled NVFP4 GEMM compiles to `tcgen05` instructions on
-  sm_100a and to the sm_120 variant on the 5060. The template
+  sm_100a and to the sm_120 variant on the 5090. The template
   dispatches correctly for either arch — re-tag to `["B200"]` for
   B200 scoring; the packager auto-injects `sm_100a` gencode.
 - **Cluster cooperative + DSMEM**: B200 supports cluster shapes
   larger than 1×1×1 via TMA multicast; sm_120 is hard-pinned to
   cluster 1×1×1 (CUTLASS example 79a documents this constraint).
   Re-tuning the `ClusterShape` for B200 may yield additional speedup.
-- **L2 carveout**: B200's larger L2 may absorb tensors the 5060's
+- **L2 carveout**: B200's larger L2 may absorb tensors the 5090's
   smaller L2 cannot; the CUTLASS pipeline's TMA-staged loads benefit
   proportionally.
 - **HBM3e vs GDDR7 bandwidth**: bandwidth-bound stages (quant
   prepass + FP4 pack + scale remap) have a different ceiling on
-  B200; the GEMM compute dominates already at M ≥ 1024 on the 5060.
+  B200; the GEMM compute dominates already at M ≥ 1024 on the 5090.
 
 ## Development iteration history (sm_120)
 

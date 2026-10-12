@@ -55,7 +55,7 @@
         "slug": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
         "platform": {
           "type": "string",
-          "enum": ["h100", "rtx_5090_blackwell", "rtx_5060_laptop", "rtx_3090_ti", "dry_run_cpu"],
+          "enum": ["h100", "rtx_5090_blackwell", "rtx_5090", "rtx_3090_ti", "dry_run_cpu"],
           "description": "Release-gating platform or `dry_run_cpu` for artifacts emitted by `run_suite.py --dry-run-cpu`. The latter is never promoted to scored status on a reporting platform; it exists so AC32 non-hardware harness plumbing can emit a schema-valid suite_results.json under --component-strict even on hosts without a real GPU probe."
         },
         "status": {

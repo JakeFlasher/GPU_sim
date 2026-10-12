@@ -47,11 +47,11 @@ The local 3090 Ti (sm_86) is the host this baseline was compile-
 checked and natively-correctness-validated on. Final SOL scoring is
 on B200 (sm_100a). Differences worth noting:
 
-- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5060): Kernel B
+- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5090): Kernel B
   is the per-column reduction with strided loads; B200's HBM3e
   bandwidth plus the larger L2 partition will cache far more of the
   B·S strided stream than the 3090 Ti's GDDR6X / 6 MB L2 can. On the
-  sm_120 5060 the GDDR7 bandwidth lands between the two but the L2
+  sm_120 5090 the GDDR7 bandwidth lands between the two but the L2
   capacity is comparable to the 3090 Ti.
 - DSMEM and cluster-cooperative reduction (sm_100a-only) are out of
   scope; both kernels reduce strictly per-CTA via warp shuffles and

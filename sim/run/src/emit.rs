@@ -3,7 +3,7 @@
 //! Takes checked counters for an exact full-coverage launch set, produces a
 //! launch-set-bound vector of NCU metric descriptor outcomes, and classifies
 //! every remaining observation contract in
-//! `tools/local_labels/metric_registry.json` with a typed exclusion.
+//! the emitted metric descriptor table with a typed exclusion.
 //! It is the only simulator module that names label-pipeline contracts: metric NAMES
 //! are the output contract and are allowed here; label VALUES still never enter
 //! (Rule 1, enforced by `eval/guards/test_targets_not_features_guard.py`).

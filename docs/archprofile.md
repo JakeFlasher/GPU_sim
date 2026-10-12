@@ -10,7 +10,7 @@ fact.
 
 1. **Native cards:** `sm_86.json` is the established RTX 3090 Ti baseline;
    `sm_120-rtx-5090.json` is the active RTX 5090 exploratory/alpha card;
-   `sm_120-laptop.json` remains a separate historical tier. Research gaps stay
+   `sm_120.json` remains a separate historical tier. Research gaps stay
    explicit and do not inherit SM86 values.
 2. **Hypothetical resources:** `ArchitectureSpec` under `arch_profiles/specs`
    feeds bounded custom execution. It is not native SASS timing.

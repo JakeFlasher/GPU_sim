@@ -2,7 +2,7 @@
 
 Use this when a tracer or trace-consumer change should be exercised on the
 local Ampere `sm_86` host and the cloud RTX 5090 `sm_120`
-host. Historical RTX 5060 laptop captures are separate SKU artifacts.
+host. Historical RTX 5090 captures are separate SKU artifacts.
 
 This is an experiment checklist, not an approval gate. A result on one GPU is
 still useful while the other GPU is unavailable.

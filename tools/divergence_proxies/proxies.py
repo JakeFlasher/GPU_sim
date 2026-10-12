@@ -340,7 +340,7 @@ def compute_divergence_proxies(
         whose launch produced this evidence. Pinned in the
         bundle for traceability back to the wire record.
     ``device``
-        Compute capability tag (``sm_86``, historical ``sm_120-laptop``, or active ``sm_120``).
+        Compute capability tag (``sm_86``, historical ``sm_120``, or active ``sm_120``).
     ``sector_stream_records``
         Per-warp records emitted by
         :mod:`tools.sector_stream.generator`. Both admitted and

@@ -132,7 +132,7 @@ def default_bundle_dir(
 
     * ``host_kind="local_sm_8_6"`` (the active 3090 Ti host) -> the
       arch-qualified sibling form ``<slug>__<lang>__sm86/``.
-    * ``host_kind="local_sm_120"`` (a future 5060 host) -> legacy
+    * ``host_kind="local_sm_120"`` (a future 5090 host) -> legacy
       un-suffixed ``<slug>__<lang>/``. The locked R0-R23 sm_120
       bundles already occupy these paths; the design contract byte-immutability
       forbids any write that mutates them.

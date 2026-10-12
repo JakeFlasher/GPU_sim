@@ -44,19 +44,19 @@ Launch is on `at::cuda::getCurrentCUDAStream()` per CLAUDE.md Rule 7.
 | 14 | PASSED | 9.61 |
 | 15 | PASSED | 4.91 |
 
-Hardware: NVIDIA GeForce RTX 5060 Laptop GPU (sm_120). Evaluation ran
+Hardware: NVIDIA GeForce RTX 5090 GPU (sm_120). Evaluation ran
 through the native `sol-execbench` CLI (no Docker); the cache /
 manifest identify this run by `native_env_hash` (see
 `tools/sol_baselines_harness/native_env.py`).
 
 ## Architecture-coupling caveats
 
-The local 5060 (sm_120) compiles and smoke-runs this baseline; final SOL
+The local 5090 (sm_120) compiles and smoke-runs this baseline; final SOL
 scoring is on B200 (sm_100a). Differences worth noting for this pattern:
 
 - HBM3e vs GDDR7 bandwidth: this kernel is heavily memory-bound (each
   row reads 2 × 16 KB inputs + 16 KB weight, writes 16 KB output); the
-  5060's GDDR7 ceiling makes local wall-time a weak proxy for the
+  5090's GDDR7 ceiling makes local wall-time a weak proxy for the
   B200 SOL Score. `seq_len` × `batch_size` row count drives total
   bandwidth pressure linearly.
 - DSMEM and cluster-cooperative reduction (sm_100a-only): the current
@@ -65,7 +65,7 @@ scoring is on B200 (sm_100a). Differences worth noting for this pattern:
   hidden_size; for `hidden_size=8192` the single-CTA reduction is
   sufficient.
 - L2 carveout: B200's larger L2 absorbs the `weight` tensor (16 KB)
-  across all rows, eliminating repeated HBM traffic; the 5060's
+  across all rows, eliminating repeated HBM traffic; the 5090's
   smaller L2 may not retain it across the row count of the larger
   workloads, surfacing as bandwidth pressure that B200 would not see.
 - TCGen05 / TMEM divergence: this kernel does not touch 5th-generation

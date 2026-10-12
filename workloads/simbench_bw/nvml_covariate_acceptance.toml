@@ -32,13 +32,13 @@ min_residual_variance_reduction_pct = 10.0
 [reference]
 # Local steady-state operating point at the time of the per-host
 # calibration sweep. The previous values measured on the now-retired
-# RTX 5060 Laptop have been REMOVED on this branch so a future worker
+# RTX 5090 have been REMOVED on this branch so a future worker
 # session re-measures them on the local RTX 3090 Ti (GA102 / sm_86 /
 # Ampere) before the regression layer consumes this block.
 #
-# Why retracted (not relabeled): the 5060 (sm_120 Blackwell) and the
+# Why retracted (not relabeled): the 5090 (sm_120 Blackwell) and the
 # 3090 Ti (sm_86 Ampere) differ by three architectural generations and
-# by GPU class (laptop vs desktop), so 5060 measurements would mis-
+# by GPU class (device class), so cross-architecture measurements would mis-
 # predict 3090 Ti behavior under any DVFS regime. Cloud-die calibration
 # is also explicitly deferred per the cross-die discipline; the cloud
 # entry remains a placeholder until the cloud calibration round closes

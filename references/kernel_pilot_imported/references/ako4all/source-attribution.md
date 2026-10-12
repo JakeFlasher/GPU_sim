@@ -49,7 +49,7 @@ To make the bundle behave like one natural skill rather than a set of nested ski
   - `references/troubleshooting.md` (was identical in all three)
   - DROPPED: `references/architectures/sm89-optimization-guide.md` (Ada — not in solbench hardware path)
   - DROPPED: `references/architectures/sm90-optimization-guide.md` (Hopper — not in solbench hardware path)
-  - KEPT (cuda-cpp + cutlass-cpp variants only): `references/{cuda-cpp,cutlass-cpp}/sm100-optimization-guide.md` (B200 scoring target), `sm103-optimization-guide.md` (Blackwell variant), `sm120-optimization-guide.md` (RTX 5060 laptop local proxy)
+  - KEPT (cuda-cpp + cutlass-cpp variants only): `references/{cuda-cpp,cutlass-cpp}/sm100-optimization-guide.md` (B200 scoring target), `sm103-optimization-guide.md` (Blackwell variant), `sm120-optimization-guide.md` (RTX 5090 local proxy)
 - **Stack-specific files are kept per-stack** because they truly differ:
   - `references/{cuda-cpp,cute-dsl,cutlass-cpp}/sm100-optimization-guide.md`
   - `references/{cuda-cpp,cute-dsl,cutlass-cpp}/sm103-optimization-guide.md`

@@ -51,14 +51,14 @@ single fp32 to the kernel.
 | 0  | PASSED | 8.2-19.8 (per-workload spread; min 8.189, max 19.836) |
 
 All 16 workloads pass with `speedup_factor` ranging from 8.189x to
-19.836x. Hardware: NVIDIA GeForce RTX 5060 Laptop GPU (sm_120).
+19.836x. Hardware: NVIDIA GeForce RTX 5090 GPU (sm_120).
 Evaluation ran through the native `sol-execbench` CLI (no Docker); the
 cache / manifest identify this run by `native_env_hash` (see
 `tools/sol_baselines_harness/native_env.py`).
 
 ## Architecture-coupling caveats
 
-The local 5060 (sm_120) compiles and smoke-runs this baseline; final SOL
+The local 5090 (sm_120) compiles and smoke-runs this baseline; final SOL
 scoring is on B200 (sm_100a). Differences worth noting for this pattern:
 
 - HBM3e vs GDDR7 bandwidth: this kernel is compute-bound on the

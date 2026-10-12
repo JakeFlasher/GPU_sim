@@ -3,7 +3,7 @@
 Single canonical home for the 7-tuple cell join key, SHA-256
 validation helpers, post-hoc drift detection, and bootstrap
 constants that the sibling project at
-`/home/jakeshea/3090ti_5060laptop_cross_study` ships as its
+`/home/jakeshea/3090ti_5090_cross_study` ships as its
 comparison contract. Downstream deployed-scope modules
 (`tiered_gate_evaluator`, the future predictor bundle factory,
 the future report tables) import from here so a single
@@ -70,7 +70,7 @@ from typing import Mapping
 # Canonical bootstrap constants. Other deployed-scope modules
 # import these from here rather than redefining; the sibling
 # project pins the same values in
-# `/home/jakeshea/3090ti_5060laptop_cross_study/workloads/simbench_bw/comparison_contract.toml`
+# `/home/jakeshea/3090ti_5090_cross_study/workloads/simbench_bw/comparison_contract.toml`
 # under `[geomean]`.
 BOOTSTRAP_RESAMPLES: int = 2000
 CI_CONFIDENCE: float = 0.95
@@ -108,7 +108,7 @@ _SHA256_FIELDS: frozenset[str] = frozenset({
 
 # Canonical sidecar-name vocabulary. Mirrors the sibling
 # project's `input_sidecar_digests` schema at
-# `/home/jakeshea/3090ti_5060laptop_cross_study/workloads/simbench_bw/schemas/cache_predictor.schema.json`
+# `/home/jakeshea/3090ti_5090_cross_study/workloads/simbench_bw/schemas/cache_predictor.schema.json`
 # where `additionalProperties: false` pins the per-input
 # allowed names to `sector_stream` (required) and
 # `dynamic_trace_pb` (optional cross-check). Names outside
@@ -376,7 +376,7 @@ class InputSidecarDigest:
     bundle declaring which sector-stream files it
     consumed). Field shape matches the sibling project's
     `input_sidecar_digests` schema at
-    `/home/jakeshea/3090ti_5060laptop_cross_study/workloads/simbench_bw/schemas/cache_predictor.schema.json`
+    `/home/jakeshea/3090ti_5090_cross_study/workloads/simbench_bw/schemas/cache_predictor.schema.json`
     object form: `name` is the canonical sidecar
     identifier (e.g., `sector_stream`,
     `calibration_corpus`), `path` is the repo-relative

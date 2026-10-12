@@ -398,8 +398,6 @@ def _infer_gpu_sku(props: DeviceProps) -> str:
         name = props.device_name.lower()
         if "rtx 5090" in name or "5090" in name:
             return "rtx_5090_blackwell"
-        if "5060" in name:
-            return "rtx_5060_laptop"
         return "blackwell_consumer_unknown"
     if cc == (8, 6):
         name = props.device_name.lower()
@@ -413,7 +411,7 @@ def _divergence_proxies_device_token_for_props(props: DeviceProps) -> str:
     """Map live `DeviceProps` to the divergence-proxies producer's
     device token. The producer at
     `tools/divergence_proxies/bundle_from_trace.py` accepts `sm_86`,
-    historical `sm_120-laptop`, and active RTX 5090 `sm_120`; any other
+    historical `sm_120`, and active RTX 5090 `sm_120`; any other
     compute capability raises a
     typed `ValueError` so the controller-side `except` records a
     `divergence_proxies_skip_reason` instead of dispatching the wrong
@@ -427,7 +425,7 @@ def _divergence_proxies_device_token_for_props(props: DeviceProps) -> str:
     if cc == (12, 0):
         if "rtx 5090" in props.device_name.lower():
             return "sm_120"
-        return "sm_120-laptop"
+        return "sm_120"
     raise ValueError(
         f"unknown_target_device_for_divergence_proxies:"
         f"cc_{cc[0]}_{cc[1]}"
@@ -440,8 +438,8 @@ def _perturbation_target_arch_for_props(props: DeviceProps) -> str:
     `tools/perturbation_harness/build.py::run_perturbation_harness`
     accepts only the historical values in
     `tools/perturbation_harness/ledger.py::SUPPORTED_TARGET_ARCHES`. The
-    active RTX 5090 is intentionally refused by this still-laptop-specific
-    producer rather than mislabeled; historical `sm_120-laptop` records remain
+    active RTX 5090 is intentionally refused by this still-device-specific
+    producer rather than mislabeled; historical `sm_120` records remain
     supported. Any other compute capability raises
     a typed `ValueError` so the controller-side `except` records a
     `perturbation_run_ledger_skip_reason` instead of building binaries
@@ -456,11 +454,11 @@ def _perturbation_target_arch_for_props(props: DeviceProps) -> str:
         return "sm_86"
     if cc == (12, 0):
         # The perturbation producer still has no Pro-specific target token;
-        # return the historical token only for the laptop and fail closed for
+        # return the supported SM120 token for the active RTX 5090 and fail closed for
         # the active RTX 5090 instead of emitting a mislabeled artifact.
         if "rtx 5090" in props.device_name.lower():
             raise ValueError("RTX 5090 perturbation target is not yet parameterized")
-        return "sm_120-laptop"
+        return "sm_120"
     raise ValueError(
         f"unknown_target_arch_for_perturbation_harness:"
         f"cc_{cc[0]}_{cc[1]}"
@@ -1300,7 +1298,7 @@ def _kernel_signature_sha256(executable: Path, slug: str) -> str:
 
     The canonical form is repo-relative so the hash is host-independent
     and joins byte-identically with the label-side fallback emitted by
-    `tools/local_labels/label_driver.sh:530`, which serializes
+    the NVBit/CUPTI sidecar emitter, which serializes
     ``$SLUG|$BINARY_PATH`` with a repo-relative ``$BINARY_PATH``.
     Pre-round-21 this function serialized the absolute executable path,
     so the trace-side placeholder diverged from the label-side
@@ -1328,7 +1326,7 @@ def _kernel_signature_sha256(executable: Path, slug: str) -> str:
 def _static_card_l2_bytes_for_props(props: "DeviceProps") -> int | None:
     """Static device-card L2 fallback per arch:
     sm_86 → 6 MiB (RTX 3090 Ti, Ampere consumer card);
-    historical sm_120-laptop → 32 MiB (RTX 5060 Laptop GPU, Blackwell GB206;
+    historical sm_120 → 32 MiB (RTX 5090 GPU, Blackwell GB206;
     confirmed via the retained live query). The active RTX 5090 path has
     no static fallback here; it uses a live CUDA value when available and
     otherwise stays unresolved.

@@ -49,7 +49,7 @@ SOL scoring is on B200 (sm_100a). Differences worth noting:
   bound (read `[B, 512]` BF16, write `[B, 512]` BF16). B200's
   HBM3e has roughly 25× the bandwidth of the 3090 Ti's GDDR6X
   (and ~20× the bandwidth of the future cross-arch sm_120
-  RTX 5060's GDDR7), so local wall-time is a weak proxy for
+  RTX 5090's GDDR7), so local wall-time is a weak proxy for
   B200 SOL Score — the kernel will be even more
   bandwidth-dominant there.
 - DSMEM and cluster-cooperative reduction (sm_100a-only) are

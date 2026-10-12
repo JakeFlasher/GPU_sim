@@ -27,7 +27,7 @@ stages. Lane / tile layout is documented in source comments under
 
 The kernel was promoted from `Compile-checked-sm_120` to
 `Profiled-local-sm_120` by running the Stage-3 surfaces orchestrator
-on the live RTX 5060 Laptop host. Final SOL scoring on B200
+on the live RTX 5090 host. Final SOL scoring on B200
 (sm_100a) will exercise the HBM3e + larger-L2 path; the per-shape
 behaviour of the scatter-and-rotate fusion will differ from sm_120
 once the B200 fanout lands.

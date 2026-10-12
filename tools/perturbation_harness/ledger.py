@@ -59,7 +59,7 @@ CACHE_MODIFIER_FAMILIES: frozenset[str] = frozenset({
 
 WORKING_SET_LADDER_MIB: tuple[int, ...] = (1, 2, 4, 8, 16, 32, 64)
 
-TARGET_ARCH = "sm_120-laptop"
+TARGET_ARCH = "sm_120"
 
 # Loop-3 widening: the perturbation harness now supports both local
 # arches as peer targets. The set is mirrored into the schema's
@@ -69,7 +69,7 @@ TARGET_ARCH = "sm_120-laptop"
 # be added to all four (BL-20260507-arch-token-multi-surface-lockstep).
 SUPPORTED_TARGET_ARCHES: frozenset[str] = frozenset({
     "sm_86",
-    "sm_120-laptop",
+    "sm_120",
 })
 
 # Cache-modifier variants admit only when SASS confirms BOTH target source

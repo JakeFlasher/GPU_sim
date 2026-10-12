@@ -26,12 +26,12 @@ counter_free_framework, sol_pattern_mapping) are explicitly marked
 | TensorRT-LLM, CCCL-CUB, ThunderKittens, TileLang, QuACK, TileKernels, Veitner-Blog, Colfax-Research, CUDA-Blog-Kernels, DeepGEMM, SGLang, vLLM, CuTe-DSL-Python | 0-1 each | **DROPPED** (unused in solbench's active work) |
 
 Architecture: solbench's local-test workflow runs **3090Ti (sm_86 Ampere)**
-and **RTX 5060 laptop (sm_120 consumer Blackwell)** BEFORE pushing to **cloud
+and **RTX 5090 (sm_120 consumer Blackwell)** BEFORE pushing to **cloud
 B200 (sm_100a)** for scoring. The trim therefore keeps:
 
 - **sm_100** (cuda-cpp + cutlass-cpp): B200 scoring target.
 - **sm_103** (cuda-cpp + cutlass-cpp): Blackwell datacenter variant context for B200.
-- **sm_120** (cuda-cpp + cutlass-cpp): RTX 5060 local dev proxy reference.
+- **sm_120** (cuda-cpp + cutlass-cpp): RTX 5090 local dev proxy reference.
 
 For **sm_80 / sm_86 (Ampere — 3090Ti, A100)** local-test references, use
 solbench's own `references/NVIDIA_Manuals/ampere_compatibility/` (11 files)
@@ -89,12 +89,12 @@ kernel_pilot_imported/
         │   ├── cuda-cpp-overview.md
         │   ├── sm100-optimization-guide.md  (B200 cloud scoring target)
         │   ├── sm103-optimization-guide.md  (Blackwell variant context)
-        │   └── sm120-optimization-guide.md  (RTX 5060 laptop local proxy)
+        │   └── sm120-optimization-guide.md  (RTX 5090 local proxy)
         └── cutlass-cpp/
             ├── cutlass-cpp-overview.md
             ├── sm100-optimization-guide.md  (B200 cloud scoring target)
             ├── sm103-optimization-guide.md  (Blackwell variant context)
-            └── sm120-optimization-guide.md  (RTX 5060 laptop local proxy)
+            └── sm120-optimization-guide.md  (RTX 5090 local proxy)
 ```
 
 **For sm_80 / sm_86 (Ampere — 3090Ti, A100):** kernel-pilot did not ship
@@ -117,7 +117,7 @@ and `references/NVIDIA_Manuals/ampere_tuning/` for local validation on Ampere ha
 ### Optimization guides KEPT (covering solbench's full local-test → cloud-scoring path)
 - `cuda-cpp/sm100-optimization-guide.md` (B200 cloud scoring target)
 - `cuda-cpp/sm103-optimization-guide.md` (Blackwell variant context)
-- `cuda-cpp/sm120-optimization-guide.md` (RTX 5060 laptop local proxy)
+- `cuda-cpp/sm120-optimization-guide.md` (RTX 5090 local proxy)
 - `cutlass-cpp/sm{100,103,120}-optimization-guide.md` (same three targets, CUTLASS C++ surface)
 - For Ampere (sm_80 / sm_86 — A100, 3090Ti): use solbench's `references/NVIDIA_Manuals/ampere_{compatibility,tuning}/`
 

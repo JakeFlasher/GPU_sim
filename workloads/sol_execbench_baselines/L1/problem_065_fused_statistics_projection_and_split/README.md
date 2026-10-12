@@ -77,7 +77,7 @@ The local 3090 Ti (sm_86) is the host this baseline was
 compile-checked and natively-correctness-validated on. Final
 SOL scoring is on B200 (sm_100a). Differences worth noting:
 
-- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5060):
+- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5090):
   the `weight` tensor (`384 × 192 × 4 = 288 KiB` fp32) fits
   comfortably in the L1 cache on every target arch; the
   `stats` workspace (`B × 384 × T × 4` bytes — up to ~50 MiB

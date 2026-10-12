@@ -56,11 +56,11 @@ The local 3090 Ti (sm_86) is the host this baseline was compile-
 checked and natively-correctness-validated on. Final SOL scoring is
 on B200 (sm_100a). Differences worth noting:
 
-- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5060): the
+- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5090): the
   per-expert matmul stream is bandwidth-light per call (the
   intermediate_size=768 is small) but heavy across 128 iterations.
   B200's HBM3e reshapes the bandwidth-vs-compute envelope; the same
-  per-expert dispatch on the 3090 Ti / 5060 spends proportionally
+  per-expert dispatch on the 3090 Ti / 5090 spends proportionally
   more time in memory.
 - DSMEM and cluster-cooperative MoE dispatch (sm_100a-only) are out
   of scope at the cuBLAS-dispatch portability level. A B200 tuning
@@ -76,6 +76,6 @@ on B200 (sm_100a). Differences worth noting:
   cohort labels this MoE access pattern accordingly.
 - TCGen05 / TMEM divergence: the per-expert matmuls dispatch
   through cuBLAS, which on B200 chooses TCGen05 / TMEM tensor-core
-  kernels automatically; on the 3090 Ti and 5060 the same call
+  kernels automatically; on the 3090 Ti and 5090 the same call
   resolves to Ampere / Ada tensor cores. Portability is at the
   call-site level, not the schedule level.

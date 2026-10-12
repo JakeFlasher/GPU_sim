@@ -48,7 +48,7 @@ The local 3090 Ti (sm_86) is the host this baseline was compile-
 checked and natively-correctness-validated on. Final SOL scoring is
 on B200 (sm_100a). Differences worth noting:
 
-- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5060): the three
+- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5090): the three
   projection GEMMs are bandwidth-bound for the I=53248 weight reads
   (~1.6 GiB per weight matrix). B200's HBM3e (~8 TB/s) reshapes
   achievable arithmetic intensity vs. the 3090 Ti's GDDR6X
@@ -64,6 +64,6 @@ on B200 (sm_100a). Differences worth noting:
   / GDDR6X spill on the 3090 Ti.
 - TCGen05 / TMEM divergence: the three GEMMs are dispatched through
   cuBLAS, which on B200 will use the TCGen05 / TMEM tensor-core
-  path automatically; on the 3090 Ti and 5060 it falls back to the
+  path automatically; on the 3090 Ti and 5090 it falls back to the
   Ampere / Ada tensor cores. The portability is at the call-site
   level, not at the schedule level.

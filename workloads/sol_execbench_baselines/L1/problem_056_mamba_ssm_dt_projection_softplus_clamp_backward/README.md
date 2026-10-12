@@ -75,7 +75,7 @@ The local 3090 Ti (sm_86) is the host this baseline was
 compile-checked and natively-correctness-validated on.
 Final SOL scoring is on B200 (sm_100a).
 
-- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5060):
+- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5090):
   this kernel is bandwidth-bound on the BF16 inputs and
   outputs; the strided read pattern further widens the
   effective bandwidth requirement.

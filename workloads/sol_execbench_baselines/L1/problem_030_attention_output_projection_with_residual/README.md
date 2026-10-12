@@ -52,7 +52,7 @@ The local 3090 Ti (sm_86) is the host this baseline was compile-
 checked and natively-correctness-validated on. Final SOL scoring
 is on B200 (sm_100a). Differences worth noting:
 
-- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5060):
+- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5090):
   the C-stream (residual) doubles the off-K bandwidth versus
   a residual-free GEMM. B200's HBM3e (~8 TB/s) absorbs this
   more easily than the 3090 Ti's GDDR6X (~1 TB/s); local

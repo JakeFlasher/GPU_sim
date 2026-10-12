@@ -1,3 +1,0 @@
-[
-  {"schema_version": 1, "kernel_unique_id": 1, "device": "sm_86", "slug": "global_atomic_histogram_kernel", "excluded_op_class": "ATOMIC", "instruction_pc": 528, "count": 3145728, "typed_reason": "unsupported_memory_path", "path_resolved": true}
-]

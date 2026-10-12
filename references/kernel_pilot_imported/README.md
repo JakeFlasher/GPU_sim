@@ -53,12 +53,12 @@ kernel_pilot_imported/
         │   ├── cuda-cpp-overview.md
         │   ├── sm100-optimization-guide.md  (B200 cloud scoring target)
         │   ├── sm103-optimization-guide.md  (Blackwell variant context)
-        │   └── sm120-optimization-guide.md  (RTX 5060 laptop local proxy)
+        │   └── sm120-optimization-guide.md  (RTX 5090 local proxy)
         └── cutlass-cpp/
             ├── cutlass-cpp-overview.md
             ├── sm100-optimization-guide.md  (B200 cloud scoring target)
             ├── sm103-optimization-guide.md  (Blackwell variant context)
-            └── sm120-optimization-guide.md  (RTX 5060 laptop local proxy)
+            └── sm120-optimization-guide.md  (RTX 5090 local proxy)
 ```
 
 ## Usage Rules
@@ -84,7 +84,7 @@ cloud-scoring workflow:
 
 - **sm_100** (`cuda-cpp/sm100-optimization-guide.md` + `cutlass-cpp/sm100-optimization-guide.md`) — B200 cloud scoring target.
 - **sm_103** (`{cuda-cpp,cutlass-cpp}/sm103-optimization-guide.md`) — Blackwell datacenter variant context.
-- **sm_120** (`{cuda-cpp,cutlass-cpp}/sm120-optimization-guide.md`) — RTX 5060 laptop local dev proxy.
+- **sm_120** (`{cuda-cpp,cutlass-cpp}/sm120-optimization-guide.md`) — RTX 5090 local dev proxy.
 
 For **sm_80 / sm_86 (Ampere — A100, 3090Ti)** local-test refs, kernel-pilot
 did not ship Ampere guides. Use solbench's own

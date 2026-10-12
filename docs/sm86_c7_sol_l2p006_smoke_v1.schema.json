@@ -1,1 +1,0 @@
-{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","additionalProperties":true,"properties":{"schema":{"const":"sm86_c7_sol_l2p006_smoke_v1"},"phase":{"const":"C7-S34BZ2"}},"required":["schema","phase"]}

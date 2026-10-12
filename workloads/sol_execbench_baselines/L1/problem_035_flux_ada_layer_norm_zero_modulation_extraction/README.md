@@ -79,7 +79,7 @@ The local 3090 Ti (sm_86) is the host this baseline was compile-
 checked and natively-correctness-validated on. Final SOL scoring is
 on B200 (sm_100a). Differences worth noting:
 
-- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5060): the
+- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5090): the
   per-warp weight-row reads (`weight[n, k0..K=3072]` fp32 = 12 KiB
   per warp per output element) cross-stream from global with no
   cross-warp reuse on B; B200's HBM3e roughly 8x the bandwidth of

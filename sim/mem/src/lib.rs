@@ -3,7 +3,7 @@
 //! v0 slice — the L1TEX layer:
 //! - [`l1`]: sectored L1 cache core, a lockstep port of the validated
 //!   Phase-1 warp-pool walker's cache state machine
-//!   (`tools/cache_predictor/l1_warp_pool_walker.py`); the sim's SM issue
+//!   (`the native L1 replay model`); the sim's SM issue
 //!   model supplies the real warp interleaving the Python pool scheduler
 //!   stood in for.
 //! - [`cache_op`]: cache-operator classification from the control-bits
@@ -21,7 +21,7 @@
 //!
 //! - [`l2`]: the shared L2 slice model, a lockstep port of the sectored
 //!   set-associative replay core in
-//!   `tools/cache_replay/sector_cache_replay.py` (geometry from the arch
+//!   `the native L2 replay model` (geometry from the arch
 //!   card's vendor-documented `l2_geometry`; associativity/hash/policy
 //!   are documented-default hypothesis knobs — the Phase-1 label-fitted
 //!   calibration is never consumed, Rule 1).

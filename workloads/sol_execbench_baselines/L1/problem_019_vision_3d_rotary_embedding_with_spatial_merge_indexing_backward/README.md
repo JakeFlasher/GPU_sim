@@ -82,7 +82,7 @@ compile-checked and natively-correctness-validated on.
 Final SOL scoring is on B200 (sm_100a). Differences worth
 noting:
 
-- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5060):
+- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5090):
   Kernel A is bandwidth-bound on the grad_x_embed and
   grad_x streams. Kernel B reads grad_q_embed + q +
   grad_k_embed + k per-head, so its read traffic scales

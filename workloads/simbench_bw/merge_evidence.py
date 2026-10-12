@@ -16,7 +16,7 @@ the entire input set is conflict-free.
 Usage:
     python3 merge_evidence.py join-cupti-nvbit \
         --cupti-dir <dir> --nvbit-dir <dir> --output-dir <dir> \
-        --platform {h100|rtx_5090_blackwell|rtx_5060_laptop|rtx_3090_ti}
+        --platform {h100|rtx_5090_blackwell|rtx_5090|rtx_3090_ti}
 
 Exit codes:
     0  every CUPTI/NVBit launch joined successfully.
@@ -87,7 +87,7 @@ SUITE_ROOT = Path(__file__).resolve().parent
 PLATFORM_KEYS: frozenset[str] = frozenset({
     "h100",
     "rtx_5090_blackwell",
-    "rtx_5060_laptop",
+    "rtx_5090",
     "rtx_3090_ti",
 })
 _JOIN_DESCRIPTOR_RESOURCE_ERRNOS: frozenset[int] = frozenset({

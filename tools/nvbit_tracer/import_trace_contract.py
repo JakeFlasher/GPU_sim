@@ -495,9 +495,9 @@ def _address_lane_mask(addr: Any, instruction_mask: int) -> int:
 
 
 # LOCKSTEP: sim/trace/src/lanes.rs (Rust replay decoder) is an exact port of
-# this function + the per-slot positional check below. Shared golden fixture:
-# tools/nvbit_tracer/lane_reconstruction_golden.json (extend it in the same
-# commit as any semantic change here).
+# this function plus the per-slot positional check below. Replay evidence is
+# taken from the complete captured workload corpus; no hand-authored golden
+# fixture is part of the acceptance path.
 def _reconstruct_lane_vector(
     addr: Any,
     and_mask: int,

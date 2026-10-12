@@ -1,5 +1,5 @@
 //! Sectored L1 cache core — a lockstep port of the cache state machine in
-//! `tools/cache_predictor/l1_warp_pool_walker.py` (`_access_once` +
+//! `the native L1 replay model` (`_access_once` +
 //! `_apply_fills`), the model whose semantics the Phase-1 L1 predictor
 //! validated. The Python module's warp-pool SCHEDULER is deliberately NOT
 //! ported: it was a latency-proportional stand-in for warp interleaving,

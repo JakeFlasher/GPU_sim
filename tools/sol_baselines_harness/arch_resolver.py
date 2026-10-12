@@ -1,7 +1,7 @@
 """Resolve the live host's device identity to a SOLAR arch yaml.
 
 Before this module landed, ``score.py`` and ``solar_analysis.py``
-hardcoded ``SOLAR/configs/arch/5060.yaml`` regardless of the live
+hardcoded ``SOLAR/configs/arch/5090.yaml`` regardless of the live
 device. On a 3090 Ti (sm_86 / GA102) that produced numerically
 plausible but architecturally wrong ``local_sol_score`` values
 against a non-matching roofline.
@@ -9,7 +9,7 @@ against a non-matching roofline.
 The resolver first distinguishes CC 12.0 device tiers. The RTX 5090
 Workstation Edition is the active cloud target, but it has no checked-in SOLAR
 roofline yet, so it intentionally returns ``None`` rather than selecting the
-historical RTX 5060 laptop yaml. Unknown / malformed / MIG inputs return
+historical RTX 5090 yaml. Unknown / malformed / MIG inputs return
 ``None`` from ``resolve_local_arch_yaml`` and ``"sm_unknown"`` (with
 a diagnostic when applicable) from ``arch_tag_from_host_kind``; the
 caller is responsible for short-circuiting numeric scoring to
@@ -141,8 +141,8 @@ def resolve_local_arch_yaml(host_info: object) -> Optional[Path]:
                 "SM120 RTX 5090 detected; no RTX-5090-specific SOLAR yaml is installed"
             )
             return None
-        if "5060" in lowered:
-            legacy_yaml = _ARCH_ROOT / "5060.yaml"
+        if "5090" in lowered:
+            legacy_yaml = _ARCH_ROOT / "5090.yaml"
             return legacy_yaml if legacy_yaml.is_file() else None
         _LOGGER.warning(
             "CC 12.0 device %r is not a known card tier; SOL Score is unknown_t_sol",
@@ -231,8 +231,8 @@ def arch_resolution_reason(host_info: object) -> str:
         lowered = device_name.lower()
         if "rtx 5090" in lowered:
             return "compute_capability=12.0; RTX 5090 has no SOLAR yaml"
-        if "5060" in lowered:
-            return "compute_capability=12.0; historical RTX 5060 yaml"
+        if "5090" in lowered:
+            return "compute_capability=12.0; historical RTX 5090 yaml"
         return f"compute_capability=12.0; unknown device tier {device_name!r}"
     if cc not in _CC_TO_YAML:
         return f"compute_capability={cc} unrecognised"

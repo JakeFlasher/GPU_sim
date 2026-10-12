@@ -35,7 +35,7 @@ CC_TO_ARCH_FAMILY: dict[tuple[int, int], frozenset[str]] = {
 PLATFORM_TO_CC_FAMILY: dict[str, tuple[int, int]] = {
     "h100": (9, 0),
     "rtx_5090_blackwell": (12, 0),
-    "rtx_5060_laptop": (12, 0),
+    "rtx_5090": (12, 0),
     "rtx_3090_ti": (8, 6),
 }
 

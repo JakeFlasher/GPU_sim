@@ -74,7 +74,7 @@ _ARCH_LIMITS = {
         "max_shared_mem_per_sm": 233472,  # 228 KB per SM (TMEM excluded)
     },
     "sm_120": {
-        # Blackwell consumer (RTX 5060 / 5060 Ti / 5080 / 5090). The
+        # Blackwell consumer (RTX 5090 / 5090 / 5080 / 5090). The
         # consumer CC differs from sm_100a in SM count + bandwidth but
         # the per-SM occupancy caps follow the same Blackwell pattern.
         "max_warps_per_sm": 48,

@@ -18,7 +18,7 @@ Wraps ``tools/sass_control/extractor.py`` (fail-closed parse contract) with:
 
 Usage:
   .venv/bin/python tools/sass_control/emit_control_bits_sidecar.py \
-      --binary workloads/portable_lcd/<slug>/<slug>_run \
+      --binary workloads/sol_execbench_baselines/<category>/<slug> \
       --arch sm_86 --out <out>.control_bits.json
 """
 from __future__ import annotations

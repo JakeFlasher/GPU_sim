@@ -1,7 +1,0 @@
-{
-  "candidate":"L1/problem_043_mla_fused_qkv_rope_split/cuda_cpp",
-  "phase":"C7-S34AK1","schema":"sm86_c7_sol_l1_problem043_source_class_correction_v1",
-  "source_observation":{"declared_class":"custom_cuda (prior marker census)","effective_class":"pure_aten","kernel_cu":"stub translation unit only; no custom __global__ definition","main_cpp":"ATen linear, RMSNorm tensor algebra, view/narrow/contiguous dispatch; no custom CUDA launcher","solution_marker_false_positive":"__global__ appears only in stub comment and embedded solution text","sm86_compile_marker":true,"entry_point":"main.cpp::run","reference_contract":"MLA q_a projection/RMSNorm/q_b split plus kv_a projection split"},
-  "disposition":{"build_attempted":false,"native_trace_admitted":false,"reason":"source-class correction; pure-ATen row retained without duplicate tracing","timing_or_ncu_claimed":false},
-  "status":"complete_source_class_correction_pure_aten_blocker"
-}

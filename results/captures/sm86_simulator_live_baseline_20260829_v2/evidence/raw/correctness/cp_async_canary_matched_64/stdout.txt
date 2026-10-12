@@ -1,1 +1,0 @@
-{"protocol":"c11_wait_barrier","locality":"l1_reuse","gap_cycles":0,"warps":4,"groups":64,"copies_per_group":8,"payload_bytes_per_copy":512,"region_bytes":512,"source_stride":0,"samples_cycles":[[17781,17779,17777,17775]],"checksum":5025747196710545408,"accumulator_checksum":4030194343430642,"correct":true}

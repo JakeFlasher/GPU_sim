@@ -1,10 +1,9 @@
 # `tools/sol_baselines_harness/`
 
-> **SM120 target note (2026-10-06):** the active CC 12.0 live target is the
-> NVIDIA GeForce RTX 5090. Historical `5060`
-> fields and artifacts remain backward-compatible labels for the older laptop
-> lane; they must not be used as a RTX 5090 roofline or card. The dedicated
-> cloud capture/replay workspace is `/root/sm120_rtx_5090_capture`.
+> **SM120 target note:** the active CC 12.0 target is the NVIDIA GeForce
+> RTX 5090. This harness is retained for SOLBench source execution; simulator
+> acceptance is defined by complete-trace replay under
+> `/root/sm120_rtx_5090_capture` and independent NCU joins.
 
 
 Drive *.cu template solutions through the official `sol-execbench`
@@ -35,7 +34,7 @@ testable:
 | `native_env.py` | Compute the ten-component native host-env fingerprint (Python / Torch / nvcc / runtime CUDA / CUTLASS tree / cuDNN / sol-execbench package / NVCC host compiler / C++ compiler / C compiler); raise `DegradedNativeEnvError` when any component reads `"unknown"`. |
 | `parse_trace.py` | Read JSONL `Trace` lines from the upstream evaluator via the live Pydantic schema (no schema duplication). |
 | `normalise_benchmark.py` | Stage a Pydantic-compatible copy of the downloaded benchmark directory (empty-string optional fields → `None`). |
-| `score.py` | SOL Score wrapper. When `SOLAR/configs/arch/5060.yaml` is present AND the slug has a builder in `solar_analysis.py:_REGISTRY`, the canonical `local_sol_score_5060` column is the median of `compute_score(t_k_5060, t_b_5060, t_sol_5060)` across the baseline's workloads, with `t_sol_5060` from SOLAR Stage 4. Falls back to `"unknown_t_sol"` when the YAML is absent OR the slug has no registered builder. |
+| `score.py` | SOL Score wrapper. When `SOLAR/configs/arch/5090.yaml` is present AND the slug has a builder in `solar_analysis.py:_REGISTRY`, the canonical `local_sol_score_5090` column is the median of `compute_score(t_k_5090, t_b_5090, t_sol_5090)` across the baseline's workloads, with `t_sol_5090` from SOLAR Stage 4. Falls back to `"unknown_t_sol"` when the YAML is absent OR the slug has no registered builder. |
 | `cache.py` | Cache-key derivation (`solution_source_hash` + `sol_execbench_source_hash` + `native_env_hash` + `environment_libs` + `build_mode` + `surface_set`); PASSED-only replay. Strict-equality match on every component; unknown or malformed digest identities are rejected before reuse. |
 | `lint.py` | Forbidden-surface scan over landed sources, harness production code, and `deferred.json` hygiene gate. |
 | `report.py` | Aggregate JSON + Markdown report across every landed baseline; lint pre-flight gate. |
@@ -71,12 +70,12 @@ Three things must exist before running the harness:
    / `ptxas` for the static surface and the JIT build path. Driver +
    CUDA toolkit setup is operator-driven by design (CLAUDE.md Rule 4).
 
-The SOLAR local-arch config (`SOLAR/configs/arch/5060.yaml`) is
+The SOLAR local-arch config (`SOLAR/configs/arch/5090.yaml`) is
 **optional**:
 
-- **Absent** — every emitted `local_sol_score_5060` cell reads the
+- **Absent** — every emitted `local_sol_score_5090` cell reads the
   sentinel `"unknown_t_sol"`; report generation still completes.
-- **Present** (the current repo state) — `local_sol_score_5060` is a
+- **Present** (the current repo state) — `local_sol_score_5090` is a
   numeric median for slugs covered by a builder in
   `solar_analysis.py:_REGISTRY` (one entry per landed pilot today),
   and the sentinel for slugs without a registered builder. The
@@ -156,7 +155,7 @@ problem's `workload.jsonl`:
   "latency_ms": 0.0123,
   "reference_latency_ms": 0.0456,
   "speedup_factor": 3.71,
-  "hardware": "5060Laptop",
+  "hardware": "RTX 5090",
   "under_contention": false,
   "definition": "001_fused_add_rmsnorm_h2048"
 }
@@ -194,7 +193,7 @@ contention-free.
       "all_passed": true,
       "meets_speed_gate": true,
       "slowest_speedup": 4.2868,
-      "local_sol_score_5060": 0.8840,
+      "local_sol_score_5090": 0.8840,
       "upper_bound_score_t_sol_zero": 0.8687,
       "evidence_label": "Ran-local-sm_120"
     }
@@ -225,7 +224,7 @@ contention-free.
 
 The example mirrors the current `report.json` shape for the
 8-landed-pilot corpus: `meets_speed_gate` sits between `all_passed`
-and `slowest_speedup`, the canonical `local_sol_score_5060` is
+and `slowest_speedup`, the canonical `local_sol_score_5090` is
 numeric for slugs covered by a registered SOLAR Stage 4 builder, the
 `trace` path is the report's own stamp under `.harness_traces/`, and
 the four category-floor slots are landed. When the local-arch YAML
@@ -336,7 +335,7 @@ one of:
 | Label | Meaning |
 |---|---|
 | `Compile-checked-sm_120` | Local `nvcc` accepts; no run. |
-| `Ran-local-sm_120` | Local 5060 run PASSED correctness on every workload AND every workload's `speedup_factor > 1.0`. The harness row's `meets_speed_gate` field is the canonical signal — a PASSED-but-slow run keeps the `Compile-checked-sm_120` label. |
+| `Ran-local-sm_120` | Local 5090 run PASSED correctness on every workload AND every workload's `speedup_factor > 1.0`. The harness row's `meets_speed_gate` field is the canonical signal — a PASSED-but-slow run keeps the `Compile-checked-sm_120` label. |
 | `Scored-B200-sm_100a` | Submitted to the leaderboard and a SOL Score returned. **Not produced by this harness this round** — leaderboard upload is operator-driven; see CLAUDE.md `## Leaderboard Submission`. |
 | `Not-B200-validated` | Explicit flag for sm_120-only artefacts that cannot validate B200 codegen (TCGen05 / TMEM / TMA / cluster behaviour / NVFP4 / FP8 layout / etc.). |
 
@@ -385,16 +384,16 @@ keep them straight:
 
 The aggregate report emits two distinct score columns:
 
-- `local_sol_score_5060` — the canonical local SOL Score column. The
+- `local_sol_score_5090` — the canonical local SOL Score column. The
   per-workload SOLAR Stage 4 derivation is wired via
   `tools/sol_baselines_harness/solar_analysis.py:_REGISTRY` (one builder
   per landed slug; populated across Rounds 8 → 18 for the current
-  8-pilot corpus). For each row in a registered baseline, `t_sol_5060`
+  8-pilot corpus). For each row in a registered baseline, `t_sol_5090`
   comes from `solar_analysis.t_sol_for_baseline_workload()`, which
   drives `SOLAR/solar/perf/perf_model.py:EinsumGraphPerfModel.predict`
   against a per-workload analysis derived from the benchmark
   definition. The column is the median of
-  `compute_score(t_k_5060, t_b_5060, t_sol_5060)` across rows.
+  `compute_score(t_k_5090, t_b_5090, t_sol_5090)` across rows.
   Honestly falls back to `"unknown_t_sol"` when the local-arch YAML is
   absent OR the slug has no registered builder (or when any single row
   is missing a Stage 4 estimate — partial coverage never mixes with
@@ -417,7 +416,7 @@ The aggregate report emits two distinct score columns:
   a **lower** bound on the canonical column for speedup rows, NOT an
   upper bound. Every landed pilot in the committed `report.json`
   confirms the relationship empirically — e.g.
-  `problem_001_fused_add_rmsnorm_h2048` has `local_sol_score_5060 =
+  `problem_001_fused_add_rmsnorm_h2048` has `local_sol_score_5090 =
   0.8840` vs `upper_bound_score_t_sol_zero = 0.8687`. The JSON key
   is retained for backward compatibility (cache index records,
   downstream consumers) and is queued for a future rename round.
@@ -429,11 +428,11 @@ visible in a clearly-named field. Even when the SOLAR config is
 present, the canonical local SOL Score is **NOT comparable to the
 leaderboard SOL Score**:
 
-- Local/cloud `t_k` for the active SM120 route is taken on the RTX 5090, not B200 (sm_100a); retained 5060 rows remain historical.
+- Local/cloud `t_k` for the active SM120 route is taken on the RTX 5090, not B200 (sm_100a); retained 5090 rows remain historical.
 - Local `t_b` is our PyTorch reference, not the benchmark-internal
   scoring baseline `T_b` (which is a paper-specific calibration we
   don't have).
-- Local `t_sol` would be the 5060 roofline, not the B200 roofline.
+- Local `t_sol` would be the 5090 roofline, not the B200 roofline.
 
 The Markdown report's first paragraph carries this disclaimer
 verbatim. When the local SOLAR config is absent, both score columns
@@ -441,7 +440,7 @@ fall back to the sentinel `"unknown_t_sol"`.
 
 ## Architecture-portability discipline
 
-The active RTX 5090 is **sm_120**; B200 scoring is **sm_100a**. Historical 5060 artifacts retain their original labels. A
+The active RTX 5090 is **sm_120**; B200 scoring is **sm_100a**. Historical 5090 artifacts retain their original labels. A
 local `PASSED` on sm_120 proves compile and smoke-run viability
 only — it does NOT validate TCGen05 / TMEM codegen, TMA descriptor
 shapes, cluster + DSMEM behaviour, register pressure, L2 partitioning

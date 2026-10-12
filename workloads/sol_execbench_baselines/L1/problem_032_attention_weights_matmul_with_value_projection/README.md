@@ -98,7 +98,7 @@ The local 3090 Ti (sm_86) is the host this baseline was
 compile-checked and natively-correctness-validated on. Final SOL
 scoring is on B200 (sm_100a). Differences worth noting:
 
-- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5060):
+- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5090):
   the bf16 strided-batched-GEMM operates per-batch on tiles
   `[S, S] × [S, D=128]`. At the largest canonical workload
   (workload 14: `B=1, S=2048`, batch_count=40) the per-batch

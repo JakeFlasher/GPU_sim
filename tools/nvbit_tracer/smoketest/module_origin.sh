@@ -14,7 +14,7 @@ if [[ $# == 1 ]]; then
   mkdir "$1"
   OUT="$(cd "$1" && pwd)"
 else
-  OUT="$(mktemp -d "$REPO/results/captures/sm86_module_origin_20260926_XXXXXX")"
+  OUT="$(mktemp -d "/dev/shm/sm120_rtx_5090_work/module_origin_XXXXXX")"
 fi
 echo "module_origin output: $OUT"
 export LD_LIBRARY_PATH="$REPO/.toolchain/pb/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"

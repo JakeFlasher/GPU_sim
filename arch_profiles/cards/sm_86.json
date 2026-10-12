@@ -46,7 +46,7 @@
     "max_sm_clock_mhz": 2130,
     "sm_clock_mhz_stdev": 37.9,
     "short_burst_sm_clock_ref_mhz": 1890.0,
-    "provenance": "data/local_labels/nvml_reference_operating_point_sm_86.json + nvml_short_burst_anchor_sm_86.json"
+    "provenance": "committed SM86 card values; retained only for compatibility replay"
   },
   "duration_crosswalk": {
     "dual_source_noise_floor_ns": 110352,

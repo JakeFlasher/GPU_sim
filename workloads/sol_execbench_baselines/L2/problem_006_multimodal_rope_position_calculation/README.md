@@ -60,7 +60,7 @@ kernel itself is roughly constant-time per batch position.
 
 ## Architecture-coupling caveats
 
-The local 5060 (sm_120) compiles and smoke-runs this baseline; final SOL
+The local 5090 (sm_120) compiles and smoke-runs this baseline; final SOL
 scoring is on B200 (sm_100a). Differences worth noting for this pattern:
 
 - HBM3e vs GDDR7 bandwidth: this kernel's memory footprint is tiny

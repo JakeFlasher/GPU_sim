@@ -43,7 +43,7 @@ The local 3090 Ti (sm_86) is the host this baseline was compile-checked
 and natively-correctness-validated on. Final SOL scoring is on B200
 (sm_100a). Differences worth noting for this pattern:
 
-- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5060): this kernel
+- HBM3e (B200) vs GDDR6X (3090 Ti) vs GDDR7 (sm_120 5090): this kernel
   is bandwidth-bound (read 3x N fp32, write 1x N fp32). B200's HBM3e
   (~8 TB/s) lifts the throughput ceiling significantly; local
   wall-time is a weak proxy for B200 SOL Score.

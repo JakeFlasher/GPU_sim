@@ -24,7 +24,7 @@
 | 5 | PASSED | 0.60963 | 5.50321 | 9.03 |
 | 6 | PASSED | 0.00821 | 0.03295 | 4.01 |
 
-Hardware: NVIDIA GeForce RTX 5060 Laptop GPU (sm_120). Evaluation ran
+Hardware: NVIDIA GeForce RTX 5090 GPU (sm_120). Evaluation ran
 through the native `sol-execbench` CLI (no Docker shim). The cache /
 manifest now key on `native_env_hash` (the SHA-256 over python /
 torch / nvcc / cuda-runtime / cutlass-tree / cudnn /
@@ -42,12 +42,12 @@ One CTA per row (batch element); BF16x2 vectorised loads of `hidden_states` and 
 
 ## Architecture-coupling caveats
 
-The local 5060 (sm_120) compiles and smoke-runs this baseline; final SOL scoring
+The local 5090 (sm_120) compiles and smoke-runs this baseline; final SOL scoring
 is on B200 (sm_100a). Differences worth noting for this pattern:
 
-- HBM3e vs GDDR7 bandwidth: fused_add_rmsnorm is memory-bound; the 5060's bandwidth ceiling makes local wall-time a weak proxy for B200 SOL Score. sm_120 timing primarily validates correctness and launch-config sanity.
+- HBM3e vs GDDR7 bandwidth: fused_add_rmsnorm is memory-bound; the 5090's bandwidth ceiling makes local wall-time a weak proxy for B200 SOL Score. sm_120 timing primarily validates correctness and launch-config sanity.
 - DSMEM and cluster-cooperative reduction (sm_100a-only) are not used here; for very large hidden_size, B200 has additional headroom that this template does not exploit.
-- L2 carveout: B200's larger L2 absorbs the `weight` tensor across batch rows; the 5060's smaller L2 may not.
+- L2 carveout: B200's larger L2 absorbs the `weight` tensor across batch rows; the 5090's smaller L2 may not.
 - TCGen05 / TMEM: this template does not use 5th-gen tensor cores or the dedicated TMEM register surface, so the kernel is not exposed to sm_100a-only TCGen05 / TMEM codegen differences. A future GEMM-fused variant of this op (which would touch TCGen05 / TMEM on B200) is out of scope for the current rmsnorm template.
 - `__launch_bounds__` is the same on both archs but register pressure is workload-specific; verify occupancy via `nvcc -Xptxas=-v` if regression observed.
 

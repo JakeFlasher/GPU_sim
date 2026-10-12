@@ -75,7 +75,7 @@ SASS-level via NVBit (compatible with existing MICRO 2025 enhanced tracer format
 - Cross-validate against MICRO 2025 simulator on same traces
 - Target MAPE: less than 15%
 - Hardware measurement protocol: locked clocks, 10 repeats, warmup discard, thermal monitoring
-- Laptop-specific: monitor clock/power variability during validation
+- Mobile-device-specific: monitor clock/power variability during validation
 
 ### Missing/Under-modeled sm_120 Features to Investigate
 - Explicit static warp-to-scheduler assignment
@@ -84,7 +84,7 @@ SASS-level via NVBit (compatible with existing MICRO 2025 enhanced tracer format
 - mbarrier semantics
 - ldmatrix/stmatrix variants used by tensor paths
 - Shared/L1 carveout behavior
-- Laptop-specific clock/power variability
+- Mobile-device-specific clock/power variability
 
 ## Anti-Patterns to Avoid (from Codex review)
 1. Per-cycle global ticking hidden inside "event-driven" marketing

@@ -1,5 +1,5 @@
 {
-  "_doc": "Build-arch families (Q5). This is a COMPILE-TIME vocabulary, kept separate from the deploy/collection arch_id. A kernel fatbin may legitimately carry server slices (sm_90a Hopper, sm_120a/sm_120f Blackwell, sm_100a datacenter) that are NEVER valid deploy arch_ids. The DEC-2 deploy ban (supported_arches restricted to sm_86 + sm_120-laptop) governs the deploy axis only; build Makefiles are excluded from that guard by design. Seed values mirror arch_resolver.CC_TO_ARCH_FAMILY + common.mk gencode tokens.",
+  "_doc": "Build-arch families (Q5). This is a compile-time vocabulary kept separate from deploy/collection arch_id. Server slices are not deployment identities. Seed values mirror the active arch resolver and common.mk gencode tokens.",
 
   "compute_capability_to_build_family": {
     "8.6": ["sm_86"],
