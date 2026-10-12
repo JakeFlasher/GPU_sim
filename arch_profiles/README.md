@@ -23,9 +23,9 @@ dated driver observations as current, or change measured values during docs clea
 - `schema/simt_its_trace.schema.json`: opt-in ITS **output shape**, version 3 /
   `custom_its_dynamic_v3`, including bounded per-lane register/predicate
   snapshots. Its nested state/instruction fields are permissive;
-  JSON-schema validation alone does not establish execution correctness.
-  `sim/arch/src/its.rs` is the ITS input validator.
+  The schema describes the output shape; execution behavior comes from
+  `sim/arch/src/its.rs` and real trace replay.
 
 Toolchain: root `rust-toolchain.toml` and `sim/Cargo.lock`; local NVBit helper
-`tools/nvbit_tracer/pinned_build_env.sh`; Python test root `pytest.ini`.
+`tools/nvbit_tracer/pinned_build_env.sh`.
 Ignored `.codex/`, toolchains and local captures are not runtime model inputs.

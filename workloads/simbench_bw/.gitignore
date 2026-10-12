@@ -10,6 +10,6 @@ l?/*/spill_variants/
 results/
 
 # Round 43 compiled-helper enforcement: per-row helpers_lib.so build
-# artifact, rebuilt on demand by the compiled-helper test fixture via
+# artifact, rebuilt on demand by the compiled helper via
 # `make -C l?/<row>/ helpers_lib`.
 l?/*/helpers_lib.so

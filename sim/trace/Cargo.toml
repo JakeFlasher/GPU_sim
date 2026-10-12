@@ -21,9 +21,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 
-[dev-dependencies]
-tempfile = { workspace = true }
-
 [[bin]]
 name = "semantic-probe"
 path = "src/bin/semantic_probe.rs"

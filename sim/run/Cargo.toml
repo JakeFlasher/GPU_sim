@@ -22,9 +22,5 @@ sim-sm = { path = "../sm", features = ["campaign"] }
 sim-trace = { path = "../trace", features = ["campaign"] }
 thiserror = { workspace = true }
 
-[dev-dependencies]
-prost = { workspace = true }
-tempfile = { workspace = true }
-
 [lints]
 workspace = true

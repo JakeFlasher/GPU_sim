@@ -5,7 +5,7 @@
 **Active plan:** `/root/gpu_cache_memory_modeling_proposal/PLAN.md`
 **Corpus:** `/root/sm120_rtx_5090_capture`
 **Replay workspace:** `/dev/shm/sm120_rtx_5090_work`  
-**Cleanup commit:** `14b40f26`
+**Cleanup baseline:** `14b40f26`
 
 ## Alpha evidence policy
 
@@ -36,6 +36,15 @@ claims.  Outputs are under
 `/dev/shm/sm120_rtx_5090_work/cleanup_20261012/replay_all/summary.json`.
 NCU was not supplied to this replay.
 
+After removing the remaining synthetic Rust test surface, the rebuilt release
+binary repeated the same full-first/fast run with **339/339** successful roots
+and **11,558** launches per mode. Driver-boundary totals were 789.156 s full
+and 638.017 s fast; the canonical 327-row subset remained 327/327 with 11,529
+launches (750.802 s full, 618.882 s fast). Results are under
+`/dev/shm/sm120_rtx_5090_work/cleanup_20261012/replay_after_test_cleanup/`.
+These measurements show no replay regression from test-surface removal and do
+not claim bare-metal or NCU timing.
+
 ## Active implementation
 
 - `sim-run --sm120-alpha --mode flat` is the primary full replay.
@@ -55,4 +64,12 @@ reports.
 The checkout now contains the active Rust simulator, RTX 5090 architecture
 inputs, NVBit producer, SOLBench sources, and the complete-corpus replay tools.
 Superseded local-label/calibration lanes, fixture bundles, small-fixture test
-harnesses, and stale SM86 campaign outputs are not part of the live branch.
+harnesses, stale SM86 campaign outputs, and the workspace's synthetic inline
+unit-test modules are not part of the live branch. The only retained Cargo
+probe targets require real trace or sidecar paths supplied by the environment:
+`machine_local_replay`, `machine_local_sidecars`, and `machine_local_smoke`.
+
+The workspace release build after the test-surface cleanup completed with no
+test targets compiled. Removing test-only dependencies also pruned `tempfile`
+and its transitive lockfile entries. This cleanup changes no native replay
+logic; the full-corpus evidence above remains the performance baseline.

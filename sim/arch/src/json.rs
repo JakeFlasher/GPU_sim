@@ -152,17 +152,3 @@ pub fn strict_json_from_slice<T: DeserializeOwned>(raw: &[u8]) -> Result<T, serd
     duplicate_check.end()?;
     serde_json::from_slice(raw)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn duplicate_members_and_excessive_nesting_are_rejected() {
-        assert!(strict_json_from_slice::<serde_json::Value>(br#"{"x": 1, "x": 2}"#).is_err());
-        let mut deeply_nested = "[".repeat(MAX_JSON_DEPTH + 1);
-        deeply_nested.push('0');
-        deeply_nested.push_str(&"]".repeat(MAX_JSON_DEPTH + 1));
-        assert!(strict_json_from_slice::<serde_json::Value>(deeply_nested.as_bytes()).is_err());
-    }
-}

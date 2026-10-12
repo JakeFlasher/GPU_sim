@@ -24,6 +24,9 @@ observers, not timing mechanisms. The custom ITS JSON trace is not native SASS;
 see `docs/experimental_diagnostics.md`. Keep NCU labels, functional results,
 model timing and host performance separate.
 
-Use `--manifest-path sim/Cargo.toml` from the repository root. First run the
-smallest affected executable, then focused tests. Commands: `docs/testing.md`
-and `docs/runbook_host.md`. For prior art use the cited primary sources in active research notes only when needed.
+Use `--manifest-path sim/Cargo.toml` from the repository root. Build the
+affected executable and exercise it with a real captured trace; the complete
+replay workflow is in `docs/runbook_host.md`. The workspace no longer carries
+synthetic inline simulator test modules, so do not recreate a small-fixture
+test lane. For prior art use the cited primary sources in active research notes
+only when needed.

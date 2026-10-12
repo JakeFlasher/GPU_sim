@@ -29,8 +29,5 @@ sim-sm = { path = "../sm" }
 sim-trace = { path = "../trace" }
 thiserror = { workspace = true }
 
-[dev-dependencies]
-tempfile = { workspace = true }
-
 [lints]
 workspace = true

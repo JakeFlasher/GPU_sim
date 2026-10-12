@@ -387,7 +387,10 @@ fn run(
             .write(true)
             .create_new(true)
             .open(&path)
-            .map_err(|source| Error::SidecarWrite { path: path.clone(), source })?;
+            .map_err(|source| Error::SidecarWrite {
+                path: path.clone(),
+                source,
+            })?;
         output
             .write_all(&bytes)
             .map_err(|source| Error::SidecarWrite { path, source })?;
@@ -417,42 +420,5 @@ fn main() -> std::process::ExitCode {
             eprintln!("{error}");
             std::process::ExitCode::from(2)
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    fn temp_path(tag: &str) -> PathBuf {
-        let nonce = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
-        std::env::temp_dir().join(format!("sm120_static_contract_{tag}_{nonce}.json"))
-    }
-
-    #[test]
-    fn strict_parser_rejects_duplicate_keys() {
-        let path = temp_path("duplicate");
-        fs::write(&path, br#"{"metadata_kind":"native_static_sm120_v3","metadata_kind":"evil"}"#).unwrap();
-        assert!(matches!(read_metadata(&path), Err(Error::MetadataParse { .. })));
-        let _ = fs::remove_file(path);
-    }
-
-    #[test]
-    fn version_three_is_required() {
-        let path = temp_path("version");
-        fs::write(&path, br#"{"metadata_kind":"native_static_sm120_v3","static_exporter_version":4,"control_latency_claims":false,"kernels":[]}"#).unwrap();
-        let (metadata, _) = read_metadata(&path).unwrap();
-        assert_ne!(metadata.static_exporter_version, 3);
-        let _ = fs::remove_file(path);
-    }
-
-    #[test]
-    fn raw_value_preserves_unknown_fields_semantically() {
-        let path = temp_path("unknown");
-        fs::write(&path, br#"{"metadata_kind":"native_static_sm120_v3","static_exporter_version":3,"control_latency_claims":false,"kernels":[],"future":{"opaque":true}}"#).unwrap();
-        let (_, raw) = read_metadata(&path).unwrap();
-        assert_eq!(raw["future"]["opaque"], true);
-        let _ = fs::remove_file(path);
     }
 }

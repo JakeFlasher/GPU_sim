@@ -4,7 +4,7 @@
   "display_name": "NVIDIA GeForce RTX 5090",
   "die": "GB202",
   "microarchitecture": "Blackwell",
-  "role": "cloud_live_capture_and_validation_reference",
+  "role": "cloud_live_capture_reference",
   "compute_capability": [
     12,
     0

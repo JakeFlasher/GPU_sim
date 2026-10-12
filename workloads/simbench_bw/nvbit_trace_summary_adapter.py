@@ -5,7 +5,7 @@ Provides three surfaces consumed by `merge_evidence.py join-cupti-nvbit`,
 
 1. `compute_kernel_signature_sha256(inputs)` — production NVBit-side
    reference implementation of `workloads/simbench_bw/schemas/
-   kernel_signature.spec.md`. Conformance-tested against every fixture
+   kernel_signature.spec.md`. Applied to every captured workload
    under `the captured workload corpus` by
    `tests/test_kernel_signature_conformance_nvbit_side.py`. The
    implementation mirrors the spec byte-for-byte: tuple-ordered field
@@ -116,7 +116,7 @@ def _spec_strict_escape_kernel_name(s: str) -> str:
     directly into a JSON object). Mirrors the CUPTI-side C++
     implementation `cupti_activity_collector.cu::json_escape_kernel_name`
     byte-for-byte; the cross-implementation conformance suites
-    enforce this equivalence against every fixture under
+    enforce this equivalence against every captured workload under
     `the captured workload corpus`.
 
     Python's stdlib `json.dumps(s, ensure_ascii=False)` deviates from

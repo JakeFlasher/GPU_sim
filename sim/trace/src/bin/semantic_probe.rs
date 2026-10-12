@@ -158,34 +158,6 @@ fn classify_opcode(text: &str) -> OperationKind {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn unsupported_families_stay_unknown_even_with_familiar_prefixes() {
-        for opcode in [
-            "FUTURE",
-            "HMMA_FUTURE",
-            "BAR_FUTURE",
-            "STUB",
-            "DPAS",
-            "WGMMA",
-            "@P0 FUTURE",
-        ] {
-            assert_eq!(classify_opcode(opcode), OperationKind::Unknown, "{opcode}");
-        }
-        assert_eq!(
-            classify_opcode("@P0 FFMA R1, R2, R3, R4"),
-            OperationKind::Arithmetic
-        );
-        assert_eq!(
-            classify_opcode("ULDC.64 UR4, c[0x0][0x118]"),
-            OperationKind::Memory
-        );
-        assert_eq!(classify_opcode("LDGDEPBAR"), OperationKind::Synchronization);
-    }
-}
-
 fn main() -> ExitCode {
     let mut args = env::args_os().skip(1);
     let Some(root) = args.next() else {

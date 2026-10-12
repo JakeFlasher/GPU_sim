@@ -21,12 +21,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ae3f5d315924270530207e2a68396c3cc547f6dca3fbdca317cfb1a51edb593"
 
 [[package]]
-name = "cfg-if"
-version = "1.0.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
-
-[[package]]
 name = "csv"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -64,23 +58,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fastrand"
-version = "2.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
-
-[[package]]
-name = "getrandom"
-version = "0.4.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "300e883d756b2e4ec94e02791f39b04b522276138852cfc41d9fb7e904106099"
-dependencies = [
- "cfg-if",
- "libc",
- "r-efi",
-]
-
-[[package]]
 name = "itertools"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -112,12 +89,6 @@ name = "memchr"
 version = "2.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "88904434abc2901f197fe8cc55f0445e7ded921dba5911dad2e2b39b48e663c4"
-
-[[package]]
-name = "once_cell"
-version = "1.21.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
 name = "proc-macro2"
@@ -159,12 +130,6 @@ checksum = "dfbc457d0c7a0759a614551b11a6409e5951f6c7537be1f1b7682b9ae9230368"
 dependencies = [
  "proc-macro2",
 ]
-
-[[package]]
-name = "r-efi"
-version = "6.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "rustix"
@@ -236,7 +201,6 @@ dependencies = [
  "serde_json",
  "sim-engine",
  "sim-semantics",
- "tempfile",
  "thiserror",
 ]
 
@@ -270,7 +234,6 @@ dependencies = [
  "sim-semantics",
  "sim-sm",
  "sim-trace",
- "tempfile",
  "thiserror",
 ]
 
@@ -278,14 +241,12 @@ dependencies = [
 name = "sim-run-campaign"
 version = "0.0.1"
 dependencies = [
- "prost",
  "serde",
  "serde_json",
  "sim-arch",
  "sim-mem",
  "sim-sm",
  "sim-trace",
- "tempfile",
  "thiserror",
 ]
 
@@ -294,7 +255,6 @@ name = "sim-semantics"
 version = "0.0.1"
 dependencies = [
  "serde",
- "serde_json",
  "thiserror",
 ]
 
@@ -302,7 +262,6 @@ dependencies = [
 name = "sim-sm"
 version = "0.0.1"
 dependencies = [
- "prost",
  "serde",
  "serde_json",
  "sim-arch",
@@ -310,7 +269,6 @@ dependencies = [
  "sim-mem",
  "sim-semantics",
  "sim-trace",
- "tempfile",
  "thiserror",
 ]
 
@@ -327,7 +285,6 @@ dependencies = [
  "sim-arch",
  "sim-mem",
  "sim-semantics",
- "tempfile",
  "thiserror",
 ]
 
@@ -340,19 +297,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
-]
-
-[[package]]
-name = "tempfile"
-version = "3.27.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
-dependencies = [
- "fastrand",
- "getrandom",
- "once_cell",
- "rustix",
- "windows-sys",
 ]
 
 [[package]]

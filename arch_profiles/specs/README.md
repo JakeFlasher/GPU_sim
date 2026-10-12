@@ -31,12 +31,12 @@ cargo run --manifest-path sim/Cargo.toml -p sim-arch --bin architecture_spec -- 
   arch_profiles/specs/simt_u32_minimal.json
 ```
 
-The `simt_u32_minimal.json` example is a small resource-schedule fixture. The
-`simt_its8.json` example is a Curry-inspired functional ITS fixture with
+The `simt_u32_minimal.json` file is a bounded resource-schedule example. The
+`simt_its8.json` file is a Curry-inspired functional ITS example with
 per-lane PCs and reconvergence barriers. Neither claims Curry compatibility,
 physical accuracy, or production SM86 timing.
 
-`simt_its_dynamic.json` is a matching bounded fixture for the opt-in
+`simt_its_dynamic.json` is a matching bounded example for the opt-in
 execution-generated trace demonstration; it exercises value-derived indirect
 addresses and remains separate from native SM86 replay.
 

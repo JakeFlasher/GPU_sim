@@ -16,7 +16,7 @@ execute the original CUDA program again.
 
 Native architecture cards select supported geometry/timing. Direct and prepared
 replay consume the carded scheduler-resource blocks. Resource-less legacy
-fixtures have an explicit compatibility path; partial blocks reject. An
+trace input has an explicit compatibility path; partial blocks reject. An
 optional scalar/profile override changes issue width, labels it hypothetical,
 and disables independent dual-issue widening. It cannot alter traced semantics.
 

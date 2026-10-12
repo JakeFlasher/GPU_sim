@@ -158,7 +158,7 @@ pub(crate) struct ReplayInst {
     pub(crate) pc: u32,
     pub(crate) kind: AccessKind,
     /// Effective executing lanes for the dynamic instruction. Native traces
-    /// carry both masks; legacy synthetic fixtures remain all-lane.
+    /// carry both masks; legacy captures remain all-lane.
     pub(crate) lane_mask: u32,
 }
 
@@ -3553,7 +3553,7 @@ struct WarpState<'a> {
     /// Full replay's dynamic fixed-latency register recurrence. Native
     /// extraction currently carries no operand values in `ReplayInst`, so
     /// alpha uses the executing warp mask conservatively (all lanes for
-    /// legacy fixtures); fast replay refines this with its compact masks.
+    /// legacy captures); fast replay refines this with its compact masks.
     register_ready: Vec<RegisterReadyEntry>,
     block: usize,
     launch_index: i64,
@@ -5865,7 +5865,7 @@ pub(crate) struct SmCore<'a> {
     /// Pre-parsed immediate-constant line references keyed by static PC.
     /// Sorted static PC -> immediate-constant line table.
     immediate_constant_schedule: Box<[(u32, Box<[u64]>)]>,
-    /// Private IMC/L0C state for each SMSP; absent for synthetic fixtures.
+    /// Private IMC/L0C state for each SMSP; absent for compact replay inputs.
     immediate_constant_cache: Option<Box<[ImmediateConstantCacheState; SUB_CORES]>>,
     params: IssueModelParams,
     shared_memory_residency: SharedMemoryResidency,

@@ -21,10 +21,6 @@ sim-semantics = { path = "../semantics" }
 sim-trace = { path = "../trace" }
 thiserror = { workspace = true }
 
-[dev-dependencies]
-prost = { workspace = true }
-tempfile = { workspace = true }
-
 [[bin]]
 name = "causal-frontier-probe"
 path = "src/bin/causal_frontier_probe.rs"

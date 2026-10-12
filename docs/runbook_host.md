@@ -15,23 +15,21 @@ cargo build --workspace --all-features --release
 
 ## Replay the complete corpus
 
-Use the retained-corpus driver from the repository root:
+Use the complete-corpus driver from the repository root. It discovers every
+recursive `dynamic_trace.pb`, derives transport sidecars from captured native
+static metadata, and runs full before fast without supplying NCU values:
 
 ```bash
 cd /root/GPU_simulator_rebase
-python3 tools/sm120_replay_bench.py \
+python3 tools/sm120_corpus_replay.py \
   --capture-root /root/sm120_rtx_5090_capture \
-  --work-root /dev/shm/sm120_rtx_5090_work \
-  --mode full
-python3 tools/sm120_replay_bench.py \
-  --capture-root /root/sm120_rtx_5090_capture \
-  --work-root /dev/shm/sm120_rtx_5090_work \
-  --mode fast
+  --output /dev/shm/sm120_rtx_5090_work/current_replay \
+  --mode both
 ```
 
 The full run must report every captured row and launch.  The fast run is a
-performance diagnostic only.  Keep replay rows, joins, residuals, and timings
-under the work root; do not add small synthetic fixtures or acceptance gates.
+performance diagnostic only. Keep replay rows, joins, residuals, and timings
+under the work root; do not add small synthetic inputs or acceptance gates.
 
 ## Direct replay
 
@@ -53,7 +51,7 @@ visible.  Never fit, offset, or feed NCU values into a replay.
 
 ## Tracer maintenance
 
-The NVBit producer remains under `tools/nvbit_tracer`.  Build it with the
-pinned CUDA/protobuf environment when a new real workload capture is required;
-write new captures directly to the corpus/work roots.  Do not create local
-fixture bundles or small acceptance workloads.
+The NVBit producer remains under `tools/nvbit_tracer`. Build it with the pinned
+CUDA/protobuf environment when a new real workload capture is required; write
+new captures directly to the corpus/work roots. Do not create local synthetic
+bundles or small acceptance workloads.

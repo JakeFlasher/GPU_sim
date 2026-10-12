@@ -14,7 +14,7 @@ against `phase_cycle_ledger.schema.json`.
 The receive-thread phase-record path in `tracer_tool.cu`'s
 `phase_recv_thread_fun` decodes the channel bytes into instances of
 `PhaseClockRecord`; this aggregator's contract is locked in here so
-the producer-side test fixtures match the real receive-thread output.
+the producer-side captured output matches the real receive-thread output.
 
 Nine typed diagnostics required by the non-root measurement
 NVBit phase-injection contract:
