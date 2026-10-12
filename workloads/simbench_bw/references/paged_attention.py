@@ -300,8 +300,7 @@ def build_l4_checkpoint(slug: str, shape_point: dict[str, Any], seed: int) -> di
     R33: built on top of `_prefill_then_decode_boundary_state`,
     the same helper the pipeline-specific reference consumes. Checkpoint
     digests and reference output therefore derive from the same state
-    by construction; the coherence test in
-    `tests/test_round33_repairs.py` verifies digest equality.
+    by construction; the coherence path retains digest equality.
     """
     if slug != "prefill_then_decode_pagedkv_pipeline":
         raise ValueError(

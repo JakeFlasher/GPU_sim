@@ -1,6 +1,6 @@
 // Compiled-helper enforcement library (R43 addition per user-
 // authorized Round-42-end promotion of Codex's recurring queued #2
-// "compiled-helper enforcement for low-precision byte-contract checks").
+// "compiled-helper contract for low-precision byte-contract checks").
 //
 // This file is an instance of the now-codified pattern in
 // `BL-20260427-compiled-helper-enforcement-template-for-byte-contract-
@@ -11,7 +11,7 @@
 // fixture + pre-submission mutation verification.
 //
 // This file exports `extern "C"` versions of the canonical Round-31
-// FP8 E4M3 byte-contract functions so a Python test can load this
+// FP8 E4M3 byte-contract functions so a capture tooling can load this
 // library via `ctypes.CDLL` and verify that the COMPILED C-side bytes
 // match the canonical Python helper byte-for-byte.
 //
@@ -20,18 +20,14 @@
 //     kernel runner binary's needs.
 //   - This file duplicates the function with `extern "C"` linkage so it
 //     can be loaded as a shared library.
-//   - The R32 + R38-41 static-source-analysis guards
-//     (`tests/test_sparse_2to4_fp8_e4m3_byte_contract_static_guard.py`
-//     for the byte contract; `tests/test_sparse_2to4_k_packed_bytes_
-//     coupling_static_guard.py` for the sparse 2:4 K_packed_bytes
-//     coupling) enforce main.cu's correctness; the R43 compiled-
-//     helper test enforces THIS file's correctness via runtime byte
-//     comparison.
+//   - The retained byte and sparse-layout workload contracts must remain
+//     aligned with main.cu; the compiled helper is kept for the capture build
+//     path and runtime byte comparison.
 //   - Together: both copies must be canonical Round-31 form.
 //
 // If the two copies ever diverge, the R32 + R38-41 static
 // guards would still pass (they only check main.cu) but the R43
-// compiled-helper test would catch the divergence (since it compares
+// compiled-helper path would catch the divergence (since it compares
 // THIS file's bytes to the Python helper, which itself matches main.cu
 // via the existing host-independent C/Python contract test).
 //
@@ -88,7 +84,7 @@ static void _init_fp8_e4m3_table(void) {
 //   - Other values: nearest-representable + sign-preserving.
 //
 // `extern "C"` linkage so the function is loadable via Python ctypes
-// for the R43 compiled-helper enforcement test.
+// for the R43 compiled-helper contract test.
 extern "C" uint8_t simbench_quantize_fp8_e4m3_byte(float value) {
     if (!FP8_E4M3_TABLE_INITIALIZED) _init_fp8_e4m3_table();
     if (isnan(value)) return 0x7F;

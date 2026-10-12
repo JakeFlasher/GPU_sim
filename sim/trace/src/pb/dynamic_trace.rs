@@ -335,13 +335,8 @@ pub struct Instruction {
     /// `predictor_l1_sass_provenance_missing`. Tag 13 is the next
     /// available after the existing tags 1-12.
     ///
-    /// Three-surface lockstep with the JSON classifier manifest
-    /// schema (the trace cache-op schema) +
-    /// the cache_predictor._TYPED_REASONS frozenset + the
-    /// comparison_runner module-level constants is enforced by the
-    /// structural lockstep test at
-    /// workloads/simbench_bw/tests/test_predictor_l1_sass_provenance_missing_lockstep.py
-    /// per BL-20260507-arch-token-multi-surface-lockstep.
+    /// The producer, schema, and consumer keep this cache-op vocabulary aligned;
+    /// unavailable provenance remains explicitly typed.
     #[prost(enumeration = "InstructionCacheOp", optional, tag = "13")]
     pub instruction_cache_op: ::core::option::Option<i32>,
     /// Opt-in host-observed order of selected asynchronous-copy instructions.

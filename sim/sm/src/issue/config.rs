@@ -201,12 +201,12 @@ pub struct IssueModelParams {
     pub(crate) arch: ArchId,
     pub(crate) resource_source: IssueResourceSource,
     /// Published SM-local instruction hierarchy and fetch/decode structure.
-    /// `None` exists for synthetic fixtures and for the explicit SM120 alpha
+    /// `None` exists for compact custom inputs and for the explicit SM120 alpha
     /// lane, which intentionally does not claim an instruction-cache
     /// capability.
     pub(crate) instruction_front_end: Option<InstructionFrontEnd>,
     /// Published per-SMSP and SM-shared memory issue pipeline. `None` is used
-    /// by synthetic fixtures and by the Flat-only SM120 alpha lane until a
+    /// by compact custom inputs and by the Flat-only SM120 alpha lane until a
     /// Blackwell memory-issue measurement is admitted.
     pub(crate) memory_issue_pipeline: Option<MemoryIssuePipeline>,
     /// Research-only scalar INT/FP execution occupancy. The explicit SM120
@@ -223,11 +223,11 @@ pub struct IssueModelParams {
     /// Source-hit return cadence for cacheable asynchronous copies.
     pub(crate) ldgsts_l1_hit_return_service: Option<LdgstsL1HitReturnService>,
     /// Additional SM-side return service for static `LDG.*.CONSTANT` loads.
-    /// Synthetic fixtures and the Flat-only SM120 alpha lane may omit it;
+    /// Compact custom inputs and the Flat-only SM120 alpha lane may omit it;
     /// carded SM86 constructors bind the architecture capability.
     pub(crate) constant_memory_return_service: Option<ConstantMemoryReturnService>,
     /// Per-SMSP immediate-constant cache used by CBANK operands. Synthetic
-    /// fixtures and SM120 alpha leave this absent so they exercise only the
+    /// compact inputs and SM120 alpha leave this absent so they exercise only the
     /// explicitly selected mechanism.
     pub(crate) immediate_constant_cache: Option<ImmediateConstantCache>,
     /// L1 hit data-ready latency (card `l1_hit_latency_cycles`, ceiled).
@@ -761,7 +761,7 @@ impl IssueModelParams {
     }
 
     /// Convenience constructor for callers that do not have a card object
-    /// (unit fixtures and alpha-only microbench harnesses).  Production direct
+    /// (custom inputs and alpha-only microbench harnesses). Production direct
     /// replay should call [`Self::from_card_alpha`] so runtime limits remain
     /// bound to the selected RTX 5090 card.
     pub fn sm120_alpha() -> Result<Self, IssueError> {
@@ -775,7 +775,7 @@ impl IssueModelParams {
                 got: 0,
             });
         }
-        // This fixture path is intentionally cardless; all values still come
+        // This compact-input path is intentionally cardless; all values still come
         // from the explicit alpha config above, never from SM86 capabilities.
         let params = Self {
             arch: ArchId::Sm120,

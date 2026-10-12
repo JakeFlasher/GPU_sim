@@ -2,13 +2,14 @@
 //!
 //! Exact port of the canonical Python decoder
 //! `tools/nvbit_tracer/import_trace_contract.py::_reconstruct_lane_vector`,
-//! FOLLOWED BY the canonical per-lane positional check the Python gate runs
+//! followed by the canonical per-lane positional check used by the Python
+//! decoder
 //! after reconstruction (`lane_position_mismatch`: slot i is sentinel iff
 //! bit i of `active_mask & predicate_mask` is clear). The two
 //! implementations MUST stay in lockstep: the Python side is the producer
 //! decoder, and this side is what the simulator actually replays. Replay
 //! evidence comes from the complete captured workload corpus rather than a
-//! hand-authored golden fixture.
+//! hand-authored synthetic input.
 //!
 //! Compressed reconstruction uses checked i64 arithmetic in both runtimes.
 //! Any record whose reconstruction leaves that domain is a typed

@@ -7,7 +7,7 @@ slug = "flash_attn_fwd_bf16_causal"
 # The kernel signature lives at
 # `l2/flash_attn_fwd_bf16_causal/flash_attn_fwd_bf16_causal.cu::flash_attn_fwd_bf16_causal_launch`.
 # R16 restored shape-contract alignment after R15 shipped a
-# template launch_config; see tests/test_round16_repairs.py for the lock.
+# template launch_config; retained as a workload input contract.
 
 [[timing_shapes]]
 name = "timing_00"

@@ -1,7 +1,7 @@
 // Compiled-helper enforcement library (R44 addition; extends the
 // R43 architecture from FP8 E4M3 to FP4 E2M1, per the user's
 // Round-42-end authorization to start blocking issues directly +
-// promote queued #2 (compiled-helper enforcement) across all four
+// promote queued #2 (compiled-helper contract) across all four
 // byte-contract C mirrors).
 //
 // This file is an instance of the now-codified pattern in
@@ -13,7 +13,7 @@
 // fixture + pre-submission mutation verification.
 //
 // This file exports `extern "C"` versions of the canonical Round-4
-// FP4 E2M1 byte-contract function so a Python test can load this
+// FP4 E2M1 byte-contract function so a capture tooling can load this
 // library via `ctypes.CDLL` and verify that the COMPILED C-side
 // nibbles match the canonical Python helper byte-for-byte.
 //
@@ -23,11 +23,11 @@
 //   - This file duplicates the function with `extern "C"` linkage so it
 //     can be loaded as a shared library.
 //   - The R33 + R34 static-source-analysis guards
-//     (`tests/test_fp4_e2m1_byte_contract_static_guard.py`; R33
+//     (`the retained workload contract`; R33
 //     added the initial 5 guards; R34 tightened them to exact
 //     byte-contract semantics + added forbidden-pattern guards per
 //     Codex Round-33-review)
-//     enforce main.cu's correctness; the R44 compiled-helper test
+//     enforce main.cu's correctness; the R44 compiled-helper path
 //     enforces THIS file's correctness via runtime nibble comparison.
 //   - Together: both copies must be canonical Round-4 form.
 //
@@ -79,7 +79,7 @@ static const float FP4_E2M1_POSITIVE_VALUES[8] = {
 //   - -0.0 + idx==0 → canonicalize to nibble 0x0 (positive zero).
 //
 // `extern "C"` linkage so the function is loadable via Python ctypes
-// for the R44 compiled-helper enforcement test.
+// for the R44 compiled-helper contract test.
 extern "C" uint8_t simbench_quantize_fp4_e2m1_nibble(float value) {
     if (isnan(value)) return 0x0;
     int sign_bit = (signbit(value) || value < 0.0f) ? 1 : 0;

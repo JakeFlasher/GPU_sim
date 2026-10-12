@@ -7,7 +7,7 @@ slug = "pagedkv_decode_gqa_bf16"
 # The kernel signature lives at
 # `l2/pagedkv_decode_gqa_bf16/pagedkv_decode_gqa_bf16.cu::pagedkv_decode_gqa_bf16_launch`.
 # R14 restored shape-contract alignment after R13 shipped a
-# template launch_config; see tests/test_round14_repairs.py for the lock.
+# template launch_config; see the retained workload contract for the lock.
 
 [[timing_shapes]]
 name = "timing_00"

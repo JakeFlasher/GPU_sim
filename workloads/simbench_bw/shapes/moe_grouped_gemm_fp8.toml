@@ -6,7 +6,7 @@ slug = "moe_grouped_gemm_fp8"
 #   block = (256, 1, 1)      # fixed block of 256 threads striding over intermediate
 # The kernel signature lives at
 # `l2/moe_grouped_gemm_fp8/moe_grouped_gemm_fp8.cu::moe_grouped_gemm_fp8_launch`.
-# Shipped shape-locked from day one — see tests/test_round18_repairs.py.
+# Shipped shape-locked from day one — retained as a workload input contract.
 #
 # trace_00 uses `experts=4` (not 8) so the axis_product with the explicit
 # top_k factor stays under the 512-MiB trace budget; matches the R14

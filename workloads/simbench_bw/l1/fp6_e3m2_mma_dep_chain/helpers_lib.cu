@@ -11,7 +11,7 @@
 // test + module fixture + pre-submission mutation verification.
 //
 // This file exports an `extern "C"` version of the canonical Round-6
-// FP6 E3M2 byte-contract function so a Python test can load this
+// FP6 E3M2 byte-contract function so a capture tooling can load this
 // library via `ctypes.CDLL` and verify that the COMPILED C-side
 // codes match the canonical Python helper byte-for-byte.
 //
@@ -21,8 +21,8 @@
 //   - This file duplicates the function with `extern "C"` linkage so it
 //     can be loaded as a shared library.
 //   - The R33-34 static-source-analysis guards
-//     (`tests/test_fp6_e3m2_byte_contract_static_guard.py`)
-//     enforce main.cu's correctness; the R46 compiled-helper test
+//     (`the retained workload contract`)
+//     enforce main.cu's correctness; the R46 compiled-helper path
 //     enforces THIS file's correctness via runtime code comparison.
 //
 // FP6 E3M2 vs FP6 E2M3 (the sibling row at l1/fp6_e2m3_saturation):
@@ -82,7 +82,7 @@ static const float FP6_E3M2_POSITIVE_VALUES[32] = {
 //   - -0.0 + idx==0 → canonicalize to code 0x00.
 //
 // `extern "C"` linkage so the function is loadable via Python ctypes
-// for the R46 compiled-helper enforcement test.
+// for the R46 compiled-helper contract test.
 extern "C" uint8_t simbench_quantize_fp6_e3m2_code(float value) {
     if (isnan(value)) return 0x00;
     int sign_bit = (signbit(value) || value < 0.0f) ? 1 : 0;

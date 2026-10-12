@@ -19,12 +19,12 @@ sass: $(RUN)
 	@set -e; mkdir -p sass_archive
 	$(CUOBJDUMP) --dump-sass $(RUN) > sass_archive/$(TARGET).sass
 
-# Round 46 addition (extends the Round 43-44 compiled-helper enforcement
+# Round 46 addition (extends the Round 43-44 compiled-helper contract
 # architecture from FP8 E4M3 + FP4 E2M1 to FP6 E2M3, the third of four
 # byte-contract C mirrors): build a shared library exporting `extern "C"`
 # versions of the canonical Round-5 FP6 E2M3 byte-contract function for
-# ctypes loading from Python tests. See `helpers_lib.cu` for rationale +
-# the Round 46 test `tests/test_fp6_e2m3_compiled_helper_enforcement.py`
+# ctypes loading from capture tooling. See `helpers_lib.cu` for rationale +
+# the Round 46 test `the retained workload contract`
 # for the byte-equality enforcement.
 helpers_lib: helpers_lib.so
 helpers_lib.so: helpers_lib.cu

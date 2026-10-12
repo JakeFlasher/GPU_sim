@@ -29,9 +29,6 @@ path = "src/bin/causal_frontier_probe.rs"
 name = "custom-program-run"
 path = "src/bin/custom_program_run.rs"
 
-[[bin]]
-name = "phasefuse-scale"
-path = "src/bin/phasefuse_scale.rs"
 
 [lints]
 workspace = true

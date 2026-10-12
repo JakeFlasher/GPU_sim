@@ -10,7 +10,7 @@ slug = "moe_grouped_gemm_bf16"
 # contract and `references/grouped_gemm.py::build_reference` both
 # parameterize on top_k (default 2), and leaving it out made the
 # stale launch_config look correct while hiding a missing axis.
-# See tests/test_round14_repairs.py for the lock.
+# Retained as a workload input contract.
 # The trace shape's `experts` was reduced 8 -> 4 so the axis_product
 # with the added `top_k` factor keeps `predicted_bytes` within the
 # row's 512-MiB trace budget.

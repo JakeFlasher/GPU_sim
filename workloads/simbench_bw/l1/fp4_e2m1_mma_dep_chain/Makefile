@@ -19,12 +19,12 @@ sass: $(RUN)
 	@set -e; mkdir -p sass_archive
 	$(CUOBJDUMP) --dump-sass $(RUN) > sass_archive/$(TARGET).sass
 
-# Round 44 addition (extends the Round 43 compiled-helper enforcement
+# Round 44 addition (extends the Round 43 compiled-helper contract
 # architecture from FP8 E4M3 to FP4 E2M1): build a shared library
 # exporting `extern "C"` versions of the canonical Round-4 FP4 E2M1
-# byte-contract functions for ctypes loading from Python tests. See
+# byte-contract functions for ctypes loading from capture tooling. See
 # `helpers_lib.cu` for rationale + the Round 44 test
-# `tests/test_fp4_e2m1_compiled_helper_enforcement.py` for the byte-
+# `the retained workload contract` for the byte-
 # equality enforcement.
 helpers_lib: helpers_lib.so
 helpers_lib.so: helpers_lib.cu

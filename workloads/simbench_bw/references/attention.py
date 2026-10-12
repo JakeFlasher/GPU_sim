@@ -417,8 +417,7 @@ def build_l4_checkpoint(slug: str, shape_point: dict[str, Any], seed: int) -> di
     R33: built on top of `_speculative_decode_boundary_state`, the
     same helper the pipeline-specific reference consumes. Checkpoint
     digests and reference output therefore derive from the same draft
-    state by construction; the coherence test in
-    `tests/test_round33_repairs.py` verifies digest equality."""
+    state by construction; the coherence path retains digest equality."""
     if slug != "speculative_decode_draft_verify_pipeline":
         raise ValueError(
             f"{slug!r} is not an L4 pipeline slug this family implements "

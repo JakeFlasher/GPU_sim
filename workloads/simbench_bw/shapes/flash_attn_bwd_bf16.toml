@@ -6,7 +6,7 @@ slug = "flash_attn_bwd_bf16"
 #   block = (head_dim, 1, 1)      # one thread per dQ[qi] dim
 # The kernel signature lives at
 # `l2/flash_attn_bwd_bf16/flash_attn_bwd_bf16.cu::flash_attn_bwd_bf16_launch`.
-# Shipped shape-locked from day one — see tests/test_round17_repairs.py.
+# Shipped shape-locked from day one — retained as a workload input contract.
 #
 # The row is deterministic="ND" (atomic_add reductions widen the
 # tolerance band; verified via run_suite.py::_infer_reduction_kind).

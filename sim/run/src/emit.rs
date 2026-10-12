@@ -6,7 +6,7 @@
 //! the emitted metric descriptor table with a typed exclusion.
 //! It is the only simulator module that names label-pipeline contracts: metric NAMES
 //! are the output contract and are allowed here; label VALUES still never enter
-//! (Rule 1, enforced by `eval/guards/test_targets_not_features_guard.py`).
+//! (Rule 1, enforced by the active alpha evidence policy).
 //!
 //! Shape (design proposal P3, "descriptor-table hybrid"): compiled
 //! [`DESCRIPTORS`] and [`TYPED_EXCLUSIONS`] tables form an exact, disjoint
@@ -572,7 +572,7 @@ pub const EMITTED_METRIC_COUNT: usize = 8;
 
 /// Closed identity of every metric the simulator can emit. Result-v2 ordering is
 /// frozen independently from the legacy descriptor-vector order so exact maps can
-/// follow the P1 7+1 authority without changing v1 golden bytes.
+/// follow the P1 7+1 authority without changing the legacy v1 byte contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum EmittedMetricKey {
     SmspInstExecutedSum,

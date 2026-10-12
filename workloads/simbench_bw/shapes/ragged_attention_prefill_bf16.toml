@@ -11,9 +11,9 @@ slug = "ragged_attention_prefill_bf16"
 # honor: cu_seqlens is derived as an even partition of total_tokens
 # (first num_seqs%total_tokens segments get one extra token), and the
 # kernel computes attention ONLY within each query's own segment.
-# See tests/test_round16_repairs.py for the launch-config + num_seqs
+# See the retained workload contract for the launch-config + num_seqs
 # locks and the segmented-vs-contiguous reference-output invariance
-# test that proves the segmentation actually changes behavior.
+# behavior required by the full-workload capture.
 #
 # The trace_00 axes were trimmed from the pre-Round-16 template so the
 # axis_product with `num_seqs` added stays within the row's 384-MiB

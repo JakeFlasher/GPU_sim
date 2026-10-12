@@ -19,12 +19,12 @@ sass: $(RUN)
 	@set -e; mkdir -p sass_archive
 	$(CUOBJDUMP) --dump-sass $(RUN) > sass_archive/$(TARGET).sass
 
-# Round 43 addition (compiled-helper enforcement per user-authorized
+# Round 43 addition (compiled-helper contract per user-authorized
 # Round-42-end promotion of Codex's recurring queued #2): build a
 # shared library exporting `extern "C"` versions of the canonical
 # Round-31 FP8 E4M3 byte-contract functions for ctypes loading from
-# Python tests. See `helpers_lib.cu` for rationale + the Round 43
-# test `tests/test_sparse_2to4_fp8_compiled_helper_enforcement.py`
+# capture tooling. See `helpers_lib.cu` for rationale + the Round 43
+# test `the retained workload contract`
 # for the byte-equality enforcement.
 helpers_lib: helpers_lib.so
 helpers_lib.so: helpers_lib.cu

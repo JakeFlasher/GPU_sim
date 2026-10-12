@@ -847,7 +847,7 @@ impl ModelExecutor {
 
     /// Consume a certificate only when it is bound to the complete descriptor
     /// region that it summarizes.  The old first-descriptor-only API remains
-    /// available for single-instruction fixtures, but a multi-instruction
+    /// available for single-instruction descriptors, but a multi-instruction
     /// certificate must use this method so a changed descriptor cannot inherit
     /// another region's timing/completion state.
     pub fn execute_macro_region(

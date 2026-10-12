@@ -4183,8 +4183,8 @@ def _emit_nvbit_trace_summaries_for_trace_artifact(
 ) -> dict[str, Any]:
     """Per-launch NVBit trace summary emission, factored out of
     `handle_trace` so the orchestrator's interaction with
-    `nvbit_trace_summary_adapter` is host-independently testable
-    via `tests/test_nvbit_trace_summary_adapter.py`.
+    `nvbit_trace_summary_adapter` is host-independent
+    via the live trace-summary contract.
 
     Returns a dict with:
       - `status`: one of `ok`, `adapter_import_failed`,

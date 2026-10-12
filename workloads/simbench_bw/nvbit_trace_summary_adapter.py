@@ -7,7 +7,7 @@ Provides three surfaces consumed by `merge_evidence.py join-cupti-nvbit`,
    reference implementation of `workloads/simbench_bw/schemas/
    kernel_signature.spec.md`. Applied to every captured workload
    under `the captured workload corpus` by
-   `tests/test_kernel_signature_conformance_nvbit_side.py`. The
+   captured workload corpus. The
    implementation mirrors the spec byte-for-byte: tuple-ordered field
    iteration, JSON canonical serialization with `ensure_ascii=False`
    and `separators=(",", ":")`, SHA-256 hex-lowercase 64 chars.

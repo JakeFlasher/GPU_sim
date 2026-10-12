@@ -570,7 +570,7 @@ impl InstructionActivity {
 
 /// Return the distinct-sector and distinct-line topology for one decoded
 /// request span.  The arena is already validated by the trace reader; this
-/// helper stays fail-closed for unit fixtures and legacy flat traces whose
+/// helper stays fail-closed for compact inputs and legacy flat traces whose
 /// arena is intentionally absent.
 fn decoded_sector_stats(kind: AccessKind, sector_arena: &[i64]) -> Option<(u64, u64)> {
     let (off, len) = match kind {

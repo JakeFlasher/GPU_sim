@@ -6,7 +6,7 @@ slug = "flash_attn_fwd_fp8_causal"
 #   block = (head_dim, 1, 1)      # one thread per output dim
 # The kernel signature lives at
 # `l2/flash_attn_fwd_fp8_causal/flash_attn_fwd_fp8_causal.cu::flash_attn_fwd_fp8_causal_launch`.
-# Shipped shape-locked from day one — see tests/test_round17_repairs.py.
+# Shipped shape-locked from day one — retained as a workload input contract.
 
 [[timing_shapes]]
 name = "timing_00"
