@@ -7,7 +7,7 @@
 - Active plan: `/root/gpu_cache_memory_modeling_proposal/PLAN.md`.
 - Full corpus: `/root/sm120_rtx_5090_capture`.
 - Replay outputs: `/dev/shm/sm120_rtx_5090_work`.
-- Cleanup commit: `baca8460`.
+- Cleanup commit: `14b40f26`.
 - Full replay is primary; fast replay is complementary.
 - NCU/CUPTI/CUDA-event measurements are independent observations joined after
   replay, never replay inputs.

@@ -5,7 +5,7 @@
 **Active plan:** `/root/gpu_cache_memory_modeling_proposal/PLAN.md`
 **Corpus:** `/root/sm120_rtx_5090_capture`
 **Replay workspace:** `/dev/shm/sm120_rtx_5090_work`  
-**Cleanup commit:** `baca8460`
+**Cleanup commit:** `14b40f26`
 
 ## Alpha evidence policy
 
