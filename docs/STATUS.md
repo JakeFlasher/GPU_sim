@@ -46,6 +46,13 @@ launches (750.802 s full, 618.882 s fast). Results are under
 These measurements show no replay regression from test-surface removal and do
 not claim bare-metal or NCU timing.
 
+The post-replay comparator joined all 339 roots and 11,558 launches with
+matching grid/block geometry (98 identity joins and 11,460 ordered fallbacks).
+Full raw endpoint medians were 0.8054 GPC cycles and 0.6249 SM-active cycles;
+fast medians were 0.1510 and 0.6118. These are distinct-endpoint diagnostics,
+not correctness or universal-accuracy claims. Comparator output is under
+`/dev/shm/sm120_rtx_5090_work/cleanup_20261012/ncu_after_test_cleanup/`.
+
 ## Active implementation
 
 - `sim-run --sm120-alpha --mode flat` is the primary full replay.
