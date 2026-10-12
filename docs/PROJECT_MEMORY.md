@@ -8,7 +8,7 @@
 - Full corpus: `/root/sm120_rtx_5090_capture`.
 - Replay outputs: `/dev/shm/sm120_rtx_5090_work`.
 - Cleanup commit: `14b40f26`.
-- Latest cleanup/replay commit: `7d9fa542`.
+- Latest cleanup/replay commit: `0330bedc`.
 - Workspace test-surface cleanup is complete: synthetic inline `#[test]`
   modules and their test-only dependencies are removed. Only the three
   environment-driven real-trace/real-sidecar Cargo probes remain.
