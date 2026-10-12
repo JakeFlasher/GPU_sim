@@ -35,4 +35,4 @@ CUDA_INJECTION64_PATH="$PWD/tools/nvbit_tracer/metric_extractor/metric_extractor
 
 Do not inject this tool and `tracer_tool.so` into the same process. The
 retained SOL integration is
-[`nvbit_metrics.py`](../../sol_baselines_harness/surfaces/nvbit_metrics.py).
+the captured sidecar metrics.

@@ -7,7 +7,7 @@ This document specifies the wire format of the per-launch records the
 followed by a single `\n`, no trailing whitespace.
 
 The strict reference parser at
-`tools/sol_baselines_harness/metric_extractor/launches_parser.py` is the
+the NVBit trace parser is the
 canonical consumer; any change to this schema MUST be accompanied by a
 parser update + a `schema_version` bump.
 
