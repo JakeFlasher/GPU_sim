@@ -33,7 +33,10 @@ const USAGE: &str = "Usage: sim-run --trace DIR --control FILE --arch-card FILE 
 [--native-payload-events FILE] \
 [--predictive-service-profile FILE] \
 [--memory-service-candidates FILE] [--memory-admission-candidates FILE] \
-[--memory-admission-feedback FILE]";
+[--memory-admission-feedback FILE]\n\
+SM120 full replay always uses l1-l2 with effective cache defaults and metric projections.\n\
+--mode flat is allowed only with --fast-frontier-only on SM120; l1-only full replay is forbidden.\n\
+The SM120 architecture card selects its effective timing model automatically.";
 
 fn write_success_document_to<W: Write>(document: &str, writer: &mut W) -> io::Result<()> {
     writer.write_all(document.as_bytes())?;
@@ -159,7 +162,7 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
     let mut control_bits = None;
     let mut arch_card = None;
     let mut pchase_card = None;
-    let mut memory_mode = MemoryMode::Flat;
+    let mut memory_mode = None;
     let mut cache_scope = CacheScope::Launch;
     let mut carded_dram_bandwidth = false;
     let mut dirty_writeback_capacity_sectors = None;
@@ -209,7 +212,7 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
                 let raw = raw
                     .to_str()
                     .ok_or_else(|| RunError::new("arguments", "--mode must be UTF-8"))?;
-                memory_mode = raw.parse()?;
+                memory_mode = Some(raw.parse()?);
             }
             value if value == OsStr::new("--cache-scope") => {
                 let raw = take_value(&mut args, "--cache-scope")?;
@@ -425,12 +428,28 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
             }
         }
     }
+    let arch_card = arch_card
+        .ok_or_else(|| RunError::new("arguments", "--arch-card is required"))?;
+    let memory_mode = match memory_mode {
+        Some(mode) => mode,
+        None if fast_frontier_only => MemoryMode::Flat,
+        None => {
+            let card = sim_arch::card::ArchCard::load(&arch_card)
+                .map_err(|error| RunError::new("architecture card", error.to_string()))?;
+            let arch = card.arch_id()
+                .map_err(|error| RunError::new("architecture card", error.to_string()))?;
+            if arch == sim_arch::ArchId::Sm120 {
+                MemoryMode::L1L2
+            } else {
+                MemoryMode::Flat
+            }
+        }
+    };
     Ok(Some(RunConfig {
         trace_dir: trace_dir.ok_or_else(|| RunError::new("arguments", "--trace is required"))?,
         control_bits: control_bits
             .ok_or_else(|| RunError::new("arguments", "--control is required"))?,
-        arch_card: arch_card
-            .ok_or_else(|| RunError::new("arguments", "--arch-card is required"))?,
+        arch_card,
         pchase_card,
         memory_mode,
         cache_scope,

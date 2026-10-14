@@ -93,8 +93,8 @@ pub enum CacheScope {
 }
 
 /// Explicit effective SM120 L1 service envelope supplied by a real-device
-/// probe.  This is deliberately not a physical geometry claim: the fully
-/// associative LRU model consumes the values as an opt-in scenario only.
+/// probe. This is an effective fully associative LRU model, not a physical
+/// geometry claim. SM120 full replay uses this model by default.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Sm120EffectiveL1Config {
     pub line_capacity: u64,
@@ -102,6 +102,17 @@ pub struct Sm120EffectiveL1Config {
     pub mshr_count: Option<u32>,
     pub hit_latency_cycles: u64,
     pub miss_latency_cycles: u64,
+}
+
+impl Default for Sm120EffectiveL1Config {
+    fn default() -> Self {
+        Self {
+            line_capacity: 1024,
+            mshr_count: None,
+            hit_latency_cycles: 50,
+            miss_latency_cycles: 512,
+        }
+    }
 }
 
 impl Sm120EffectiveL1Config {
@@ -175,7 +186,7 @@ pub struct RunConfig {
     pub architecture_spec: Option<PathBuf>,
     pub kernel_id: Option<i32>,
     /// Include the registry-bound simulator projections used for NCU joins.
-    /// The default remains false so existing direct-result JSON is unchanged.
+    /// Always enabled for SM120 full replay; optional for compatibility targets.
     pub ncu_shaped_metrics: bool,
     /// Run only the conservative trace-derived fast-frontier analyzer. This
     /// skips native timing replay and emits no silicon timing claim.
@@ -216,15 +227,13 @@ pub struct RunConfig {
     /// default is an independent sidecar; residual/replacement roles are
     /// experimental and must remain declared in the output.
     pub service_stage_role: ServiceStageRole,
-    /// Explicit alpha timing lane for retained SM120/RTX5090 traces.  This
-    /// never changes the ordinary SM120 fail-closed path and is intentionally
-    /// separate from SM86 compatibility or carded resources.
+    /// Effective timing lane for retained SM120/RTX5090 traces. Selected
+    /// automatically from the architecture card, separate from SM86 resources.
     pub sm120_alpha: bool,
-    /// Optional measured effective L1 envelope for SM120 cache-mode replay.
-    /// Without this field SM120 remains on the conservative flat lane.
+    /// Optional override of the default SM120 effective L1 envelope.
     pub sm120_effective_l1: Option<Sm120EffectiveL1Config>,
-    /// Optional explicit SM120 effective L2 scenario. This is a conditional
-    /// model assumption and never a recovered physical geometry card.
+    /// Optional override of the default SM120 effective L2 scenario. This is
+    /// a conditional assumption, not a recovered physical geometry card.
     pub sm120_effective_l2: Option<Sm120EffectiveL2Config>,
 }
 
@@ -240,6 +249,45 @@ pub struct Sm120EffectiveL2Config {
     pub replacement: L2Replacement,
     pub slice_hash: SliceHash,
     pub write_policy: &'static str,
+}
+
+impl Default for Sm120EffectiveL2Config {
+    fn default() -> Self {
+        Self {
+            capacity_bytes: 100_663_296,
+            line_bytes: 128,
+            sector_bytes: 32,
+            num_slices: 1,
+            associativity: 16,
+            replacement: L2Replacement::Lru,
+            slice_hash: SliceHash::LineMod,
+            write_policy: L2_WRITE_ALLOCATE_POLICY,
+        }
+    }
+}
+
+impl RunConfig {
+    /// Resolve the integrated SM120 model once, before dispatch and reporting.
+    /// Flat memory is only the separate fast-frontier representation; it must
+    /// never silently stand in for full SM120 replay.
+    fn with_architecture_defaults(&self, arch: sim_arch::ArchId) -> Result<Self, RunError> {
+        let mut config = self.clone();
+        if arch == sim_arch::ArchId::Sm120 {
+            config.sm120_alpha = true;
+            if !config.fast_frontier_only {
+                if config.memory_mode != MemoryMode::L1L2 {
+                    return Err(RunError::new(
+                        "arguments",
+                        "SM120 full replay requires --mode l1-l2; flat and l1-only full replay are forbidden (flat is fast-frontier-only)",
+                    ));
+                }
+                config.sm120_effective_l1.get_or_insert_with(Default::default);
+                config.sm120_effective_l2.get_or_insert_with(Default::default);
+                config.ncu_shaped_metrics = true;
+            }
+        }
+        Ok(config)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -2497,6 +2545,10 @@ fn resolve_mode(
 
 pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
     let total_started = Instant::now();
+    let arch_card = load_arch_card(&config.arch_card)?;
+    let arch = arch_card.arch_id().map_err(at("architecture card"))?;
+    let resolved_config = config.with_architecture_defaults(arch)?;
+    let config = &resolved_config;
     #[cfg(feature = "performance-counters")]
     let performance_enabled = std::env::var_os("SIM_RUN_PERFORMANCE_COUNTERS").is_some();
     let candidate_inputs = usize::from(config.memory_service_candidates.is_some())
@@ -2738,7 +2790,6 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
         return PreparedReplay::prepare(config, CoverageAdmission::ExistingDirectBehavior)?
             .replay_all_report();
     }
-    let arch_card = load_arch_card(&config.arch_card)?;
     if config.kernel_id.is_some() && config.launch_resources.is_some() {
         return Err(RunError::new(
             "arguments",
@@ -2750,7 +2801,6 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
         .as_ref()
         .map(|path| resources::ResourceObservations::load(path))
         .transpose()?;
-    let arch = arch_card.arch_id().map_err(at("architecture card"))?;
     let (issue, architecture_spec_issue_ports) = resolve_issue_with_metadata(config, &arch_card)?;
     let mode = resolve_mode(config, &arch_card, issue)?;
 

@@ -84,6 +84,9 @@ pub struct PreparedReplay {
     hypothetical_issue_ports: Option<u32>,
     architecture_spec: Option<String>,
     sm120_alpha: bool,
+    sm120_effective_l1: Option<super::Sm120EffectiveL1Config>,
+    sm120_effective_l2: Option<super::Sm120EffectiveL2Config>,
+    ncu_shaped_metrics: bool,
     launches: Vec<PreparedLaunchIdentity>,
 }
 
@@ -92,6 +95,16 @@ impl PreparedReplay {
         config: &RunConfig,
         coverage_admission: CoverageAdmission,
     ) -> Result<Self, RunError> {
+        if config.fast_frontier_only {
+            return Err(RunError::new(
+                "prepared replay",
+                "prepared replay executes full timing; use the direct fast-frontier path instead",
+            ));
+        }
+        let arch_card = load_arch_card(&config.arch_card)?;
+        let arch = arch_card.arch_id().map_err(at("architecture card"))?;
+        let resolved_config = config.with_architecture_defaults(arch)?;
+        let config = &resolved_config;
         if config.dirty_writeback_capacity_sectors.is_some()
             || config.coherence_service_cycles.is_some()
             || config.l1_visibility_protocol
@@ -110,8 +123,6 @@ impl PreparedReplay {
             reject_sampling_declarations(&config.trace_dir)?;
         }
 
-        let arch_card = load_arch_card(&config.arch_card)?;
-        let arch = arch_card.arch_id().map_err(at("architecture card"))?;
         let (issue, architecture_spec_issue_ports) =
             super::resolve_issue_with_metadata(config, &arch_card)?;
         let mode = resolve_mode(config, &arch_card, issue)?;
@@ -180,6 +191,9 @@ impl PreparedReplay {
                 .as_ref()
                 .map(|path| path.display().to_string()),
             sm120_alpha: config.sm120_alpha,
+            sm120_effective_l1: config.sm120_effective_l1,
+            sm120_effective_l2: config.sm120_effective_l2,
+            ncu_shaped_metrics: config.ncu_shaped_metrics,
             launches,
         })
     }
@@ -278,7 +292,7 @@ impl PreparedReplay {
                 "prepared timing replay requires full launch coverage",
             )
         })?;
-        launch_report(result, &self.arch_card, None, None, None, false)
+        launch_report(result, &self.arch_card, None, None, None, self.ncu_shaped_metrics)
     }
 
     /// Replay one launch and wrap it in the same configuration-bearing report
@@ -318,8 +332,8 @@ impl PreparedReplay {
             sm120_alpha: self.sm120_alpha,
             sm120_alpha_config: self.sm120_alpha.then(super::alpha_config),
             sm120_alpha_profile_id: self.sm120_alpha.then_some(Sm120AlphaConfig::PROFILE_ID),
-            sm120_effective_l1: None,
-            sm120_effective_l2: None,
+            sm120_effective_l1: self.sm120_effective_l1,
+            sm120_effective_l2: self.sm120_effective_l2,
             hypothetical_issue_ports: self.hypothetical_issue_ports,
             architecture_spec: self.architecture_spec.clone(),
             memory_service_candidate_count: 0,

@@ -158,11 +158,11 @@ def replay(capture: Path, relative: str, control: Path, args, mode: str, logs: P
                str(memory_mode)]
     if args.sm120_effective_l1 and memory_mode != "flat":
         command.extend(("--sm120-effective-l1", args.sm120_effective_l1))
-    if args.sm120_effective_l2 and memory_mode != "flat":
+    if args.sm120_effective_l2 and memory_mode == "l1-l2":
         command.extend(("--sm120-effective-l2", args.sm120_effective_l2))
     if args.carded_dram and mode == "full":
         command.append("--carded-dram")
-    if args.ncu_shaped_metrics and mode == "full":
+    if mode == "full":
         command.append("--ncu-shaped-metrics")
     if mode == "fast":
         command.append("--fast-frontier-only")
@@ -233,18 +233,19 @@ def main() -> int:
     parser.add_argument("--sim-bin", type=Path, default=DEFAULT_SIM)
     parser.add_argument("--arch-card", type=Path, default=DEFAULT_CARD)
     parser.add_argument("--mode", choices=("both", "full", "fast"), default="both")
-    parser.add_argument("--memory-mode", choices=("flat", "l1", "l1-l2"), default="flat",
-                        help="simulator memory mode passed to every replay")
+    parser.add_argument("--memory-mode", choices=("l1-l2",), default="l1-l2",
+                        help="full replay always models L1 and L2 together; flat/L1-only full replay is forbidden")
     parser.add_argument("--fast-memory-mode", choices=("flat",), default="flat",
                         help="complementary fast-stage mode; fast SM120 stage is flat-only")
     parser.add_argument("--sm120-effective-l1",
-                        help="effective L1 profile CAPACITY:MSHR|none:HIT:MISS")
+                        help="override the default effective L1 parameters: CAPACITY:MSHR|none:HIT:MISS")
     parser.add_argument("--sm120-effective-l2",
-                        help="effective L2 scenario CAPACITY_BYTES:SLICES:ASSOCIATIVITY (opt-in l1-l2 only)")
+                        help="override the default effective L2 parameters: CAPACITY_BYTES:SLICES:ASSOCIATIVITY")
     parser.add_argument("--carded-dram", action="store_true",
                         help="enable the architecture-card DRAM path (for l1-l2 mode)")
-    parser.add_argument("--ncu-shaped-metrics", action="store_true",
-                        help="emit typed NCU metric projection for full mode (never fast mode)")
+    # Accepted for old command lines; full replay always emits these projections.
+    parser.add_argument("--ncu-shaped-metrics", action="store_true", default=True,
+                        help=argparse.SUPPRESS)
     parser.add_argument("--timeout", type=float, default=1200, help="seconds per complete capture replay")
     parser.add_argument("--max-sim-output-bytes", type=int, default=512 * 1024 * 1024,
                         help="bounded simulator stdout retained by the driver")
@@ -298,8 +299,10 @@ def main() -> int:
                "selected_captures": args.capture,
                "memory_mode": args.memory_mode,
                "fast_memory_mode": args.fast_memory_mode,
-               "sm120_effective_l1": args.sm120_effective_l1,
-               "sm120_effective_l2": args.sm120_effective_l2,
+               "sm120_effective_l1": None,
+               "sm120_effective_l2": None,
+               "sm120_effective_l1_override": args.sm120_effective_l1,
+               "sm120_effective_l2_override": args.sm120_effective_l2,
                "carded_dram": bool(args.carded_dram),
                "ncu_shaped_metrics": bool(args.ncu_shaped_metrics and "full" in modes),
                "ncu_shaped_metrics_requested": bool(args.ncu_shaped_metrics),
@@ -352,6 +355,11 @@ def main() -> int:
                         output.write(json.dumps(row, separators=(",", ":"), allow_nan=False) + "\n")
                         output.flush()
                         counts[row["status"]] += 1
+                        if mode == "full" and row["status"] == "ok":
+                            # Report the actual binary-resolved defaults, not
+                            # absent override flags or duplicated Python constants.
+                            summary["sm120_effective_l1"] = row.get("sm120_effective_l1")
+                            summary["sm120_effective_l2"] = row.get("sm120_effective_l2")
                         mode_rows = row.get("launches" if mode == "full" else "fast_frontier", [])
                         if isinstance(mode_rows, list):
                             launches += len(mode_rows)
