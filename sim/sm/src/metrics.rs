@@ -2,7 +2,7 @@
 use std::collections::BTreeMap;
 
 use serde::Serialize;
-use sim_mem::{opcode_head, AccessKind, CacheOpToken};
+use sim_mem::{opcode_head, AccessKind, CacheOpToken, LdgstsL1Policy};
 use sim_semantics::{
     CandidateDomain, EvidenceKind, LatentFactors, LatentModelError, ResourceDemandEnvelope,
     ResourceDemandInterval,
@@ -348,6 +348,10 @@ pub struct TraceMetrics {
     /// NCU-style logical pipe projections. These are deliberately separate
     /// from the issue scheduler's resource classes above.
     pub by_ncu_pipeline: BTreeMap<String, InstructionActivity>,
+    /// Logical LDGSTS cache-route counts derived from the qualified static
+    /// route. These are not dynamic physical cache-access counters.
+    pub ldgsts_cache_access_instructions: u64,
+    pub ldgsts_cache_bypass_instructions: u64,
     /// Conservative physical-pipeline candidate domains. These are not NCU
     /// counters; they quantify how much dynamic pipe attribution the trace
     /// contract can support without value or hardware-selection state.
@@ -1309,6 +1313,18 @@ impl TraceMetrics {
                 active_mask_present,
                 predicate_mask_present,
             )?;
+        if effective != 0 {
+            if let AccessKind::GlobalAsyncCopy { l1_policy, .. } = kind {
+                match l1_policy {
+                    LdgstsL1Policy::CacheAtAllLevels => {
+                        add(&mut self.ldgsts_cache_access_instructions, 1)?;
+                    }
+                    LdgstsL1Policy::BypassL1 => {
+                        add(&mut self.ldgsts_cache_bypass_instructions, 1)?;
+                    }
+                }
+            }
+        }
         let candidates = Self::physical_candidates(head, &kind, pipeline);
         self.schedule_candidates(candidates, pipeline)?;
         add(&mut self.physical_pipeline.total_warp_instructions, 1)?;

@@ -846,6 +846,28 @@ pub(super) fn project(
                 ),
             );
         }
+        for (key, ncu_metric, count) in [
+            (
+                "ldgsts_cache_access_instructions",
+                "sm__sass_inst_executed_op_ldgsts_cache_access.sum",
+                trace.ldgsts_cache_access_instructions,
+            ),
+            (
+                "ldgsts_cache_bypass_instructions",
+                "sm__sass_inst_executed_op_ldgsts_cache_bypass.sum",
+                trace.ldgsts_cache_bypass_instructions,
+            ),
+        ] {
+            m.insert(
+                key.to_owned(),
+                Metric::approximate_count(
+                    Some(ncu_metric),
+                    "inst",
+                    u128::from(count),
+                    "trace-derived logical LDGSTS cache-route cardinality; route semantics are qualified, physical cache access remains unresolved",
+                ),
+            );
+        }
         // Additional logical operation classes with unambiguous trace
         // provenance. These counts do not select a physical pipe.
         for (key, ncu_metric, count) in [
