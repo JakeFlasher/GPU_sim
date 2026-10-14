@@ -18,6 +18,7 @@ python3 tools/sm120_corpus_replay.py \
   --mode both \
   --memory-mode l1-l2 \
   --fast-memory-mode flat \
+  --cache-scope launch \
   --sm120-effective-l1 1024:none:50:512 \
   --ncu-shaped-metrics \
   --workers 12
@@ -29,7 +30,9 @@ the complementary fast mode is flat-frontier-only. If effective parameters
 are omitted, the binary resolves L1 `1024:none:50:512` and L2
 `100663296:1:16` automatically. They are conditional effective scenarios,
 not physical geometry claims; protocol identity is built into the default route.
-The driver
+`--cache-scope stream-l2` is an explicit persistent-L2 hypothesis; captures
+with mixed device/stream identities fall back to launch-cold and report that
+fallback. The driver
 publishes `full.jsonl.zst` and `fast.jsonl.zst`; no new uncompressed replay
 JSONL is produced.
 
