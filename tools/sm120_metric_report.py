@@ -63,6 +63,7 @@ def allowed_units(unit: str) -> set[str]:
         "sector": {"sector"},
         "byte": {"byte"},
         "request": {"request"},
+        "wavefront": {"wavefront"},
     }.get(unit, set())
 
 
@@ -85,6 +86,7 @@ def metric_entries(launch: dict[str, Any]) -> list[dict[str, Any]]:
             "unit": str(prediction.get("unit", "")),
             "status": str(outcome.get("status", "unavailable")),
             "estimate": estimate,
+            "source_key": f"metric_predictions.{prediction.get('key', prediction['ncu_metric'])}",
             "reason": (outcome.get("detail") or {}).get("reason")
             if isinstance(outcome.get("detail"), dict) else None,
         })
@@ -105,6 +107,7 @@ def metric_entries(launch: dict[str, Any]) -> list[dict[str, Any]]:
                 "status": "predicted" if estimate is not None else "unavailable",
                 "estimate": estimate,
                 "reason": None if estimate is not None else "observer_count_unavailable",
+                "source_key": f"cache_lookup_predictions.{metric_key}.{metric}",
             })
     native = launch.get("native_metrics", {})
     native_metrics = native.get("metrics", {}) if isinstance(native, dict) else {}
@@ -116,12 +119,44 @@ def metric_entries(launch: dict[str, Any]) -> list[dict[str, Any]]:
         entries.append({
             "metric": str(metric["ncu_metric"]),
             "unit": "cycles" if metric.get("unit") == "cycle" else str(metric.get("unit", "")),
-            "status": "predicted" if status in {"modeled", "approximate", "observed_external"} and estimate is not None else "unavailable",
+            "status": "predicted" if status in {"modeled", "approximate"} and estimate is not None else str(status or "unavailable"),
             "estimate": estimate,
             "reason": metric.get("semantics") if estimate is None else None,
-            "source_key": key,
+            "source_key": f"native_metrics.{key}",
+            "semantics": metric.get("semantics"),
         })
     return entries
+
+
+def selected_entries(launch: dict[str, Any], mode: str) -> list[dict[str, Any]]:
+    """One prediction per metric/launch, selected without inspecting NCU.
+
+    Prefer a finite declared metric, then cache observer, then native metric,
+    then the existing timing fallback. Preserve other representations in the
+    row, but do not count aliases as independent launches. External measured
+    values are not simulator predictions.
+    """
+    candidates = metric_entries(launch)
+    for metric, estimate in timing_predictions(launch, mode).items():
+        candidates.append({
+            "metric": metric, "unit": "cycles",
+            "status": "predicted" if estimate is not None else "unavailable",
+            "estimate": estimate, "source_key": f"{mode}_timing.{metric}",
+            "semantics": "model-relative timing endpoint; not an identified hardware clock",
+        })
+    groups: dict[str, list[dict[str, Any]]] = collections.defaultdict(list)
+    for entry in candidates:
+        groups[entry["metric"]].append(entry)
+    result = []
+    for entries in groups.values():
+        chosen = next((entry for entry in entries
+                       if entry["status"] == "predicted" and entry["estimate"] is not None), entries[0])
+        row = dict(chosen)
+        alternatives = [entry for entry in entries if entry is not chosen]
+        if alternatives:
+            row["alternative_predictions"] = alternatives
+        result.append(row)
+    return result
 
 
 def add_observation(
@@ -144,6 +179,13 @@ def add_observation(
         "target_missing": 0,
         "zero_opportunity": 0,
         "errors": [],
+        "relative_errors": [],
+        "errors_by_capture": collections.defaultdict(list),
+        "relative_by_family": collections.defaultdict(list),
+        "source_counts": collections.Counter(),
+        "aliases_not_scored": 0,
+        "different_numeric_alternatives": 0,
+        "zero_targets": 0,
         "exact": 0,
         "captures": set(),
     })
@@ -154,25 +196,61 @@ def add_observation(
     if entry.get("reason"):
         row["reasons"][entry["reason"]] += 1
     estimate = entry.get("estimate")
+    row["source_counts"][entry["source_key"]] += 1
+    alternatives = entry.get("alternative_predictions", [])
+    row["aliases_not_scored"] += len(alternatives)
+    row["different_numeric_alternatives"] += sum(
+        candidate["status"] == "predicted"
+        and candidate.get("estimate") is not None
+        and estimate is not None
+        and candidate["estimate"] != estimate
+        for candidate in alternatives
+    )
+    result = {"metric": name, "source_key": entry["source_key"],
+              "estimate": estimate, "model_status": status, "model_unit": entry["unit"]}
+    if entry.get("semantics"):
+        result["semantics"] = entry["semantics"]
+    if alternatives:
+        result["alternative_predictions"] = alternatives
     target = target_metrics.get(name, {})
     truth = finite(target.get("value")) if isinstance(target, dict) else None
     if status != "predicted" or estimate is None:
         if status == "predicted":
             row["zero_opportunity"] += 1
-        return {"metric": name, "status": "model_unavailable", "reason": entry.get("reason")}
+        return {**result, "status": "model_unavailable", "reason": entry.get("reason")}
     row["predicted"] += 1
     if truth is None:
         row["target_missing"] += 1
-        return {"metric": name, "status": "target_missing"}
+        return {**result, "status": "target_missing"}
     row["target_available"] += 1
-    if target.get("unit") not in allowed_units(entry["unit"]):
+    result.update(target=truth, target_unit=target.get("unit"))
+    # NCU exports these documented count metrics with an empty unit on SM120.
+    # This is a name-qualified count relation, not permission to equate arbitrary
+    # unitless metrics with wavefronts or to convert timing domains.
+    shared_wavefront = name in {
+        "l1tex__data_pipe_lsu_wavefronts_mem_shared_op_ld.sum",
+        "l1tex__data_pipe_lsu_wavefronts_mem_shared_op_st.sum",
+        "l1tex__data_pipe_lsu_wavefronts_mem_shared_op_atom.sum",
+        "l1tex__data_bank_conflicts_pipe_lsu_mem_shared_op_ld.sum",
+        "l1tex__data_bank_conflicts_pipe_lsu_mem_shared_op_st.sum",
+        "l1tex__data_bank_conflicts_pipe_lsu_mem_shared_op_atom.sum",
+    } and entry["unit"] == "wavefront" and target.get("unit") == ""
+    if target.get("unit") not in allowed_units(entry["unit"]) and not shared_wavefront:
         row["unit_mismatch"] += 1
-        return {"metric": name, "status": "unit_mismatch", "target_unit": target.get("unit")}
+        return {**result, "status": "unit_mismatch"}
     error = abs(estimate - truth)
     row["compared"] += 1
     row["errors"].append(error)
+    row["errors_by_capture"][capture].append(error)
+    relative = error / abs(truth) if truth != 0 else None
+    if relative is not None:
+        row["relative_errors"].append(relative)
+        row["relative_by_family"][capture.split("_", 1)[0]].append(relative)
+    else:
+        row["zero_targets"] += 1
     row["exact"] += int(error == 0.0)
-    return {"metric": name, "status": "compared", "absolute_error": error}
+    return {**result, "status": "compared", "absolute_error": error,
+            "relative_error_nonzero_target": relative}
 
 
 def reduce_mode(
@@ -181,6 +259,7 @@ def reduce_mode(
     profiles: Path,
     output,
     table: dict[str, dict[str, Any]],
+    target_inventory: collections.Counter,
 ) -> dict[str, int]:
     key = "launches" if mode == "full" else "fast_frontier"
     counts = collections.Counter()
@@ -195,26 +274,21 @@ def reduce_mode(
             if not isinstance(launches, list):
                 raise ValueError(f"{path}:{line_number}: {key} is not an array")
             counts["captures"] += 1
+            counts[f"capture_status_{capture.get('status', 'unspecified')}"] += 1
             counts["launches"] += len(launches)
             for join in join_ncu_rows(launches, ncu):
+                counts[f"join_{join['join_status']}"] += 1
                 li, ni = join.get("launch_index"), join.get("ncu_row_index")
                 if li is None or ni is None:
                     output.write(json.dumps({"capture": rel, "mode": mode, **join}) + "\n")
                     continue
                 launch = launches[li]
                 target_metrics = ncu[ni].get("metrics", {})
+                target_inventory.update(target_metrics.keys())
                 results = []
-                for entry in metric_entries(launch):
+                for entry in selected_entries(launch, mode):
                     results.append(add_observation(table, entry, target_metrics, mode, rel))
-                for metric, estimate in timing_predictions(launch, mode).items():
-                    results.append(add_observation(
-                        table,
-                        {"metric": metric, "unit": "cycles", "status": "predicted", "estimate": estimate},
-                        target_metrics,
-                        mode,
-                        rel,
-                    ))
-                output.write(json.dumps({"capture": rel, "mode": mode, **join, "results": results}, separators=(",", ":")) + "\n")
+                output.write(json.dumps({"capture": rel, "mode": mode, **join, "results": results}, separators=(",", ":"), allow_nan=False) + "\n")
     return dict(counts)
 
 
@@ -237,6 +311,17 @@ def render_summary(table: dict[str, dict[str, Any]]) -> dict[str, Any]:
             "prediction_status": dict(row["prediction_status"]),
             "reasons": dict(row["reasons"]),
             "absolute_error": distribution(errors),
+            "relative_error_nonzero_targets": distribution(row["relative_errors"]),
+            "equal_capture_median_absolute_error": distribution([
+                statistics.median(values) for values in row["errors_by_capture"].values()
+            ]),
+            "family_relative_error_nonzero_targets": {
+                name: distribution(values) for name, values in sorted(row["relative_by_family"].items())
+            },
+            "source_counts": dict(row["source_counts"]),
+            "aliases_not_scored": row["aliases_not_scored"],
+            "different_numeric_alternatives": row["different_numeric_alternatives"],
+            "zero_targets": row["zero_targets"],
         }
         metrics[name] = item
         if row["predicted"] == 0:
@@ -261,33 +346,48 @@ def main() -> int:
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
-    table: dict[str, dict[str, Any]] = {}
+    tables: dict[str, dict[str, Any]] = {"full": {}, "fast": {}}
+    target_inventory: collections.Counter = collections.Counter()
     with open_jsonl_writer(args.output / "metric_comparisons.jsonl") as output:
-        full_counts = reduce_mode(args.full, "full", args.profiles, output, table)
-        fast_counts = reduce_mode(args.fast, "fast", args.profiles, output, table)
+        full_counts = reduce_mode(args.full, "full", args.profiles, output, tables["full"], target_inventory)
+        fast_counts = reduce_mode(args.fast, "fast", args.profiles, output, tables["fast"], target_inventory)
+    by_mode = {mode: render_summary(table) for mode, table in tables.items()}
+    available = {name for table in tables.values() for name, row in table.items() if row["predicted"]}
+    declared = {name for table in tables.values() for name in table}
+    unavailable: dict[str, list[dict[str, Any]]] = collections.defaultdict(list)
+    for name in sorted((set(target_inventory) | declared) - available):
+        unavailable[family(name)].append({"metric": name, "target_rows": target_inventory[name]})
     summary = {
+        "schema_version": 2,
         "scope": "post-replay metric predictions; NCU values never replay/model inputs",
+        "selection": "one prediction per metric/launch/mode; finite declared metric, cache observer, native metric, then timing fallback; alternatives retained but not scored; no NCU-based selection",
         "sources": {"full": str(args.full), "fast": str(args.fast), "profiles": str(args.profiles)},
         "jsonl_compression": jsonl_compression_description(),
         "full": full_counts,
         "fast": fast_counts,
-        **render_summary(table),
+        "by_mode": by_mode,
+        "available_metric_count": len(available),
+        "unavailable_metric_count": sum(map(len, unavailable.values())),
+        "unavailable_by_family": dict(sorted(unavailable.items())),
     }
     (args.output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     with (args.output / "summary.md").open("w") as report:
         report.write("# SM120 metric coverage\n\n")
         report.write("Post-replay reduction of emitted predictions; NCU values were not replay inputs.\n\n")
-        report.write("## Compared metrics\n\n| metric | family | modes | compared | median absolute error | P90 | exact |\n|---|---|---|---:|---:|---:|---:|\n")
-        for name, item in summary["metrics"].items():
-            if item["compared"] == 0:
-                continue
-            error = item["absolute_error"]
-            report.write(f"| `{name}` | {item['family']} | {','.join(item['modes'])} | {item['compared']} | {error['median'] if error['median'] is not None else '—'} | {error['p90'] if error['p90'] is not None else '—'} | {item['exact']} |\n")
+        report.write("Each launch contributes at most once per metric and mode. Full and fast errors are not pooled; aliases and differing alternatives are retained in compressed rows, not counted as extra observations. Relative errors exclude zero targets.\n\n")
+        for mode, mode_summary in by_mode.items():
+            report.write(f"## {mode.capitalize()} compared metrics\n\n| metric | family | compared | median absolute error | P90 | median APE | P90 APE | exact |\n|---|---|---:|---:|---:|---:|---:|---:|\n")
+            for name, item in mode_summary["metrics"].items():
+                if item["compared"] == 0:
+                    continue
+                error = item["absolute_error"]
+                relative = item["relative_error_nonzero_targets"]
+                report.write(f"| `{name}` | {item['family']} | {item['compared']} | {error['median']} | {error['p90']} | {relative['median']} | {relative['p90']} | {item['exact']} |\n")
         report.write("\n## Currently unavailable model families\n\n")
         report.write("Metrics with no simulator prediction in either retained mode are listed once by family; raw NCU distributions are intentionally omitted.\n\n")
         for family_name, entries in summary["unavailable_by_family"].items():
             names = ", ".join(
-                f"`{entry['metric']}` ({entry['rows']} rows)" for entry in entries
+                f"`{entry['metric']}` ({entry['target_rows']} target rows)" for entry in entries
             )
             report.write(f"- **{family_name}:** {names}\n")
     return 0

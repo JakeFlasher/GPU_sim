@@ -589,6 +589,7 @@ pub(super) fn project(
         // approximate; they do not recover SM120 scheduler topology or a
         // hardware clock. The instruction count remains the trace cardinality
         // used by the existing sector/instruction projections.
+        let trace = result.trace_metrics();
         let modeled_elapsed = result
             .modeled_completion_frontier()
             .lower_bound_cycles()
@@ -729,6 +730,60 @@ pub(super) fn project(
                     "inst",
                     u128::from(activity.warp_instructions),
                     "SM120 trace opcode projection for an NCU logical pipeline; dynamic hardware pipe selection is unresolved",
+                ),
+            );
+        }
+        // The compact trace preserves address-derived 32-bank/4-byte-word
+        // wavefront work for shared accesses.  Publish it as an effective
+        // SM120 observation surface: identical words are broadcast-collapsed,
+        // but this is not a claim about undocumented bank arbitration or a
+        // replacement for NCU's cross-client aggregate counters.
+        for (kind, wavefront_metric, conflict_metric) in [
+            (
+                "shared_load",
+                "l1tex__data_pipe_lsu_wavefronts_mem_shared_op_ld.sum",
+                "l1tex__data_bank_conflicts_pipe_lsu_mem_shared_op_ld.sum",
+            ),
+            (
+                "shared_store",
+                "l1tex__data_pipe_lsu_wavefronts_mem_shared_op_st.sum",
+                "l1tex__data_bank_conflicts_pipe_lsu_mem_shared_op_st.sum",
+            ),
+            (
+                "shared_atomic",
+                "l1tex__data_pipe_lsu_wavefronts_mem_shared_op_atom.sum",
+                "l1tex__data_bank_conflicts_pipe_lsu_mem_shared_op_atom.sum",
+            ),
+        ] {
+            let row = trace.memory.get(kind).cloned().unwrap_or_default();
+            let requests = u128::from(row.requests);
+            let wavefronts = u128::from(row.bank_wavefronts);
+            let conflicts = wavefronts.saturating_sub(requests);
+            m.insert(
+                format!("{kind}_requests"),
+                Metric::approximate_count(
+                    None,
+                    "request",
+                    requests,
+                    "effective SM120 shared-memory instruction requests from the real trace",
+                ),
+            );
+            m.insert(
+                format!("{kind}_bank_wavefronts"),
+                Metric::approximate_count(
+                    Some(wavefront_metric),
+                    "wavefront",
+                    wavefronts,
+                    "address-derived 32-bank/4-byte-word broadcast-collapsed shared service work; effective model, not physical bank timing",
+                ),
+            );
+            m.insert(
+                format!("{kind}_bank_conflicts"),
+                Metric::approximate_count(
+                    Some(conflict_metric),
+                    "wavefront",
+                    conflicts,
+                    "wavefronts beyond one per shared instruction; effective bank-conflict projection, not a cross-client profiler total",
                 ),
             );
         }
