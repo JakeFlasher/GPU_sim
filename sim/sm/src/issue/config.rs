@@ -1398,4 +1398,16 @@ impl IssueModelParams {
             miss_latency: self.l1_miss_latency,
         }
     }
+
+    /// Replace the alpha lane's L1 timing with an explicit effective envelope
+    /// measured by a real SM120 probe. Geometry remains a separate opt-in
+    /// value; ordinary flat replay never calls this path.
+    pub fn with_l1_timing(mut self, hit: u64, miss: u64) -> Result<Self, IssueError> {
+        if hit == 0 || hit >= miss {
+            return Err(IssueError::InvalidL1TimingOverride { hit, miss });
+        }
+        self.l1_hit_latency = hit;
+        self.l1_miss_latency = miss;
+        Ok(self)
+    }
 }

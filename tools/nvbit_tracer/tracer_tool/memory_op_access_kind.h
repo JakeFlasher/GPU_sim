@@ -17,7 +17,7 @@
 // `dynamic_trace::instruction.memory_op_access_kind` field at proto
 // tag 12. The classifier is the single source of truth for the
 // producer-side direction mapping; the consumer-side validator
-// (`tools/nvbit_tracer/import_trace_contract.py`) and the HRD
+// (`the NVBit trace contract`) and the HRD
 // profiler trust whatever the tracer emits here.
 //
 // Header-only by design so the unit test

@@ -5,7 +5,7 @@
 //! layout before this decoder can be enabled.
 //!
 //! Input: `*.control_bits.json` sidecars produced by
-//! `tools/sass_control/emit_control_bits_sidecar.py`. This loader fail-closes
+//! `tools/sm120_replay_bench.py`. This loader fail-closes
 //! on: layout drift vs the producer's `parser_contract`, undecoded records,
 //! summary/record count mismatches, and — as a transcription guard — any
 //! record whose JSON control fields disagree with re-decoding its own

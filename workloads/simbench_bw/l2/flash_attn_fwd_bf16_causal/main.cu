@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "../../sm120_event_timing.h"
 
 extern "C" void flash_attn_fwd_bf16_causal_launch(
     const __nv_bfloat16 *d_q,
@@ -106,8 +107,9 @@ int main(int argc, char **argv) {
     rc = cudaMemcpy(d_k, h_k, n_k * sizeof(__nv_bfloat16), cudaMemcpyHostToDevice); if (rc) fail("H2D k", rc);
     rc = cudaMemcpy(d_v, h_v, n_v * sizeof(__nv_bfloat16), cudaMemcpyHostToDevice); if (rc) fail("H2D v", rc);
 
-    flash_attn_fwd_bf16_causal_launch(d_q, d_k, d_v, d_out, batch, heads, seq, head_dim, scale, 0);
-    rc = cudaDeviceSynchronize(); if (rc) fail("sync", rc);
+    sm120_measure_launches("flash_attn_fwd_bf16_causal", [&]() { flash_attn_fwd_bf16_causal_launch(d_q, d_k, d_v, d_out, batch, heads, seq, head_dim, scale, 0); },
+        [&]() {  });
+
 
     rc = cudaMemcpy(h_out, d_out, n_out * sizeof(__nv_bfloat16), cudaMemcpyDeviceToHost); if (rc) fail("D2H out", rc);
 

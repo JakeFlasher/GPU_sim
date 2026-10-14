@@ -1239,7 +1239,7 @@ enum address_format { list_all = 0, base_stride = 1, base_delta = 2 };
 // Sentinel value the `list_all` compression format writes at every
 // inactive-lane position so each `address.addrs` vector on the wire
 // carries exactly 32 entries (one slot per lane). Per the
-// per-record contract the offline `import_trace_contract` validator
+// per-record contract the offline trace-contract reader
 // enforces, the int64 sentinel -1 is unambiguous because real GPU
 // virtual addresses are non-negative `uint64` values that never
 // collide with the negative reinterpretation. The compressed
@@ -1391,7 +1391,7 @@ std::map<uint64_t, std::string> map_func_addr_to_kernel_name;
 
 /* Map a memory_op_class_classifier::Value to its schema-string
  * form for the typed-exclusion sidecar. Mirrors the enum in
- * `workloads/simbench_bw/schemas/nvbit_unsupported_memory_path.schema.json`
+ * `the captured unsupported-memory sidecar`
  * (UPPER_CASE with underscores). The R23 producer hook
  * routes the 7 excluded classes (TEXTURE, SURFACE, ATOMIC, TMA,
  * ASYNC_COPY, CLUSTER_DSMEM, TMEM) to `unsupported_memory_path.json`.
@@ -1631,6 +1631,12 @@ static void write_sync_operand_sidecar_record(
     }
     out << "]";
   }
+  if (ma.sync_phase != 0)
+    // This is a clock at the post-query instrumentation site.  The tracer
+    // cannot recover whether the lowered PHASECHK came from relaxed or acquire
+    // PTX, so do not label it consumer visibility here.  Evidence consumers
+    // may promote it only after independently identifying the query semantics.
+    out << ",\"query_clock\":" << ma.device_clock;
   out << "}\n";
   out.flush();
   if (!out) {
@@ -1688,7 +1694,8 @@ static void write_tma_sidecar_record(
       << ",\"active_mask\":" << ma.active_mask
       << ",\"predicate_mask\":" << ma.predicate_mask
       << ",\"sm_id\":" << ma.sm_id << ",\"pc\":" << ma.vpc
-      << ",\"opcode\":\"" << opcode << "\",\"handle_size\":"
+      << ",\"opcode\":\"" << opcode << "\",\"issue_clock\":"
+      << ma.device_clock << ",\"handle_size\":"
       << ma.tma_param_size << ",\"is_tensor\":"
       << (info.is_tensor ? "true" : "false") << ",\"is_bulk\":"
       << (info.is_bulk ? "true" : "false") << ",\"is_multicast\":"
@@ -3098,14 +3105,9 @@ void nvbit_at_init() {
     fprintf(stderr,
             "[tracer_tool] phase_injection_enabled=1 "
             "repeat_index=%" PRIu32 " "
-            "(SIMBENCH_NVBIT_PHASE_INJECT=1); phase-injection "
-            "foundation wired (phase_clock_record_t struct + "
-            "record_phase_clock injected function defined). "
-            "Injection-call insertion at function-entry / "
-            "function-exit / basic-block-entry / bar.sync "
-            "boundaries is sequenced for a subsequent round; no "
-            "per-launch phase_cycle_ledger sidecars are emitted "
-            "yet.\n",
+            "(SIMBENCH_NVBIT_PHASE_INJECT=1); emits phase_records binaries. "
+            "Clocks include instrumentation overhead; paired markers before "
+            "BAR/basic-block instructions do not measure their execution latency.\n",
             phase_repeat_index);
 
     create_folder(traces_path.c_str());
@@ -4391,11 +4393,15 @@ void instrument_function_if_needed(CUcontext ctx, CUfunction func, int device_id
         bool is_branch = is_branch_opcode_short(opcode_short);
 
         /* Helper macro mirroring the boundary-call argument list:
-         * 5 args per call match `record_phase_clock`'s signature
+         * 6 args per call match `record_phase_clock`'s signature
          * in `inject_funcs.cu`. Inlined here to avoid an extra
          * helper symbol in this translation unit. */
         #define INSERT_PHASE_CALL(p_id, p_kind, p_role) do {                  \
           nvbit_insert_call(instr, "record_phase_clock", IPOINT_BEFORE);      \
+          if (is_function_terminator)                                       \
+            nvbit_add_call_arg_guard_pred_val(instr);                        \
+          else                                                              \
+            nvbit_add_call_arg_const_val32(instr, 1);                         \
           nvbit_add_call_arg_const_val32(instr, (p_id));                      \
           nvbit_add_call_arg_const_val32(instr, (p_kind));                    \
           nvbit_add_call_arg_const_val32(instr, (p_role));                    \

@@ -5,7 +5,9 @@ use std::process::ExitCode;
 #[cfg(feature = "performance-counters")]
 use std::time::Instant;
 
-use sim_direct_run::{CacheScope, MemoryMode, RunConfig, RunError, run};
+use sim_direct_run::{
+    CacheScope, MemoryMode, RunConfig, RunError, Sm120EffectiveL1Config, run,
+};
 use sim_semantics::ServiceStageRole;
 
 const USAGE: &str = "Usage: sim-run --trace DIR --control FILE --arch-card FILE \
@@ -19,6 +21,7 @@ const USAGE: &str = "Usage: sim-run --trace DIR --control FILE --arch-card FILE 
 [--architecture-spec FILE] \
 [--fast-frontier-only] \
 [--sm120-alpha] \
+[--sm120-effective-l1 CAPACITY:MSHR|none:HIT:MISS] \
 [--latent-envelope] \
 [--service-stage-role independent_post_replay|residual_closure|replacement_timing] \
 [--ncu-shaped-metrics] \
@@ -49,6 +52,59 @@ fn take_value(
         .ok_or_else(|| RunError::new("arguments", format!("{option} requires a value")))
 }
 
+fn parse_sm120_effective_l1(raw: &str) -> Result<Sm120EffectiveL1Config, RunError> {
+    let fields: Vec<_> = raw.split(':').collect();
+    if fields.len() != 4 {
+        return Err(RunError::new(
+            "arguments",
+            "--sm120-effective-l1 expects CAPACITY:MSHR|none:HIT:MISS",
+        ));
+    }
+    let parse_u64 = |field: &str, name: &str| {
+        field.parse::<u64>().map_err(|error| {
+            RunError::new("arguments", format!("invalid {name} {field:?}: {error}"))
+        })
+    };
+    let line_capacity = parse_u64(fields[0], "effective L1 line capacity")?;
+    if line_capacity == 0 {
+        return Err(RunError::new(
+            "arguments",
+            "--sm120-effective-l1 capacity must be positive",
+        ));
+    }
+    let mshr_count = if fields[1] == "none" {
+        None
+    } else {
+        let value = fields[1].parse::<u32>().map_err(|error| {
+            RunError::new(
+                "arguments",
+                format!("invalid effective L1 MSHR count {:?}: {error}", fields[1]),
+            )
+        })?;
+        if value == 0 {
+            return Err(RunError::new(
+                "arguments",
+                "--sm120-effective-l1 MSHR count must be positive or none",
+            ));
+        }
+        Some(value)
+    };
+    let hit_latency_cycles = parse_u64(fields[2], "effective L1 hit latency")?;
+    let miss_latency_cycles = parse_u64(fields[3], "effective L1 miss latency")?;
+    if hit_latency_cycles >= miss_latency_cycles {
+        return Err(RunError::new(
+            "arguments",
+            "--sm120-effective-l1 hit latency must be below miss latency",
+        ));
+    }
+    Ok(Sm120EffectiveL1Config {
+        line_capacity,
+        mshr_count,
+        hit_latency_cycles,
+        miss_latency_cycles,
+    })
+}
+
 fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConfig>, RunError> {
     let mut trace_dir = None;
     let mut control_bits = None;
@@ -66,6 +122,7 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
     let mut architecture_spec = None;
     let mut fast_frontier_only = false;
     let mut sm120_alpha = false;
+    let mut sm120_effective_l1 = None;
     let mut latent_envelope = false;
     let mut kernel_id = None;
     let mut ncu_shaped_metrics = false;
@@ -218,6 +275,13 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
             value if value == OsStr::new("--sm120-alpha") => {
                 sm120_alpha = true;
             }
+            value if value == OsStr::new("--sm120-effective-l1") => {
+                let raw = take_value(&mut args, "--sm120-effective-l1")?;
+                let raw = raw.to_str().ok_or_else(|| {
+                    RunError::new("arguments", "--sm120-effective-l1 must be UTF-8")
+                })?;
+                sm120_effective_l1 = Some(parse_sm120_effective_l1(raw)?);
+            }
             value if value == OsStr::new("--latent-envelope") => {
                 latent_envelope = true;
             }
@@ -325,6 +389,7 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
         ncu_shaped_metrics,
         fast_frontier_only,
         sm120_alpha,
+        sm120_effective_l1,
         ncu_csv,
         ncu_launch,
         launch_resources,

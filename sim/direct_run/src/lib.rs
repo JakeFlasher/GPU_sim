@@ -3,6 +3,7 @@
 //! The runner accepts ordinary input paths. It deliberately has no admission
 //! manifest, artifact digest, receipt, publication, or approval layer.
 
+pub mod emit;
 mod metrics;
 pub mod ncu;
 mod prepared;
@@ -22,11 +23,11 @@ use sim_arch::card::{ArchCard, CalibError};
 use sim_arch::spec::{ArchitectureSpec, ResourceKind};
 use sim_mem::{
     CoherenceConfig, L1Counters, L2Config, L2Counters, L2Source, MemoryOrigin,
-    NativePayloadRecordV1, PayloadForwardingLedgerV1, PchaseCard, SectorPayloadV1,
+    L1Config, NativePayloadRecordV1, PayloadForwardingLedgerV1, PchaseCard, SectorPayloadV1,
     coalesce_payloads, enrich_native_payload_records, join_native_payload_records,
     load_native_payload_sidecar_records,
 };
-use sim_run::emit::{
+use crate::emit::{
     EmitOutcome, EmittedMetricKey, FullLaunchPredictions, MetricValue, Unavailable, Unit,
     emit_launch,
 };
@@ -90,6 +91,29 @@ pub enum CacheScope {
     /// Ordered same-device/same-stream launches retain only fully drained L2
     /// replacement and valid-sector state.
     StreamL2,
+}
+
+/// Explicit effective SM120 L1 service envelope supplied by a real-device
+/// probe.  This is deliberately not a physical geometry claim: the fully
+/// associative LRU model consumes the values as an opt-in scenario only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct Sm120EffectiveL1Config {
+    pub line_capacity: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mshr_count: Option<u32>,
+    pub hit_latency_cycles: u64,
+    pub miss_latency_cycles: u64,
+}
+
+impl Sm120EffectiveL1Config {
+    pub const fn as_l1_config(self) -> L1Config {
+        L1Config::effective_sm120(
+            self.line_capacity,
+            self.mshr_count,
+            self.hit_latency_cycles,
+            self.miss_latency_cycles,
+        )
+    }
 }
 
 impl CacheScope {
@@ -197,6 +221,9 @@ pub struct RunConfig {
     /// never changes the ordinary SM120 fail-closed path and is intentionally
     /// separate from SM86 compatibility or carded resources.
     pub sm120_alpha: bool,
+    /// Optional measured effective L1 envelope for SM120 cache-mode replay.
+    /// Without this field SM120 remains on the conservative flat lane.
+    pub sm120_effective_l1: Option<Sm120EffectiveL1Config>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -592,10 +619,24 @@ fn resolve_issue_with_metadata(
             ));
         }
         let alpha = Sm120AlphaConfig::from_m8_m9();
-        return Ok((
-            IssueModelParams::from_card_alpha(arch, card, alpha)
-                .map_err(at("SM120 alpha issue configuration"))?,
-            None,
+        let issue = IssueModelParams::from_card_alpha(arch, card, alpha)
+            .map_err(at("SM120 alpha issue configuration"))?;
+        let issue = config
+            .sm120_effective_l1
+            .map_or(Ok(issue), |effective| {
+                issue
+                    .with_l1_timing(
+                        effective.hit_latency_cycles,
+                        effective.miss_latency_cycles,
+                    )
+                    .map_err(at("SM120 effective L1 timing"))
+            })?;
+        return Ok((issue, None));
+    }
+    if config.sm120_effective_l1.is_some() {
+        return Err(RunError::new(
+            "arguments",
+            "--sm120-effective-l1 requires --sm120-alpha",
         ));
     }
     let issue = match card.required_issue_resources() {
@@ -1017,6 +1058,8 @@ pub struct RunReport {
     pub sm120_alpha_config: Option<Sm120AlphaConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sm120_alpha_profile_id: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sm120_effective_l1: Option<Sm120EffectiveL1Config>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hypothetical_issue_ports: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2233,10 +2276,21 @@ fn resolve_mode(
     arch_card: &ArchCard,
     issue: IssueModelParams,
 ) -> Result<ReplayMemMode, RunError> {
-    if config.sm120_alpha && config.memory_mode != MemoryMode::Flat {
+    if config.sm120_alpha
+        && config.memory_mode != MemoryMode::Flat
+        && config.sm120_effective_l1.is_none()
+    {
         return Err(RunError::new(
             "arguments",
-            "--sm120-alpha currently supports only --mode flat; SM120 cache/TMA semantics remain unmodeled",
+            "SM120 cache mode requires --sm120-effective-l1; otherwise use --mode flat",
+        ));
+    }
+    if config.sm120_effective_l1.is_some()
+        && (!config.sm120_alpha || config.memory_mode == MemoryMode::Flat)
+    {
+        return Err(RunError::new(
+            "arguments",
+            "--sm120-effective-l1 requires --sm120-alpha with --mode l1 or --mode l1-l2",
         ));
     }
     if config.dirty_writeback_capacity_sectors == Some(0) {
@@ -2299,17 +2353,21 @@ fn resolve_mode(
         return Ok(ReplayMemMode::Flat);
     }
 
-    let pchase_path = config.pchase_card.as_ref().ok_or_else(|| {
-        RunError::new(
-            "arguments",
-            "--pchase-card is required for l1 and l1-l2 modes",
-        )
-    })?;
-    let pchase = load_pchase_card(pchase_path)?;
-    let geometry = pchase
-        .resolve_walk_geometry_for_arch(issue.arch(), None)
-        .map_err(at("L1 geometry"))?;
-    let l1 = issue.l1_config(geometry.capacity.line_capacity, geometry.mshr.count);
+    let l1 = if let Some(effective) = config.sm120_effective_l1 {
+        effective.as_l1_config()
+    } else {
+        let pchase_path = config.pchase_card.as_ref().ok_or_else(|| {
+            RunError::new(
+                "arguments",
+                "--pchase-card is required for l1 and l1-l2 modes",
+            )
+        })?;
+        let pchase = load_pchase_card(pchase_path)?;
+        let geometry = pchase
+            .resolve_walk_geometry_for_arch(issue.arch(), None)
+            .map_err(at("L1 geometry"))?;
+        issue.l1_config(geometry.capacity.line_capacity, geometry.mshr.count)
+    };
     if config.memory_mode == MemoryMode::L1 {
         if config.carded_dram_bandwidth {
             return Err(RunError::new(
@@ -2878,6 +2936,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
             sm120_alpha_profile_id: config
                 .sm120_alpha
                 .then_some(Sm120AlphaConfig::PROFILE_ID),
+            sm120_effective_l1: config.sm120_effective_l1,
             hypothetical_issue_ports: config
                 .hypothetical_issue_ports
                 .or(architecture_spec_issue_ports),
@@ -3080,6 +3139,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
         sm120_alpha_profile_id: config
             .sm120_alpha
             .then_some(Sm120AlphaConfig::PROFILE_ID),
+        sm120_effective_l1: config.sm120_effective_l1,
         hypothetical_issue_ports: config
             .hypothetical_issue_ports
             .or(architecture_spec_issue_ports),

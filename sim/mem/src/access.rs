@@ -83,11 +83,13 @@ pub fn mem_role_of_checked(opcode_text: &str, arch_token: &str) -> Result<MemRol
     let arch = ArchId::parse_deploy(arch_token).map_err(CacheOpError::from)?;
     Ok(match classify_opcode_for_arch(opcode_text, arch)? {
         // CUDA 13.2 lowers an sm_86 `ld.global.ca` to
-        // `LDG.E.STRONG.SM`.  The fixed/L1TEX priority campaign measures
+        // `LDG.E.STRONG.SM`.  The fixed/L1TEX priority probe measures
         // that exact form as an L1 tag hit on GA102.  Keep the literal token
         // (the same spelling has different Blackwell cache semantics), but
         // route it through the Ampere L1 hierarchy here.
-        Some(CacheOpToken::LdgEStrongSm) if arch == ArchId::Sm86 => {
+        Some(CacheOpToken::LdgEStrongSm) if matches!(arch, ArchId::Sm86 | ArchId::Sm120) => {
+            // RTX 5090 `.ca` traces lower to STRONG.SM and independent NCU
+            // rows retain an L1-eligible route; keep STRONG.GPU separate.
             MemRole::EligibleLoad(CacheOpToken::LdgEStrongSm)
         }
         Some(token) if derive_l1_eligible(token) => MemRole::EligibleLoad(token),

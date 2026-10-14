@@ -1052,6 +1052,14 @@ impl FastDynamicWarp<'_> {
         let slot = self.slot?;
         let mask = self.masks[self.next];
         let mut ready = self.ready.max(dispatch);
+        if let Some(guard) = slot.guard_predicate {
+            let lanes = fast_register_mask(guard, self.warp.insts[self.next].active_lane_mask);
+            for &(prior, prior_lanes, done) in &self.registers {
+                if lanes & prior_lanes != 0 && fast_register_overlap(prior, guard) {
+                    ready = ready.max(done);
+                }
+            }
+        }
         if mask != 0 {
             ready = ready.max(pipes[fast_pipeline_index(slot.pipeline_class())]);
             let waits =
@@ -1297,10 +1305,16 @@ fn fast_dynamic_sm_frontier(
             dispatch[smsp] = issued_end;
             frontier = frontier.max(issued_end);
             let projection = slot.fixed_latency_operands().projected();
+            let observes_register = mask != 0 && projection.is_some_and(|p| p.destinations().iter().any(|d| !d.register().is_constant()));
+            let result_ready = crate::issue::data_ready_time(inst.kind, &[], now, params, None, None, observes_register)?;
             let done = if mask == 0 {
                 issued_end
             } else {
-                fast_cycle_add(now, latency)?
+                if matches!(pipeline, PipelineClass::ScalarAlu { .. }) {
+                    fast_cycle_add(now, latency)?
+                } else {
+                    result_ready.unwrap_or(fast_cycle_add(now, 1)?)
+                }
             };
             if mask != 0 {
                 if !matches!(
@@ -1316,11 +1330,7 @@ fn fast_dynamic_sm_frontier(
                 // predication overwrites only executing lanes, not the whole register.
                 warp.registers.retain(|&(_, _, ready)| ready > now);
                 if let Some(projection) = projection {
-                    for destination in projection.destinations() {
-                        let register = destination.register();
-                        if register.is_constant() {
-                            continue;
-                        }
+                    for register in projection.destinations().iter().flat_map(|d| d.register().components()) {
                         let lanes = fast_register_mask(register, mask);
                         for (prior, prior_lanes, _) in &mut warp.registers {
                             if *prior == register {
@@ -2041,20 +2051,23 @@ pub fn sm120_fast_stage_for_trace(
             })?,
         )?;
         for block in blocks {
+            let warp_count = u64::try_from(block.warps.len()).map_err(|_| ReplayError::FastFrontier {
+                detail: "warp count exceeds u64".to_owned(),
+            })?;
             add(
                 "warps_seen",
                 &mut summary.warps_seen,
-                u64::try_from(block.warps.len()).unwrap_or(u64::MAX),
+                warp_count,
             )?;
             add(
                 "eligible_warps",
                 &mut summary.eligible_warps,
-                u64::try_from(block.warps.len()).unwrap_or(u64::MAX),
+                warp_count,
             )?;
             add(
                 "candidate_regions",
                 &mut summary.candidate_regions,
-                u64::try_from(block.warps.len()).unwrap_or(u64::MAX),
+                warp_count,
             )?;
             for warp in &block.warps {
                 for instruction in &warp.insts {
@@ -2069,9 +2082,12 @@ pub fn sm120_fast_stage_for_trace(
                             PipelineClass::ScalarAlu { .. } => "scalar",
                         })
                         .unwrap_or("unknown");
-                    *resource_class_counts
+                    let count = resource_class_counts
                         .entry(class_name.to_owned())
-                        .or_default() += 1;
+                        .or_default();
+                    *count = count.checked_add(1).ok_or_else(|| ReplayError::FastFrontier {
+                        detail: "resource-class observation count overflows u64".to_owned(),
+                    })?;
                 }
             }
         }
@@ -2083,9 +2099,21 @@ pub fn sm120_fast_stage_for_trace(
             extracted.shared_memory_residency,
         )?;
         summary.maximum_exact_final_cycle = summary.maximum_exact_final_cycle.max(frontier);
-        memory_records = memory_records.saturating_add(memory);
-        async_records = async_records.saturating_add(async_count);
-        barrier_records = barrier_records.saturating_add(barriers);
+        memory_records = memory_records
+            .checked_add(memory)
+            .ok_or_else(|| ReplayError::FastFrontier {
+                detail: "memory-service observation count overflows u64".to_owned(),
+            })?;
+        async_records = async_records
+            .checked_add(async_count)
+            .ok_or_else(|| ReplayError::FastFrontier {
+                detail: "async-completion observation count overflows u64".to_owned(),
+            })?;
+        barrier_records = barrier_records
+            .checked_add(barriers)
+            .ok_or_else(|| ReplayError::FastFrontier {
+                detail: "barrier-visibility observation count overflows u64".to_owned(),
+            })?;
     }
     // Charge the footprint actually fetched by this launch, not all cold
     // branches present in the static function table.
@@ -2116,10 +2144,19 @@ pub fn sm120_fast_stage_for_trace(
         .ok_or_else(|| ReplayError::FastFrontier {
             detail: "front-end-adjusted SM120 stage cycles overflow u64".to_owned(),
         })?;
-    summary.refusal_reasons.insert(
-        "stage_resource_classes".to_owned(),
-        resource_class_counts.values().sum(),
-    );
+    let resource_class_total = resource_class_counts.values().try_fold(
+        0_u64,
+        |total, count| {
+            total
+                .checked_add(*count)
+                .ok_or_else(|| ReplayError::FastFrontier {
+                    detail: "resource-class total overflows u64".to_owned(),
+                })
+        },
+    )?;
+    summary
+        .refusal_reasons
+        .insert("stage_resource_classes".to_owned(), resource_class_total);
     summary
         .refusal_reasons
         .insert("memory_service_pending".to_owned(), memory_records);
@@ -3245,16 +3282,25 @@ fn extract_per_sm_blocks(
     });
     let mut trace_metrics = TraceMetrics {
         launch_resources,
-        sectors_decoded: decode_sectors,
+        // SM120 flat mixed-async launches use the compact classifier but also
+        // retain every observed global/local source span. Opaque TMA payload
+        // bytes are reported separately and do not manufacture sector ids.
+        sectors_decoded: decode_sectors || schedule.arch == ArchId::Sm120,
         ..TraceMetrics::default()
     };
     let sidecar_join_started = Instant::now();
-    let observations = if !decode_sectors && schedule.arch == ArchId::Sm120 {
+    let observations = if schedule.arch == ArchId::Sm120 {
         td.async_sidecars()?
             .launch(loc.device_id(), loc.stream_id(), loc.kernel().id)
     } else {
         None
     };
+    trace_metrics.async_relations = observations
+        .filter(|o| !o.tma.is_empty() || !o.sync.is_empty())
+        .map(|o| o.relations(cluster.into()));
+    trace_metrics.async_obligations = observations
+        .filter(|o| !o.tma.is_empty() || !o.sync.is_empty())
+        .map(|o| sim_trace::obligations::ObligationFrontier::from_launch(o, cluster.into()).0);
     let tma_observations = observations.map(|o| &o.tma);
     let sync_observations = observations.map(|o| &o.sync);
     trace_metrics.sidecar_join_wall_ns =
@@ -3339,15 +3385,13 @@ fn extract_per_sm_blocks(
                     });
                 }
                 instruction_sectors.insert((inst.function_unique_id(), inst.pc() / 32));
-                if !decode_sectors
-                    && schedule.arch == ArchId::Sm120
-                    && preflight.is_none()
+                let is_tma_opcode = schedule.arch == ArchId::Sm120
                     && schedule
                         .issue_slot(u64::from(inst.pc()))
                         .is_some_and(|slot| {
                             matches!(opcode_head(slot.opcode_text()), "UTMALDG" | "UTMASTG")
-                        })
-                {
+                        });
+                if is_tma_opcode && (decode_sectors || preflight.is_none()) {
                     let key = TmaObservationKey {
                         cta: block_id,
                         warp: warp_id,
@@ -3358,8 +3402,7 @@ fn extract_per_sm_blocks(
                     trace_metrics
                         .observe_tma_sidecar_payload(tma_observations.and_then(|o| o.get(&key)))?;
                 }
-                if !decode_sectors
-                    && schedule.arch == ArchId::Sm120
+                if schedule.arch == ArchId::Sm120
                     && schedule
                         .issue_slot(u64::from(inst.pc()))
                         .is_some_and(|slot| is_sync_sidecar_opcode(slot.opcode_text()))
@@ -3409,6 +3452,8 @@ fn extract_per_sm_blocks(
                         schedule.arch,
                         &mut sectors,
                         &mut async_copy_cohorts,
+                        block_id,
+                        tma_observations,
                         &path,
                         warp_id,
                         record_ix,
@@ -3448,7 +3493,7 @@ fn extract_per_sm_blocks(
                 if let Some(slot) = schedule.issue_slot(u64::from(inst.pc())) {
                     trace_metrics
                         .operand_bank_pressure
-                        .observe(slot.fixed_latency_operands())?;
+                        .observe(slot.fixed_latency_operands(), schedule.arch)?;
                 }
                 if active_mask_present && predicate_mask_present {
                     trace_metrics.observe_coherence(
@@ -3495,6 +3540,11 @@ fn extract_per_sm_blocks(
                 insts.push(ReplayInst {
                     pc: inst.pc(),
                     kind,
+                    active_lane_mask: if inst.active_mask_present() {
+                        inst.active_mask()
+                    } else {
+                        u32::MAX
+                    },
                     lane_mask: if inst.predicate_mask_present() {
                         inst.predicate_on_mask()
                     } else if inst.active_mask_present() {
@@ -4445,12 +4495,10 @@ fn replay_kernel_with_schedule_and_l2_and_candidates_with_payload_events(
         validate_replay_architecture(schedule, params, mode, memory_admission_feedback)?;
     let placement = PlacementConfig::from_arch_card(arch_card, schedule.arch)?;
     require_trace_architecture(td, schedule.arch)?;
-    // The SM120 alpha Flat lane normally keeps the compact, empty-sector
-    // representation so opaque async/TMA records retain their existing typed
-    // fallback.  For ordinary global/shared calibration launches, however,
-    // retain the already-captured NVBit sector arena even in full replay.  It
-    // gives the new logical service tail request width and working-set
-    // information without consulting scored NCU rows or changing fast replay.
+    // Ordinary launches can use the hierarchy classifier in flat mode.
+    // Mixed async/TMA launches use the alpha compact classifier to preserve
+    // opaque sidecar payloads without borrowing the SM86 completion protocol;
+    // that classifier also retains all observed global/local sector spans.
     let alpha_flat_sector_decode = matches!(mode, ReplayMemMode::Flat)
         && params.resource_source() == IssueResourceSource::Sm120Alpha
         && !schedule.by_pc.values().any(|slot| {
@@ -5305,9 +5353,11 @@ fn validate_static_access_kind(
     })
 }
 
-/// Flat mode validates the same static operation role as hierarchy replay but
-/// deliberately carries an empty sector span. This preserves Store/ATOM/RED
-/// semantics for timing and capability diagnostics without decoding addresses.
+/// Flat mode validates the same static operation role as hierarchy replay.  The
+/// legacy path deliberately carries an empty sector span, but the SM120 alpha
+/// path may retain the already validated NVBit span so its logical global
+/// service tail sees the captured request width even when a launch also
+/// contains an opaque async/TMA record.
 fn flat_global_kind(role: MemRole) -> AccessKind {
     match role {
         MemRole::EligibleLoad(token) => AccessKind::GlobalEligible {
@@ -5329,6 +5379,24 @@ fn flat_global_kind(role: MemRole) -> AccessKind {
         },
         MemRole::None => AccessKind::GlobalUntagged { off: 0, len: 0 },
     }
+}
+
+fn classify_flat_global_sectors(
+    role: MemRole,
+    warp: &ValidatedWarp,
+    memory: &ValidatedMemoryInstruction,
+    sectors: &mut Vec<i64>,
+    path: &Path,
+    warp_id: i32,
+    record_ix: usize,
+) -> Result<AccessKind, ReplayError> {
+    let sector_scratch = match warp.sector_plan(memory) {
+        ValidatedSectorPlan::Sectors(sectors) => sectors,
+        ValidatedSectorPlan::Error { error, .. } => {
+            return Err(deferred_sector_error(error, path, warp_id, record_ix));
+        }
+    };
+    append_staged_global_sectors(role, sectors, sector_scratch, path, warp_id, record_ix)
 }
 
 #[derive(Clone, Copy)]
@@ -5495,13 +5563,28 @@ fn classify_compact_flat(
     let meta = preflight.memory.replay_meta();
     match (preflight.route, meta.op_class) {
         (ReplayMemoryRoute::Shared, _) => Ok(compact_shared_kind(preflight.memory)),
-        (ReplayMemoryRoute::Local, pb::MemoryOpClass::Local) => Ok(
-            match require_known_local_direction(schedule, arch, preflight.pc)? {
-                Some(LocalDirection::Load) => AccessKind::LocalLoad { off: 0, len: 0 },
-                Some(LocalDirection::Store) => AccessKind::LocalStore { off: 0, len: 0 },
-                None => AccessKind::NonMemory,
-            },
-        ),
+        (ReplayMemoryRoute::Local, pb::MemoryOpClass::Local) => {
+            let Some(direction) = require_known_local_direction(schedule, arch, preflight.pc)?
+            else {
+                return Ok(AccessKind::NonMemory);
+            };
+            if arch == ArchId::Sm120 {
+                let source_sectors = match warp.sector_plan(preflight.memory) {
+                    ValidatedSectorPlan::Sectors(sectors) => sectors,
+                    ValidatedSectorPlan::Error { error, .. } => {
+                        return Err(deferred_sector_error(error, path, warp_id, record_ix));
+                    }
+                };
+                append_staged_local_sectors(
+                    direction, sector_arena, source_sectors, path, warp_id, record_ix,
+                )
+            } else {
+                Ok(match direction {
+                    LocalDirection::Load => AccessKind::LocalLoad { off: 0, len: 0 },
+                    LocalDirection::Store => AccessKind::LocalStore { off: 0, len: 0 },
+                })
+            }
+        }
         (ReplayMemoryRoute::Local, class) => {
             Err(ReplayError::UnsupportedMemoryPath { arch, class })
         }
@@ -5510,7 +5593,19 @@ fn classify_compact_flat(
         }
         (ReplayMemoryRoute::Global, pb::MemoryOpClass::Global) => {
             let role = require_known_global_role(schedule, arch, preflight.pc)?;
-            Ok(flat_global_kind(role))
+            if arch == ArchId::Sm120 {
+                classify_flat_global_sectors(
+                    role,
+                    warp,
+                    preflight.memory,
+                    sector_arena,
+                    path,
+                    warp_id,
+                    record_ix,
+                )
+            } else {
+                Ok(flat_global_kind(role))
+            }
         }
         (ReplayMemoryRoute::Global, pb::MemoryOpClass::Atomic) => {
             require_sm86_special_role(
@@ -5521,17 +5616,28 @@ fn classify_compact_flat(
                 pb::MemoryOpClass::Atomic,
             )?;
             let role = require_known_global_role(schedule, arch, preflight.pc)?;
-            Ok(flat_global_kind(role))
+            if arch == ArchId::Sm120 {
+                classify_flat_global_sectors(
+                    role,
+                    warp,
+                    preflight.memory,
+                    sector_arena,
+                    path,
+                    warp_id,
+                    record_ix,
+                )
+            } else {
+                Ok(flat_global_kind(role))
+            }
         }
         (ReplayMemoryRoute::Global, pb::MemoryOpClass::AsyncCopy) => {
             if arch == ArchId::Sm120 {
                 // Full-replay-only alpha route: preserve an observed async
                 // source as a typed completion token instead of collapsing it
-                // into an ordinary global instruction.  The compact trace may
-                // lack TMA operand bytes; in that case retain at least one
-                // sector of logical source work and keep the missing payload
-                // provenance explicit in the report. This is not a native TMA
-                // engine timestamp or queue model.
+                // into an ordinary global instruction.  A compact trace may
+                // lack payload/sector evidence; that is zero logical work with
+                // an inactive token, not an invented transaction.  This is not
+                // a native TMA engine timestamp or queue model.
                 let source_sectors = match warp.sector_plan(preflight.memory) {
                     ValidatedSectorPlan::Sectors(sectors) => sectors,
                     ValidatedSectorPlan::Error { error, .. } => {
@@ -5543,7 +5649,7 @@ fn classify_compact_flat(
                     .ok()
                     .and_then(|count| count.checked_mul(32))
                     .unwrap_or(0);
-                let logical_bytes = payload_bytes.max(sector_bytes).max(32);
+                let logical_bytes = payload_bytes.max(sector_bytes);
                 let completion_work = u32::try_from(logical_bytes)
                     .ok()
                     .and_then(encode_async_copy_payload_work)
@@ -5554,14 +5660,26 @@ fn classify_compact_flat(
                         completion_work: logical_bytes,
                         max_completion_work: ASYNC_COPY_COMPLETION_VALUE_MASK,
                     })?;
-                let off = sector_arena.len();
-                sector_arena.extend_from_slice(source_sectors);
-                return Ok(AccessKind::GlobalAsyncCopy {
-                    off,
-                    len: source_sectors.len() as u16,
+                let kind = checked_staged_async_copy_kind(
+                    LdgstsL1Policy::CacheAtAllLevels,
+                    sector_arena.len(),
+                    source_sectors.len(),
                     completion_work,
-                    l1_policy: LdgstsL1Policy::CacheAtAllLevels,
-                });
+                )
+                .ok_or(ReplayError::SectorCountOverflow {
+                    path: path.to_path_buf(),
+                    warp_id,
+                    record_ix,
+                    sectors: source_sectors.len(),
+                })?;
+                return append_staged_sectors(
+                    Some(kind),
+                    sector_arena,
+                    source_sectors,
+                    path,
+                    warp_id,
+                    record_ix,
+                );
             }
             require_sm86_special_role(
                 schedule,
@@ -5664,6 +5782,8 @@ fn classify_compact_with_l1(
     arch: ArchId,
     sectors: &mut Vec<i64>,
     async_copy_cohorts: &mut AsyncCopyCohortReplay,
+    block_id: [u32; 3],
+    tma_observations: Option<&BTreeMap<TmaObservationKey, TmaObservation>>,
     path: &Path,
     warp_id: i32,
     record_ix: usize,
@@ -5708,10 +5828,17 @@ fn classify_compact_with_l1(
         (ReplayMemoryRoute::Global, pb::MemoryOpClass::Global) => {
             StagedHierarchyRole::Global(require_known_global_role(schedule, arch, preflight.pc)?)
         }
-        (
-            ReplayMemoryRoute::Global,
-            class @ (pb::MemoryOpClass::Atomic | pb::MemoryOpClass::AsyncCopy),
-        ) => {
+        (ReplayMemoryRoute::Global, class @ pb::MemoryOpClass::Atomic) => {
+            require_sm86_special_role(schedule, arch, preflight.pc, preflight.route, class)?;
+            StagedHierarchyRole::Global(require_known_global_role(schedule, arch, preflight.pc)?)
+        }
+        (ReplayMemoryRoute::Global, pb::MemoryOpClass::AsyncCopy) if arch == ArchId::Sm120 => {
+            // SM120 async source/destination semantics are admitted only into
+            // the explicit alpha cache scenario.  The route remains typed as
+            // an async token; it is never downgraded to ordinary global timing.
+            StagedHierarchyRole::Global(MemRole::BypassLoad(CacheOpToken::Ldgsts))
+        }
+        (ReplayMemoryRoute::Global, class @ pb::MemoryOpClass::AsyncCopy) => {
             require_sm86_special_role(schedule, arch, preflight.pc, preflight.route, class)?;
             StagedHierarchyRole::Global(require_known_global_role(schedule, arch, preflight.pc)?)
         }
@@ -5732,11 +5859,86 @@ fn classify_compact_with_l1(
     };
     match staged_role {
         StagedHierarchyRole::Global(_role) if meta.op_class == pb::MemoryOpClass::AsyncCopy => {
-            let l1_policy = require_ldgsts_l1_policy(schedule, arch, preflight.pc)?;
+            let tma = arch == ArchId::Sm120
+                && schedule
+                    .issue_slot(u64::from(preflight.pc))
+                    .is_some_and(|slot| {
+                        matches!(opcode_head(slot.opcode_text()), "UTMALDG" | "UTMASTG")
+                    });
+            let l1_policy = if tma {
+                LdgstsL1Policy::BypassL1
+            } else if arch == ArchId::Sm120 {
+                let opcode = schedule
+                    .issue_slot(u64::from(preflight.pc))
+                    .map(|slot| slot.opcode_text())
+                    .unwrap_or("");
+                if opcode_has_qualifier(opcode, "BYPASS") {
+                    LdgstsL1Policy::BypassL1
+                } else {
+                    LdgstsL1Policy::CacheAtAllLevels
+                }
+            } else {
+                require_ldgsts_l1_policy(schedule, arch, preflight.pc)?
+            };
+            let completion_work_override = if arch == ArchId::Sm120 {
+                let key = TmaObservationKey {
+                    cta: block_id,
+                    warp: warp_id,
+                    instruction: record_ix,
+                    pc: preflight.pc,
+                    function: warp.function_unique_id(),
+                };
+                let payload_bytes = if tma {
+                    tma_observations
+                        .and_then(|observations| observations.get(&key))
+                        .and_then(|observation| observation.bytes)
+                        .ok_or(ReplayError::AsyncCopyPayloadMismatch {
+                            path: path.to_path_buf(),
+                            warp_id,
+                            record_ix,
+                            source_active: true,
+                            sectors: staged.len(),
+                            payload_bytes: 0,
+                        })?
+                } else {
+                    warp.effective_data_bytes(preflight.memory).max(
+                        u64::try_from(staged.len())
+                            .unwrap_or(0)
+                            .saturating_mul(32),
+                    )
+                };
+                Some(encode_async_copy_payload_work(
+                    u32::try_from(payload_bytes).map_err(|_| {
+                        ReplayError::AsyncCopyCompletionWorkOutOfRange {
+                            path: path.to_path_buf(),
+                            warp_id,
+                            record_ix,
+                            completion_work: payload_bytes,
+                            max_completion_work: ASYNC_COPY_COMPLETION_VALUE_MASK,
+                        }
+                    })?,
+                ).ok_or(ReplayError::AsyncCopyCompletionWorkOutOfRange {
+                    path: path.to_path_buf(),
+                    warp_id,
+                    record_ix,
+                    completion_work: payload_bytes,
+                    max_completion_work: ASYNC_COPY_COMPLETION_VALUE_MASK,
+                })?)
+            } else {
+                None
+            };
             append_staged_async_copy_sectors(
                 arch,
                 l1_policy,
-                warp.effective_data_bytes(preflight.memory),
+                if tma {
+                    0
+                } else {
+                    warp.effective_data_bytes(preflight.memory).max(
+                        u64::try_from(staged.len())
+                            .unwrap_or(0)
+                            .saturating_mul(32),
+                    )
+                },
                 warp.ldgsts_destination_topology_128b_32x4(preflight.memory),
                 warp.ldgsts_source_cohorts_128b_32x4(preflight.memory),
                 warp.ldgsts_source_sector_cohort_masks_128b_32x4(preflight.memory),
@@ -5746,6 +5948,7 @@ fn classify_compact_with_l1(
                 path,
                 warp_id,
                 record_ix,
+                completion_work_override,
             )
         }
         StagedHierarchyRole::Global(role) => {
@@ -6088,11 +6291,12 @@ fn append_staged_async_copy_sectors(
     path: &Path,
     warp_id: i32,
     record_ix: usize,
+    completion_work_override: Option<u32>,
 ) -> Result<AccessKind, ReplayError> {
     let start = sectors.len();
     let count = sector_scratch.len();
     let source_active = count != 0;
-    if source_active != (payload_bytes != 0) {
+    if completion_work_override.is_none() && source_active != (payload_bytes != 0) {
         return Err(ReplayError::AsyncCopyPayloadMismatch {
             path: path.to_path_buf(),
             warp_id,
@@ -6102,14 +6306,19 @@ fn append_staged_async_copy_sectors(
             payload_bytes,
         });
     }
-    let completion_work = project_async_copy_completion_work(
-        arch,
-        l1_policy,
-        payload_bytes,
-        destination_topology,
-        path,
-        warp_id,
-        record_ix,
+    let completion_work = completion_work_override.map_or_else(
+        || {
+            project_async_copy_completion_work(
+                arch,
+                l1_policy,
+                payload_bytes,
+                destination_topology,
+                path,
+                warp_id,
+                record_ix,
+            )
+        },
+        Ok,
     )?;
     let overflow = |sectors: usize| ReplayError::SectorCountOverflow {
         path: path.to_path_buf(),

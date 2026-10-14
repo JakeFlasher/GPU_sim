@@ -10,13 +10,16 @@ use sim_semantics::{
 
 use crate::sass_operands::FixedLatencyOperandStatus;
 
-/// Static SM86 regular-register bank demand projected from admitted SASS
-/// operands. This is a resource-pressure envelope, not a dynamic physical
-/// pipe, SMSP, or issue-slot observation.
+/// Static register demand projected from admitted SASS operands. Regular-bank
+/// counts are retained only for SM86; SM120 records expose projection/gap
+/// coverage while physical banks/ports remain unknown. This is a pressure
+/// envelope, not a dynamic physical pipe, SMSP, or issue-slot observation.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct OperandBankPressure {
     pub projected_records: u64,
+    pub generic_projected_records: u64,
     pub gap_records: u64,
+    pub not_applicable_records: u64,
     pub source_bank_reads: [u64; 2],
     pub destination_bank_writes: [u64; 2],
 }
@@ -25,6 +28,7 @@ impl OperandBankPressure {
     pub(crate) fn observe(
         &mut self,
         status: &FixedLatencyOperandStatus,
+        arch: sim_arch::ArchId,
     ) -> Result<(), crate::IssueError> {
         let projection = match status {
             FixedLatencyOperandStatus::Projected(projection) => projection,
@@ -32,9 +36,18 @@ impl OperandBankPressure {
                 add(&mut self.gap_records, 1)?;
                 return Ok(());
             }
-            FixedLatencyOperandStatus::NotApplicable => return Ok(()),
+            FixedLatencyOperandStatus::NotApplicable => {
+                add(&mut self.not_applicable_records, 1)?;
+                return Ok(());
+            }
         };
         add(&mut self.projected_records, 1)?;
+        if projection.opcode() == crate::sass_operands::FixedLatencyOpcode::Generic {
+            add(&mut self.generic_projected_records, 1)?;
+        }
+        if arch != sim_arch::ArchId::Sm86 {
+            return Ok(());
+        }
         let reads = projection.sm86_regular_source_bank_reads();
         let writes = projection.sm86_regular_destination_bank_writes();
         for bank in 0..2 {
@@ -335,9 +348,8 @@ pub struct TraceMetrics {
     /// counters; they quantify how much dynamic pipe attribution the trace
     /// contract can support without value or hardware-selection state.
     pub physical_pipeline: PhysicalPipelineAttribution,
-    /// Static operand-bank demand envelope for the admitted SM86 SASS forms;
-    /// it is intentionally separate from physical pipeline attribution.
-    #[serde(skip)]
+    /// Static operand-role coverage and (for SM86 only) bank-demand envelope;
+    /// intentionally separate from physical pipeline attribution.
     pub operand_bank_pressure: OperandBankPressure,
     pub control_flow: ControlFlowGraph,
     /// Conservative cross-SM sharing domain; not a coherence protocol or
@@ -353,6 +365,15 @@ pub struct TraceMetrics {
     /// Host wall time spent locating/parsing the typed TMA/sync sidecars for
     /// this launch. This is a replay-cost diagnostic, not a GPU timestamp.
     pub sidecar_join_wall_ns: u64,
+    /// Producer-to-successful-wait instruction relations from runtime barrier
+    /// identities. Multiple generations remain unresolved, never fabricated.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub async_relations: Option<sim_trace::async_sidecars::AsyncRelations>,
+    /// Typed asynchronous-obligation frontier. This is an observation/model
+    /// diagnostic only; it never contributes cycles, issue readiness, cache
+    /// service, or NCU comparison values.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub async_obligations: Option<sim_trace::obligations::ObligationFrontier>,
     /// TMA payload observations joined from the producer sidecar. Missing
     /// sidecar records remain explicitly unavailable; these counters never
     /// enter NCU comparison or synthesize completion timestamps.

@@ -6,7 +6,7 @@ commit `0b55a2f691d69981583568fd9eb69687b1f0de8a`, example
 
 It uses `cutlass::arch::Sm120`, `OpClassBlockScaledTensorOp`, warp-level
 block-scaled MMA, and a 1×1×1 cluster. It is intentionally separate from the
-portable `workloads/simbench_bw` rows and must not be built for SM86 or SM100.
+portable capture rows and must not be built for SM86 or SM100.
 
 Build uses CUDA 13.2 and `/usr/bin/g++-14` explicitly:
 

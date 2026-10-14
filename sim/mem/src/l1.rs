@@ -66,8 +66,11 @@ pub enum L1StorePolicy {
     ResidentHitWriteBack,
 }
 
-/// Configuration (card-resolved by `pchase_card`; latencies are integer
-/// cycles — the caller ceils the card's fractional cycle values).
+/// Configuration (card-resolved by `pchase_card` for SM86, or an explicit
+/// effective SM120 observation). Latencies are integer cycles — the caller
+/// ceils fractional source observations. SM120 remains opt-in: accepting its
+/// typed configuration here does not invent geometry or wire flat replay to a
+/// guessed cache model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct L1Config {
     /// Deployment architecture whose geometry/latency hypotheses produced this config.
@@ -78,6 +81,26 @@ pub struct L1Config {
     pub mshr_count: Option<u32>,
     pub hit_latency: u64,
     pub miss_latency: u64,
+}
+
+impl L1Config {
+    /// Explicit SM120 fully-associative LRU scenario, not physical geometry.
+    /// Capacity, timing and miss concurrency are caller-supplied hypotheses.
+    /// `None` disables MSHR pressure; it does not represent an unknown count.
+    pub const fn effective_sm120(
+        line_capacity: u64,
+        mshr_count: Option<u32>,
+        hit_latency: u64,
+        miss_latency: u64,
+    ) -> Self {
+        Self {
+            arch: ArchId::Sm120,
+            line_capacity,
+            mshr_count,
+            hit_latency,
+            miss_latency,
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -1261,7 +1284,7 @@ pub struct L1Cache {
 
 impl L1Cache {
     pub fn new(cfg: L1Config) -> Result<Self, L1ConfigError> {
-        if cfg.arch != ArchId::Sm86 {
+        if !matches!(cfg.arch, ArchId::Sm86 | ArchId::Sm120) {
             return Err(L1ConfigError::ArchitectureUnsupported { arch: cfg.arch });
         }
         if cfg.line_capacity == 0 {

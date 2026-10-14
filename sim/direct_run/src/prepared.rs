@@ -322,6 +322,7 @@ impl PreparedReplay {
             sm120_alpha_profile_id: self
                 .sm120_alpha
                 .then_some(Sm120AlphaConfig::PROFILE_ID),
+            sm120_effective_l1: None,
             hypothetical_issue_ports: self.hypothetical_issue_ports,
             architecture_spec: self.architecture_spec.clone(),
             memory_service_candidate_count: 0,

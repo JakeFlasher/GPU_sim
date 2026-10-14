@@ -21,8 +21,8 @@ optional scalar/profile override changes issue width, labels it hypothetical,
 and disables independent dual-issue widening. It cannot alter traced semantics.
 
 Package `sim-run` (`sim/direct_run`) provides the direct CLI and `sim_direct_run`
-library. Package `sim-run-campaign` (`sim/run`, library `sim_run`) retains the
-campaign CLI and shared emitters. NCU joins add observations after replay, never
+library, including the native metric emitter. NCU joins add observations after
+replay, never model inputs. NCU joins add observations after replay, never
 model inputs. See [components](COMPONENTS.md) and [profiles](archprofile.md).
 
 ## Custom functional/resource model

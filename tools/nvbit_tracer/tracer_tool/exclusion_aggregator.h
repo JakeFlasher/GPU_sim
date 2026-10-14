@@ -10,9 +10,9 @@
 // finalization.
 //
 // Schemas the emitted JSON conforms to:
-//   - workloads/simbench_bw/schemas/nvbit_unsupported_memory_path.schema.json
-//   - workloads/simbench_bw/schemas/nvbit_unmapped_memory_range.schema.json
-//   - workloads/simbench_bw/schemas/nvbit_cross_allocation_lane_span.schema.json
+//   - the captured unsupported-memory sidecar
+//   - the captured unmapped-range sidecar
+//   - the captured cross-allocation sidecar
 //
 // All three schemas share the same per-entry shape (8 fields:
 // schema_version, kernel_unique_id, device, slug, excluded_op_class,

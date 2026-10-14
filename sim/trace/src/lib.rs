@@ -14,9 +14,12 @@ pub mod digest;
 pub mod exec_info;
 pub mod json;
 pub mod lanes;
+pub mod obligations;
+pub mod phase_sidecars;
 pub mod pb;
 pub mod reader;
 pub mod semantic;
+pub mod submission;
 mod wire_preflight;
 
 pub use anchored::{

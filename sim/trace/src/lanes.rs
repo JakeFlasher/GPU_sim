@@ -1,7 +1,7 @@
 //! Per-lane address reconstruction for the three wire compression formats.
 //!
 //! Exact port of the canonical Python decoder
-//! `tools/nvbit_tracer/import_trace_contract.py::_reconstruct_lane_vector`,
+//! `the NVBit trace contract::_reconstruct_lane_vector`,
 //! followed by the canonical per-lane positional check used by the Python
 //! decoder
 //! after reconstruction (`lane_position_mismatch`: slot i is sentinel iff
@@ -19,7 +19,7 @@
 use crate::pb;
 
 pub const LANES_PER_WARP: usize = 32;
-/// Mirrors `LANE_INACTIVE_SENTINEL` in tracer_tool.cu / import_trace_contract.py.
+/// Mirrors `LANE_INACTIVE_SENTINEL` in tracer_tool.cu / the trace contract.
 pub const LANE_INACTIVE_SENTINEL: i64 = -1;
 
 pub const FORMAT_LIST_ALL: i32 = 0;

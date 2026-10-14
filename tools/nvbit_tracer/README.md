@@ -44,28 +44,26 @@ runtime libraries resolve for both the injected tracer and `trace_printer`:
 ```bash
 source tools/nvbit_tracer/pinned_build_env.sh
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-OUT="/dev/shm/sm120_rtx_5090_work/manual"
+OUT="/root/sm120_rtx_5090_capture/captures/manual"
 mkdir -p "$OUT"
 CUDA_INJECTION64_PATH="$REPO_ROOT/tools/nvbit_tracer/tracer_tool/tracer_tool.so" \
 USER_DEFINED_FOLDERS=1 TRACES_FOLDER="$OUT" \
   /absolute/path/to/cuda-program [arguments]
 ```
 
-A capture normally contains `dynamic_trace.pb`, `stats.csv`, enhanced launch
-metadata, allocation metadata, and per-thread-block protobuf payloads. Inspect
-it with `tracer_tool/trace_printer "$OUT"`.
+A capture normally contains `dynamic_trace.pb`, `stats.csv`, launch metadata,
+allocation metadata, and per-thread-block protobuf payloads. Inspect it with
+`tracer_tool/trace_printer "$OUT"`.
 
-`extra_info/traced_kernel_modules.json` is the accepted-launch provenance
-sidecar.  The producer resolves the exact launch handle to its CUDA module or
-context-independent library, then records a regular-file path and SHA-256
-when one is available. JIT, deleted and opaque origins can remain
-`no_stable_static_module` rather than a guessed benchmark path. Active graph
-launch capture is separately rejected as `graph_node_capture_unsupported`;
-it does not produce a successful graph-node trace.
+Set `SIMBENCH_NVBIT_ASYNC_ORDER=1` to retain host creation order for selected
+asynchronous-copy instructions. It is an ordering token, not a GPU timestamp.
 
-Set `SIMBENCH_NVBIT_ASYNC_ORDER=1` to retain the optional host creation order
-for selected asynchronous-copy instructions. It is an ordering token, not a
-GPU timestamp.
+Synchronization-after sidecar rows emitted by the SM120 tracer carry
+`query_clock`, a `%clock64` sample at the instrumented query site. The tracer
+does not label this as acquire visibility because relaxed and acquire
+`mbarrier` queries can lower to the same `PHASECHK` SASS mnemonic. Older
+captures may contain `visibility_clock`; consumers must treat that legacy field
+as a query-site sample unless the query semantics are independently identified.
 
-The Rust reader and Python consumers share the protobuf definitions. Update
-both generated surfaces when the wire schema changes.
+The Rust reader and Python consumers share the protobuf definitions. Update both
+generated surfaces when the wire schema changes.

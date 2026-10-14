@@ -25,7 +25,7 @@ use sim_trace::ExecInfo;
 
 use crate::control_bits::{ControlBits, ControlSidecar, DepBarrier, FunctionControl, WaitMask};
 use crate::issue::Sm120AlphaConfig;
-use crate::sass_operands::{FixedLatencyOperandStatus, project_fixed_latency_operands};
+use crate::sass_operands::{FixedLatencyOperandStatus, SassRegister, project_fixed_latency_operands, project_guard_predicate};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProgramError {
@@ -233,6 +233,7 @@ pub struct IssueSlot {
     /// Static exact-family register/source/reuse projection. This is diagnostic
     /// input only until Control/Allocate timing passes live transfer.
     pub(crate) fixed_latency_operands: FixedLatencyOperandStatus,
+    pub(crate) guard_predicate: Option<SassRegister>,
     /// Static phase markers used in dynamic readiness checks. Sidecar SASS is
     /// canonical ASCII, so classify once instead of reparsing on every scan.
     pub(crate) clocklo_read: bool,
@@ -481,8 +482,18 @@ fn classify(
 /// cache geometry/semantic claim and Flat replay only needs a stable global,
 /// local, shared, or atomic class for trace accounting.
 fn alpha_mem_role(opcode_text: &str) -> MemRole {
+    let opcode = opcode_text.split_ascii_whitespace().next().unwrap_or("");
     match opcode_head(opcode_text) {
-        "LDG" => MemRole::EligibleLoad(CacheOpToken::LdgECg),
+        "LDG" if opcode.contains("STRONG.SM") || opcode.contains(".CA") || opcode.contains(".EF") => {
+            // The live SM120 probe emits STRONG.SM for the cache-all source
+            // form. Preserve the route distinction only where SASS exposes it;
+            // a bare LDG.E remains conservative/bypass.
+            MemRole::EligibleLoad(CacheOpToken::LdgECa)
+        }
+        "LDG" if opcode.contains("STRONG.GPU") || opcode.contains(".CG") || opcode.contains(".CS") => {
+            MemRole::BypassLoad(CacheOpToken::LdgECg)
+        }
+        "LDG" => MemRole::BypassLoad(CacheOpToken::LdgECg),
         // TMA/cp.async completion and cache routing are a separate SM120
         // feature lane.  Keep the static spelling opaque here so a dynamic
         // async record is rejected by replay rather than silently priced by
@@ -1051,6 +1062,7 @@ fn build_schedules_with_pipeline_arch_and_alpha(
                         mem_role,
                         ldgsts_l1_policy,
                         fixed_latency_operands,
+                        guard_predicate: project_guard_predicate(inst.predicate.as_deref()),
                         clocklo_read: is_clocklo_opcode_text(&inst.opcode_text),
                         gpu_membar: is_gpu_membar_opcode_text(&inst.opcode_text),
                         opcode_text: inst.opcode_text.clone(),

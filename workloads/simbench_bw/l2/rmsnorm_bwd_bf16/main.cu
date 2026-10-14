@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "../../sm120_event_timing.h"
 
 
 extern "C" void rmsnorm_bwd_bf16_launch(
@@ -71,8 +72,9 @@ int main(int argc, char **argv) {
     rc = cudaMemcpy(d_g,  h_g,  n_g * sizeof(__nv_bfloat16), cudaMemcpyHostToDevice); if (rc) fail("H2D g", rc);
     rc = cudaMemcpy(d_dO, h_dO, n_x * sizeof(__nv_bfloat16), cudaMemcpyHostToDevice); if (rc) fail("H2D dO", rc);
 
-    rmsnorm_bwd_bf16_launch(d_x, d_g, d_dO, d_dX, rows, hidden, eps, 0);
-    rc = cudaDeviceSynchronize(); if (rc) fail("sync", rc);
+    sm120_measure_launches("rmsnorm_bwd_bf16", [&]() { rmsnorm_bwd_bf16_launch(d_x, d_g, d_dO, d_dX, rows, hidden, eps, 0); },
+        [&]() {  });
+
     rc = cudaMemcpy(h_dX, d_dX, n_x * sizeof(__nv_bfloat16), cudaMemcpyDeviceToHost); if (rc) fail("D2H", rc);
 
     printf("{\n  \"schema_version\": 1,\n  \"slug\": \"rmsnorm_bwd_bf16\",\n");

@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "../../sm120_event_timing.h"
 
 extern "C" void qkv_rope_standard_bf16_launch(
     __nv_bfloat16 *d_qkv, const __nv_bfloat16 *d_cos, const __nv_bfloat16 *d_sin,
@@ -96,8 +97,9 @@ int main(int argc, char **argv) {
     rc = cudaMemcpy(d_cos, h_cos, n_ct * sizeof(__nv_bfloat16), cudaMemcpyHostToDevice); if (rc) fail("H2D cos", rc);
     rc = cudaMemcpy(d_sin, h_sin, n_ct * sizeof(__nv_bfloat16), cudaMemcpyHostToDevice); if (rc) fail("H2D sin", rc);
 
-    qkv_rope_standard_bf16_launch(d_qkv, d_cos, d_sin, tokens, heads, head_dim, 0);
-    rc = cudaDeviceSynchronize(); if (rc) fail("sync", rc);
+    sm120_measure_launches("qkv_rope_standard_bf16", [&]() { qkv_rope_standard_bf16_launch(d_qkv, d_cos, d_sin, tokens, heads, head_dim, 0); },
+        [&]() { rc = cudaMemcpy(d_qkv, h_qkv, n_qkv * sizeof(__nv_bfloat16), cudaMemcpyHostToDevice); if (rc) fail("restore in-place QKV", rc); });
+
     rc = cudaMemcpy(h_qkv, d_qkv, n_qkv * sizeof(__nv_bfloat16), cudaMemcpyDeviceToHost); if (rc) fail("D2H qkv", rc);
 
     // Emit JSON: output is [tokens][heads][head_dim] (matches references/rope.py)

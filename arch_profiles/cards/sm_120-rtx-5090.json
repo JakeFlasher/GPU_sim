@@ -27,7 +27,7 @@
   "griddim_penalty_alpha": {
     "status": "research_gap",
     "reason": "No RTX 5090 grid-density sweep has been captured.",
-    "challenge": "sm120 cloud capture campaign"
+    "challenge": "sm120 cloud capture probe"
   },
   "bare_ldg_e_default": "unknown_typed_unavailable",
   "cache_layers": [
@@ -57,7 +57,7 @@
   "duration_crosswalk": {
     "status": "research_gap",
     "reason": "No independent simulator-cycle to wall-clock crosswalk exists for this SKU.",
-    "challenge": "sm120 cloud timing campaign"
+    "challenge": "sm120 cloud timing probe"
   },
   "dram_bandwidth": {
     "status": "research_gap",
@@ -73,7 +73,7 @@
     "max_resident_warps_per_sm": 48,
     "max_blocks": 24
   },
-  "occupancy_provenance": "Retained RTX 5090 cudaDevAttrMaxBlocksPerMultiprocessor=24 in m4/launch_probe.jsonl; CUDA tuning-guide statement of 32 conflicts with this device attribute. Do not reinterpret the direct device attribute as a kernel-specific occupancy result.",
+  "occupancy_provenance": "Retained RTX 5090 cudaDevAttrMaxBlocksPerMultiprocessor=24 from the live launch probe; the CUDA tuning-guide statement of 32 conflicts with this device attribute. Do not reinterpret the direct device attribute as a kernel-specific occupancy result.",
   "runtime_limits": {
     "max_resident_warps_per_sm": 48,
     "max_blocks_per_sm": 24,
@@ -92,7 +92,7 @@
       64,
       100
     ],
-    "provenance": "Retained live CUDA device attributes in /dev/shm/sm120_rtx_5090_work/m4/launch_probe.jsonl (device row); identifier limits and shared-memory capacities retained. max_blocks_per_sm=24 is a device attribute, not only the M8 occupancy result."
+    "provenance": "Retained live CUDA device attributes from the launch probe (device row); identifier limits and shared-memory capacities are retained. max_blocks_per_sm=24 is a device attribute, not only a kernel occupancy result."
   },
   "dep_barriers": {
     "status": "research_gap",

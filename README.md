@@ -1,34 +1,32 @@
 # GPU simulator
 
-This repository contains the Rust trace/replay engine, architecture cards,
-NVBit producer, and SOLBench workload sources for the SM120/RTX 5090 alpha
-lane.
+Rust trace/replay engine and NVBit producer for the SM120/RTX 5090 alpha lane.
 
 ```text
 NVBit/SASS + sidecars -> sim-trace -> sim-sm/sim-mem/sim-engine -> sim-run
-NCU/CUPTI observations ---------------------------------------> independent join
+NCU/CUDA observations ---------------------------------------> post-replay join
 ```
 
 ## Start here
 
-1. Read [`AGENTS.md`](AGENTS.md) for the permanent workflow boundaries.
+1. Read [`AGENTS.md`](AGENTS.md) for repository boundaries.
 2. Read [`docs/PROJECT_MEMORY.md`](docs/PROJECT_MEMORY.md) and
    [`docs/STATUS.md`](docs/STATUS.md).
 3. Follow `/root/gpu_cache_memory_modeling_proposal/PLAN.md`.
-4. Use [`docs/runbook_host.md`](docs/runbook_host.md) for complete-corpus
-   replay commands.
+4. Use [`docs/runbook_host.md`](docs/runbook_host.md) for complete-corpus replay.
 
-Acceptance is performance and generalization on the complete SOLBench plus
-modern/SOTA traces in `/root/sm120_rtx_5090_capture`, compared with independent
-NCU ground truth.  Full replay is primary; fast replay is complementary.  No
-fixture/synthetic simulator tests or procedural hash/check/validation gates are
-part of the alpha workflow.
+The canonical real-trace scope is `/root/sm120_rtx_5090_capture`, with 339
+capture/profile pairs. Full replay is primary and fast frontier replay is
+complementary. NCU remains an independent comparison surface. No synthetic
+fixture acceptance path or Accel-Sim baseline is part of this alpha lane.
 
 ## Repository map
 
 - `sim/` — Rust trace frontend, scheduler, memory model, event engine, runners.
 - `arch_profiles/` — active RTX 5090 card and architecture schemas.
 - `tools/nvbit_tracer/` — real trace and sidecar producer.
-- `tools/sm120_*.py` — replay and corpus reporting tools.
-- `workloads/sol_execbench_baselines/` — SOLBench kernel sources.
-- `docs/` and `plans/` — current contracts and plan pointer.
+- `tools/sm120_corpus_replay.py` — full/fast corpus driver.
+- `tools/sm120_replay_bench.py` — sidecar adapter and NCU join.
+- `tools/sm120_corpus_compare.py` — endpoint comparison.
+- `workloads/` — SOLBench kernel sources and real capture launchers.
+- `docs/` — current implementation notes only.

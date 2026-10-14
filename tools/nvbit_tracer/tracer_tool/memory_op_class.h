@@ -7,7 +7,7 @@
 // `dynamic_trace::instruction.memory_op_class` field added in
 // AC4 / R9. The classifier is the single source of truth for
 // the producer-side mapping; the consumer-side validator
-// (`tools/nvbit_tracer/import_trace_contract.py`) and downstream
+// (`the NVBit trace contract`) and downstream
 // coalescer / HRD profiler trust whatever the tracer emits here.
 //
 // Header-only by design so the unit test

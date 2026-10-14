@@ -1,57 +1,52 @@
 # SM120 host runbook
 
-The active lane is the RTX 5090 (`sm_120`) full-trace replay.  The complete
-capture corpus is `/root/sm120_rtx_5090_capture`; independent NCU/CUPTI records
-are joined after replay and are never simulator inputs.  Full replay is always
-run before the complementary fast frontier.
+The active RTX 5090 corpus is `/root/sm120_rtx_5090_capture`. Its `captures/`
+and `profiles/` directories each contain 339 direct workload/kernel entries.
+NCU is joined after replay and is never a simulator input. Full replay always
+precedes the complementary fast frontier.
 
-## Build
-
-```bash
-cd /root/GPU_simulator_rebase/sim
-cargo build --workspace --all-features
-cargo build --workspace --all-features --release
-```
-
-## Replay the complete corpus
-
-Use the complete-corpus driver from the repository root. It discovers every
-recursive `dynamic_trace.pb`, derives transport sidecars from captured native
-static metadata, and runs full before fast without supplying NCU values:
+## Complete replay
 
 ```bash
 cd /root/GPU_simulator_rebase
 python3 tools/sm120_corpus_replay.py \
   --capture-root /root/sm120_rtx_5090_capture \
-  --output /dev/shm/sm120_rtx_5090_work/current_replay \
+  --output /root/sm120_replay_current \
   --mode both
 ```
 
-The full run must report every captured row and launch.  The fast run is a
-performance diagnostic only. Keep replay rows, joins, residuals, and timings
-under the work root; do not add small synthetic inputs or acceptance gates.
+The release binary is `/root/GPU_simulator_rebase/sim/target/release/sim-run`.
+Use the RTX 5090 architecture card in `arch_profiles/cards/` and keep replay
+results separate from raw captures/profiles.
 
-## Direct replay
+## Independent comparison
 
 ```bash
-sim/target/release/sim-run --sm120-alpha --mode flat \
-  --trace TRACE_DIR --control CONTROL_BITS.json \
-  --arch-card arch_profiles/cards/sm_120-rtx-5090.json
-sim/target/release/sim-run --sm120-alpha --fast-frontier-only \
-  --trace TRACE_DIR --control CONTROL_BITS.json \
-  --arch-card arch_profiles/cards/sm_120-rtx-5090.json
+python3 tools/sm120_corpus_compare.py \
+  --full /root/sm120_replay_current/full.jsonl \
+  --fast /root/sm120_replay_current/fast.jsonl \
+  --profiles /root/sm120_rtx_5090_capture/profiles \
+  --output /root/sm120_replay_current/ncu_join
 ```
 
-## Independent NCU comparison
+Preserve units, launch scope, and endpoint definitions. Do not fit NCU rows
+back into replay parameters.
 
-Use the NCU/trace artifacts already captured in
-`/root/sm120_rtx_5090_capture`.  Join by launch identity, report the timing
-domain and unit explicitly, and keep unmatched rows and native timing gaps
-visible.  Never fit, offset, or feed NCU values into a replay.
+## Effective-L1 held-out diagnostic
 
-## Tracer maintenance
+The optional cache scenario is intentionally separate from the canonical flat
+run. It must use a frozen real subset and an independently measured envelope:
 
-The NVBit producer remains under `tools/nvbit_tracer`. Build it with the pinned
-CUDA/protobuf environment when a new real workload capture is required; write
-new captures directly to the corpus/work roots. Do not create local synthetic
-bundles or small acceptance workloads.
+```bash
+sim/target/release/sim-run \
+  --trace /root/sm120_rtx_5090_capture/captures/ROOT \
+  --control /root/effective-cache-controls/ROOT.control_bits.json \
+  --arch-card arch_profiles/cards/sm_120-rtx-5090.json \
+  --sm120-alpha --mode l1 --sm120-effective-l1 1024:none:43:501
+```
+
+The `1024:none:43:501` values are an effective pointer-chase service
+scenario, not physical cache geometry. Keep TMA/UTMA roots on the explicit
+typed refusal path until native completion and mbarrier visibility are
+resolved. Join NCU rows only after replay and keep cycles and microseconds in
+separate timing domains.

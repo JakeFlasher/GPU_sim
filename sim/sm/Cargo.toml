@@ -22,10 +22,6 @@ sim-trace = { path = "../trace" }
 thiserror = { workspace = true }
 
 [[bin]]
-name = "causal-frontier-probe"
-path = "src/bin/causal_frontier_probe.rs"
-
-[[bin]]
 name = "custom-program-run"
 path = "src/bin/custom_program_run.rs"
 

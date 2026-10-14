@@ -119,6 +119,11 @@ typedef struct {
   uint32_t sync_register_id;
   uint32_t sync_phase;
   uint32_t sync_width;
+  // Device clock at the injected call site. TMA calls are inserted before
+  // the producer instruction; SM120 sync after-calls use the same field as a
+  // consumer visibility observation. It is evidence only, never a replay
+  // timing input.
+  uint64_t device_clock;
 } inst_trace_t;
 
 /* phase-clock record carried through the phase-injection channel.

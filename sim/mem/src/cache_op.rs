@@ -41,11 +41,11 @@ pub enum CacheOpToken {
     Other,
 }
 
-/// Port of the predictor manifest's architecture-neutral
+/// Common architecture-neutral
 /// `derive_l1_eligible` partition. Simulator routing may refine a literal token
 /// by architecture: [`crate::access::mem_role_of_checked`] admits the measured
-/// sm_86 `LDG.E.STRONG.SM` lowering into L1 while Blackwell retains the
-/// manifest's strong-scope bypass behavior.
+/// SM86 and RTX 5090 `LDG.E.STRONG.SM` lowering into L1 while retaining the
+/// distinct STRONG.GPU bypass route.
 pub fn derive_l1_eligible(token: CacheOpToken) -> bool {
     matches!(
         token,
@@ -65,7 +65,7 @@ pub fn derive_l1_eligible(token: CacheOpToken) -> bool {
 pub const BARE_LDG_E_DEFAULTS_TO_CA: &[&str] = &["sm_86"];
 
 /// Source-cache route encoded by an architecture-supported `LDGSTS` SASS form.
-/// This is separate from [`CacheOpToken`] so the historical 12-token parity
+/// This is separate from [`CacheOpToken`] so the stable 12-token
 /// vocabulary remains stable while async-copy completion retains its own type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LdgstsL1Policy {

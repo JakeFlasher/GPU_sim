@@ -7834,7 +7834,7 @@ struct AllocRange {
 }
 
 /// The `<trace_dir>/extra_info/allocations.json` registry — the same sidecar the
-/// Python `import_trace_contract` validator reads (an array of
+/// Python `trace_contract` validator reads (an array of
 /// `{allocation_id, base_address (hex string), size_bytes, ...}`). Used to
 /// enforce the address-carrying contract's allocation identity in the Rust
 /// reader, at parity with the Python gate.
@@ -7844,7 +7844,7 @@ pub struct AllocationRegistry {
 }
 
 /// The EXACT six-field allocation-sidecar entry, at parity with the Python
-/// validator's shape gate (`import_trace_contract.py`: all six fields required,
+/// validator's shape gate (`the trace contract`: all six fields required,
 /// no extras). `deny_unknown_fields` + all-required non-Option fields make serde
 /// reject a missing field, an unexpected key, a negative/boolean `allocation_id`
 /// or `size_bytes`, and a non-bool `alive`. The explicit VALUE checks (positive

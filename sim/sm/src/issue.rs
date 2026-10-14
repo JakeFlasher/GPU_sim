@@ -160,6 +160,8 @@ pub(crate) struct ReplayInst {
     /// Effective executing lanes for the dynamic instruction. Native traces
     /// carry both masks; legacy captures remain all-lane.
     pub(crate) lane_mask: u32,
+    /// Active lanes also evaluate the guard when its outcome is false.
+    pub(crate) active_lane_mask: u32,
 }
 
 impl ReplayInst {
@@ -642,6 +644,8 @@ pub enum IssueError {
         expected: u64,
         got: u64,
     },
+    #[error("SM120 effective L1 timing override is invalid: hit={hit}, miss={miss}")]
+    InvalidL1TimingOverride { hit: u64, miss: u64 },
     #[error("{name} latency must be finite, positive, and fit in u64 (got {value})")]
     InvalidLatency { name: &'static str, value: f64 },
     #[error("{operation}: cycle addition {base} + {delta} overflows u64")]
@@ -2680,7 +2684,7 @@ struct MemoryIssuePipelinePlan {
 /// slot starts.  This captures finite pipelined service without turning the
 /// model into a register scoreboard or a per-cycle global scan.
 /// Research-only scalar resource candidate. It is intentionally not wired
-/// into production IssueModelParams; the issue-port campaign found that a
+/// into production IssueModelParams; the bounded issue-port probe found that a
 /// single generic queue does not transfer across independent and mixed
 /// workloads. Keeping the implementation here makes future probes
 /// reproducible without silently changing the deployed lane.
@@ -3048,6 +3052,9 @@ enum ReadinessCause {
     MemoryAdmissionQueue,
     MemoryIssueQueue,
     MemoryWriteCompletion,
+    RegisterRaw,
+    RegisterPredicate,
+    RegisterWaw,
     ControlStall,
 }
 
@@ -3080,6 +3087,9 @@ impl ReadinessCauseCycles {
                 "instruction front-end readiness",
                 &mut self.instruction_front_end,
             ),
+            ReadinessCause::RegisterRaw => ("register RAW", &mut self.register_raw),
+            ReadinessCause::RegisterPredicate => ("register predicate", &mut self.register_predicate),
+            ReadinessCause::RegisterWaw => ("register WAW", &mut self.register_waw),
             ReadinessCause::ControlStall => ("control stall readiness", &mut self.control_stall),
             ReadinessCause::DependenceCounterRead => (
                 "read-dependence counter readiness",
@@ -3587,6 +3597,22 @@ struct RegisterReadyEntry {
     ready_at: u64,
 }
 
+#[derive(Debug, Clone, Copy, Default)]
+struct FixedRegisterReady {
+    /// Data-register RAW readiness.
+    raw: u64,
+    /// Predicate-register readiness is tracked independently of data RAW.
+    predicate: u64,
+    /// Destination overlap is a WAW/partial-lane overwrite dependency.
+    waw: u64,
+}
+
+impl FixedRegisterReady {
+    fn latest(self) -> u64 {
+        self.raw.max(self.predicate).max(self.waw)
+    }
+}
+
 fn issue_register_overlap(left: SassRegister, right: SassRegister) -> bool {
     if left.file() != right.file() { return false; }
     let (Some(left_index), Some(right_index)) = (left.index(), right.index()) else { return false; };
@@ -3604,20 +3630,45 @@ fn issue_register_lane_mask(register: SassRegister, mask: u32) -> u32 {
 fn issue_fixed_register_ready(
     status: &FixedLatencyOperandStatus,
     mask: u32,
+    active_mask: u32,
+    guard: Option<SassRegister>,
     entries: &[RegisterReadyEntry],
-) -> u64 {
-    let FixedLatencyOperandStatus::Projected(projection) = status else { return 0; };
-    let sources = projection.sources().iter().filter_map(|source| match source {
-        SassSourceOperand::Register(operand) => Some(operand.register()),
-        SassSourceOperand::Immediate | SassSourceOperand::ConstantBank => None,
-    }).chain(projection.predicate_sources().iter().map(|operand| operand.register()))
-      .chain(projection.destinations().iter().map(|operand| operand.register()));
-    let mut ready = 0;
-    for register in sources {
+) -> FixedRegisterReady {
+    let mut ready = FixedRegisterReady::default();
+    if let Some(register) = guard {
+        let lanes = issue_register_lane_mask(register, active_mask);
+        for entry in entries {
+            if lanes & entry.lane_mask != 0 && issue_register_overlap(register, entry.register) {
+                ready.predicate = ready.predicate.max(entry.ready_at);
+            }
+        }
+    }
+    let FixedLatencyOperandStatus::Projected(projection) = status else { return ready; };
+    for source in projection.sources() {
+        let SassSourceOperand::Register(operand) = source else { continue; };
+        let register = operand.register();
         let lanes = issue_register_lane_mask(register, mask);
         for entry in entries {
             if lanes & entry.lane_mask != 0 && issue_register_overlap(register, entry.register) {
-                ready = ready.max(entry.ready_at);
+                ready.raw = ready.raw.max(entry.ready_at);
+            }
+        }
+    }
+    for operand in projection.predicate_sources() {
+        let register = operand.register();
+        let lanes = issue_register_lane_mask(register, mask);
+        for entry in entries {
+            if lanes & entry.lane_mask != 0 && issue_register_overlap(register, entry.register) {
+                ready.predicate = ready.predicate.max(entry.ready_at);
+            }
+        }
+    }
+    for operand in projection.destinations() {
+        let register = operand.register();
+        let lanes = issue_register_lane_mask(register, mask);
+        for entry in entries {
+            if lanes & entry.lane_mask != 0 && issue_register_overlap(register, entry.register) {
+                ready.waw = ready.waw.max(entry.ready_at);
             }
         }
     }
@@ -3631,11 +3682,12 @@ fn issue_record_fixed_register_writes(
     ready_at: u64,
 ) {
     let FixedLatencyOperandStatus::Projected(projection) = status else { return; };
-    for destination in projection.destinations() {
-        let register = destination.register();
-        if register.is_constant() { continue; }
+    for register in projection.destinations().iter().flat_map(|dst| dst.register().components()) {
         let lanes = issue_register_lane_mask(register, mask);
-        for entry in entries.iter_mut().filter(|entry| entry.register == register) {
+        for entry in entries
+            .iter_mut()
+            .filter(|entry| issue_register_overlap(register, entry.register))
+        {
             entry.lane_mask &= !lanes;
         }
         entries.retain(|entry| entry.lane_mask != 0);
@@ -5145,7 +5197,11 @@ pub(crate) fn data_ready_time(
             }
             (None, _) => {
                 if needs_ready {
-                    checked_cycle_add("flat global visibility", t, params.global_flat_latency)
+                    checked_cycle_add(
+                        "flat global visibility",
+                        t,
+                        params.global_flat_latency,
+                    )
                         .map(Some)
                 } else {
                     Ok(None)
@@ -5163,7 +5219,11 @@ pub(crate) fn data_ready_time(
             }
             None => {
                 if needs_ready {
-                    checked_cycle_add("flat global visibility", t, params.global_flat_latency)
+                    checked_cycle_add(
+                        "flat global visibility",
+                        t,
+                        params.global_flat_latency,
+                    )
                         .map(Some)
                 } else {
                     Ok(None)
@@ -5201,7 +5261,11 @@ pub(crate) fn data_ready_time(
                 }
                 None => {
                     if needs_ready {
-                        checked_cycle_add("flat global visibility", t, params.global_flat_latency)
+                        checked_cycle_add(
+                            "flat global visibility",
+                            t,
+                            params.global_flat_latency,
+                        )
                             .map(Some)
                     } else {
                         Ok(None)
@@ -6167,6 +6231,7 @@ impl<'a> SmCore<'a> {
                         | AccessKind::GlobalUntagged { len, .. }
                         | AccessKind::GlobalStore { len, .. } => {
                             sm120_flat_global_sectors = sm120_flat_global_sectors.saturating_add(u64::from(len));
+
                         }
                         AccessKind::Shared { wavefronts } => {
                             sm120_flat_shared_wavefronts = sm120_flat_shared_wavefronts.saturating_add(wavefronts);
@@ -9326,6 +9391,19 @@ impl<'a> SmCore<'a> {
         let mut ready_at = base;
         let mut limiting = None;
         let mut tied = 0;
+        if self.params.resource_source() == IssueResourceSource::Sm120Alpha {
+            let inst = warp.insts[warp.next];
+            let ready = issue_fixed_register_ready(slot.fixed_latency_operands(),
+                inst.effective_lane_mask(), inst.active_lane_mask, slot.guard_predicate,
+                &warp.register_ready);
+            for (cause, until) in [(ReadinessCause::RegisterRaw, ready.raw),
+                (ReadinessCause::RegisterPredicate, ready.predicate),
+                (ReadinessCause::RegisterWaw, ready.waw)] {
+                observe_readiness_constraint(projected, base, until, cause,
+                    &mut ready_at, &mut limiting, &mut tied)?;
+            }
+        }
+
 
         if self.instruction_front_end.is_some() {
             let until = warp.instruction_front_end_ready_at().ok_or(
@@ -10424,11 +10502,14 @@ impl<'a> SmCore<'a> {
         if self.params.resource_source() == IssueResourceSource::Sm120Alpha
             && let Some(slot) = self.warps[warp].next_slot {
             let mask = self.warps[warp].insts[self.warps[warp].next].effective_lane_mask();
-            warp_ready = warp_ready.max(issue_fixed_register_ready(
+            let register_ready = issue_fixed_register_ready(
                 slot.fixed_latency_operands(),
                 mask,
+                self.warps[warp].insts[self.warps[warp].next].active_lane_mask,
+                slot.guard_predicate,
                 &self.warps[warp].register_ready,
-            ));
+            );
+            warp_ready = warp_ready.max(register_ready.latest());
         }
         if self.warps[warp]
             .next_slot
@@ -12712,21 +12793,11 @@ impl<'a> SmCore<'a> {
                 .then(|| self.warps[wix]
                 .next_slot
                 .map(|current| current.fixed_latency_operands())).flatten();
-            let fixed_register_ready_at = match pipeline_class {
-                PipelineClass::ScalarAlu { latency_cycles, .. } => {
-                    checked_cycle_add("fixed-register completion", t, latency_cycles)?
-                }
-                _ => checked_cycle_add("fixed-register completion", t, 1)?,
-            };
-            self.warps[wix].register_ready.retain(|entry| entry.ready_at > t);
-            if let Some(status) = fixed_latency_status {
-                issue_record_fixed_register_writes(
-                    &mut self.warps[wix].register_ready,
-                    status,
-                    inst.effective_lane_mask(),
-                    fixed_register_ready_at,
-                );
-            }
+            let observe_register_result = inst.effective_lane_mask() != 0
+                && matches!(self.mem, MemModel::Flat)
+                && fixed_latency_status.and_then(|s| s.projected()).is_some_and(|p| {
+                    p.destinations().iter().any(|dst| !dst.register().is_constant())
+                });
 
             // The instruction has passed its IMC probe and is now dispatched;
             // touch each resident line in the cloned cache state.  A line that
@@ -12850,7 +12921,7 @@ impl<'a> SmCore<'a> {
                     &self.params,
                     self.mem.const_l1_mut(),
                     write_barrier,
-                    observe_async_copy,
+                    observe_async_copy || observe_register_result,
                 )?
             };
             if self.params.resource_source() == IssueResourceSource::Sm120Alpha
@@ -12895,12 +12966,34 @@ impl<'a> SmCore<'a> {
             if let Some(service_done) = sm120_flat_service_completion
                 && (write_barrier.is_some()
                     || control.read_barrier.is_some()
-                    || observe_async_copy)
+                    || observe_async_copy || observe_register_result)
             {
                 data_ready = Some(data_ready.map_or(service_done, |ready| ready.max(service_done)));
             }
             if let Some(service_done) = sm120_flat_store_retire_completion {
                 data_ready = Some(data_ready.map_or(service_done, |ready| ready.max(service_done)));
+            }
+            // Register results and scoreboard counters must share the same
+            // producer completion. A load is not ready at dispatch+1 simply
+            // because its consumer lacks a compiler barrier annotation.
+            if observe_register_result {
+                let completion = match pipeline_class {
+                    PipelineClass::ScalarAlu { latency_cycles, .. } => {
+                        let base = checked_cycle_add("scalar register completion", t, latency_cycles)?;
+                        scalar_execution_pipeline_plan.as_ref()
+                            .and_then(|plan| plan.next.release_times[sc].back().copied())
+                            .map_or(base, |ready| base.max(ready))
+                    }
+                    _ => data_ready.unwrap_or(self.params.non_memory_ready(t)?),
+                };
+                if let Some(status) = fixed_latency_status {
+                    self.warps[wix].register_ready.retain(|entry| entry.ready_at > t);
+                    issue_record_fixed_register_writes(
+                        &mut self.warps[wix].register_ready, status,
+                        inst.effective_lane_mask(), completion,
+                    );
+                    self.local_completion_time = Some(self.local_completion_time.unwrap_or(0).max(completion));
+                }
             }
             if cctl_invalidate_all && matches!(self.mem, MemModel::L1Shared(_)) {
                 self.invalidate_l1_all()?;

@@ -56,6 +56,8 @@ extern "C" __device__ __noinline__ void instrument_inst(
 
   const int active_mask = __ballot_sync(__activemask(), 1);
   const int predicate_mask = __ballot_sync(__activemask(), pred);
+  uint64_t device_clock;
+  asm volatile("mov.u64 %0, %%clock64;" : "=l"(device_clock));
   const int laneid = get_laneid();
   const int first_laneid = __ffs(active_mask) - 1;
 
@@ -90,6 +92,7 @@ extern "C" __device__ __noinline__ void instrument_inst(
   ma.sync_register_id = SECRET_UREG_DESC_NOT_USED;
   ma.sync_phase = 0;
   ma.sync_width = 0;
+  ma.device_clock = device_clock;
   if (memory_type == MEM_TYPE::TMA) {
     ma.mem_type = MEM_TYPE::TMA;
     ma.width = 0;
@@ -351,10 +354,12 @@ extern "C" __device__ __noinline__ void instrument_inst(
  * if a `nvbit_insert_call` site references it).
  */
 extern "C" __device__ __noinline__ void record_phase_clock(
-    uint32_t phase_id, uint32_t phase_kind, uint32_t clock_role,
+    int guard_predicate, uint32_t phase_id, uint32_t phase_kind, uint32_t clock_role,
     uint64_t plaunch_index_for_inject, uint64_t pphase_channel_dev) {
 
-  const int active_mask = __ballot_sync(__activemask(), 1);
+  // Predicated-off EXIT/RET instructions are not function completions.
+  const unsigned active_mask = __ballot_sync(__activemask(), guard_predicate != 0);
+  if (active_mask == 0) return;
   const int laneid = get_laneid();
   const int first_laneid = __ffs(active_mask) - 1;
 

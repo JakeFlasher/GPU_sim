@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cuda_runtime.h>
+#include <cuda_profiler_api.h>
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -48,3 +49,43 @@ struct Sm120CudaEventScope {
         if (stop) cudaEventDestroy(stop);
     }
 };
+
+// One prewarmed launch per event pair. Host submission may still contribute to
+// very short CUDA-event intervals; it is reported, never equated to NCU time.
+// reset() restores any in-place input outside the measured bracket.
+template<class Launch, class Reset>
+inline void sm120_measure_launches(const char* label, Launch launch, Reset reset,
+                                  cudaStream_t stream = 0) {
+    auto require = [](cudaError_t error, const char* action) {
+        if (error != cudaSuccess) {
+            fprintf(stderr, "%s: %s\n", action, cudaGetErrorString(error));
+            exit(2);
+        }
+    };
+    for (int warm = 0; warm < 3; ++warm) {
+        reset(); launch();
+        require(cudaGetLastError(), "warm-up launch");
+    }
+    require(cudaStreamSynchronize(stream), "warm-up stream");
+    cudaEvent_t begin{}, end{};
+    require(cudaEventCreate(&begin), "create start event");
+    require(cudaEventCreate(&end), "create stop event");
+    const int repetitions = sm120_event_reps();
+    for (int rep = 0; rep < repetitions; ++rep) {
+        reset();
+        require(cudaStreamSynchronize(stream), "input reset stream");
+        require(cudaProfilerStart(), "start measured launch range");
+        require(cudaEventRecord(begin, stream), "record start event");
+        launch();
+        require(cudaGetLastError(), "measured launch");
+        require(cudaEventRecord(end, stream), "record stop event");
+        require(cudaEventSynchronize(end), "wait stop event");
+        require(cudaProfilerStop(), "stop measured launch range");
+        float ms = 0;
+        require(cudaEventElapsedTime(&ms, begin, end), "elapsed event time");
+        printf("SM120_CUDA_EVENT label=%s repetition=%d launches=1 warmups=3 elapsed_ms=%.9g\n",
+               label, rep, ms);
+    }
+    require(cudaEventDestroy(begin), "destroy start event");
+    require(cudaEventDestroy(end), "destroy stop event");
+}

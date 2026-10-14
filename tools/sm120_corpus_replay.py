@@ -20,7 +20,7 @@ from sm120_replay_bench import (
     DEFAULT_SIM,
     discover_captures,
     load_static_metadata,
-    synthesize_legacy_sidecar,
+    synthesize_static_sidecar,
 )
 
 
@@ -57,7 +57,6 @@ def replay(capture: Path, relative: str, control: Path, args, mode: str, logs: P
             wall_ns = time.perf_counter_ns() - started
             row = {"status": "launch_error", "detail": str(error), "returncode": None}
     row.update(canonical_capture=relative, capture_dir=str(capture),
-               control_path=str(control), command=command, stderr_path=str(stderr_path),
                driver_wall_ms=wall_ns / 1_000_000)
     return row
 
@@ -94,7 +93,7 @@ def main() -> int:
             if metadata is None:
                 raise ValueError("native static metadata missing")
             control.parent.mkdir(parents=True, exist_ok=True)
-            synthesize_legacy_sidecar(capture, metadata, control)
+            synthesize_static_sidecar(capture, metadata, control)
         except (OSError, ValueError, KeyError, TypeError) as failure:
             error = str(failure)
         prepared.append((capture, relative, control, error))
