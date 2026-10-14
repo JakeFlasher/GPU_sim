@@ -598,6 +598,9 @@ pub(super) fn project(
                     .and_then(|cycles| cycles.checked_add(1))
             })
             .unwrap_or(0);
+        let modeled_elapsed = modeled_elapsed
+            .checked_add(super::sm120_front_end_envelope_cycles(result).unwrap_or(0))
+            .unwrap_or(u64::MAX);
         let smsp_active_cycles: u128 = result
             .per_sm()
             .values()
@@ -677,6 +680,31 @@ pub(super) fn project(
                 "observed TMA store payload sectors; conditional demand accounting, not a DRAM acknowledgment",
             ),
         );
+        // SM120 already retains the NCU-style logical pipeline projection in
+        // the trace metrics. Publish it here as an approximate instruction
+        // surface without claiming dynamic hardware pipe selection.
+        for (pipeline, ncu_metric) in [
+            ("fma", "smsp__inst_executed_pipe_fma.sum"),
+            ("alu", "smsp__inst_executed_pipe_alu.sum"),
+            ("tensor", "smsp__inst_executed_pipe_tensor.sum"),
+            ("lsu", "smsp__inst_executed_pipe_lsu.sum"),
+        ] {
+            let activity = result
+                .trace_metrics()
+                .by_ncu_pipeline
+                .get(pipeline)
+                .cloned()
+                .unwrap_or_default();
+            m.insert(
+                format!("ncu_pipeline_{pipeline}_instructions"),
+                Metric::approximate_count(
+                    Some(ncu_metric),
+                    "inst",
+                    u128::from(activity.warp_instructions),
+                    "SM120 trace opcode projection for an NCU logical pipeline; dynamic hardware pipe selection is unresolved",
+                ),
+            );
+        }
         m.insert(
             "alpha_active_sm_count".to_owned(),
             Metric::count(

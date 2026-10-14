@@ -1498,6 +1498,10 @@ pub struct TimingReport {
     /// completion semantics.  The SM120 alpha path deliberately reports an
     /// approximate internal frontier when it flattens async/TMA demands.
     pub completion_frontier_semantics: &'static str,
+    /// Effective SM120 GPC front-end envelope. This is separate from the raw
+    /// SM-active frontier and is not a hardware clock conversion.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effective_gpc_front_end_envelope_cycles: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub alpha_approximation: Option<AlphaApproximationReport>,
     pub diagnostic_last_issue_cycles: u64,
@@ -1967,19 +1971,47 @@ fn tail_report(tails: TailFlags) -> TailReport {
     }
 }
 
-fn completion_frontier_report(value: ModeledCompletionFrontier) -> CompletionFrontierReport {
-    match value {
+pub(crate) fn sm120_front_end_envelope_cycles(
+    result: &FullKernelReplayResult,
+) -> Option<u64> {
+    if result.arch() != sim_arch::ArchId::Sm120 {
+        return None;
+    }
+    let config = Sm120AlphaConfig::from_m8_m9();
+    if config.front_end_line_cycles_denominator == 0 {
+        return None;
+    }
+    let lines = result.front_end().compulsory_instruction_read_sectors();
+    let scaled = lines
+        .checked_mul(config.front_end_line_cycles_numerator)?
+        .checked_add(config.front_end_line_cycles_denominator - 1)?
+        / config.front_end_line_cycles_denominator;
+    config.front_end_base_cycles.checked_add(scaled)
+}
+
+fn effective_gpc_completion_frontier_report(
+    result: &FullKernelReplayResult,
+) -> Result<CompletionFrontierReport, RunError> {
+    let envelope = sm120_front_end_envelope_cycles(result).unwrap_or(0);
+    let add = |cycles: Option<u64>| match cycles {
+        Some(value) => value
+            .checked_add(envelope)
+            .map(Some)
+            .ok_or_else(|| RunError::new("timing projection", "GPC front-end envelope overflow")),
+        None => Ok(None),
+    };
+    Ok(match result.modeled_completion_frontier() {
         ModeledCompletionFrontier::Complete { cycles } => {
-            CompletionFrontierReport::Complete { cycles }
+            CompletionFrontierReport::Complete { cycles: add(cycles)? }
         }
         ModeledCompletionFrontier::Incomplete {
             lower_bound_cycles,
             unmodeled_tails,
         } => CompletionFrontierReport::IncompleteUnmodeledRetirementTails {
-            lower_bound_cycles,
+            lower_bound_cycles: add(lower_bound_cycles)?,
             unmodeled_tails: tail_report(unmodeled_tails),
         },
-    }
+    })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2309,11 +2341,14 @@ fn launch_report(
     }
     let readiness_schema_version = readiness.schema_version();
     let timing = Some(TimingReport {
-        completion_frontier_semantics: if alpha_approximation_report(&result).is_some() {
+        completion_frontier_semantics: if sm120_front_end_envelope_cycles(&result).is_some() {
+            "model_internal_gpc_effective_front_end_envelope_not_physical_completion"
+        } else if alpha_approximation_report(&result).is_some() {
             "model_internal_approximate_not_physical_completion"
         } else {
             "model_internal_frontier"
         },
+        effective_gpc_front_end_envelope_cycles: sm120_front_end_envelope_cycles(&result),
         alpha_approximation: alpha_approximation_report(&result),
         diagnostic_last_issue_cycles: result.diagnostic_last_issue_cycles(),
         last_processed_modeled_system_event_time: result.last_processed_modeled_system_event_time(),
@@ -2325,7 +2360,7 @@ fn launch_report(
         }),
         sm_active_observation_frontier: result.sm_active_observation_frontier().map(Into::into),
         gpc_observation_frontier: result.gpc_observation_frontier().map(Into::into),
-        completion_frontier: completion_frontier_report(result.modeled_completion_frontier()),
+        completion_frontier: effective_gpc_completion_frontier_report(&result)?,
         readiness: ReadinessReport {
             schema_version: readiness_schema_version,
             diagnostics: readiness,

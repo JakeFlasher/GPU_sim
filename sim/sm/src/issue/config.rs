@@ -91,8 +91,9 @@ pub struct Sm120AlphaConfig {
     pub mad_initiation_interval_cycles: u64,
     pub add_initiation_interval_cycles: u64,
     /// Logical front-end warm/footprint envelope calibrated from P10 endpoint
-    /// probes.  It is applied only by the fast alpha stage and is not an
-    /// instruction-cache geometry claim.
+    /// probes. It is an effective GPC observation envelope, not an
+    /// instruction-cache geometry claim; the fast stage and full SM120 GPC
+    /// projection may consume it.
     pub front_end_base_cycles: u64,
     pub front_end_line_cycles_numerator: u64,
     pub front_end_line_cycles_denominator: u64,

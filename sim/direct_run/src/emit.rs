@@ -938,6 +938,12 @@ fn single_binding_cycles(result: &FullKernelReplayResult) -> Result<BindingCycle
     if let Some(cycles) = result.modeled_completion_frontier().lower_bound_cycles() {
         frontier = frontier.max(cycles);
     }
+    if let Some(envelope) = super::sm120_front_end_envelope_cycles(result) {
+        frontier = frontier.checked_add(envelope).ok_or(EmitError::CounterOverflow {
+            key: "exec_cycles_gpc_max",
+            operation: "SM120 GPC front-end envelope",
+        })?;
+    }
     Ok(BindingCycles::from_aggregated_frontier(frontier))
 }
 
