@@ -76,11 +76,9 @@ use crate::issue::{
     AsyncInstrumentationOrderDiagnostics, BlockReplay, InstrumentationOrderAnchor, IssueError,
     IssueModelParams, IssueResourceSource, MemoryAdmissionCandidate, MemoryServiceCandidate,
     PayloadStoreSite, ReplayInst, SharedMemoryResidency, SmSimResult, TailFlags, WarpReplay,
-    simulate_sm_with_residency, validate_memory_admission_candidates,
+    MAX_ASYNC_DECISION_SNAPSHOTS, simulate_sm_with_residency, validate_memory_admission_candidates,
     validate_memory_service_candidates,
 };
-
-const MAX_LAUNCH_ASYNC_DECISION_SNAPSHOTS: usize = 1_024;
 
 fn append_bounded_async_decision_snapshots(
     metrics: &mut TraceMetrics,
@@ -93,7 +91,7 @@ fn append_bounded_async_decision_snapshots(
         .ok_or(IssueError::CounterOverflow {
             counter: "launch async decision snapshots dropped",
         })?;
-    let available = MAX_LAUNCH_ASYNC_DECISION_SNAPSHOTS
+    let available = MAX_ASYNC_DECISION_SNAPSHOTS
         .saturating_sub(metrics.async_decision_snapshots.len());
     let kept = available.min(snapshots.len());
     metrics

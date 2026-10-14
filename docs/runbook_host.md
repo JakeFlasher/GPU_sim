@@ -19,17 +19,16 @@ python3 tools/sm120_corpus_replay.py \
   --memory-mode l1 \
   --fast-memory-mode flat \
   --sm120-effective-l1 1024:none:50:512 \
-  --sm120-protocol-split \
   --ncu-shaped-metrics \
   --workers 12
 ```
 
 The explicit `--workers 12` is mandatory for every complete-corpus
-invocation.  Full replay runs first; the complementary fast stage is
-flat-frontier-only.  The effective `50/512` profile and protocol split are
-conditional/opt-in scenarios, not the default physical SM120 model.  The
-driver publishes `full.jsonl.zst` and `fast.jsonl.zst`; no new uncompressed
-replay JSONL is produced.
+invocation. Full replay runs first; the complementary fast stage is
+flat-frontier-only. The effective `50/512` profile is a conditional cache
+scenario; protocol identity is built into the default SM120 route. The driver
+publishes `full.jsonl.zst` and `fast.jsonl.zst`; no new uncompressed replay
+JSONL is produced.
 
 The release binary is `/root/GPU_simulator_rebase/sim/target/release/sim-run`.
 Use the RTX 5090 architecture card in `arch_profiles/cards/` and keep replay
@@ -56,9 +55,9 @@ replay parameters.
 ## Effective-L1 conditional diagnostic
 
 The optional cache scenario is intentionally separate from the canonical flat
-run.  The 12-root list in `HELDOUT_SCOPE.md` is historical development
+run. The former 12-root cache slice is archived historical development
 material, not an active held-out guarantee; the complete 339-root corpus has
-already been exposed.  Use a frozen real subset only for descriptive
+already been exposed. Use a newly predeclared real subset only for descriptive
 mechanism work and report it as development-exposed.
 
 ```bash

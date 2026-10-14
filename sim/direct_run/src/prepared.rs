@@ -84,7 +84,6 @@ pub struct PreparedReplay {
     hypothetical_issue_ports: Option<u32>,
     architecture_spec: Option<String>,
     sm120_alpha: bool,
-    sm120_protocol_split: bool,
     launches: Vec<PreparedLaunchIdentity>,
 }
 
@@ -126,7 +125,7 @@ impl PreparedReplay {
         let control = load_control_sidecar(&config.control_bits, arch, config.sm120_alpha)?;
         super::validate_direct_control_identity(&config.control_bits, exec, &control)?;
         let schedules = if config.sm120_alpha {
-            build_schedules_sm120_alpha(exec, &control, super::alpha_config(config))
+            build_schedules_sm120_alpha(exec, &control, super::alpha_config())
                 .map_err(at("SM120 alpha schedule"))?
         } else {
             build_schedules(exec, &control).map_err(at("schedule"))?
@@ -181,7 +180,6 @@ impl PreparedReplay {
                 .as_ref()
                 .map(|path| path.display().to_string()),
             sm120_alpha: config.sm120_alpha,
-            sm120_protocol_split: config.sm120_protocol_split,
             launches,
         })
     }
@@ -318,11 +316,7 @@ impl PreparedReplay {
             l1_resident_writeback: false,
             fast_frontier_only: false,
             sm120_alpha: self.sm120_alpha,
-            sm120_protocol_split: self.sm120_protocol_split,
-            sm120_alpha_config: self.sm120_alpha.then(|| {
-                sim_sm::Sm120AlphaConfig::from_m8_m9()
-                    .with_protocol_split(self.sm120_protocol_split)
-            }),
+            sm120_alpha_config: self.sm120_alpha.then(super::alpha_config),
             sm120_alpha_profile_id: self.sm120_alpha.then_some(Sm120AlphaConfig::PROFILE_ID),
             sm120_effective_l1: None,
             sm120_effective_l2: None,

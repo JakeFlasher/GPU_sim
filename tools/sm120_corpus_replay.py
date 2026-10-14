@@ -156,8 +156,6 @@ def replay(capture: Path, relative: str, control: Path, args, mode: str, logs: P
     command = [str(args.sim_bin), "--trace", str(capture), "--control", str(control),
                "--arch-card", str(args.arch_card), "--sm120-alpha", "--mode",
                str(memory_mode)]
-    if args.sm120_protocol_split:
-        command.append("--sm120-protocol-split")
     if args.sm120_effective_l1 and memory_mode != "flat":
         command.extend(("--sm120-effective-l1", args.sm120_effective_l1))
     if args.sm120_effective_l2 and memory_mode != "flat":
@@ -245,8 +243,6 @@ def main() -> int:
                         help="effective L2 scenario CAPACITY_BYTES:SLICES:ASSOCIATIVITY (opt-in l1-l2 only)")
     parser.add_argument("--carded-dram", action="store_true",
                         help="enable the architecture-card DRAM path (for l1-l2 mode)")
-    parser.add_argument("--sm120-protocol-split", action="store_true",
-                        help="opt into source-qualified PHASECHK routing")
     parser.add_argument("--ncu-shaped-metrics", action="store_true",
                         help="emit typed NCU metric projection for full mode (never fast mode)")
     parser.add_argument("--timeout", type=float, default=1200, help="seconds per complete capture replay")
@@ -305,7 +301,6 @@ def main() -> int:
                "sm120_effective_l1": args.sm120_effective_l1,
                "sm120_effective_l2": args.sm120_effective_l2,
                "carded_dram": bool(args.carded_dram),
-               "sm120_protocol_split": bool(args.sm120_protocol_split),
                "ncu_shaped_metrics": bool(args.ncu_shaped_metrics and "full" in modes),
                "ncu_shaped_metrics_requested": bool(args.ncu_shaped_metrics),
                "workers": args.workers,

@@ -15,6 +15,10 @@ Replay and comparison JSONL are streamed as `.jsonl.zst` through
 found. Raw capture sidecars (`tma_trace.jsonl`, `sync_trace.jsonl`) and
 `workload.jsonl` manifests are not replay artifacts and remain unchanged.
 
+SM120 alpha uses the protocol-specific phase-query route by default; no
+separate protocol-routing switch is required. Effective cache options remain
+explicit conditional scenarios.
+
 ## Effective cache scenario
 
 SM120 remains flat by default. For a bounded real-device cache experiment, the

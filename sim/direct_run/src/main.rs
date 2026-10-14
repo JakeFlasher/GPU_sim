@@ -22,7 +22,6 @@ const USAGE: &str = "Usage: sim-run --trace DIR --control FILE --arch-card FILE 
 [--architecture-spec FILE] \
 [--fast-frontier-only] \
 [--sm120-alpha] \
-[--sm120-protocol-split] \
 [--sm120-effective-l1 CAPACITY:MSHR|none:HIT:MISS] \
 [--sm120-effective-l2 CAPACITY:SLICES:ASSOCIATIVITY] \
 [--latent-envelope] \
@@ -172,7 +171,6 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
     let mut architecture_spec = None;
     let mut fast_frontier_only = false;
     let mut sm120_alpha = false;
-    let mut sm120_protocol_split = false;
     let mut sm120_effective_l1 = None;
     let mut sm120_effective_l2 = None;
     let mut latent_envelope = false;
@@ -327,9 +325,6 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
             value if value == OsStr::new("--sm120-alpha") => {
                 sm120_alpha = true;
             }
-            value if value == OsStr::new("--sm120-protocol-split") => {
-                sm120_protocol_split = true;
-            }
             value if value == OsStr::new("--sm120-effective-l1") => {
                 let raw = take_value(&mut args, "--sm120-effective-l1")?;
                 let raw = raw.to_str().ok_or_else(|| {
@@ -430,12 +425,6 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
             }
         }
     }
-    if sm120_protocol_split && !sm120_alpha {
-        return Err(RunError::new(
-            "arguments",
-            "--sm120-protocol-split requires --sm120-alpha",
-        ));
-    }
     Ok(Some(RunConfig {
         trace_dir: trace_dir.ok_or_else(|| RunError::new("arguments", "--trace is required"))?,
         control_bits: control_bits
@@ -457,7 +446,6 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
         ncu_shaped_metrics,
         fast_frontier_only,
         sm120_alpha,
-        sm120_protocol_split,
         sm120_effective_l1,
         sm120_effective_l2,
         ncu_csv,

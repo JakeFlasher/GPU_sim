@@ -142,9 +142,9 @@ pub enum OpClass {
     /// control bits and dynamic memory class; independent execution-resource
     /// timing, when characterized, is carried by [`PipelineClass`].
     Other,
-    /// Source-qualified mbarrier phase query.  This is deliberately distinct
-    /// from `Other` so the protocol-split path cannot accidentally inherit the
-    /// committed async-copy-group wait class; it has no group-state mutation.
+    /// Source-qualified mbarrier phase query. This is deliberately distinct
+    /// from `Other` so it cannot inherit the committed async-copy-group wait
+    /// class; it has no group-state mutation.
     MBarrierPhaseQuery,
 }
 
@@ -533,12 +533,7 @@ fn alpha_mem_role(opcode_text: &str) -> MemRole {
     }
 }
 
-fn alpha_ldgsts_l1_policy(opcode_text: &str) -> Option<LdgstsL1Policy> {
-    let _ = opcode_text;
-    None
-}
-
-fn alpha_op_class(opcode_text: &str, protocol_split: bool) -> OpClass {
+fn alpha_op_class(opcode_text: &str) -> OpClass {
     match opcode_head(opcode_text) {
         "BAR" => OpClass::BlockBarrier,
         // Full-replay-only alpha async protocol. Keep the existing explicit
@@ -550,14 +545,9 @@ fn alpha_op_class(opcode_text: &str, protocol_split: bool) -> OpClass {
         // legacy group state prevents a tensor-memory submission from
         // fabricating a committed async-copy group.
         "UTMALDG" | "UTMASTG" | "UTMACMDFLUSH" | "UBLKCP" => OpClass::Other,
-        // Keep the legacy effective timing proxy in the default alpha path;
-        // `ProtocolOp::MBarrierPhaseQuery` preserves the native namespace and
-        // prevents this proxy from being mistaken for semantic identity. The
-        // source-qualified correction remains an opt-in research candidate
-        // until a full-corpus/Ncu comparison supports activating it.
-        "SYNCS" if opcode_text.contains("PHASECHK") && !protocol_split => {
-            OpClass::AsyncCopyWait
-        }
+        // A phase query observes mbarrier state; it is not an async-copy-group
+        // commit or wait. Keep that semantic distinction in the default alpha
+        // route while retaining ordinary issue-cost handling below.
         "SYNCS" if opcode_text.contains("PHASECHK") => OpClass::MBarrierPhaseQuery,
         _ => match parse_dependency_barrier(opcode_text) {
             Some(DependencyBarrierOperand::AsyncCopyWait(_)) => OpClass::AsyncCopyWait,
@@ -1055,13 +1045,13 @@ fn build_schedules_with_pipeline_arch_and_alpha(
                     mem_role_of_checked(&inst.opcode_text, decode_arch.token())?
                 };
                 let ldgsts_l1_policy = if alpha.is_some() {
-                    alpha_ldgsts_l1_policy(&inst.opcode_text)
+                    None
                 } else {
                     classify_ldgsts_l1_policy(&inst.opcode_text, decode_arch)
                         .map_err(ProgramError::LdgstsCacheClassification)?
                 };
                 let op_class = if alpha.is_some() {
-                    alpha_op_class(&inst.opcode_text, alpha.is_some_and(|a| a.protocol_split))
+                    alpha_op_class(&inst.opcode_text)
                 } else {
                     classify(
                         &inst.opcode_text,
@@ -1108,13 +1098,9 @@ fn build_schedules_with_pipeline_arch_and_alpha(
                     parse_async_copy_wait(&inst.opcode_text).unwrap_or(0);
                 let fixed_latency_operands =
                     project_fixed_latency_operands(&inst.opcode_text, inst.control, sidecar_arch);
-                // `PHASECHK` is intentionally retained as the legacy
-                // effective async-wait proxy unless the opt-in protocol split
-                // is active.  It is not a DEPBAR group wait, so the old
-                // bidirectional assertion incorrectly panicked in debug
-                // builds for a valid legacy phase-query form.  Assert only
-                // the narrower implication that an actually parsed DEPBAR
-                // async wait receives the async-group class.
+                // `PHASECHK` is a mbarrier query, not a DEPBAR group wait. The
+                // debug assertion below checks only the narrower implication
+                // that a parsed DEPBAR async wait receives its group class.
                 if parse_async_copy_wait(&inst.opcode_text).is_some() {
                     debug_assert_eq!(op_class, OpClass::AsyncCopyWait);
                 }

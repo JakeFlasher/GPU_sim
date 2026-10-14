@@ -116,6 +116,8 @@ use crate::sass_operands::{
 
 pub use sim_mem::AccessKind;
 
+pub(crate) const MAX_ASYNC_DECISION_SNAPSHOTS: usize = 1_024;
+
 mod config;
 pub use config::{IssueModelParams, IssueResourceSource, Sm120AlphaConfig};
 pub(crate) use config::{checked_cycle_add, SharedMemoryResidency};
@@ -1106,7 +1108,6 @@ impl ReadinessDiagnostics {
         // Snapshots are optional diagnostics.  Keep the serialized report
         // bounded even for very large multi-SM launches; the dropped count
         // preserves the fact that sampling was truncated.
-        const MAX_ASYNC_DECISION_SNAPSHOTS: usize = 1_024;
         next.async_decision_snapshots_dropped = checked_readiness_add(
             "readiness.async_decision_snapshots_dropped",
             next.async_decision_snapshots_dropped,

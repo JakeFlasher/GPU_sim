@@ -140,6 +140,10 @@ physical gaps should become scoped effective models with residual-error
 reporting rather than indefinite blockers. Existing bans on fixtures, NCU
 fitting, Accel-Sim, and premature broad replay remain in force.
 
+SM120 alpha routes `SYNCS.PHASECHK` through its protocol-specific mbarrier
+class by default. The superseded `--sm120-protocol-split` option is no longer
+part of the CLI or replay runner.
+
 ### Clarification of the PhD research boundary (2026-10-14)
 
 These are university PhD research projects. Researchers have no access to and

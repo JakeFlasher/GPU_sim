@@ -22,8 +22,8 @@ and disables independent dual-issue widening. It cannot alter traced semantics.
 
 Package `sim-run` (`sim/direct_run`) provides the direct CLI and `sim_direct_run`
 library, including the native metric emitter. NCU joins add observations after
-replay, never model inputs. NCU joins add observations after replay, never
-model inputs. See [components](COMPONENTS.md) and [profiles](archprofile.md).
+replay, never model inputs. See [components](COMPONENTS.md) and
+[profiles](archprofile.md).
 
 ## Custom functional/resource model
 

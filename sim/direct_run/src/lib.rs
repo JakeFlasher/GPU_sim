@@ -220,9 +220,6 @@ pub struct RunConfig {
     /// never changes the ordinary SM120 fail-closed path and is intentionally
     /// separate from SM86 compatibility or carded resources.
     pub sm120_alpha: bool,
-    /// Opt-in source-qualified PHASECHK protocol split. The default retains
-    /// the legacy effective timing proxy for comparability.
-    pub sm120_protocol_split: bool,
     /// Optional measured effective L1 envelope for SM120 cache-mode replay.
     /// Without this field SM120 remains on the conservative flat lane.
     pub sm120_effective_l1: Option<Sm120EffectiveL1Config>,
@@ -637,7 +634,7 @@ fn resolve_issue_with_metadata(
                 "--sm120-alpha cannot combine with --architecture-spec or --hypothetical-issue-ports",
             ));
         }
-        let alpha = alpha_config(config);
+        let alpha = alpha_config();
         let issue = IssueModelParams::from_card_alpha(arch, card, alpha)
             .map_err(at("SM120 alpha issue configuration"))?;
         let issue = config.sm120_effective_l1.map_or(Ok(issue), |effective| {
@@ -694,8 +691,8 @@ fn resolve_issue_with_metadata(
     Ok((issue, architecture_spec_issue_ports))
 }
 
-pub(crate) fn alpha_config(config: &RunConfig) -> Sm120AlphaConfig {
-    Sm120AlphaConfig::from_m8_m9().with_protocol_split(config.sm120_protocol_split)
+pub(crate) const fn alpha_config() -> Sm120AlphaConfig {
+    Sm120AlphaConfig::from_m8_m9()
 }
 
 /// Resolve the deliberately narrow architecture-spec bridge into the one
@@ -1072,8 +1069,6 @@ pub struct RunReport {
     pub fast_frontier_only: bool,
     #[serde(skip_serializing_if = "is_false")]
     pub sm120_alpha: bool,
-    #[serde(skip_serializing_if = "is_false")]
-    pub sm120_protocol_split: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sm120_alpha_config: Option<Sm120AlphaConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2785,7 +2780,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
     #[cfg(feature = "performance-counters")]
     let schedule_started = Instant::now();
     let schedules = if config.sm120_alpha {
-        sim_sm::build_schedules_sm120_alpha(exec, &control, alpha_config(config))
+        sim_sm::build_schedules_sm120_alpha(exec, &control, alpha_config())
             .map_err(at("SM120 alpha schedule"))?
     } else {
         build_schedules(exec, &control).map_err(at("schedule"))?
@@ -2943,7 +2938,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
                     &loc,
                     schedule,
                     &arch_card,
-                    alpha_config(config),
+                    alpha_config(),
                 )
             } else {
                 sim_sm::fast_frontier_for_trace(&trace, &loc, schedule, &arch_card)
@@ -2984,8 +2979,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
             l1_resident_writeback: config.l1_resident_writeback,
             fast_frontier_only: true,
             sm120_alpha: config.sm120_alpha,
-            sm120_protocol_split: config.sm120_protocol_split,
-            sm120_alpha_config: config.sm120_alpha.then(|| alpha_config(config)),
+            sm120_alpha_config: config.sm120_alpha.then(alpha_config),
             sm120_alpha_profile_id: config.sm120_alpha.then_some(Sm120AlphaConfig::PROFILE_ID),
             sm120_effective_l1: config.sm120_effective_l1,
             sm120_effective_l2: config.sm120_effective_l2,
@@ -3185,8 +3179,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
         l1_resident_writeback: config.l1_resident_writeback,
         fast_frontier_only: false,
         sm120_alpha: config.sm120_alpha,
-        sm120_protocol_split: config.sm120_protocol_split,
-        sm120_alpha_config: config.sm120_alpha.then(|| alpha_config(config)),
+        sm120_alpha_config: config.sm120_alpha.then(alpha_config),
         sm120_alpha_profile_id: config.sm120_alpha.then_some(Sm120AlphaConfig::PROFILE_ID),
         sm120_effective_l1: config.sm120_effective_l1,
         sm120_effective_l2: config.sm120_effective_l2,
