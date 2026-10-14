@@ -59,7 +59,7 @@ use sim_trace::{
 
 use sim_mem::{
     ASYNC_COPY_COMPLETION_VALUE_MASK, ASYNC_COPY_COMPOSITE_PAYLOAD_WORK_MAX, CacheOpToken,
-    CoherenceConfig, L2Config, L2Counters, L2Model, LdgstsL1Policy, MemRole,
+    CoherenceConfig, L2Config, L2Counters, L2Model, L2OpClass, LdgstsL1Policy, MemRole,
     encode_async_copy_destination_work, encode_async_copy_payload_and_topology,
     encode_async_copy_payload_work, is_known_untagged_opcode, opcode_head,
 };
@@ -108,6 +108,60 @@ fn append_bounded_async_decision_snapshots(
             counter: "launch async decision snapshots dropped",
         })?;
     Ok(())
+}
+
+/// Build a bounded, address-derived TMA source shadow for L2 metric coverage.
+///
+/// TMA source addresses are present in the native sidecar but are not carried
+/// by the compact dynamic memory payload. The shadow therefore runs in a
+/// separate L2 model, in sidecar instruction order, and never changes the
+/// shared replay cache, timing, DRAM demand, or issue schedule. It is an
+/// effective observer projection: ordinary L1/L2 requests and TMA requests
+/// are not falsely serialized into one physical stream.
+fn observe_tma_l2_shadow(
+    observations: &BTreeMap<TmaObservationKey, TmaObservation>,
+    config: L2Config,
+) -> Result<(u64, u64, u64, u64), ReplayError> {
+    let mut shadow = L2Model::new(config)?;
+    let mut requests = 0_u64;
+    let mut hits = 0_u64;
+    let mut misses = 0_u64;
+    let mut unavailable = 0_u64;
+    for observation in observations.values() {
+        if !observation.is_load {
+            continue;
+        }
+        if observation.source_sector_ids.is_empty() {
+            unavailable = unavailable.checked_add(1).ok_or(IssueError::CounterOverflow {
+                counter: "TMA shadow L2 unavailable source records",
+            })?;
+            continue;
+        }
+        for &sector_id in observation.source_sector_ids.iter() {
+            let line_id = sector_id.div_euclid(4);
+            let sector = u8::try_from(sector_id.rem_euclid(4)).map_err(|_| {
+                ReplayError::System(SystemError::L2(
+                    sim_mem::L2AccessError::SectorOutOfRange { sector: u8::MAX },
+                ))
+            })?;
+            let outcome = shadow
+                .access(line_id, sector, L2OpClass::Read)
+                .map_err(|error| ReplayError::System(SystemError::L2(error)))?;
+            requests = requests.checked_add(1).ok_or(IssueError::CounterOverflow {
+                counter: "TMA shadow L2 requests",
+            })?;
+            if outcome.counted_hit {
+                hits = hits.checked_add(1).ok_or(IssueError::CounterOverflow {
+                    counter: "TMA shadow L2 hits",
+                })?;
+            } else {
+                misses = misses.checked_add(1).ok_or(IssueError::CounterOverflow {
+                    counter: "TMA shadow L2 misses",
+                })?;
+            }
+        }
+    }
+    Ok((requests, hits, misses, unavailable))
 }
 use crate::metrics::TraceMetrics;
 use crate::program::{
@@ -1676,7 +1730,7 @@ pub fn fast_frontier_for_trace(
     if launches != 1 {
         return Err(ReplayError::FastFrontierLaunchScopeUnknown { launches });
     }
-    let extracted = extract_per_sm_blocks(td, loc, schedule, placement, false)?;
+    let extracted = extract_per_sm_blocks(td, loc, schedule, placement, false, None)?;
     if !matches!(&extracted.coverage, ExtractedCoverage::Full(_)) {
         return Err(ReplayError::FastFrontierRequiresFullCoverage);
     }
@@ -2012,7 +2066,7 @@ pub fn sm120_fast_stage_for_trace(
 ) -> Result<FastFrontierSummary, ReplayError> {
     let placement = PlacementConfig::from_arch_card(arch_card, schedule.arch)?;
     require_trace_architecture(td, schedule.arch)?;
-    let extracted = extract_per_sm_blocks(td, loc, schedule, placement, false)?;
+    let extracted = extract_per_sm_blocks(td, loc, schedule, placement, false, None)?;
     let params = IssueModelParams::from_card_alpha(ArchId::Sm120, arch_card, alpha_config)?;
     let mut masks = BTreeMap::new();
     for (launch_index, block) in td.validated_threadblocks_in_launch_order(loc)? {
@@ -3254,6 +3308,7 @@ fn extract_per_sm_blocks(
     schedule: &FunctionSchedule,
     placement: PlacementConfig,
     decode_sectors: bool,
+    tma_shadow_l2: Option<L2Config>,
 ) -> Result<ExtractedKernel, ReplayError> {
     let expected_fuid = schedule.function_unique_id;
     let shared_memory_residency = placement.shared_memory_residency(loc.kernel())?;
@@ -3340,6 +3395,11 @@ fn extract_per_sm_blocks(
     trace_metrics.async_obligations = observations
         .filter(|o| !o.tma.is_empty() || !o.sync.is_empty())
         .map(|o| sim_trace::obligations::ObligationFrontier::from_launch(o, cluster.into()).0);
+    if let (Some(observations), Some(l2)) = (observations, tma_shadow_l2) {
+        let (requests, hits, misses, unavailable) =
+            observe_tma_l2_shadow(&observations.tma, l2)?;
+        trace_metrics.observe_tma_shadow_l2(requests, hits, misses, unavailable)?;
+    }
     let tma_observations = observations.map(|o| &o.tma);
     let sync_observations = observations.map(|o| &o.sync);
     trace_metrics.sidecar_join_wall_ns =
@@ -3766,7 +3826,7 @@ pub(crate) fn admit_launch_coverage(
 ) -> Result<ExtractedCoverage, ReplayError> {
     let placement = PlacementConfig::from_arch_card(arch_card, schedule.arch)?;
     require_trace_architecture(td, schedule.arch)?;
-    Ok(extract_per_sm_blocks(td, loc, schedule, placement, false)?.coverage)
+    Ok(extract_per_sm_blocks(td, loc, schedule, placement, false, None)?.coverage)
 }
 
 /// Fold per-SM results into the kernel-level view, enforcing the
@@ -4556,7 +4616,17 @@ fn replay_kernel_with_schedule_and_l2_and_candidates_with_payload_events(
         shared_memory_residency,
         front_end,
         mut trace_metrics,
-    } = extract_per_sm_blocks(td, loc, schedule, placement, decode_sectors)?;
+    } = extract_per_sm_blocks(
+        td,
+        loc,
+        schedule,
+        placement,
+        decode_sectors,
+        match mode {
+            ReplayMemMode::L1SharedL2 { l2, .. } => Some(l2),
+            _ => None,
+        },
+    )?;
     let instrumentation_order = observe_async_instrumentation_order(&per_sm_blocks, schedule)?;
     #[cfg(feature = "campaign")]
     if matches!(

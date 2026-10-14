@@ -406,6 +406,13 @@ pub struct TraceMetrics {
     pub tma_sidecar_store_payload_bytes: u64,
     pub tma_sidecar_zero_byte_records: u64,
     pub tma_sidecar_oob_or_empty_records: u64,
+    /// Address-derived conditional TMA/L2 shadow stream. These counters are
+    /// separate from the shared replay L2 state and never affect scheduling,
+    /// response timing, or DRAM service.
+    pub tma_shadow_l2_requests: u64,
+    pub tma_shadow_l2_hits: u64,
+    pub tma_shadow_l2_misses: u64,
+    pub tma_shadow_l2_address_unavailable: u64,
     /// Typed synchronization-sidecar observations. These are semantic
     /// joins only; they do not manufacture mbarrier completion timestamps.
     pub sync_sidecar_records_observed: u64,
@@ -690,6 +697,20 @@ impl TraceMetrics {
             &mut self.tma_sidecar_oob_or_empty_records,
             u64::from(observation.oob_or_empty),
         )?;
+        Ok(())
+    }
+
+    pub(crate) fn observe_tma_shadow_l2(
+        &mut self,
+        requests: u64,
+        hits: u64,
+        misses: u64,
+        unavailable: u64,
+    ) -> Result<(), crate::IssueError> {
+        add(&mut self.tma_shadow_l2_requests, requests)?;
+        add(&mut self.tma_shadow_l2_hits, hits)?;
+        add(&mut self.tma_shadow_l2_misses, misses)?;
+        add(&mut self.tma_shadow_l2_address_unavailable, unavailable)?;
         Ok(())
     }
 

@@ -57,7 +57,7 @@ pub struct ObservationKey {
     pub function: i32,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct TmaObservation {
     pub bytes: Option<u64>,
     pub is_load: bool,
@@ -77,6 +77,11 @@ pub struct TmaObservation {
     /// synthesized from payload bytes or profiler counters.
     pub issue_clock: Option<u64>,
     pub completion_clock: Option<u64>,
+    /// Distinct 32-byte source sectors projected from the retained TMA source
+    /// addresses. This is an address-derived observation for the conditional
+    /// TMA/L2 shadow metric; it is not a claim about the engine's request
+    /// granularity or completion timing.
+    pub source_sector_ids: Box<[i64]>,
 }
 
 #[derive(Debug, Default)]
@@ -339,8 +344,36 @@ pub struct AsyncSidecars {
     pub phase_clock: crate::phase_sidecars::PhaseClockEvidence,
 }
 
+#[derive(Deserialize)]
+struct TmaSourceAddress {
+    address: u64,
+    oob: bool,
+}
+
+fn compact_source_sector_ids(
+    values: Option<&[TmaSourceAddress]>,
+) -> Result<Box<[i64]>, &'static str> {
+    let Some(values) = values else {
+        return Ok(Box::new([]));
+    };
+    let mut seen = BTreeSet::new();
+    let mut sectors = Vec::new();
+    for value in values {
+        if value.oob {
+            continue;
+        }
+        let sector = value.address >> 5;
+        let sector = i64::try_from(sector).map_err(|_| "TMA source address exceeds the signed sector-id domain")?;
+        if seen.insert(sector) {
+            sectors.push(sector);
+        }
+    }
+    Ok(sectors.into_boxed_slice())
+}
+
 // Do not flatten a serde map here: it would materialize the enormous address
-// arrays. Unused JSON fields are streamed/skipped without constructing Values.
+// arrays. Only TMA source addresses are decoded into compact distinct sectors;
+// other unused fields remain skipped without constructing Values.
 #[derive(Deserialize)]
 struct Row {
     device_id: i64,
@@ -373,6 +406,7 @@ struct Row {
     values: Option<Vec<u64>>,
     lane_mask: Option<u32>,
     value_mask_complete: Option<bool>,
+    src_addresses: Option<Vec<TmaSourceAddress>>,
 }
 
 impl AsyncSidecars {
@@ -476,6 +510,13 @@ impl AsyncSidecars {
                             row.opcode
                         )));
                     }
+                    let is_load = matches!(head, "UTMALDG" | "UBLKCP");
+                    let source_sector_ids = if is_load {
+                        compact_source_sector_ids(row.src_addresses.as_deref())
+                            .map_err(|message| error(message.to_owned()))?
+                    } else {
+                        Box::new([])
+                    };
                     let obs = TmaObservation {
                         bytes: row.byte_count,
                         // Blackwell lowers the bulk tensor/mbarrier transfer
@@ -483,7 +524,7 @@ impl AsyncSidecars {
                         // spelling as a producer-side load while retaining
                         // the opcode in the sidecar identity; it is not
                         // silently reclassified as ordinary LDGSTS traffic.
-                        is_load: matches!(head, "UTMALDG" | "UBLKCP"),
+                        is_load,
                         is_store: head == "UTMASTG",
                         zero_byte: row.byte_count == Some(0),
                         oob_or_empty: row.zero_byte_disposition.as_deref()
@@ -498,6 +539,7 @@ impl AsyncSidecars {
                         destination_cluster_rank: row.dst_mbar_cluster_cta_id,
                         issue_clock: row.issue_clock,
                         completion_clock: row.completion_clock,
+                        source_sector_ids,
                     };
                     if launch.tma.insert(key, obs).is_some() {
                         return Err(error(format!(
