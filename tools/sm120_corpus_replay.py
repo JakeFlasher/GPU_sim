@@ -163,6 +163,7 @@ def replay(capture: Path, relative: str, control: Path, args, mode: str, logs: P
     if args.carded_dram and mode == "full":
         command.append("--carded-dram")
     if mode == "full":
+        command.extend(("--cache-scope", args.cache_scope))
         command.append("--ncu-shaped-metrics")
     if mode == "fast":
         command.append("--fast-frontier-only")
@@ -235,6 +236,8 @@ def main() -> int:
     parser.add_argument("--mode", choices=("both", "full", "fast"), default="both")
     parser.add_argument("--memory-mode", choices=("l1-l2",), default="l1-l2",
                         help="full replay always models L1 and L2 together; flat/L1-only full replay is forbidden")
+    parser.add_argument("--cache-scope", choices=("launch", "stream-l2"), default="launch",
+                        help="full replay L2 lifetime: launch-cold or persistent ordered stream")
     parser.add_argument("--fast-memory-mode", choices=("flat",), default="flat",
                         help="complementary fast-stage mode; fast SM120 stage is flat-only")
     parser.add_argument("--sm120-effective-l1",
@@ -266,6 +269,8 @@ def main() -> int:
         parser.error("--sm120-effective-l2 applies only to the full l1-l2 stage")
     if args.sm120_effective_l2 and args.memory_mode != "l1-l2":
         parser.error("--sm120-effective-l2 requires --memory-mode l1-l2")
+    if args.cache_scope == "stream-l2" and args.mode == "fast":
+        parser.error("--cache-scope stream-l2 applies only to the full replay stage")
     if args.carded_dram and args.mode == "fast":
         parser.error("--carded-dram applies only to the full l1-l2 stage")
     if args.carded_dram and args.memory_mode != "l1-l2":
@@ -299,6 +304,7 @@ def main() -> int:
                "selected_captures": args.capture,
                "memory_mode": args.memory_mode,
                "fast_memory_mode": args.fast_memory_mode,
+               "cache_scope": args.cache_scope,
                "sm120_effective_l1": None,
                "sm120_effective_l2": None,
                "sm120_effective_l1_override": args.sm120_effective_l1,
