@@ -601,6 +601,17 @@ pub(super) fn project(
         let modeled_elapsed = modeled_elapsed
             .checked_add(super::sm120_front_end_envelope_cycles(result).unwrap_or(0))
             .unwrap_or(u64::MAX);
+        // The raw SM-active terminal frontier is intentionally preserved in
+        // the timing report.  This separate effective projection applies the
+        // same fixed front-end observation envelope used by the GPC metric to
+        // the SM elapsed endpoint, allowing the NCU average-cycle surface to
+        // be reported without relabeling raw SM-active timing as physical
+        // elapsed time.
+        let effective_sm_elapsed_cycles = result
+            .sm_active_terminal_event_time()
+            .and_then(|cycles| {
+                cycles.checked_add(super::sm120_front_end_envelope_cycles(result).unwrap_or(0))
+            });
         let smsp_active_cycles: u128 = result
             .per_sm()
             .values()
@@ -672,6 +683,22 @@ pub(super) fn project(
             ),
         );
         m.insert(
+            "sm_elapsed_cycles_effective".to_owned(),
+            match effective_sm_elapsed_cycles {
+                Some(cycles) => Metric::approximate_count(
+                    Some("sm__cycles_elapsed.avg"),
+                    "cycle",
+                    u128::from(cycles),
+                    "raw modeled SM-active terminal frontier plus the fixed alpha front-end observation envelope; effective NCU projection, not raw SM-active timing or physical elapsed time",
+                ),
+                None => Metric::unavailable(
+                    Some("sm__cycles_elapsed.avg"),
+                    "cycle",
+                    "no modeled SM-active terminal frontier",
+                ),
+            },
+        );
+        m.insert(
             "alpha_tma_store_demand_sectors".to_owned(),
             Metric::count(
                 Some("dram__sectors_op_write.sum"),
@@ -716,7 +743,7 @@ pub(super) fn project(
         );
         return Ok(NativeMetrics {
             schema_version: 1,
-            metric_surface_version: 3,
+            metric_surface_version: 4,
             architecture: result.arch().token(),
             sm_count,
             active_sm_count,
