@@ -867,6 +867,23 @@ pub(super) fn project(
                 ),
             );
         }
+        for (kind, ncu_metric) in [
+            ("global_load", "smsp__sass_inst_executed_op_global_ld.sum"),
+            ("global_store", "smsp__sass_inst_executed_op_global_st.sum"),
+            ("local_load", "smsp__sass_inst_executed_op_local_ld.sum"),
+            ("local_store", "smsp__sass_inst_executed_op_local_st.sum"),
+        ] {
+            let count = trace.memory.get(kind).map_or(0, |row| row.requests);
+            m.insert(
+                format!("{kind}_opcode_count"),
+                Metric::approximate_count(
+                    Some(ncu_metric),
+                    "inst",
+                    u128::from(count),
+                    "trace-derived logical memory operation cardinality; cache route retained separately and physical pipe assignment unresolved",
+                ),
+            );
+        }
         m.insert(
             "alpha_active_sm_count".to_owned(),
             Metric::count(
