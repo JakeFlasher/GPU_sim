@@ -604,6 +604,10 @@ pub(super) fn project(
             .flat_map(|sm| sm.activity.smsp_active_cycles)
             .map(u128::from)
             .sum();
+        let sm_cycle_population = u128::from(sm_count);
+        let elapsed_population_cycles = u128::from(modeled_elapsed)
+            .checked_mul(sm_cycle_population)
+            .unwrap_or(u128::MAX);
         m.insert(
             "alpha_warp_instructions".to_owned(),
             Metric::count(
@@ -628,9 +632,9 @@ pub(super) fn project(
                 Some("sm__inst_executed.avg.per_cycle_elapsed"),
                 "inst/cycle",
                 u128::from(result.instructions_issued()),
-                u128::from(modeled_elapsed),
+                elapsed_population_cycles,
                 true,
-                "trace instruction cardinality divided by the model-relative terminal frontier; not calibrated silicon IPC",
+                "trace instruction cardinality divided by the model-relative terminal frontier and carded SM population; not calibrated silicon IPC",
             ),
         );
         m.insert(
