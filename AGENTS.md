@@ -65,7 +65,7 @@ unrelated work. Inspect the focused diff before and after changes.
 
 ## Context and collaboration
 
-Send a short preamble for multi-step work and updates at material milestones,
+Send a short preamble for multi-step work and updates at material changes,
 not narration of routine commands. Keep the continuation memory short: current
 state, assumptions, evidence, blockers, and next concrete seam. Do not reload
 whole histories after compaction. Report check failures without hiding them.
