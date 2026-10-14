@@ -807,6 +807,19 @@ pub(super) fn project(
                 ),
             );
         }
+        let shared_total_requests: u64 = ["shared_load", "shared_store", "shared_atomic"]
+            .into_iter()
+            .map(|kind| trace.memory.get(kind).map_or(0, |row| row.requests))
+            .sum();
+        m.insert(
+            "shared_opcode_total".to_owned(),
+            Metric::approximate_count(
+                Some("smsp__sass_inst_executed_op_shared.sum"),
+                "inst",
+                u128::from(shared_total_requests),
+                "trace-derived total logical shared-memory opcode cardinality; no physical pipe assignment implied",
+            ),
+        );
         // TMA opcode families are already preserved in the dynamic trace.
         // Emit their instruction cardinalities as a logical operation surface
         // without treating opcode text as a physical engine assignment.
