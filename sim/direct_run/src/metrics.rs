@@ -768,6 +768,26 @@ pub(super) fn project(
                     "effective SM120 shared-memory instruction requests from the real trace",
                 ),
             );
+            let opcode = match kind {
+                "shared_load" => "shared_ld",
+                "shared_store" => "shared_st",
+                "shared_atomic" => "shared_atom",
+                _ => unreachable!("shared metric table has a closed operation set"),
+            };
+            for ncu_metric in [
+                format!("smsp__inst_executed_op_{opcode}.sum"),
+                format!("smsp__sass_inst_executed_op_{opcode}.sum"),
+            ] {
+                m.insert(
+                    format!("{kind}_opcode_{}", ncu_metric.replace('.', "_")),
+                    Metric::approximate_count(
+                        Some(&ncu_metric),
+                        "inst",
+                        requests,
+                        "trace-derived logical shared-memory opcode cardinality; no physical pipe assignment implied",
+                    ),
+                );
+            }
             m.insert(
                 format!("{kind}_bank_wavefronts"),
                 Metric::approximate_count(
