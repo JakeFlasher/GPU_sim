@@ -793,6 +793,9 @@ pub(super) fn project(
         for (kind, ncu_metric) in [
             ("UTMALDG", "smsp__inst_executed_op_tma_ld.sum"),
             ("UTMASTG", "smsp__inst_executed_op_tma_st.sum"),
+            ("LDGSTS", "smsp__inst_executed_op_ldgsts.sum"),
+            ("UTMALDG", "smsp__sass_inst_executed_op_tma_ld.sum"),
+            ("UTMASTG", "smsp__sass_inst_executed_op_tma_st.sum"),
         ] {
             let count: u64 = trace
                 .by_opcode
@@ -801,7 +804,7 @@ pub(super) fn project(
                 .map(|(_, activity)| activity.warp_instructions)
                 .sum();
             m.insert(
-                format!("{kind}_instructions"),
+                format!("{kind}_{}", ncu_metric.replace('.', "_")),
                 Metric::approximate_count(
                     Some(ncu_metric),
                     "inst",
