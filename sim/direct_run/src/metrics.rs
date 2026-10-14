@@ -833,6 +833,40 @@ pub(super) fn project(
                 ),
             );
         }
+        // Additional logical operation classes with unambiguous trace
+        // provenance. These counts do not select a physical pipe.
+        for (key, ncu_metric, count) in [
+            (
+                "branch",
+                "smsp__inst_executed_op_branch.sum",
+                trace.branch_warp_instructions,
+            ),
+            (
+                "global_reduction",
+                "smsp__inst_executed_op_global_red.sum",
+                trace.memory.get("global_reduction").map_or(0, |row| row.requests),
+            ),
+            (
+                "ldsm",
+                "smsp__inst_executed_op_ldsm.sum",
+                trace
+                    .by_opcode
+                    .iter()
+                    .filter(|(opcode, _)| opcode.split('.').next() == Some("LDSM"))
+                    .map(|(_, activity)| activity.warp_instructions)
+                    .sum(),
+            ),
+        ] {
+            m.insert(
+                format!("{key}_opcode_count"),
+                Metric::approximate_count(
+                    Some(ncu_metric),
+                    "inst",
+                    u128::from(count),
+                    "trace-derived logical operation cardinality; no physical pipe assignment implied",
+                ),
+            );
+        }
         m.insert(
             "alpha_active_sm_count".to_owned(),
             Metric::count(
