@@ -16,3 +16,8 @@ Replay and post-replay generated JSONL use `.jsonl.zst` through
 and remain outside that generated-artifact rule. See the proposal `PLAN.md` and
 compact reports for current evidence; superseded engineering history is in the
 local adversarial dossier.
+
+The current effective-model slice also emits model-relative SM/SMSP IPC rows
+(`01307b1c`, refined by `6a634f84`). The complete 339-root full/fast replay
+completed after the change; IPC is an effective projection and does not claim
+physical issue width or a clock crosswalk.
