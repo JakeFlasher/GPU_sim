@@ -4,7 +4,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{self, BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -12,6 +12,34 @@ use serde::{Deserialize, Serialize};
 // Runtime resource bounds, not corpus-selection or measurement gates.
 const MAX_LINE_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_INSTRUCTION_KEYS: usize = 4_000_000;
+
+/// Open one generated sidecar without materialising the compressed stream.
+///
+/// A compressed sibling takes precedence over the legacy plain file.  This is
+/// intentional: the archive migration can leave both names during a staged
+/// copy, and silently choosing the stale plain stream would make the reader
+/// report a different execution.  Decoder errors are returned to the caller,
+/// rather than being treated as an absent sidecar.
+fn open_sidecar_reader(plain: &Path) -> Result<Option<(PathBuf, Box<dyn BufRead>)>, io::Error> {
+    let compressed = plain.with_extension("jsonl.zst");
+    let path = if compressed.is_file() {
+        compressed
+    } else if plain.is_file() {
+        plain.to_path_buf()
+    } else {
+        return Ok(None);
+    };
+    if path.extension().is_some_and(|extension| extension == "zst") {
+        let file = File::open(&path)?;
+        let decoder = zstd::stream::read::Decoder::new(file)?;
+        Ok(Some((path, Box::new(BufReader::new(decoder)))))
+    } else {
+        Ok(Some((
+            path.clone(),
+            Box::new(BufReader::new(File::open(path)?)),
+        )))
+    }
+}
 
 #[derive(Debug, Clone, thiserror::Error)]
 #[error("native async sidecar {path}: {message}")]
@@ -79,6 +107,11 @@ pub struct SyncObservation {
     pub transaction_lane_mask: u32,
     pub query_lane_mask: u32,
     pub exchange_token_lane_mask: u32,
+    /// Preserve the raw barrier operand alongside the legacy offset
+    /// projection. Address equality and shared-memory offset equality are not
+    /// the same lifetime/ownership relation, especially for cluster targets.
+    pub barrier_address_raw: Option<u32>,
+    pub barrier_cluster_rank: Option<u32>,
     /// `ARRIVES.LDGSTSBAR` belongs to the async-copy/group namespace and is
     /// intentionally not folded into ordinary transaction-barrier arrivals.
     pub is_async_copy_arrival: bool,
@@ -86,6 +119,11 @@ pub struct SyncObservation {
     /// semantic ledger contribution, not a physical completion timestamp or
     /// a claim that the encoded operand equals a hardware byte granule.
     pub transaction_delta_bytes: Option<i64>,
+    /// A decoded unsigned operand existed, but its signed ledger delta could
+    /// not be represented exactly.  This is different from an absent
+    /// operand: both are unresolved, but the former must remain visible as a
+    /// precision loss rather than silently becoming zero/no-op.
+    pub operand_precision_lost: bool,
     /// The operand is retained separately from its interpreted delta so lane
     /// multiplicity and an elected/counting lowering cannot be mistaken for a
     /// population count.
@@ -141,7 +179,10 @@ pub enum BarrierOperation {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PhaseQueryKind {
+    /// A potentially suspending phase wait.  A false result is not itself a
+    /// proof that the issuing warp continued issuing instructions.
     TryWait,
+    /// A nonblocking phase test/query.
     TestWait,
     Unknown,
 }
@@ -154,7 +195,10 @@ pub fn barrier_operation(opcode: &str) -> Option<BarrierOperation> {
     if op.starts_with("ARRIVES.LDGSTSBAR") {
         return Some(BarrierOperation::AsyncCopyBarrierArrival);
     }
-    if op.starts_with("SYNCS.PHASECHK") || op.starts_with("SYNCS.TRYWAIT") {
+    if op.starts_with("SYNCS.PHASECHK")
+        || op.starts_with("SYNCS.TRYWAIT")
+        || op.starts_with("SYNCS.TESTWAIT")
+    {
         return Some(BarrierOperation::PhaseQuery);
     }
     if op.starts_with("SYNCS.EXCH") {
@@ -205,12 +249,15 @@ pub fn barrier_operation(opcode: &str) -> Option<BarrierOperation> {
 }
 
 pub fn phase_query_kind(opcode: &str) -> Option<PhaseQueryKind> {
-    if !opcode.starts_with("SYNCS.PHASECHK") && !opcode.starts_with("SYNCS.TRYWAIT") {
+    if !opcode.starts_with("SYNCS.PHASECHK")
+        && !opcode.starts_with("SYNCS.TRYWAIT")
+        && !opcode.starts_with("SYNCS.TESTWAIT")
+    {
         return None;
     }
     if opcode.split('.').any(|field| field == "TRYWAIT") {
         Some(PhaseQueryKind::TryWait)
-    } else if opcode.starts_with("SYNCS.PHASECHK") {
+    } else if opcode.starts_with("SYNCS.PHASECHK") || opcode.starts_with("SYNCS.TESTWAIT") {
         Some(PhaseQueryKind::TestWait)
     } else {
         Some(PhaseQueryKind::Unknown)
@@ -228,11 +275,7 @@ fn merge_phase_query_kind(
     }
 }
 
-fn merge_operand_value(
-    current: &mut Option<u64>,
-    incoming: Option<u64>,
-    conflict: &mut bool,
-) {
+fn merge_operand_value(current: &mut Option<u64>, incoming: Option<u64>, conflict: &mut bool) {
     let Some(incoming) = incoming else {
         return;
     };
@@ -249,14 +292,25 @@ pub struct LaunchObservations {
     pub sync: BTreeMap<ObservationKey, SyncObservation>,
 }
 
+/// How strongly a producer/query relationship is identified by the captured
+/// sidecars.  A protocol-scoped candidate is useful for follow-up analysis,
+/// but must never be counted as an established satisfaction witness.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PhaseAssociation {
+    EstablishedWitness,
+    ProtocolScopedCandidate,
+    Unresolved,
+}
+
 /// A phase-readiness observation is deliberately weaker than an engine
-/// completion timestamp.  It joins one exact producer byte contribution to a
-/// successful phase query in another warp while retaining the query-site clock
-/// bracket (or an upper-only first-success clock).  Query ordering is left to
-/// the evidence consumer because relaxed and acquire forms can lower to the
-/// same Blackwell SASS mnemonic.
+/// completion timestamp.  It joins a producer/query only when the captured
+/// barrier identity and one-to-one generation evidence justify that claim;
+/// otherwise it is retained as a protocol-scoped candidate.  Query ordering
+/// is never inferred from file order, parity, or an exchange token alone.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PhaseReadinessObservation {
+    pub association: PhaseAssociation,
     pub producer: ObservationKey,
     pub query: ObservationKey,
     pub barrier_cta: [u32; 3],
@@ -333,22 +387,27 @@ impl AsyncSidecars {
         let mut result = Self::default();
         let mut keys = 0;
         for (name, tma) in [("tma_trace.jsonl", true), ("sync_trace.jsonl", false)] {
-            let path = root.join("extra_info").join(name);
+            let plain = root.join("extra_info").join(name);
+            let Some((path, mut reader)) =
+                open_sidecar_reader(&plain).map_err(|e| AsyncSidecarError {
+                    path: plain.clone(),
+                    message: e.to_string(),
+                })?
+            else {
+                continue;
+            };
             let error = |message: String| AsyncSidecarError {
                 path: path.clone(),
                 message,
             };
-            let file = match File::open(&path) {
-                Ok(file) => file,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
-                Err(e) => return Err(error(e.to_string())),
-            };
-            let mut reader = BufReader::new(file);
             let mut line = Vec::new();
             let mut number = 0_u64;
             loop {
                 line.clear();
-                let read = (&mut reader)
+                // `take` is recreated for each line to retain the bound;
+                // decoder errors propagate instead of looking like EOF.
+                let read = reader
+                    .by_ref()
                     .take(MAX_LINE_BYTES + 1)
                     .read_until(b'\n', &mut line)
                     .map_err(|e| error(e.to_string()))?;
@@ -542,6 +601,9 @@ impl AsyncSidecars {
                                                     obs.expected_tx_bytes = Some(bytes);
                                                 }
                                                 let delta = i64::try_from(bytes).ok();
+                                                if delta.is_none() {
+                                                    obs.operand_precision_lost = true;
+                                                }
                                                 if obs.transaction_delta_bytes.is_some_and(
                                                     |prior| Some(prior) != delta.as_ref().copied(),
                                                 ) {
@@ -561,6 +623,9 @@ impl AsyncSidecars {
                                                 let delta = i64::try_from(bytes)
                                                     .ok()
                                                     .and_then(|value| value.checked_neg());
+                                                if delta.is_none() {
+                                                    obs.operand_precision_lost = true;
+                                                }
                                                 if obs.transaction_delta_bytes.is_some_and(
                                                     |prior| Some(prior) != delta.as_ref().copied(),
                                                 ) {
@@ -580,6 +645,11 @@ impl AsyncSidecars {
                                             uniform,
                                             &mut obs.interpretation_conflict,
                                         );
+                                        if uniform
+                                            .is_some_and(|value| i64::try_from(value).is_err())
+                                        {
+                                            obs.operand_precision_lost = true;
+                                        }
                                     }
                                 }
                                 if row.sync_role == Some(3) && obs.is_phase_query {
@@ -694,6 +764,10 @@ impl AsyncSidecars {
                         && let Some(address) = row.barrier_address_u32
                     {
                         obs.barrier_addresses.insert(address);
+                        obs.barrier_address_raw = Some(address);
+                    }
+                    if let Some(rank) = row.dst_mbar_cluster_cta_id {
+                        obs.barrier_cluster_rank = Some(rank);
                     }
                 }
             }
@@ -711,8 +785,16 @@ impl AsyncSidecars {
 
 /// Actual instruction-to-instruction relations. Optional clock fields remain
 /// trace-local evidence and are only surfaced when the producer supplied them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RelationAssociation {
+    EstablishedWitness,
+    ProtocolScopedCandidate,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct AsyncRelation {
+    pub association: RelationAssociation,
     pub producer: ObservationKey,
     pub wait: ObservationKey,
     pub barrier_cta: [u32; 3],
@@ -737,6 +819,9 @@ pub struct AsyncRelations {
     pub tma_stores: u64,
     pub barriers_observed: u64,
     pub one_shot_relations: u64,
+    /// Relations retained for analysis but not counted as established
+    /// witnesses because raw scope/lifetime or generation identity is open.
+    pub protocol_scoped_candidates: u64,
     pub unresolved_generation_barriers: u64,
     pub unresolved_payload_barriers: u64,
     pub missing_destination_barriers: u64,
@@ -810,10 +895,16 @@ fn record_relation(
     load: &TmaObservation,
     wait: ObservationKey,
     observation: &SyncObservation,
+    association: RelationAssociation,
 ) {
-    result.one_shot_relations += 1;
+    if association == RelationAssociation::EstablishedWitness {
+        result.one_shot_relations += 1;
+    } else {
+        result.protocol_scoped_candidates += 1;
+    }
     if result.relation_samples.len() < 64 {
         result.relation_samples.push(AsyncRelation {
+            association,
             producer,
             wait,
             barrier_cta: cta,
@@ -922,6 +1013,15 @@ fn relate_ordered_generations(
     if consumed.len() != loads.len() {
         return false;
     }
+    let association = if raw_address.is_some()
+        && sync
+            .iter()
+            .all(|(_, observation)| observation.exchange_records == 0)
+    {
+        RelationAssociation::EstablishedWitness
+    } else {
+        RelationAssociation::ProtocolScopedCandidate
+    };
     for (producer, load, wait, observation) in matched {
         record_relation(
             result,
@@ -932,6 +1032,7 @@ fn relate_ordered_generations(
             load,
             wait,
             observation,
+            association,
         );
     }
     true
@@ -965,6 +1066,10 @@ fn relate_barrier(
         result.unresolved_payload_barriers += 1;
         return;
     }
+    // This path has one exchange witness by construction.  An exchange
+    // token is useful for scoped correlation but does not establish a unique
+    // initialization lifetime, so relations remain candidates.
+    let association = RelationAssociation::ProtocolScopedCandidate;
     for &(wait, observation) in sync {
         if !observation.is_phase_query || observation.successful_wait_lanes == 0 {
             continue;
@@ -988,6 +1093,7 @@ fn relate_barrier(
                 load,
                 wait,
                 observation,
+                association,
             );
         }
     }
@@ -1001,7 +1107,7 @@ impl LaunchObservations {
     /// sequence per consumer warp.  It never infers an engine completion clock.
     pub fn phase_readiness_observations(
         &self,
-        _cluster: [u32; 3],
+        cluster: [u32; 3],
     ) -> Vec<PhaseReadinessObservation> {
         type Barrier = ([u32; 3], u32);
         let mut loads_by_barrier: BTreeMap<Barrier, Vec<(ObservationKey, &TmaObservation)>> =
@@ -1028,7 +1134,10 @@ impl LaunchObservations {
             if observation.barrier_addresses.len() != 1 {
                 continue;
             }
-            let offset = *observation.barrier_addresses.first().unwrap();
+            let offset = *observation
+                .barrier_addresses
+                .first()
+                .expect("set length checked");
             let barrier = (key.cta, offset);
             if observation.is_arrival && observation.expected_tx_bytes.is_some() {
                 arrivals_by_barrier
@@ -1054,112 +1163,120 @@ impl LaunchObservations {
             if producer_warps.len() != 1 || arrivals.is_empty() {
                 continue;
             }
-            let producer_warp = *producer_warps.first().unwrap();
-            let mut matched_loads = Vec::with_capacity(arrivals.len());
-            let mut generation_ok = true;
-            for (index, (arrival, observation)) in arrivals.iter().enumerate() {
-                let previous_arrival = index
-                    .checked_sub(1)
-                    .and_then(|previous| arrivals.get(previous))
-                    .map(|(key, _)| key.instruction);
-                let next_arrival = arrivals.get(index + 1).map(|(key, _)| key.instruction);
-                let mut candidates: Vec<_> = loads
+            let producer_warp = *producer_warps.first().expect("non-empty producer set");
+
+            // A repeated sequence needs an explicit generation token or a
+            // retained lifetime/phase relation.  The sidecar projection has
+            // neither.  In particular, do not pair the nth successful query
+            // with the nth producer: a successful query may observe any
+            // already-completed phase, and the same producer may otherwise be
+            // reused for multiple arrivals.  Keep only the one-shot case in
+            // this compact witness path; repeated cases remain unresolved in
+            // the obligation ledger.
+            if arrivals.len() != 1 {
+                continue;
+            }
+            let (arrival, arrival_observation) = arrivals[0];
+            let mut producer_candidates: Vec<_> = loads
+                .iter()
+                .filter(|(producer, load)| {
+                    producer.cta == arrival.cta
+                        && producer.warp == producer_warp
+                        && producer.instruction < arrival.instruction
+                        && load.bytes == arrival_observation.expected_tx_bytes
+                })
+                .collect();
+            // Some captures place the expected-byte marker before the copy;
+            // accept that ordering only when it still leaves one producer.
+            if producer_candidates.is_empty() {
+                producer_candidates = loads
                     .iter()
                     .filter(|(producer, load)| {
                         producer.cta == arrival.cta
                             && producer.warp == producer_warp
                             && producer.instruction > arrival.instruction
-                            && next_arrival.is_none_or(|next| producer.instruction < next)
-                            && load.bytes == observation.expected_tx_bytes
+                            && load.bytes == arrival_observation.expected_tx_bytes
                     })
                     .collect();
-                // Some real producers submit the copy before recording the
-                // expected transaction count, while the AH harness records
-                // the count first. Accept either order only when the same
-                // exact byte-qualified window identifies one producer.
-                if candidates.is_empty() {
-                    candidates = loads
-                        .iter()
-                        .filter(|(producer, load)| {
-                            producer.cta == arrival.cta
-                                && producer.warp == producer_warp
-                                && previous_arrival
-                                    .is_none_or(|previous| producer.instruction > previous)
-                                && producer.instruction < arrival.instruction
-                                && load.bytes == observation.expected_tx_bytes
-                        })
-                        .collect();
-                }
-                if candidates.len() != 1 {
-                    generation_ok = false;
-                    break;
-                }
-                matched_loads.push(*candidates[0]);
             }
-            if !generation_ok {
+            if producer_candidates.len() != 1 {
                 continue;
             }
+            let (producer, load) = *producer_candidates[0];
 
-            let query_groups: Vec<_> = queries_by_barrier
-                .iter()
-                .filter(|((query_barrier, _), queries)| {
-                    *query_barrier == barrier
-                        && queries
-                            .iter()
-                            .filter(|(_, observation)| observation.successful_wait_lanes != 0)
-                            .count()
-                            == arrivals.len()
-                })
-                .collect();
-            for (_, queries) in query_groups {
-                let mut queries = queries.clone();
-                queries.sort_by_key(|(key, _)| key.instruction);
-                let successes: Vec<_> = queries
+            for ((query_barrier, _warp), queries) in queries_by_barrier.iter() {
+                if *query_barrier != barrier {
+                    continue;
+                }
+                let mut successes: Vec<_> = queries
                     .iter()
                     .copied()
-                    .filter(|(_, observation)| observation.successful_wait_lanes != 0)
+                    .filter(|(_, observation)| {
+                        observation.successful_wait_lanes != 0 && !observation.query_result_mixed
+                    })
                     .collect();
-                for (index, (producer, load)) in matched_loads.iter().enumerate() {
-                    let (query, observation) = successes[index];
-                    let previous_success = index
-                        .checked_sub(1)
-                        .and_then(|previous| successes.get(previous))
-                        .map(|(key, _)| key.instruction);
-                    let last_false = queries
-                        .iter()
-                        .filter(|(key, candidate)| {
-                            candidate.unsuccessful_wait_lanes != 0
-                                && previous_success
-                                    .is_none_or(|previous| key.instruction > previous)
-                                && key.instruction < query.instruction
-                        })
-                        .filter_map(|(_, candidate)| candidate.last_unsuccessful_query_clock)
-                        .max();
-                    let first_true = observation.first_successful_query_clock;
-                    let observation_window = match (last_false, first_true) {
-                        (Some(last), Some(first)) if last <= first => Some([last, first]),
-                        _ => None,
-                    };
-                    let upper_only = (observation_window.is_none())
-                        .then_some(first_true)
-                        .flatten();
-                    result.push(PhaseReadinessObservation {
-                        producer: *producer,
-                        query,
-                        barrier_cta: barrier.0,
-                        barrier_offset: barrier.1,
-                        barrier_address_raw: load.destination_barrier_raw,
-                        destination_cluster_rank: load.destination_cluster_rank,
-                        payload_bytes: load.bytes.unwrap_or(0),
-                        producer_issue_clock: load.issue_clock,
-                        last_unsuccessful_query_clock: last_false,
-                        first_successful_query_clock: first_true,
-                        successful_wait_lanes: observation.successful_wait_lanes,
-                        observation_window,
-                        upper_only,
-                        window_basis: "post_query_sample_span",
-                    });
+                successes.sort_by_key(|(key, _)| key.instruction);
+                // A single success is associated with the one-shot producer;
+                // multiple successes at one warp are retained as ambiguous
+                // rather than selected by file/instruction order.
+                if successes.len() != 1 {
+                    continue;
                 }
+                let (query, observation) = successes[0];
+                let last_false = queries
+                    .iter()
+                    .filter(|(key, candidate)| {
+                        candidate.unsuccessful_wait_lanes != 0
+                            && key.instruction < query.instruction
+                    })
+                    .filter_map(|(_, candidate)| candidate.last_unsuccessful_query_clock)
+                    .max();
+                let first_true = observation.first_successful_query_clock;
+                let observation_window = match (last_false, first_true) {
+                    (Some(last), Some(first)) if last <= first => Some([last, first]),
+                    _ => None,
+                };
+                let upper_only = observation_window.is_none().then_some(first_true).flatten();
+                let strong_scope = load.destination_barrier_raw.is_some()
+                    && observation.barrier_address_raw == load.destination_barrier_raw
+                    && (cluster == [1, 1, 1]
+                        || (load.destination_cluster_rank.is_some()
+                            && observation.barrier_cluster_rank == load.destination_cluster_rank));
+                // An exchange row is not an initialization/lifetime proof;
+                // retain the relation as a candidate even when all other
+                // fields happen to line up.
+                let association = if strong_scope
+                    && arrival_observation.exchange_records == 0
+                    && observation.exchange_records == 0
+                    && !arrival_observation.interpretation_conflict
+                    && !observation.interpretation_conflict
+                    && !arrival_observation.operand_precision_lost
+                {
+                    PhaseAssociation::EstablishedWitness
+                } else {
+                    // The byte-qualified one-shot relation is still useful
+                    // as a protocol-scoped candidate, but raw-address,
+                    // destination-scope, or lifetime ambiguity prevents an
+                    // established witness.
+                    PhaseAssociation::ProtocolScopedCandidate
+                };
+                result.push(PhaseReadinessObservation {
+                    association,
+                    producer,
+                    query,
+                    barrier_cta: barrier.0,
+                    barrier_offset: barrier.1,
+                    barrier_address_raw: load.destination_barrier_raw,
+                    destination_cluster_rank: load.destination_cluster_rank,
+                    payload_bytes: load.bytes.unwrap_or(0),
+                    producer_issue_clock: load.issue_clock,
+                    last_unsuccessful_query_clock: last_false,
+                    first_successful_query_clock: first_true,
+                    successful_wait_lanes: observation.successful_wait_lanes,
+                    observation_window,
+                    upper_only,
+                    window_basis: "post_query_sample_span",
+                });
             }
         }
         result

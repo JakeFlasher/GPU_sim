@@ -9,11 +9,27 @@ precedes the complementary fast frontier.
 
 ```bash
 cd /root/GPU_simulator_rebase
+# Rust workspace/build root is /root/GPU_simulator_rebase/sim.
+# Build before a new real-capture run:
+(cd sim && cargo build -p sim-trace --release && cargo build -p sim-run --release)
 python3 tools/sm120_corpus_replay.py \
   --capture-root /root/sm120_rtx_5090_capture \
   --output /root/sm120_replay_current \
-  --mode both
+  --mode both \
+  --memory-mode l1 \
+  --fast-memory-mode flat \
+  --sm120-effective-l1 1024:none:50:512 \
+  --sm120-protocol-split \
+  --ncu-shaped-metrics \
+  --workers 12
 ```
+
+The explicit `--workers 12` is mandatory for every complete-corpus
+invocation.  Full replay runs first; the complementary fast stage is
+flat-frontier-only.  The effective `50/512` profile and protocol split are
+conditional/opt-in scenarios, not the default physical SM120 model.  The
+driver publishes `full.jsonl.zst` and `fast.jsonl.zst`; no new uncompressed
+replay JSONL is produced.
 
 The release binary is `/root/GPU_simulator_rebase/sim/target/release/sim-run`.
 Use the RTX 5090 architecture card in `arch_profiles/cards/` and keep replay
@@ -23,30 +39,41 @@ results separate from raw captures/profiles.
 
 ```bash
 python3 tools/sm120_corpus_compare.py \
-  --full /root/sm120_replay_current/full.jsonl \
-  --fast /root/sm120_replay_current/fast.jsonl \
+  --full /root/sm120_replay_current/full.jsonl.zst \
+  --fast /root/sm120_replay_current/fast.jsonl.zst \
   --profiles /root/sm120_rtx_5090_capture/profiles \
   --output /root/sm120_replay_current/ncu_join
 ```
 
-Preserve units, launch scope, and endpoint definitions. Do not fit NCU rows
-back into replay parameters.
+`tools/jsonl_io.py` resolves compressed paths first and legacy uncompressed
+siblings second, so logical `full.jsonl`/`fast.jsonl` names remain readable for
+older archives.  The comparator writes `launch_comparisons.jsonl.zst`.
+Preserve units, launch scope, and endpoint definitions.  Identity joins and
+ordered fallback joins must be reported separately; an ordered association is
+not an independently verified launch identity.  Do not fit NCU rows back into
+replay parameters.
 
-## Effective-L1 held-out diagnostic
+## Effective-L1 conditional diagnostic
 
 The optional cache scenario is intentionally separate from the canonical flat
-run. It must use a frozen real subset and an independently measured envelope:
+run.  The 12-root list in `HELDOUT_SCOPE.md` is historical development
+material, not an active held-out guarantee; the complete 339-root corpus has
+already been exposed.  Use a frozen real subset only for descriptive
+mechanism work and report it as development-exposed.
 
 ```bash
 sim/target/release/sim-run \
   --trace /root/sm120_rtx_5090_capture/captures/ROOT \
   --control /root/effective-cache-controls/ROOT.control_bits.json \
   --arch-card arch_profiles/cards/sm_120-rtx-5090.json \
-  --sm120-alpha --mode l1 --sm120-effective-l1 1024:none:43:501
+  --sm120-alpha --mode l1 --sm120-effective-l1 1024:none:50:512
 ```
 
-The `1024:none:43:501` values are an effective pointer-chase service
-scenario, not physical cache geometry. Keep TMA/UTMA roots on the explicit
-typed refusal path until native completion and mbarrier visibility are
-resolved. Join NCU rows only after replay and keep cycles and microseconds in
-separate timing domains.
+The `1024:none:50:512` values are the corrected full-ring effective
+pointer-chase service scenario, not physical cache geometry.  The retired
+`43/501` profile is historical and must not be used. Keep TMA/UTMA roots on
+the explicit typed refusal path when native completion and mbarrier visibility
+are unresolved. Join NCU rows only after replay and keep cycles and
+microseconds in separate timing domains. Raw capture sidecars are retained as
+capture evidence; the compressed-artifact rule applies to generated replay and
+post-replay JSONL.

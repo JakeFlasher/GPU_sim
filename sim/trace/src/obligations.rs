@@ -8,7 +8,8 @@
 //! does not prove either individual literal is the unique blocker.
 
 use crate::async_sidecars::{
-    BarrierOperation, LaunchObservations, ObservationKey, PhaseQueryKind, PhaseReadinessObservation,
+    BarrierOperation, LaunchObservations, ObservationKey, PhaseAssociation, PhaseQueryKind,
+    PhaseReadinessObservation,
 };
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -144,6 +145,8 @@ pub struct DeferredArrivalObligation {
 pub struct BarrierLedger {
     pub barrier_cta: [u32; 3],
     pub barrier_offset: u32,
+    pub barrier_address_raw: Option<u32>,
+    pub barrier_cluster_rank: Option<u32>,
     pub lifetime: &'static str,
     pub generation: Option<u64>,
     pub operations: Vec<BarrierOperation>,
@@ -169,6 +172,10 @@ pub struct BarrierLedger {
     pub unsuccessful_query_instructions: u64,
     pub async_copy_arrivals_separate: u64,
     pub interpretation_conflicts: u64,
+    /// Raw identity or operand coverage is incomplete; no exact witness is
+    /// emitted from this ledger even when its offset-only candidate set is
+    /// useful for diagnostics.
+    pub identity_or_operand_precision_lost: bool,
     pub precision_lost: bool,
 }
 
@@ -178,6 +185,8 @@ pub struct ConsumerFrontier {
     pub consumer: ObservationKey,
     pub barrier_cta: Option<[u32; 3]>,
     pub barrier_offset: Option<u32>,
+    pub barrier_address_raw: Option<u32>,
+    pub barrier_cluster_rank: Option<u32>,
     pub requested_phase: Option<u64>,
     pub requested_phases: Vec<u64>,
     pub query_kind: Option<PhaseQueryKind>,
@@ -220,6 +229,7 @@ pub struct ObligationFrontier {
     pub qualified_synchronization_applied: bool,
     pub qualified_synchronization_reason: &'static str,
     pub qualified_phase_observations: u64,
+    pub protocol_scoped_phase_candidates: u64,
     pub qualified_satisfied_generations: u64,
     pub possible_unresolved_generations: u64,
     /// Protocol requirements, not individually identified blockers.
@@ -248,6 +258,8 @@ pub struct ConsumerObligation {
     pub query: ObservationKey,
     pub barrier_cta: [u32; 3],
     pub barrier_offset: u32,
+    pub barrier_address_raw: Option<u32>,
+    pub barrier_cluster_rank: Option<u32>,
     pub payload_bytes: u64,
     pub producer_association: FrontierCertainty,
     /// These fields mean “required by the architectural phase expression”,
@@ -259,7 +271,7 @@ pub struct ConsumerObligation {
     pub engine_completion_clock: &'static str,
 }
 
-type Barrier = ([u32; 3], u32);
+type Barrier = ([u32; 3], u32, Option<u32>, Option<u32>);
 
 fn add_i64(target: &mut i64, value: i64, precision_lost: &mut bool) {
     if let Some(sum) = target.checked_add(value) {
@@ -285,18 +297,17 @@ fn push_candidate(
 }
 
 fn signed_count(value: Option<u64>) -> Option<i64> {
-    value.and_then(|value| i64::try_from(value).ok().and_then(|value| value.checked_neg()))
+    value.and_then(|value| {
+        i64::try_from(value)
+            .ok()
+            .and_then(|value| value.checked_neg())
+    })
 }
 
 fn accounting_effect(
     operation: BarrierOperation,
     observation: &crate::async_sidecars::SyncObservation,
-) -> (
-    Option<i64>,
-    Option<i64>,
-    Option<i64>,
-    &'static str,
-) {
+) -> (Option<i64>, Option<i64>, Option<i64>, &'static str) {
     match operation {
         BarrierOperation::ArriveExpectTransaction => (
             Some(-1),
@@ -311,10 +322,10 @@ fn accounting_effect(
             "ordinary arrival; lane mask retained without converting it to a count",
         ),
         BarrierOperation::ArrivalDrop => (
-            signed_count(observation.arrival_count_operand).or(Some(-1)),
-            signed_count(observation.arrival_count_operand).or(Some(-1)),
+            signed_count(observation.arrival_count_operand),
+            signed_count(observation.arrival_count_operand),
             None,
-            "arrival/drop; current and next-phase effects remain separate",
+            "arrival/drop; current and next-phase effects remain separate; missing count unresolved",
         ),
         BarrierOperation::CountedArrival => (
             signed_count(observation.arrival_count_operand),
@@ -334,14 +345,27 @@ fn accounting_effect(
             observation.transaction_delta_bytes,
             "transaction accounting decrement; signed balance is not clamped",
         ),
-        _ => (None, None, None, "no ordinary transaction-barrier ledger effect"),
+        _ => (
+            None,
+            None,
+            None,
+            "no ordinary transaction-barrier ledger effect",
+        ),
     }
 }
 
-fn new_ledger(cta: [u32; 3], offset: u32, producer: bool) -> BarrierLedger {
+fn new_ledger(
+    cta: [u32; 3],
+    offset: u32,
+    raw: Option<u32>,
+    cluster_rank: Option<u32>,
+    producer: bool,
+) -> BarrierLedger {
     BarrierLedger {
         barrier_cta: cta,
         barrier_offset: offset,
+        barrier_address_raw: raw,
+        barrier_cluster_rank: cluster_rank,
         lifetime: "initialization_unobserved",
         generation: None,
         operations: Vec::new(),
@@ -371,6 +395,7 @@ fn new_ledger(cta: [u32; 3], offset: u32, producer: bool) -> BarrierLedger {
         unsuccessful_query_instructions: 0,
         async_copy_arrivals_separate: 0,
         interpretation_conflicts: 0,
+        identity_or_operand_precision_lost: false,
         precision_lost: false,
     }
 }
@@ -381,9 +406,19 @@ fn build_ledgers(observations: &LaunchObservations) -> Vec<BarrierLedger> {
         let Some(offset) = observation.destination_barrier else {
             continue;
         };
+        let identity = (
+            key.cta,
+            offset,
+            observation.destination_barrier_raw,
+            observation.destination_cluster_rank,
+        );
         let entry = ledgers
-            .entry((key.cta, offset))
-            .or_insert_with(|| new_ledger(key.cta, offset, true));
+            .entry(identity)
+            .or_insert_with(|| new_ledger(key.cta, offset, identity.2, identity.3, true));
+        if identity.2.is_none() {
+            entry.identity_or_operand_precision_lost = true;
+            entry.precision_lost = true;
+        }
         push_candidate(
             &mut entry.producer_candidates,
             key,
@@ -401,9 +436,19 @@ fn build_ledgers(observations: &LaunchObservations) -> Vec<BarrierLedger> {
         }) else {
             continue;
         };
+        let identity = (
+            key.cta,
+            offset,
+            observation.barrier_address_raw,
+            observation.barrier_cluster_rank,
+        );
         let entry = ledgers
-            .entry((key.cta, offset))
-            .or_insert_with(|| new_ledger(key.cta, offset, false));
+            .entry(identity)
+            .or_insert_with(|| new_ledger(key.cta, offset, identity.2, identity.3, false));
+        if identity.2.is_none() {
+            entry.identity_or_operand_precision_lost = true;
+            entry.precision_lost = true;
+        }
         if observation.exchange_records != 0 {
             entry.lifetime = "exchange_witness_observed; initialization_or_reuse_not_decoded";
         }
@@ -428,6 +473,10 @@ fn build_ledgers(observations: &LaunchObservations) -> Vec<BarrierLedger> {
             entry.interpretation_conflicts = entry.interpretation_conflicts.saturating_add(1);
             entry.precision_lost = true;
         }
+        if observation.operand_precision_lost {
+            entry.identity_or_operand_precision_lost = true;
+            entry.precision_lost = true;
+        }
         for operation in &observation.barrier_operations {
             if !entry.operations.contains(operation) {
                 entry.operations.push(*operation);
@@ -445,11 +494,20 @@ fn build_ledgers(observations: &LaunchObservations) -> Vec<BarrierLedger> {
                 transaction_delta_bytes: transaction_delta,
                 effect_basis,
             });
-            if pending_delta.is_none()
+            if (pending_delta.is_none()
                 && matches!(
                     operation,
-                    BarrierOperation::CountedArrival | BarrierOperation::UnknownArrivalForm
-                )
+                    BarrierOperation::CountedArrival
+                        | BarrierOperation::ArrivalDrop
+                        | BarrierOperation::UnknownArrivalForm
+                ))
+                || (matches!(
+                    operation,
+                    BarrierOperation::ExpectTransactionOnly
+                        | BarrierOperation::CompleteTransaction
+                        | BarrierOperation::ArriveExpectTransaction
+                ) && observation.transaction_operand_bytes.is_some()
+                    && transaction_delta.is_none())
             {
                 entry.precision_lost = true;
             }
@@ -574,6 +632,9 @@ fn build_frontiers(
     let mut exact_success: BTreeMap<ObservationKey, Vec<&PhaseReadinessObservation>> =
         BTreeMap::new();
     for observation in phase {
+        if observation.association != PhaseAssociation::EstablishedWitness {
+            continue;
+        }
         exact_success
             .entry(observation.query)
             .or_default()
@@ -590,11 +651,18 @@ fn build_frontiers(
                 .first()
                 .expect("set length checked")
         });
+        let barrier_raw = observation.barrier_address_raw;
+        let barrier_cluster_rank = observation.barrier_cluster_rank;
         let barrier_cta = barrier.map(|_| key.cta);
         let ledger_precision_lost = barrier.and_then(|offset| {
             ledgers
                 .iter()
-                .find(|ledger| ledger.barrier_cta == key.cta && ledger.barrier_offset == offset)
+                .find(|ledger| {
+                    ledger.barrier_cta == key.cta
+                        && ledger.barrier_offset == offset
+                        && ledger.barrier_address_raw == barrier_raw
+                        && ledger.barrier_cluster_rank == barrier_cluster_rank
+                })
                 .map(|ledger| ledger.precision_lost)
         }) == Some(true);
         let has_success = observation.successful_wait_lanes != 0;
@@ -619,12 +687,15 @@ fn build_frontiers(
         if has_success {
             if let Some(matches) = exact_success.get(&key) {
                 for matched in matches {
-                    let association_uncertain =
-                        ledger_precision_lost || observation.interpretation_conflict;
+                    let association_uncertain = ledger_precision_lost
+                        || observation.interpretation_conflict
+                        || observation.operand_precision_lost;
                     result.push(ConsumerFrontier {
                         consumer: key,
                         barrier_cta: Some(matched.barrier_cta),
                         barrier_offset: Some(matched.barrier_offset),
+                        barrier_address_raw: matched.barrier_address_raw,
+                        barrier_cluster_rank: matched.destination_cluster_rank,
                         requested_phase: observation.requested_phase,
                         requested_phases: observation.requested_phases.iter().copied().collect(),
                         query_kind: observation.query_kind,
@@ -680,6 +751,8 @@ fn build_frontiers(
                         supporting_events: vec![matched.producer, key],
                         unresolved_reasons: if observation.interpretation_conflict {
                             vec!["incompatible opcode/query forms share one dynamic key"]
+                        } else if observation.operand_precision_lost {
+                            vec!["signed operand delta exceeds representable ledger precision"]
                         } else if ledger_precision_lost {
                             vec!["ledger alternatives widened or lost precision; exact association is not decisive"]
                         } else if has_failure {
@@ -697,6 +770,8 @@ fn build_frontiers(
                     consumer: key,
                     barrier_cta,
                     barrier_offset: barrier,
+                    barrier_address_raw: barrier_raw,
+                    barrier_cluster_rank,
                     requested_phase: observation.requested_phase,
                     requested_phases: observation.requested_phases.iter().copied().collect(),
                     query_kind: observation.query_kind,
@@ -745,11 +820,14 @@ fn build_frontiers(
                 blocker_expression_for_failed_query(barrier.is_some());
             if observation.query_kind == Some(PhaseQueryKind::TryWait) {
                 reasons.push(
-                    "TRYWAIT is a nonblocking query; false does not mean the warp stopped issuing",
+                    "TRYWAIT may suspend until the qualified phase condition; a false/early return is not a nonblocking-test witness",
                 );
             }
             if observation.interpretation_conflict {
                 reasons.push("incompatible opcode/query forms share one dynamic key");
+            }
+            if observation.operand_precision_lost {
+                reasons.push("signed operand delta exceeds representable ledger precision");
             }
             if ledger_precision_lost {
                 reasons.push("ledger alternatives widened or lost precision");
@@ -758,6 +836,8 @@ fn build_frontiers(
                 consumer: key,
                 barrier_cta,
                 barrier_offset: barrier,
+                barrier_address_raw: barrier_raw,
+                barrier_cluster_rank,
                 requested_phase: observation.requested_phase,
                 requested_phases: observation.requested_phases.iter().copied().collect(),
                 query_kind: observation.query_kind,
@@ -788,7 +868,12 @@ fn build_frontiers(
                 blocker_expression: expression,
                 supporting_events: vec![key],
                 unresolved_reasons: reasons,
-                captured_polling: true,
+                // A failed test is one observation, not proof that the
+                // captured program retried.  TRYWAIT is potentially
+                // suspending and is tracked separately from a nonblocking
+                // PHASECHK/TESTWAIT query; adjacent retries require separate
+                // dynamic keys.
+                captured_polling: observation.query_kind == Some(PhaseQueryKind::TryWait),
                 qualified_synchronization_applied: false,
                 engine_completion_clock: "unavailable",
             });
@@ -797,6 +882,8 @@ fn build_frontiers(
                 consumer: key,
                 barrier_cta,
                 barrier_offset: barrier,
+                barrier_address_raw: barrier_raw,
+                barrier_cluster_rank,
                 requested_phase: observation.requested_phase,
                 requested_phases: observation.requested_phases.iter().copied().collect(),
                 query_kind: observation.query_kind,
@@ -834,10 +921,12 @@ fn build_frontiers(
                 supporting_events: vec![key],
                 unresolved_reasons: if observation.interpretation_conflict {
                     vec!["incompatible opcode/query forms share one dynamic key"]
+                } else if observation.operand_precision_lost {
+                    vec!["signed operand delta exceeds representable ledger precision"]
                 } else {
                     vec!["query operands or result mask is incomplete"]
                 },
-                captured_polling: true,
+                captured_polling: observation.query_kind == Some(PhaseQueryKind::TryWait),
                 qualified_synchronization_applied: false,
                 engine_completion_clock: "unavailable",
             });
@@ -884,7 +973,16 @@ impl ObligationFrontier {
             .values()
             .filter(|observation| observation.unsuccessful_wait_lanes != 0)
             .count() as u64;
-        let qualified_satisfied_generations = phase.len() as u64;
+        let qualified_satisfied_generations = phase
+            .iter()
+            .filter(|observation| observation.association == PhaseAssociation::EstablishedWitness)
+            .count() as u64;
+        let protocol_scoped_phase_candidates = phase
+            .iter()
+            .filter(|observation| {
+                observation.association == PhaseAssociation::ProtocolScopedCandidate
+            })
+            .count() as u64;
         let tma_load_obligations = observations
             .tma
             .values()
@@ -914,11 +1012,14 @@ impl ObligationFrontier {
         }
         let consumer_obligations = phase
             .iter()
+            .filter(|observation| observation.association == PhaseAssociation::EstablishedWitness)
             .map(|observation| ConsumerObligation {
                 producer: observation.producer,
                 query: observation.query,
                 barrier_cta: observation.barrier_cta,
                 barrier_offset: observation.barrier_offset,
+                barrier_address_raw: observation.barrier_address_raw,
+                barrier_cluster_rank: observation.destination_cluster_rank,
                 payload_bytes: observation.payload_bytes,
                 producer_association: FrontierCertainty::ObservedSatisfaction,
                 software_arrival: FrontierCertainty::PossibleObligation,
@@ -970,6 +1071,7 @@ impl ObligationFrontier {
                 qualified_synchronization_applied: false,
                 qualified_synchronization_reason: "diagnostic frontier only; no counterfactual polling loop was substituted",
                 qualified_phase_observations: qualified_satisfied_generations,
+                protocol_scoped_phase_candidates,
                 qualified_satisfied_generations,
                 possible_unresolved_generations,
                 mandatory_obligations,

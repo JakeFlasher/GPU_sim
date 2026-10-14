@@ -86,6 +86,7 @@ pub use l2::{
     L2EventMaskPreview, L2Eviction, L2FillCompletion, L2FillToken, L2MaskPreview, L2Model,
     L2OpClass, L2Outcome, L2PendingSectorIdentity, L2PendingSectorKey, L2ProjectionError,
     L2Replacement, L2SetIndexError, L2SnapshotError, L2Source, SliceHash,
+    L2_WRITE_ALLOCATE_POLICY,
 };
 pub use memory_order::{
     MemoryOrder, MemoryOrderError, MemoryOrderLedgerV1, MemoryOrderScope, MemoryRead,

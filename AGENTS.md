@@ -125,3 +125,39 @@ full real workload suites, not by small self-authored fixtures:
 - Performance changes are accepted only when the full workload-suite result
   improves or the mechanism-local residual is explicitly reported; do not claim
   improvement from labels, fixture counts, or source-size reductions.
+
+## Permanent PhD-closure criterion (user directive, 2026-10-14)
+
+Exact proprietary silicon recovery is not required for SM120 thesis closure.
+Effective, conditional, uncertainty-aware models are acceptable when they align
+with all 339 real workload traces and achieve high accuracy against independent
+NCU profiling metrics. NCU remains an independent comparison target, never a
+replay input or tuning target. Closure is judged by complete-corpus replay
+coverage, simulator/bare-metal relative performance where available, and
+simulator-vs-NCU metric accuracy—not by recovering RTL, physical cache hashes,
+MSHR counts, scheduler ports, or an engine-completion timestamp. Unidentifiable
+physical gaps should become scoped effective models with residual-error
+reporting rather than indefinite blockers. Existing bans on fixtures, NCU
+fitting, Accel-Sim, and premature broad replay remain in force.
+
+### Clarification of the PhD research boundary (2026-10-14)
+
+These are university PhD research projects. Researchers have no access to and
+will never obtain NVIDIA proprietary RTL, internal timing tables, exact physical
+cache/scheduler topology, or engine microarchitectural state. Such truth is not
+a prerequisite for completion. The accepted endpoint is a scoped
+effective/conditional model with explicit assumptions and residuals, evaluated
+across all 339 real traces and independent NCU metrics.
+
+## Permanent replay concurrency directive (2026-10-14)
+
+Every complete-corpus replay invocation must use a twelve-worker simulator
+process pool through `tools/sm120_corpus_replay.py --workers 12` (the default).
+Keep per-capture logs/results isolated and never exceed twelve workers.
+The user's explicit authorization supersedes the previous four-worker limit.
+
+Replay and post-replay generated JSONL artifacts must be written as
+`.jsonl.zst` through `tools/jsonl_io.py`; readers must transparently consume
+compressed artifacts and legacy uncompressed paths. New uncompressed replay
+JSONL is prohibited. Workload-manifest `workload.jsonl` files are outside this
+artifact rule.

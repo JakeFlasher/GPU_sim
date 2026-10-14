@@ -142,6 +142,26 @@ pub enum OpClass {
     /// control bits and dynamic memory class; independent execution-resource
     /// timing, when characterized, is carried by [`PipelineClass`].
     Other,
+    /// Source-qualified mbarrier phase query.  This is deliberately distinct
+    /// from `Other` so the protocol-split path cannot accidentally inherit the
+    /// committed async-copy-group wait class; it has no group-state mutation.
+    MBarrierPhaseQuery,
+}
+
+/// Native protocol identity kept separate from the legacy execution-cost
+/// class.  In particular, a mbarrier phase query must not inherit committed
+/// async-copy-group membership merely because both forms are asynchronous.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProtocolOp {
+    None,
+    TmaSubmission,
+    AsyncCopySubmission,
+    AsyncCopyCommit,
+    AsyncCopyWait,
+    MBarrierPhaseQuery,
+    MBarrierAccounting,
+    DeferredArrivalRegistration,
+    UnknownSynchronization,
 }
 
 /// Execution resource an instruction occupies after dispatch. `DispatchOnly`
@@ -221,6 +241,7 @@ impl PipelineClass {
 pub struct IssueSlot {
     pub(crate) control: ControlBits,
     pub(crate) op_class: OpClass,
+    pub(crate) protocol_op: ProtocolOp,
     /// Meaningful only when `op_class == OpClass::AsyncCopyWait`; construction
     /// validates and preserves the complete `u32` sidecar immediate.
     pub(crate) async_copy_wait_max_pending_groups: u32,
@@ -261,6 +282,10 @@ impl IssueSlot {
 
     pub fn op_class(&self) -> OpClass {
         self.op_class
+    }
+
+    pub fn protocol_op(&self) -> ProtocolOp {
+        self.protocol_op
     }
 
     pub fn async_copy_wait_max_pending_groups(&self) -> Option<u32> {
@@ -494,11 +519,11 @@ fn alpha_mem_role(opcode_text: &str) -> MemRole {
             MemRole::BypassLoad(CacheOpToken::LdgECg)
         }
         "LDG" => MemRole::BypassLoad(CacheOpToken::LdgECg),
-        // TMA/cp.async completion and cache routing are a separate SM120
-        // feature lane.  Keep the static spelling opaque here so a dynamic
-        // async record is rejected by replay rather than silently priced by
-        // the old Ampere transport helper.
-        "LDGSTS" => MemRole::None,
+        // LDGSTS is the legacy async-copy source protocol.  Keep its cache
+        // policy separate from ordinary global loads so dynamic records with
+        // validated memory metadata take the same route as sidecar-only
+        // records; this does not assert a Blackwell TMA engine timing.
+        "LDGSTS" => MemRole::BypassLoad(CacheOpToken::Ldgsts),
         "LDL" => MemRole::EligibleLoad(CacheOpToken::Ldl),
         "STL" => MemRole::EligibleLoad(CacheOpToken::Stl),
         "STG" => MemRole::Store,
@@ -513,19 +538,54 @@ fn alpha_ldgsts_l1_policy(opcode_text: &str) -> Option<LdgstsL1Policy> {
     None
 }
 
-fn alpha_op_class(opcode_text: &str) -> OpClass {
+fn alpha_op_class(opcode_text: &str, protocol_split: bool) -> OpClass {
     match opcode_head(opcode_text) {
         "BAR" => OpClass::BlockBarrier,
         // Full-replay-only alpha async protocol. Keep the existing explicit
         // group/DEPBAR parser; the fast frontier is frozen and does not use
         // this schedule path.
         "LDGDEPBAR" => OpClass::AsyncCopyCommit,
-        "UTMALDG" | "UTMACMDFLUSH" => OpClass::AsyncCopyCommit,
-        "SYNCS" if opcode_text.contains("PHASECHK") => OpClass::AsyncCopyWait,
+        // Blackwell TMA command forms are submissions/flushes, not the
+        // Ampere LDGDEPBAR group-commit protocol.  Keeping them out of the
+        // legacy group state prevents a tensor-memory submission from
+        // fabricating a committed async-copy group.
+        "UTMALDG" | "UTMASTG" | "UTMACMDFLUSH" | "UBLKCP" => OpClass::Other,
+        // Keep the legacy effective timing proxy in the default alpha path;
+        // `ProtocolOp::MBarrierPhaseQuery` preserves the native namespace and
+        // prevents this proxy from being mistaken for semantic identity. The
+        // source-qualified correction remains an opt-in research candidate
+        // until a full-corpus/Ncu comparison supports activating it.
+        "SYNCS" if opcode_text.contains("PHASECHK") && !protocol_split => {
+            OpClass::AsyncCopyWait
+        }
+        "SYNCS" if opcode_text.contains("PHASECHK") => OpClass::MBarrierPhaseQuery,
         _ => match parse_dependency_barrier(opcode_text) {
             Some(DependencyBarrierOperand::AsyncCopyWait(_)) => OpClass::AsyncCopyWait,
             Some(DependencyBarrierOperand::OrdinaryWait(_)) | None => OpClass::Other,
         },
+    }
+}
+
+fn protocol_op(opcode_text: &str) -> ProtocolOp {
+    let head = opcode_head(opcode_text);
+    if head == "SYNCS" && opcode_text.contains("PHASECHK") {
+        return ProtocolOp::MBarrierPhaseQuery;
+    }
+    if head == "ARRIVES" && opcode_text.contains("LDGSTSBAR") {
+        return ProtocolOp::DeferredArrivalRegistration;
+    }
+    if head == "SYNCS"
+        && (opcode_text.contains("ARRIVE") || opcode_text.contains("EXCH"))
+    {
+        return ProtocolOp::MBarrierAccounting;
+    }
+    match head {
+        "LDGDEPBAR" => ProtocolOp::AsyncCopyCommit,
+        "DEPBAR" if parse_async_copy_wait(opcode_text).is_some() => ProtocolOp::AsyncCopyWait,
+        "LDGSTS" => ProtocolOp::AsyncCopySubmission,
+        "UTMALDG" | "UTMASTG" | "UTMACMDFLUSH" | "UBLKCP" => ProtocolOp::TmaSubmission,
+        "SYNCS" | "ARRIVES" => ProtocolOp::UnknownSynchronization,
+        _ => ProtocolOp::None,
     }
 }
 
@@ -1001,7 +1061,7 @@ fn build_schedules_with_pipeline_arch_and_alpha(
                         .map_err(ProgramError::LdgstsCacheClassification)?
                 };
                 let op_class = if alpha.is_some() {
-                    alpha_op_class(&inst.opcode_text)
+                    alpha_op_class(&inst.opcode_text, alpha.is_some_and(|a| a.protocol_split))
                 } else {
                     classify(
                         &inst.opcode_text,
@@ -1048,15 +1108,22 @@ fn build_schedules_with_pipeline_arch_and_alpha(
                     parse_async_copy_wait(&inst.opcode_text).unwrap_or(0);
                 let fixed_latency_operands =
                     project_fixed_latency_operands(&inst.opcode_text, inst.control, sidecar_arch);
-                debug_assert_eq!(
-                    op_class == OpClass::AsyncCopyWait,
-                    parse_async_copy_wait(&inst.opcode_text).is_some()
-                );
+                // `PHASECHK` is intentionally retained as the legacy
+                // effective async-wait proxy unless the opt-in protocol split
+                // is active.  It is not a DEPBAR group wait, so the old
+                // bidirectional assertion incorrectly panicked in debug
+                // builds for a valid legacy phase-query form.  Assert only
+                // the narrower implication that an actually parsed DEPBAR
+                // async wait receives the async-group class.
+                if parse_async_copy_wait(&inst.opcode_text).is_some() {
+                    debug_assert_eq!(op_class, OpClass::AsyncCopyWait);
+                }
                 Ok((
                     pc,
                     IssueSlot {
                         control: inst.control,
                         op_class,
+                        protocol_op: protocol_op(&inst.opcode_text),
                         async_copy_wait_max_pending_groups,
                         pipeline_class,
                         mem_role,

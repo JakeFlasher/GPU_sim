@@ -1,18 +1,18 @@
-# Simulator status
+# Simulator status — SM120 alpha
 
-**Updated:** 2026-10-13
-**Plan:** `/root/gpu_cache_memory_modeling_proposal/PLAN.md`
-**Code:** `/root/GPU_simulator_rebase`
-**Corpus:** `/root/sm120_rtx_5090_capture`
+Updated 2026-10-14. The Rust simulator and Python replay tools build from the
+`sim/` workspace. The complete real corpus is 339 roots / 11,558 launches per
+mode; full replay precedes fast and complete-corpus runs use exactly 12 workers.
 
-The complete real-trace corpus is consolidated at one root. The saved release
-run covers 339 full and 339 fast roots, with 11,558 launches per mode. The
-current adapter keeps capture discovery, native static-sidecar transport, replay
-launch, NCU parsing, and post-replay comparison only.
+Implemented source behavior separates TMA submissions from legacy async-copy
+commit state, routes LDGSTS explicitly, preserves barrier scope/precision
+uncertainty, bounds diagnostics, and fails closed on unsupported directions or
+malformed input. `completion_clock` is intentionally unavailable. Effective L1
+and L2 scenarios remain explicit conditional configurations; no physical cache,
+MSHR, scheduler, or engine claim is made.
 
-The Rust path is conservative when SM120 issue, cache, or asynchronous completion
-state is not directly observed. Raw async identities, the strict
-`STRONG.SM`/`STRONG.GPU` route distinction, and explicit async timing-evidence
-classes are core behavior; they are not claims of recovered proprietary topology. Use the proposal plan for the next
-mechanism-local change. Do not rerun the corpus until the active cleanup/debug
-stage is complete.
+Replay and post-replay generated JSONL use `.jsonl.zst` through
+`tools/jsonl_io.py`. Raw capture sidecars and workload manifests are input data
+and remain outside that generated-artifact rule. See the proposal `PLAN.md` and
+compact reports for current evidence; superseded engineering history is in the
+local adversarial dossier.

@@ -6,7 +6,8 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use sim_direct_run::{
-    CacheScope, MemoryMode, RunConfig, RunError, Sm120EffectiveL1Config, run,
+    run, CacheScope, MemoryMode, RunConfig, RunError, Sm120EffectiveL1Config,
+    Sm120EffectiveL2Config,
 };
 use sim_semantics::ServiceStageRole;
 
@@ -21,7 +22,9 @@ const USAGE: &str = "Usage: sim-run --trace DIR --control FILE --arch-card FILE 
 [--architecture-spec FILE] \
 [--fast-frontier-only] \
 [--sm120-alpha] \
+[--sm120-protocol-split] \
 [--sm120-effective-l1 CAPACITY:MSHR|none:HIT:MISS] \
+[--sm120-effective-l2 CAPACITY:SLICES:ASSOCIATIVITY] \
 [--latent-envelope] \
 [--service-stage-role independent_post_replay|residual_closure|replacement_timing] \
 [--ncu-shaped-metrics] \
@@ -105,6 +108,53 @@ fn parse_sm120_effective_l1(raw: &str) -> Result<Sm120EffectiveL1Config, RunErro
     })
 }
 
+fn parse_sm120_effective_l2(raw: &str) -> Result<Sm120EffectiveL2Config, RunError> {
+    let fields: Vec<_> = raw.split(':').collect();
+    if fields.len() != 3 {
+        return Err(RunError::new(
+            "arguments",
+            "--sm120-effective-l2 expects CAPACITY_BYTES:SLICES:ASSOCIATIVITY",
+        ));
+    }
+    let parse_u64 = |field: &str, name: &str| {
+        field.parse::<u64>().map_err(|error| {
+            RunError::new("arguments", format!("invalid {name} {field:?}: {error}"))
+        })
+    };
+    let capacity_bytes = parse_u64(fields[0], "effective L2 capacity")?;
+    let num_slices = fields[1].parse::<u32>().map_err(|error| {
+        RunError::new(
+            "arguments",
+            format!("invalid effective L2 slices {:?}: {error}", fields[1]),
+        )
+    })?;
+    let associativity = fields[2].parse::<u32>().map_err(|error| {
+        RunError::new(
+            "arguments",
+            format!(
+                "invalid effective L2 associativity {:?}: {error}",
+                fields[2]
+            ),
+        )
+    })?;
+    if capacity_bytes == 0 || num_slices == 0 || associativity == 0 {
+        return Err(RunError::new(
+            "arguments",
+            "--sm120-effective-l2 capacity, slices, and associativity must be positive",
+        ));
+    }
+    Ok(Sm120EffectiveL2Config {
+        capacity_bytes,
+        line_bytes: 128,
+        sector_bytes: 32,
+        num_slices,
+        associativity,
+        replacement: sim_mem::L2Replacement::Lru,
+        slice_hash: sim_mem::SliceHash::LineMod,
+        write_policy: sim_mem::L2_WRITE_ALLOCATE_POLICY,
+    })
+}
+
 fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConfig>, RunError> {
     let mut trace_dir = None;
     let mut control_bits = None;
@@ -122,7 +172,9 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
     let mut architecture_spec = None;
     let mut fast_frontier_only = false;
     let mut sm120_alpha = false;
+    let mut sm120_protocol_split = false;
     let mut sm120_effective_l1 = None;
+    let mut sm120_effective_l2 = None;
     let mut latent_envelope = false;
     let mut kernel_id = None;
     let mut ncu_shaped_metrics = false;
@@ -275,12 +327,22 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
             value if value == OsStr::new("--sm120-alpha") => {
                 sm120_alpha = true;
             }
+            value if value == OsStr::new("--sm120-protocol-split") => {
+                sm120_protocol_split = true;
+            }
             value if value == OsStr::new("--sm120-effective-l1") => {
                 let raw = take_value(&mut args, "--sm120-effective-l1")?;
                 let raw = raw.to_str().ok_or_else(|| {
                     RunError::new("arguments", "--sm120-effective-l1 must be UTF-8")
                 })?;
                 sm120_effective_l1 = Some(parse_sm120_effective_l1(raw)?);
+            }
+            value if value == OsStr::new("--sm120-effective-l2") => {
+                let raw = take_value(&mut args, "--sm120-effective-l2")?;
+                let raw = raw.to_str().ok_or_else(|| {
+                    RunError::new("arguments", "--sm120-effective-l2 must be UTF-8")
+                })?;
+                sm120_effective_l2 = Some(parse_sm120_effective_l2(raw)?);
             }
             value if value == OsStr::new("--latent-envelope") => {
                 latent_envelope = true;
@@ -368,6 +430,12 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
             }
         }
     }
+    if sm120_protocol_split && !sm120_alpha {
+        return Err(RunError::new(
+            "arguments",
+            "--sm120-protocol-split requires --sm120-alpha",
+        ));
+    }
     Ok(Some(RunConfig {
         trace_dir: trace_dir.ok_or_else(|| RunError::new("arguments", "--trace is required"))?,
         control_bits: control_bits
@@ -389,7 +457,9 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
         ncu_shaped_metrics,
         fast_frontier_only,
         sm120_alpha,
+        sm120_protocol_split,
         sm120_effective_l1,
+        sm120_effective_l2,
         ncu_csv,
         ncu_launch,
         launch_resources,

@@ -880,7 +880,20 @@ fn require_arch(expected: ArchId, got: ArchId, component: &'static str) -> Resul
     Ok(())
 }
 
-fn require_l2_pending_read_semantics(arch: ArchId) -> Result<(), SystemError> {
+fn require_l2_pending_read_semantics(arch: ArchId, effective_l2: bool) -> Result<(), SystemError> {
+    if effective_l2 {
+        if arch != ArchId::Sm120 {
+            return Err(SystemError::ArchitectureMismatch {
+                component: "effective L2 scenario",
+                expected: ArchId::Sm120,
+                got: arch,
+            });
+        }
+        // The effective path explicitly selects the same allocation/sector
+        // merge rule used by the implemented L2 engine. This is a scenario
+        // assumption, not an SM120 architectural claim.
+        return Ok(());
+    }
     match arch
         .l2_pending_read_semantics()
         .require("l2_pending_read_semantics")?
@@ -3382,7 +3395,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
     require_arch(arch, l2.config().arch, "L2 configuration")?;
     checked_l2_counters(arch, l2)?;
     require_arch(arch, dram.arch(), "DRAM configuration")?;
-    require_l2_pending_read_semantics(arch)?;
+    require_l2_pending_read_semantics(arch, l2.config().is_effective())?;
     params.validate_l1_timing(l1_config)?;
     // Fail closed on an inverted ladder: every horizon/run-ahead bound
     // below assumes no response can price under the L2-hit arm.

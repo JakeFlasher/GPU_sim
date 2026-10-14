@@ -79,6 +79,38 @@ use crate::issue::{
     simulate_sm_with_residency, validate_memory_admission_candidates,
     validate_memory_service_candidates,
 };
+
+const MAX_LAUNCH_ASYNC_DECISION_SNAPSHOTS: usize = 16_384;
+
+fn append_bounded_async_decision_snapshots(
+    metrics: &mut TraceMetrics,
+    snapshots: &[crate::AsyncDecisionSnapshot],
+    already_dropped: u64,
+) -> Result<(), ReplayError> {
+    metrics.async_decision_snapshots_dropped = metrics
+        .async_decision_snapshots_dropped
+        .checked_add(already_dropped)
+        .ok_or(IssueError::CounterOverflow {
+            counter: "launch async decision snapshots dropped",
+        })?;
+    let available = MAX_LAUNCH_ASYNC_DECISION_SNAPSHOTS
+        .saturating_sub(metrics.async_decision_snapshots.len());
+    let kept = available.min(snapshots.len());
+    metrics
+        .async_decision_snapshots
+        .extend_from_slice(&snapshots[..kept]);
+    metrics.async_decision_snapshots_dropped = metrics
+        .async_decision_snapshots_dropped
+        .checked_add(u64::try_from(snapshots.len() - kept).map_err(|_| {
+            IssueError::CounterOverflow {
+                counter: "launch async decision snapshot omission",
+            }
+        })?)
+        .ok_or(IssueError::CounterOverflow {
+            counter: "launch async decision snapshots dropped",
+        })?;
+    Ok(())
+}
 use crate::metrics::TraceMetrics;
 use crate::program::{
     FunctionSchedule, OpClass, PipelineClass, sm120_alpha_scalar_control_stall_suppressed,
@@ -373,6 +405,15 @@ pub enum ReplayError {
     UnsupportedMemoryPath {
         arch: ArchId,
         class: pb::MemoryOpClass,
+    },
+    #[error(
+        "TMA opcode {opcode:?} at pc {pc:#x} on architecture {arch} has an unsupported \
+         direction; only the source-global/destination-shared load form is modeled"
+    )]
+    UnsupportedTmaDirection {
+        arch: ArchId,
+        pc: u32,
+        opcode: String,
     },
     #[error(
         "{path}: warp {warp_id} record {record_ix}: {class:?} operand routing is invalid: {source}"
@@ -2672,7 +2713,7 @@ fn ordered_async_event_kind(
                 .async_copy_wait_max_pending_groups()
                 .expect("async-copy wait slot carries its parsed immediate"),
         }),
-        OpClass::BlockBarrier | OpClass::Other => None,
+        OpClass::BlockBarrier | OpClass::Other | OpClass::MBarrierPhaseQuery => None,
     }
 }
 
@@ -3389,7 +3430,7 @@ fn extract_per_sm_blocks(
                     && schedule
                         .issue_slot(u64::from(inst.pc()))
                         .is_some_and(|slot| {
-                            matches!(opcode_head(slot.opcode_text()), "UTMALDG" | "UTMASTG")
+                            matches!(opcode_head(slot.opcode_text()), "UTMALDG" | "UTMASTG" | "UBLKCP")
                         });
                 if is_tma_opcode && (decode_sectors || preflight.is_none()) {
                     let key = TmaObservationKey {
@@ -4507,7 +4548,7 @@ fn replay_kernel_with_schedule_and_l2_and_candidates_with_payload_events(
                     slot.op_class(),
                     OpClass::AsyncCopyCommit | OpClass::AsyncCopyWait
                 )
-                || matches!(opcode_head(slot.opcode_text()), "UTMALDG" | "UTMASTG")
+                || matches!(opcode_head(slot.opcode_text()), "UTMALDG" | "UTMASTG" | "UBLKCP")
         });
     let decode_sectors = !matches!(mode, ReplayMemMode::Flat) || alpha_flat_sector_decode;
     let ExtractedKernel {
@@ -4516,7 +4557,7 @@ fn replay_kernel_with_schedule_and_l2_and_candidates_with_payload_events(
         coverage,
         shared_memory_residency,
         front_end,
-        trace_metrics,
+        mut trace_metrics,
     } = extract_per_sm_blocks(td, loc, schedule, placement, decode_sectors)?;
     let instrumentation_order = observe_async_instrumentation_order(&per_sm_blocks, schedule)?;
     #[cfg(feature = "campaign")]
@@ -4591,6 +4632,13 @@ fn replay_kernel_with_schedule_and_l2_and_candidates_with_payload_events(
                     result.readiness.async_instrumentation_order = Some(Box::new(*observation));
                 }
                 per_sm.insert(*sm, result);
+            }
+            for result in per_sm.values() {
+                append_bounded_async_decision_snapshots(
+                    &mut trace_metrics,
+                    &result.readiness.async_decision_snapshots,
+                    result.readiness.async_decision_snapshots_dropped,
+                )?;
             }
             fold_kernel_result(
                 schedule.arch,
@@ -4676,6 +4724,13 @@ fn replay_kernel_with_schedule_and_l2_and_candidates_with_payload_events(
             }
             if !async_copy_destination_fallback_sms.is_empty() {
                 sys.unmodeled_tails.ldgsts_dst_shared_timing = true;
+            }
+            for result in sys.per_sm.values() {
+                append_bounded_async_decision_snapshots(
+                    &mut trace_metrics,
+                    &result.readiness.async_decision_snapshots,
+                    result.readiness.async_decision_snapshots_dropped,
+                )?;
             }
             require_replay_arch(schedule.arch, sys.arch, "system result")?;
             let system_unmodeled_tails = sys.unmodeled_tails;
@@ -5090,6 +5145,51 @@ fn opcode_has_qualifier(opcode_text: &str, qualifier: &str) -> bool {
         .any(|part| part == qualifier)
 }
 
+/// Return whether a Blackwell bulk-copy spelling is the modeled
+/// global-to-shared producer form.  The qualifier order is part of the
+/// instruction contract: `UBLKCP.S.G` names a shared destination and global
+/// source.  The legacy `UTMASTG` store form remains a supported effective
+/// store-side trace path; it is not confused with the load-side direction
+/// check below.
+fn is_modeled_tma_load_opcode(opcode_text: &str) -> bool {
+    let token = opcode_text
+        .split_whitespace()
+        .next()
+        .unwrap_or("");
+    let mut fields = token.split('.');
+    match fields.next().unwrap_or("") {
+        "UTMALDG" | "UTMASTG" => true,
+        "UBLKCP" => {
+            matches!(fields.next(), Some("S")) && matches!(fields.next(), Some("G"))
+        }
+        _ => false,
+    }
+}
+
+fn is_tma_submission_opcode(opcode_text: &str) -> bool {
+    matches!(opcode_head(opcode_text), "UTMALDG" | "UTMASTG" | "UBLKCP")
+}
+
+fn validate_tma_load_direction(
+    schedule: &FunctionSchedule,
+    arch: ArchId,
+    pc: u32,
+) -> Result<(), ReplayError> {
+    let Some(slot) = schedule.by_pc.get(&u64::from(pc)) else {
+        return Ok(());
+    };
+    if is_tma_submission_opcode(&slot.opcode_text)
+        && !is_modeled_tma_load_opcode(&slot.opcode_text)
+    {
+        return Err(ReplayError::UnsupportedTmaDirection {
+            arch,
+            pc,
+            opcode: slot.opcode_text.clone(),
+        });
+    }
+    Ok(())
+}
+
 /// Space-coded SASS heads whose storage class is part of the mnemonic rather
 /// than inferred from the dynamic record. ATOM and RED are generic, while
 /// ATOMG/ATOMS constrain the route; LDGSTS uses its traced Global source. REDG,
@@ -5198,6 +5298,7 @@ fn validate_static_memory_route(
         class: meta.op_class,
         source,
     };
+    validate_tma_load_direction(schedule, schedule.arch, pc)?;
     let local_role = matches!(
         slot.mem_role,
         MemRole::EligibleLoad(CacheOpToken::Ldl | CacheOpToken::Stl)
@@ -5508,9 +5609,10 @@ fn classify_compact_flat(
         if arch == ArchId::Sm120
             && schedule.issue_slot(u64::from(pc)).is_some_and(|slot| {
                 let head = opcode_head(&slot.opcode_text);
-                matches!(head, "UTMALDG" | "UTMASTG")
+                matches!(head, "UTMALDG" | "UTMASTG" | "UBLKCP")
             })
         {
+            validate_tma_load_direction(schedule, arch, pc)?;
             // TMA operands are carried by tensor-map/mbarrier sidecars rather
             // than ordinary dynamic address operands in the compact trace.
             // Consume the matching per-instruction payload observation when
@@ -5863,7 +5965,7 @@ fn classify_compact_with_l1(
                 && schedule
                     .issue_slot(u64::from(preflight.pc))
                     .is_some_and(|slot| {
-                        matches!(opcode_head(slot.opcode_text()), "UTMALDG" | "UTMASTG")
+                        matches!(opcode_head(slot.opcode_text()), "UTMALDG" | "UTMASTG" | "UBLKCP")
                     });
             let l1_policy = if tma {
                 LdgstsL1Policy::BypassL1

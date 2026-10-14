@@ -68,6 +68,10 @@ pub enum IssueResourceSource {
 /// sensitivity work; it is not a calibrated Blackwell silicon model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Sm120AlphaConfig {
+    /// Optional source-qualified PHASECHK protocol split.  False preserves the
+    /// legacy effective timing proxy; true routes PHASECHK out of the
+    /// committed-copy-group dependency while retaining all other alpha costs.
+    pub protocol_split: bool,
     pub l1_hit_cycles: u64,
     pub l2_hit_cycles: u64,
     pub dram_cycles: u64,
@@ -124,6 +128,7 @@ impl Sm120AlphaConfig {
     /// no call into an SM86 capability/default constructor is made.
     pub const fn from_m8_m9() -> Self {
         Self {
+            protocol_split: false,
             l1_hit_cycles: 32,
             l2_hit_cycles: 160,
             dram_cycles: 520,
@@ -174,6 +179,11 @@ impl Sm120AlphaConfig {
             ldgsts_cache_all_destination_service_wavefronts: 1,
             ldgsts_cache_all_destination_service_cycles: 1,
         }
+    }
+
+    pub const fn with_protocol_split(mut self, enabled: bool) -> Self {
+        self.protocol_split = enabled;
+        self
     }
 }
 

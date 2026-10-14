@@ -100,7 +100,7 @@ pub use evidence::{
     TraceBundleIdentity, admit_launch_evidence, admit_launch_evidence_anchored,
 };
 pub use issue::{
-    AccessKind, AsyncInstrumentationOrderDiagnostics, AsyncIssueOverlapDiagnostics,
+    AccessKind, AsyncDecisionSnapshot, AsyncInstrumentationOrderDiagnostics, AsyncIssueOverlapDiagnostics,
     AsyncReadinessDiagnostics, BarrierPipelineDiagnostics, ClockIssueDiagnostics,
     ControlPipelineDiagnostics, CtaBarrierDiagnostics, GlobalMemoryIssueDiagnostics, IssueError,
     IssueModelParams, IssueResourceSource, Sm120AlphaConfig, MAX_MEMORY_ADMISSION_CANDIDATES,
@@ -118,7 +118,7 @@ pub use metrics::{
     PhysicalPipelineAttribution, PipelineClassEnvelope, SmActivity, TraceMetrics, WarpLifetime,
 };
 pub use program::{
-    FunctionSchedule, IssueSlot, OpClass, PipelineClass, ProgramError, build_schedules,
+    FunctionSchedule, IssueSlot, OpClass, PipelineClass, ProtocolOp, ProgramError, build_schedules,
     build_schedules_sm120_alpha, build_schedules_with_pipeline_arch,
 };
 pub use replay::{

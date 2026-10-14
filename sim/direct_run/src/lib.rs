@@ -18,18 +18,18 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::Instant;
 
+use crate::emit::{
+    emit_launch, EmitOutcome, EmittedMetricKey, FullLaunchPredictions, MetricValue, Unavailable,
+    Unit,
+};
 use serde::{Deserialize, Serialize};
 use sim_arch::card::{ArchCard, CalibError};
 use sim_arch::spec::{ArchitectureSpec, ResourceKind};
 use sim_mem::{
-    CoherenceConfig, L1Counters, L2Config, L2Counters, L2Source, MemoryOrigin,
-    L1Config, NativePayloadRecordV1, PayloadForwardingLedgerV1, PchaseCard, SectorPayloadV1,
     coalesce_payloads, enrich_native_payload_records, join_native_payload_records,
-    load_native_payload_sidecar_records,
-};
-use crate::emit::{
-    EmitOutcome, EmittedMetricKey, FullLaunchPredictions, MetricValue, Unavailable, Unit,
-    emit_launch,
+    load_native_payload_sidecar_records, CoherenceConfig, L1Config, L1Counters, L2Config,
+    L2Counters, L2Replacement, L2Source, MemoryOrigin, NativePayloadRecordV1,
+    PayloadForwardingLedgerV1, PchaseCard, SectorPayloadV1, SliceHash, L2_WRITE_ALLOCATE_POLICY,
 };
 use sim_semantics::{
     CacheCandidateSummary, CacheWitnessDomains, ClockDomain, CompletionRequirement,
@@ -38,18 +38,17 @@ use sim_semantics::{
     ServiceQueueProjection, ServiceRateProfile, ServiceStageRole,
 };
 use sim_sm::{
-    ControlSidecar, DramBw, DramStats, FastFrontierSummary, FullKernelReplayResult,
-    GpcObservationFrontier, IssueModelParams, L1PayloadAdmissionEvent, L2SourceSplit,
-    MAX_MEMORY_ADMISSION_CANDIDATES, MAX_MEMORY_SERVICE_CANDIDATES, MemoryAdmissionCandidate,
-    MemoryServiceCandidate, ModeledCompletionFrontier, ReadinessDiagnostics, ReplayMemMode,
-    Sm120AlphaConfig,
-    SmActiveObservationFrontier, StreamL2ReplaySession, TailFlags, TraceMetrics, build_schedules,
-    replay_trace_kernel, replay_trace_kernel_with_l1_payload_events,
+    build_schedules, replay_trace_kernel, replay_trace_kernel_with_l1_payload_events,
     replay_trace_kernel_with_memory_admission_candidates,
     replay_trace_kernel_with_memory_admission_feedback,
-    replay_trace_kernel_with_memory_service_candidates,
+    replay_trace_kernel_with_memory_service_candidates, ControlSidecar, DramBw, DramStats,
+    FastFrontierSummary, FullKernelReplayResult, GpcObservationFrontier, IssueModelParams,
+    L1PayloadAdmissionEvent, L2SourceSplit, MemoryAdmissionCandidate, MemoryServiceCandidate,
+    ModeledCompletionFrontier, ReadinessDiagnostics, ReplayMemMode, Sm120AlphaConfig,
+    SmActiveObservationFrontier, StreamL2ReplaySession, TailFlags, TraceMetrics,
+    MAX_MEMORY_ADMISSION_CANDIDATES, MAX_MEMORY_SERVICE_CANDIDATES,
 };
-use sim_trace::{AnchoredDir, ExecInfo, TraceDir, kernel_grid, strict_json_from_slice};
+use sim_trace::{kernel_grid, strict_json_from_slice, AnchoredDir, ExecInfo, TraceDir};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryMode {
@@ -221,9 +220,29 @@ pub struct RunConfig {
     /// never changes the ordinary SM120 fail-closed path and is intentionally
     /// separate from SM86 compatibility or carded resources.
     pub sm120_alpha: bool,
+    /// Opt-in source-qualified PHASECHK protocol split. The default retains
+    /// the legacy effective timing proxy for comparability.
+    pub sm120_protocol_split: bool,
     /// Optional measured effective L1 envelope for SM120 cache-mode replay.
     /// Without this field SM120 remains on the conservative flat lane.
     pub sm120_effective_l1: Option<Sm120EffectiveL1Config>,
+    /// Optional explicit SM120 effective L2 scenario. This is a conditional
+    /// model assumption and never a recovered physical geometry card.
+    pub sm120_effective_l2: Option<Sm120EffectiveL2Config>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct Sm120EffectiveL2Config {
+    pub capacity_bytes: u64,
+    /// Explicit scenario geometry; these are assumptions, not recovered card
+    /// metadata, and are serialized so a report is self-describing.
+    pub line_bytes: u32,
+    pub sector_bytes: u32,
+    pub num_slices: u32,
+    pub associativity: u32,
+    pub replacement: L2Replacement,
+    pub slice_hash: SliceHash,
+    pub write_policy: &'static str,
 }
 
 #[derive(Debug, Deserialize)]
@@ -618,19 +637,14 @@ fn resolve_issue_with_metadata(
                 "--sm120-alpha cannot combine with --architecture-spec or --hypothetical-issue-ports",
             ));
         }
-        let alpha = Sm120AlphaConfig::from_m8_m9();
+        let alpha = alpha_config(config);
         let issue = IssueModelParams::from_card_alpha(arch, card, alpha)
             .map_err(at("SM120 alpha issue configuration"))?;
-        let issue = config
-            .sm120_effective_l1
-            .map_or(Ok(issue), |effective| {
-                issue
-                    .with_l1_timing(
-                        effective.hit_latency_cycles,
-                        effective.miss_latency_cycles,
-                    )
-                    .map_err(at("SM120 effective L1 timing"))
-            })?;
+        let issue = config.sm120_effective_l1.map_or(Ok(issue), |effective| {
+            issue
+                .with_l1_timing(effective.hit_latency_cycles, effective.miss_latency_cycles)
+                .map_err(at("SM120 effective L1 timing"))
+        })?;
         return Ok((issue, None));
     }
     if config.sm120_effective_l1.is_some() {
@@ -678,6 +692,10 @@ fn resolve_issue_with_metadata(
         None => Ok(issue),
     }?;
     Ok((issue, architecture_spec_issue_ports))
+}
+
+pub(crate) fn alpha_config(config: &RunConfig) -> Sm120AlphaConfig {
+    Sm120AlphaConfig::from_m8_m9().with_protocol_split(config.sm120_protocol_split)
 }
 
 /// Resolve the deliberately narrow architecture-spec bridge into the one
@@ -1054,12 +1072,16 @@ pub struct RunReport {
     pub fast_frontier_only: bool,
     #[serde(skip_serializing_if = "is_false")]
     pub sm120_alpha: bool,
+    #[serde(skip_serializing_if = "is_false")]
+    pub sm120_protocol_split: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sm120_alpha_config: Option<Sm120AlphaConfig>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sm120_alpha_profile_id: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sm120_effective_l1: Option<Sm120EffectiveL1Config>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sm120_effective_l2: Option<Sm120EffectiveL2Config>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hypothetical_issue_ports: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1472,12 +1494,13 @@ impl Sm120IssueEnvelopeReport {
             issue_ports_configured: params.issue_ports(),
             dual_issue_configured: params.dual_issue_supported(),
             scalar_latency_configured_cycles: scalar.map(|value| value.latency_cycles),
-            scalar_initiation_configured_cycles:
-                scalar.map(|value| value.initiation_interval_cycles),
+            scalar_initiation_configured_cycles: scalar
+                .map(|value| value.initiation_interval_cycles),
             max_resident_warps_configured: params.max_resident_warps_per_sm(),
             max_resident_blocks_configured: params.max_resident_blocks_per_sm(),
             configuration_source: "IssueModelParams consumed by executor",
-            non_claim: "scenario inputs only; not a confidence interval or physical scheduler topology",
+            non_claim:
+                "scenario inputs only; not a confidence interval or physical scheduler topology",
         }
     }
 }
@@ -1539,7 +1562,8 @@ impl Sm120CompletionLedgerReport {
             destination_visibility: "unobserved_without_consumer_payload_observation",
             payload_observation: "not_present_in_alpha_trace_contract",
             affected_async_records,
-            non_claim: "ledger separates semantic edges but does not supply native completion timing",
+            non_claim:
+                "ledger separates semantic edges but does not supply native completion timing",
         }
     }
 }
@@ -1568,9 +1592,9 @@ impl TimingReport {
         // completion frontier can overshoot the NCU target by a large amount;
         // do not expose that hypothesis as a prediction lower bound until C3
         // closes an independent async completion witness.
-        let async_completion_unvalidated =
-            self.readiness.diagnostics.async_groups.groups_committed != 0
-                || self.alpha_approximation.is_some();
+        let async_completion_unvalidated = self.readiness.diagnostics.async_groups.groups_committed
+            != 0
+            || self.alpha_approximation.is_some();
         let modeled_event = if async_completion_unvalidated {
             FrontierBound::unknown()
         } else {
@@ -2111,9 +2135,7 @@ fn cache_lookup_prediction_reports(
         .collect()
 }
 
-fn alpha_approximation_report(
-    result: &FullKernelReplayResult,
-) -> Option<AlphaApproximationReport> {
+fn alpha_approximation_report(result: &FullKernelReplayResult) -> Option<AlphaApproximationReport> {
     if !matches!(
         result.configuration().issue_params().resource_source(),
         sim_sm::IssueResourceSource::Sm120Alpha
@@ -2240,7 +2262,8 @@ fn launch_report(
         terminal_modeled_event_time: result.terminal_modeled_event_time(),
         sm_active_terminal_frontier: Some(SmActiveTerminalFrontierReport {
             cycles: result.sm_active_terminal_event_time(),
-            role: "causal_sm_active_terminal_lower_bound_excludes_write_ack_and_service_only_events",
+            role:
+                "causal_sm_active_terminal_lower_bound_excludes_write_ack_and_service_only_events",
         }),
         sm_active_observation_frontier: result.sm_active_observation_frontier().map(Into::into),
         gpc_observation_frontier: result.gpc_observation_frontier().map(Into::into),
@@ -2291,6 +2314,14 @@ fn resolve_mode(
         return Err(RunError::new(
             "arguments",
             "--sm120-effective-l1 requires --sm120-alpha with --mode l1 or --mode l1-l2",
+        ));
+    }
+    if config.sm120_effective_l2.is_some()
+        && (!config.sm120_alpha || config.memory_mode != MemoryMode::L1L2)
+    {
+        return Err(RunError::new(
+            "arguments",
+            "--sm120-effective-l2 requires --sm120-alpha with --mode l1-l2",
         ));
     }
     if config.dirty_writeback_capacity_sectors == Some(0) {
@@ -2378,16 +2409,39 @@ fn resolve_mode(
         return Ok(ReplayMemMode::L1Const(l1));
     }
 
-    let l2_geometry = arch_card.require_l2_geometry().map_err(at("L2 geometry"))?;
-    let l2 = L2Config::from_carded_geometry_for_arch(
-        issue.arch(),
-        l2_geometry.capacity_bytes,
-        l2_geometry.line_bytes,
-        l2_geometry.sector_bytes,
-        l2_geometry.num_slices,
-        l2_geometry.policy.as_deref(),
-    )
-    .map_err(at("L2 configuration"))?;
+    let l2 = if let Some(effective) = config.sm120_effective_l2 {
+        if effective.write_policy != L2_WRITE_ALLOCATE_POLICY {
+            return Err(RunError::new(
+                "SM120 effective L2 configuration",
+                format!(
+                    "unsupported effective L2 write policy {:?}; expected {:?}",
+                    effective.write_policy, L2_WRITE_ALLOCATE_POLICY
+                ),
+            ));
+        }
+        L2Config::from_effective_geometry_for_arch(
+            issue.arch(),
+            effective.capacity_bytes,
+            effective.line_bytes,
+            effective.sector_bytes,
+            effective.num_slices,
+            effective.associativity,
+            effective.replacement,
+            effective.slice_hash,
+        )
+        .map_err(at("SM120 effective L2 configuration"))?
+    } else {
+        let l2_geometry = arch_card.require_l2_geometry().map_err(at("L2 geometry"))?;
+        L2Config::from_carded_geometry_for_arch(
+            issue.arch(),
+            l2_geometry.capacity_bytes,
+            l2_geometry.line_bytes,
+            l2_geometry.sector_bytes,
+            l2_geometry.num_slices,
+            l2_geometry.policy.as_deref(),
+        )
+        .map_err(at("L2 configuration"))?
+    };
     let dram = if config.carded_dram_bandwidth {
         let card = arch_card
             .require_dram_bandwidth()
@@ -2731,7 +2785,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
     #[cfg(feature = "performance-counters")]
     let schedule_started = Instant::now();
     let schedules = if config.sm120_alpha {
-        sim_sm::build_schedules_sm120_alpha(exec, &control, Sm120AlphaConfig::from_m8_m9())
+        sim_sm::build_schedules_sm120_alpha(exec, &control, alpha_config(config))
             .map_err(at("SM120 alpha schedule"))?
     } else {
         build_schedules(exec, &control).map_err(at("schedule"))?
@@ -2889,7 +2943,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
                     &loc,
                     schedule,
                     &arch_card,
-                    Sm120AlphaConfig::from_m8_m9(),
+                    alpha_config(config),
                 )
             } else {
                 sim_sm::fast_frontier_for_trace(&trace, &loc, schedule, &arch_card)
@@ -2930,13 +2984,11 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
             l1_resident_writeback: config.l1_resident_writeback,
             fast_frontier_only: true,
             sm120_alpha: config.sm120_alpha,
-            sm120_alpha_config: config
-                .sm120_alpha
-                .then(Sm120AlphaConfig::from_m8_m9),
-            sm120_alpha_profile_id: config
-                .sm120_alpha
-                .then_some(Sm120AlphaConfig::PROFILE_ID),
+            sm120_protocol_split: config.sm120_protocol_split,
+            sm120_alpha_config: config.sm120_alpha.then(|| alpha_config(config)),
+            sm120_alpha_profile_id: config.sm120_alpha.then_some(Sm120AlphaConfig::PROFILE_ID),
             sm120_effective_l1: config.sm120_effective_l1,
+            sm120_effective_l2: config.sm120_effective_l2,
             hypothetical_issue_ports: config
                 .hypothetical_issue_ports
                 .or(architecture_spec_issue_ports),
@@ -3133,13 +3185,11 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
         l1_resident_writeback: config.l1_resident_writeback,
         fast_frontier_only: false,
         sm120_alpha: config.sm120_alpha,
-        sm120_alpha_config: config
-            .sm120_alpha
-            .then(Sm120AlphaConfig::from_m8_m9),
-        sm120_alpha_profile_id: config
-            .sm120_alpha
-            .then_some(Sm120AlphaConfig::PROFILE_ID),
+        sm120_protocol_split: config.sm120_protocol_split,
+        sm120_alpha_config: config.sm120_alpha.then(|| alpha_config(config)),
+        sm120_alpha_profile_id: config.sm120_alpha.then_some(Sm120AlphaConfig::PROFILE_ID),
         sm120_effective_l1: config.sm120_effective_l1,
+        sm120_effective_l2: config.sm120_effective_l2,
         hypothetical_issue_ports: config
             .hypothetical_issue_ports
             .or(architecture_spec_issue_ports),

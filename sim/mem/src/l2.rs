@@ -46,6 +46,7 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use serde::Serialize;
 use sim_arch::{ArchError, ArchId, CapabilityError, L2Replacement as ArchL2Replacement};
 use sim_semantics::{
     AddressDomain, CanonicalLineKey, L2AccessDisciplineState, L2AllocationState, L2BoundaryState,
@@ -89,7 +90,8 @@ pub enum L2SetIndexError {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SliceHash {
     /// Documented-default candidate (v0 approximation).
     LineMod,
@@ -139,7 +141,8 @@ impl SliceHash {
 /// through `sim-arch`; SRRIP/BIP are ported so the lockstep differential covers
 /// the full Python surface and a future carded policy can flip the knob without
 /// a re-port.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum L2Replacement {
     Lru,
     Srrip,
@@ -172,6 +175,16 @@ pub enum L2ConfigError {
     AssociativityZero,
     #[error("num_slices must be >= 1")]
     SlicesZero,
+    #[error("effective L2 scenarios are supported only for sm_120, got {arch}")]
+    EffectiveArchitectureUnsupported { arch: ArchId },
+    #[error("effective L2 capacity {capacity}B exceeds the bounded scenario limit {maximum}B")]
+    EffectiveCapacityTooLarge { capacity: u64, maximum: u64 },
+    #[error(
+        "effective L2 geometry allocates {sets} sets, exceeding the bounded scenario limit {maximum}"
+    )]
+    EffectiveSetCountTooLarge { sets: u64, maximum: u64 },
+    #[error("effective L2 scenarios require the implemented LRU/line-mod policy")]
+    EffectivePolicyUnsupported,
     #[error(
         "card L2 geometry has non-integral sets per slice: capacity={capacity}B, line={line}B, \
          slices={slices}, associativity={associativity}"
@@ -252,8 +265,25 @@ pub enum L2ProjectionError {
 /// closed at construction.
 pub const L2_WRITE_ALLOCATE_POLICY: &str = "write_allocate_non_inclusive";
 
-/// L2 geometry + policy. Construct via [`L2Config::from_carded_geometry`]
-/// so the documented-default provenance is explicit at the call site.
+/// The effective L2 model allocates one host-side `Vec` per set.  Keep the
+/// scenario surface explicitly bounded in addition to bounding byte capacity;
+/// a large number of slices/ways can otherwise exhaust the host even when the
+/// nominal byte count looks moderate.
+const MAX_EFFECTIVE_CAPACITY_BYTES: u64 = 1 << 40;
+const MAX_EFFECTIVE_TOTAL_SETS: u64 = 4_194_304;
+
+/// Provenance of an L2 configuration. Carded geometry is a physical card
+/// declaration; effective geometry is an explicit scenario and must never be
+/// reported as recovered SM120 hardware truth.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum L2ConfigOrigin {
+    Carded,
+    Effective,
+}
+
+/// L2 geometry + policy. Construct via [`L2Config::from_carded_geometry`] or
+/// [`L2Config::from_effective_geometry_for_arch`] so provenance is explicit at
+/// the call site.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct L2Config {
     /// Deployment architecture whose defaults/geometry this config carries.
@@ -265,6 +295,7 @@ pub struct L2Config {
     pub associativity: u32,
     pub replacement: L2Replacement,
     pub slice_hash: SliceHash,
+    pub origin: L2ConfigOrigin,
 }
 
 impl L2Config {
@@ -302,6 +333,7 @@ impl L2Config {
             slice_hash: match defaults.slice_hash {
                 sim_arch::L2SliceHash::LineMod => SliceHash::LineMod,
             },
+            origin: L2ConfigOrigin::Carded,
         };
         cfg.validate()?;
         // Carded geometry is a physical declaration, so preserve the
@@ -332,6 +364,89 @@ impl L2Config {
         Ok(cfg)
     }
 
+    /// Construct a deliberately explicit effective geometry. This path does
+    /// not consult `ArchId::l2_defaults()` and therefore can represent an
+    /// SM120 scenario while retaining its assumptions as `origin=Effective`.
+    /// The current model supports the documented 128-byte/32-byte granularity,
+    /// LRU replacement, and line-mod slice hypothesis only.
+    pub fn from_effective_geometry_for_arch(
+        arch: ArchId,
+        capacity_bytes: u64,
+        line_bytes: u32,
+        sector_bytes: u32,
+        num_slices: u32,
+        associativity: u32,
+        replacement: L2Replacement,
+        slice_hash: SliceHash,
+    ) -> Result<Self, L2ConfigError> {
+        if arch != ArchId::Sm120 {
+            return Err(L2ConfigError::EffectiveArchitectureUnsupported { arch });
+        }
+        if replacement != L2Replacement::Lru || slice_hash != SliceHash::LineMod {
+            return Err(L2ConfigError::EffectivePolicyUnsupported);
+        }
+        let cfg = Self {
+            arch,
+            capacity_bytes,
+            line_bytes,
+            sector_bytes,
+            num_slices,
+            associativity,
+            replacement,
+            slice_hash,
+            origin: L2ConfigOrigin::Effective,
+        };
+        cfg.validate()?;
+        // Keep the scenario bounded and integral.  The cache model allocates
+        // one vector per set, so accepting a floored or unbounded geometry
+        // would silently change the declared capacity or exhaust the host.
+        if capacity_bytes > MAX_EFFECTIVE_CAPACITY_BYTES {
+            return Err(L2ConfigError::EffectiveCapacityTooLarge {
+                capacity: capacity_bytes,
+                maximum: MAX_EFFECTIVE_CAPACITY_BYTES,
+            });
+        }
+        let bytes_per_set = u64::from(line_bytes)
+            .checked_mul(u64::from(associativity))
+            .ok_or(L2ConfigError::NonIntegralSetCount {
+                capacity: capacity_bytes,
+                line: line_bytes,
+                slices: num_slices,
+                associativity,
+            })?;
+        let bytes_per_slice = capacity_bytes
+            .checked_div(u64::from(num_slices))
+            .ok_or(L2ConfigError::SlicesZero)?;
+        if !capacity_bytes.is_multiple_of(u64::from(num_slices))
+            || !bytes_per_slice.is_multiple_of(bytes_per_set)
+        {
+            return Err(L2ConfigError::NonIntegralSetCount {
+                capacity: capacity_bytes,
+                line: line_bytes,
+                slices: num_slices,
+                associativity,
+            });
+        }
+        let sets_per_slice = bytes_per_slice / bytes_per_set;
+        let total_sets = sets_per_slice
+            .checked_mul(u64::from(num_slices))
+            .ok_or(L2ConfigError::EffectiveSetCountTooLarge {
+                sets: u64::MAX,
+                maximum: MAX_EFFECTIVE_TOTAL_SETS,
+            })?;
+        if total_sets > MAX_EFFECTIVE_TOTAL_SETS {
+            return Err(L2ConfigError::EffectiveSetCountTooLarge {
+                sets: total_sets,
+                maximum: MAX_EFFECTIVE_TOTAL_SETS,
+            });
+        }
+        Ok(cfg)
+    }
+
+    pub const fn is_effective(&self) -> bool {
+        matches!(self.origin, L2ConfigOrigin::Effective)
+    }
+
     /// Compatibility string-token entry point. New composition code should
     /// resolve a typed [`ArchId`] before constructing the cache.
     pub fn from_carded_geometry(
@@ -354,13 +469,26 @@ impl L2Config {
     }
 
     pub fn validate(&self) -> Result<(), L2ConfigError> {
-        let defaults = self.arch.l2_defaults().require("l2_defaults")?;
-        if self.line_bytes != defaults.line_bytes || self.sector_bytes != defaults.sector_bytes {
+        if self.is_effective() {
+            if self.arch != ArchId::Sm120 {
+                return Err(L2ConfigError::EffectiveArchitectureUnsupported { arch: self.arch });
+            }
+            if self.replacement != L2Replacement::Lru || self.slice_hash != SliceHash::LineMod {
+                return Err(L2ConfigError::EffectivePolicyUnsupported);
+            }
+        }
+        let (expected_line, expected_sector) = if self.is_effective() {
+            (128, 32)
+        } else {
+            let defaults = self.arch.l2_defaults().require("l2_defaults")?;
+            (defaults.line_bytes, defaults.sector_bytes)
+        };
+        if self.line_bytes != expected_line || self.sector_bytes != expected_sector {
             return Err(L2ConfigError::UnsupportedGranularity {
                 line: self.line_bytes,
                 sector: self.sector_bytes,
-                expected_line: defaults.line_bytes,
-                expected_sector: defaults.sector_bytes,
+                expected_line,
+                expected_sector,
             });
         }
         if self.capacity_bytes < u64::from(self.line_bytes) {
@@ -374,6 +502,47 @@ impl L2Config {
         }
         if self.num_slices == 0 {
             return Err(L2ConfigError::SlicesZero);
+        }
+        if self.is_effective() {
+            if self.capacity_bytes > MAX_EFFECTIVE_CAPACITY_BYTES {
+                return Err(L2ConfigError::EffectiveCapacityTooLarge {
+                    capacity: self.capacity_bytes,
+                    maximum: MAX_EFFECTIVE_CAPACITY_BYTES,
+                });
+            }
+            let bytes_per_set = u64::from(self.line_bytes)
+                .checked_mul(u64::from(self.associativity))
+                .ok_or(L2ConfigError::NonIntegralSetCount {
+                    capacity: self.capacity_bytes,
+                    line: self.line_bytes,
+                    slices: self.num_slices,
+                    associativity: self.associativity,
+                })?;
+            let bytes_per_slice = self.capacity_bytes
+                .checked_div(u64::from(self.num_slices))
+                .ok_or(L2ConfigError::SlicesZero)?;
+            if !self.capacity_bytes.is_multiple_of(u64::from(self.num_slices))
+                || !bytes_per_slice.is_multiple_of(bytes_per_set)
+            {
+                return Err(L2ConfigError::NonIntegralSetCount {
+                    capacity: self.capacity_bytes,
+                    line: self.line_bytes,
+                    slices: self.num_slices,
+                    associativity: self.associativity,
+                });
+            }
+            let total_sets = (bytes_per_slice / bytes_per_set)
+                .checked_mul(u64::from(self.num_slices))
+                .ok_or(L2ConfigError::EffectiveSetCountTooLarge {
+                    sets: u64::MAX,
+                    maximum: MAX_EFFECTIVE_TOTAL_SETS,
+                })?;
+            if total_sets > MAX_EFFECTIVE_TOTAL_SETS {
+                return Err(L2ConfigError::EffectiveSetCountTooLarge {
+                    sets: total_sets,
+                    maximum: MAX_EFFECTIVE_TOTAL_SETS,
+                });
+            }
         }
         Ok(())
     }

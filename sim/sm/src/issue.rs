@@ -133,7 +133,8 @@ pub use readiness::{
 };
 use readiness::{
     checked_readiness_add, dependency_origin, observe_readiness_constraint,
-    operand_read_dependency_origin, projected_global_memory_issue, projected_l1_write_lookup_hits,
+    is_zero_u64, operand_read_dependency_origin, projected_global_memory_issue,
+    projected_l1_write_lookup_hits,
 };
 
 mod candidates;
@@ -996,6 +997,16 @@ pub struct ReadinessDiagnostics {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub immediate_constant_cache: Option<Box<ImmediateConstantCacheDiagnostics>>,
     pub async_groups: AsyncReadinessDiagnostics,
+    /// Read-only scalar async decision records. These are emitted only when a
+    /// modeled async-group wait is selected; they never participate in issue
+    /// selection or completion timing.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub async_decision_snapshots: Vec<AsyncDecisionSnapshot>,
+    /// Number of dynamic decision snapshots intentionally omitted after the
+    /// bounded diagnostic sample was filled. Dropping diagnostics must never
+    /// reject an otherwise valid real-trace replay.
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub async_decision_snapshots_dropped: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scalar_execution_pipeline: Option<Box<ScalarExecutionPipelineDiagnostics>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1025,6 +1036,32 @@ pub struct ReadinessDiagnostics {
     pub memory_admission_feedback: Option<Box<MemoryAdmissionFeedbackDiagnostics>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memory_write_ack: Option<Box<MemoryWriteAckDiagnostics>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AsyncDecisionSnapshot {
+    pub function_unique_id: i32,
+    pub pc: u32,
+    pub warp_slot: i32,
+    pub instruction: u64,
+    pub protocol: &'static str,
+    pub committed_groups_before: u64,
+    pub required_prefix_len: u64,
+    pub wait_threshold: u32,
+    pub readiness_cycle: u64,
+    pub decision_cycle: u64,
+    pub issue_cycle: u64,
+    /// This diagnostic is emitted only for a warp selected by the current
+    /// arbitration pass.  It is not a census of blocked candidates and does
+    /// not prove that the async prefix was the cause preventing another warp
+    /// from issuing.
+    pub observation_scope: &'static str,
+    /// Explicit semantic disposition prevents consumers from treating the
+    /// selected-only snapshot as the stronger same-state blocked witness that
+    /// would require instrumentation before arbitration.
+    pub semantics: &'static str,
+    pub membership: &'static str,
+    pub limiting_cause: Option<&'static str>,
 }
 
 impl ReadinessDiagnostics {
@@ -1066,6 +1103,26 @@ impl ReadinessDiagnostics {
             }
         }
         next.async_groups.add_checked(&addend.async_groups)?;
+        const MAX_ASYNC_DECISION_SNAPSHOTS: usize = 16_384;
+        next.async_decision_snapshots_dropped = checked_readiness_add(
+            "readiness.async_decision_snapshots_dropped",
+            next.async_decision_snapshots_dropped,
+            addend.async_decision_snapshots_dropped,
+        )?;
+        let available = MAX_ASYNC_DECISION_SNAPSHOTS
+            .saturating_sub(next.async_decision_snapshots.len());
+        let kept = available.min(addend.async_decision_snapshots.len());
+        next.async_decision_snapshots
+            .extend_from_slice(&addend.async_decision_snapshots[..kept]);
+        let omitted = addend
+            .async_decision_snapshots
+            .len()
+            .saturating_sub(kept);
+        next.async_decision_snapshots_dropped = checked_readiness_add(
+            "readiness.async_decision_snapshots_dropped",
+            next.async_decision_snapshots_dropped,
+            u64::try_from(omitted).unwrap_or(u64::MAX),
+        )?;
         if let Some(addend_scalar) = addend.scalar_execution_pipeline.as_deref() {
             if let Some(current) = next.scalar_execution_pipeline.as_deref_mut() {
                 current.add_checked(addend_scalar)?;
@@ -3056,6 +3113,15 @@ enum ReadinessCause {
     RegisterPredicate,
     RegisterWaw,
     ControlStall,
+}
+
+fn readiness_cause_name(cause: ReadinessCause) -> &'static str {
+    match cause {
+        ReadinessCause::AsyncSource => "async_source",
+        ReadinessCause::AsyncDestinationLocal => "async_destination_local",
+        ReadinessCause::AsyncDestinationSmService => "async_destination_sm_service",
+        _ => "other_readiness_cause",
+    }
 }
 
 impl From<DependencyOrigin> for ReadinessCause {
@@ -9391,6 +9457,7 @@ impl<'a> SmCore<'a> {
         let mut ready_at = base;
         let mut limiting = None;
         let mut tied = 0;
+        let mut async_snapshot = None;
         if self.params.resource_source() == IssueResourceSource::Sm120Alpha {
             let inst = warp.insts[warp.next];
             let ready = issue_fixed_register_ready(slot.fixed_latency_operands(),
@@ -9583,6 +9650,17 @@ impl<'a> SmCore<'a> {
                         .max()
                 })
                 .unwrap_or(0);
+            async_snapshot = Some((
+                u64::try_from(committed_groups_before).map_err(|_| {
+                    IssueError::CounterOverflow {
+                        counter: "async-decision committed-group cardinality",
+                    }
+                })?,
+                u64::try_from(prefix).map_err(|_| IssueError::CounterOverflow {
+                    counter: "async-decision required-prefix cardinality",
+                })?,
+                wait_frontier,
+            ));
             if let Some(diagnostics) = projected.async_wait_prefix.as_deref_mut() {
                 diagnostics.observe(
                     slot.async_copy_wait_max_pending_groups,
@@ -9827,6 +9905,41 @@ impl<'a> SmCore<'a> {
         }
 
         let effective_ready = ready_at.max(base);
+        if let Some((committed_groups_before, required_prefix_len, readiness_cycle)) =
+            async_snapshot
+        {
+            if projected.async_decision_snapshots.len() >= 16_384 {
+                projected.async_decision_snapshots_dropped = projected
+                    .async_decision_snapshots_dropped
+                    .checked_add(1)
+                    .ok_or(IssueError::ReadinessDiagnostic(
+                        ReadinessCounterError::Overflow {
+                            field: "readiness.async_decision_snapshots_dropped",
+                            accumulated: u64::MAX,
+                            addend: 1,
+                        },
+                    ))?;
+            } else {
+                let inst = warp.insts[warp.next];
+                projected.async_decision_snapshots.push(AsyncDecisionSnapshot {
+                    function_unique_id: self.schedule.function_unique_id(),
+                    pc: inst.pc,
+                    warp_slot: warp.warp_slot,
+                    instruction: u64::try_from(warp.next).unwrap_or(u64::MAX),
+                    protocol: "committed_async_group_prefix_wait",
+                    committed_groups_before,
+                    required_prefix_len,
+                    wait_threshold: slot.async_copy_wait_max_pending_groups,
+                    readiness_cycle,
+                    decision_cycle: effective_ready,
+                    issue_cycle: now,
+                    observation_scope: "selected_warp_issue_opportunity",
+                    semantics: "selected_only_not_blocked_witness",
+                    membership: "committed-prefix membership from scalar model state",
+                    limiting_cause: limiting.map(readiness_cause_name),
+                });
+            }
+        }
         if effective_ready > base {
             projected.limiting_cycles.add_cause(
                 limiting.expect("a post-baseline ready frontier has a cause"),
@@ -13210,7 +13323,7 @@ impl<'a> SmCore<'a> {
                     // `Other` includes explicit SB1..SB5 DEPBAR operand sets.
                     // Readiness was enforced through ordinary barrier state;
                     // they never mutate asynchronous-copy groups.
-                    OpClass::BlockBarrier | OpClass::Other => {}
+                    OpClass::BlockBarrier | OpClass::Other | OpClass::MBarrierPhaseQuery => {}
                 }
             }
 

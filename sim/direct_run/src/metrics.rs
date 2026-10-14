@@ -1,11 +1,11 @@
 //! Unit-explicit SM86 metrics derived after replay, never from NCU values.
 //! Existing campaign emissions keep their compatibility contract. This surface
 //! supplies additional ratios and explicitly distinguishes approximations/gaps.
-use super::RunError;
 use super::resources::LaunchResourceObservation;
+use super::RunError;
 use serde::Serialize;
-use sim_arch::ArchId;
 use sim_arch::card::ArchCard;
+use sim_arch::ArchId;
 use sim_mem::MemoryOrigin;
 use sim_sm::FullKernelReplayResult;
 use sim_sm::{GlobalMemoryIssueDiagnostics, ReadinessCauseCycles, ReadinessDiagnostics};
@@ -2457,9 +2457,11 @@ pub(super) fn project(
                 "modeled unified L1TEX observer counter; cache state and lookup packetization are explicit",
             );
         }
+        let [store_hits, reduction_hits] = crate::emit::l1_write_hit_terms(result.arch(), l1);
         let unified_hit_num = u128::from(l1.hits)
             + u128::from(l1.pending_lookup_hits)
-            + u128::from(l1.write_lookup_hits);
+            + u128::from(store_hits)
+            + u128::from(reduction_hits);
         let unified_hit_den = u128::from(l1.hits)
             + u128::from(l1.misses)
             + u128::from(l1.store_sectors)
@@ -2474,7 +2476,7 @@ pub(super) fn project(
                 unified_hit_num * 100,
                 unified_hit_den,
                 false,
-                "same numerator/denominator contract as the frozen unified L1TEX emitter",
+                "architecture-scoped unified L1TEX projection; SM120 uses effective resident-sector write hits, not the SM86 write-lookup observer",
             ),
         );
         for (origin, name) in [

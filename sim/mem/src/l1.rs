@@ -366,11 +366,11 @@ pub struct L1Counters {
     pub untagged_sectors: u64,
     pub store_sectors: u64,
     pub store_hits: u64,
-    /// §6.4 write-class rule at the L1 probe: store sectors whose LINE
-    /// tag was resident regardless of the sector's valid bit (a
-    /// superset of `store_hits`). Counted alongside — the sector-valid
-    /// `store_hits` stays the v0 unified diagnostic until l1tex store
-    /// accounting is scored against labels and one rule wins.
+    /// §6.4 write-class line-tag observer used by the SM86 compatibility
+    /// surface. It is a superset of sector-valid `store_hits`; SM120's
+    /// unified sector-hit projection uses the effective model's resident
+    /// sector counters instead because no SM120 write-lookup capability is
+    /// established.
     pub store_tag_hits: u64,
     pub write_lookup_hits: u64,
     /// RED/REDG sectors and sector-valid hits. They contribute to the unified

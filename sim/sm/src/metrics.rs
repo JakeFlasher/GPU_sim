@@ -2,13 +2,17 @@
 use std::collections::BTreeMap;
 
 use serde::Serialize;
-use sim_mem::{AccessKind, CacheOpToken, opcode_head};
+use sim_mem::{opcode_head, AccessKind, CacheOpToken};
 use sim_semantics::{
     CandidateDomain, EvidenceKind, LatentFactors, LatentModelError, ResourceDemandEnvelope,
     ResourceDemandInterval,
 };
 
 use crate::sass_operands::FixedLatencyOperandStatus;
+
+fn is_zero_u64(value: &u64) -> bool {
+    *value == 0
+}
 
 /// Static register demand projected from admitted SASS operands. Regular-bank
 /// counts are retained only for SM86; SM120 records expose projection/gap
@@ -374,6 +378,18 @@ pub struct TraceMetrics {
     /// service, or NCU comparison values.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub async_obligations: Option<sim_trace::obligations::ObligationFrontier>,
+    /// Read-only scalar async-group decision snapshots from the issue model.
+    /// They cover selected issue opportunities only; they are not a census of
+    /// blocked candidates or a same-state blocked witness.  They are dynamic
+    /// model-state evidence, not hardware completion clocks, and never feed
+    /// scheduling.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub async_decision_snapshots: Vec<crate::AsyncDecisionSnapshot>,
+    /// Launch-level cap for the aggregated snapshot vector.  Per-SM caps do
+    /// not bound a multi-SM launch, so omitted records are retained as an
+    /// explicit count rather than silently growing the report.
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub async_decision_snapshots_dropped: u64,
     /// TMA payload observations joined from the producer sidecar. Missing
     /// sidecar records remain explicitly unavailable; these counters never
     /// enter NCU comparison or synthesize completion timestamps.

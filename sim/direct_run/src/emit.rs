@@ -1001,11 +1001,20 @@ fn emit_l1tex_read_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitE
     )?))
 }
 
+/// Write-hit terms for the unified projection. SM86 retains its architecture-
+/// specific lookup observer. SM120 has no supported write-lookup window and
+/// instead reports resident-sector hits in the explicitly effective L1 model.
+/// These terms do not change cache state, write routing, or replay timing.
+pub(crate) fn l1_write_hit_terms(arch: ArchId, l1: &L1Counters) -> [u64; 2] {
+    match arch {
+        ArchId::Sm86 => [l1.write_lookup_hits, 0],
+        ArchId::Sm120 => [l1.store_hits, l1.reduction_hits],
+    }
+}
+
 /// `l1tex__t_sector_hit_rate.pct` — the unified L1TEX sector hit rate over all
-/// op classes. Loads use resident-data hits plus prior-request pending-fill
-/// merges. Write classes use the
-/// independently calibrated 64 B lookup-allocation observer derived from exact
-/// instruction sector/wavefront topology; it changes no cache state or timing.
+/// modeled op classes. Loads use resident-data hits plus prior-request pending-
+/// fill merges; write-hit accounting is architecture-specific (see above).
 /// The full bypass stream (atom included) is in the denominator —
 /// `bypass_atom_sectors` must NOT be added on top because it is already a subset
 /// of `bypass_sectors`.
@@ -1016,10 +1025,11 @@ fn emit_l1tex_unified_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, Em
             needs: MemUnit::L1Tex,
         }));
     };
+    let [store_hits, reduction_hits] = l1_write_hit_terms(snap.arch, l1);
     let num = checked_sum(
         key,
         "unified L1TEX hit-rate numerator",
-        &[l1.hits, l1.pending_lookup_hits, l1.write_lookup_hits],
+        &[l1.hits, l1.pending_lookup_hits, store_hits, reduction_hits],
     )?;
     let den = checked_sum(
         key,
@@ -1086,7 +1096,6 @@ fn emit_dram_read_sectors(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitErr
     Ok(EmitOutcome::Predicted(MetricValue::Exact(total)))
 }
 
-const SM86_ONLY: &[ArchId] = &[ArchId::Sm86];
 const ALL_ARCHITECTURES: &[ArchId] = &[ArchId::Sm86, ArchId::Sm120];
 
 /// The stable emission table. Seven simulator counters retain their established
@@ -1101,7 +1110,7 @@ pub const DESCRIPTORS: [MetricDescriptor; EMITTED_METRIC_COUNT] = [
         valid_max: RegistryValidMax::Unbounded,
         parser_transform: ParserTransform::IdentityNonnegative,
         model_io_role: ModelIoRole::Target,
-        available_on: SM86_ONLY,
+        available_on: ALL_ARCHITECTURES,
         emit: emit_smsp_inst_executed,
     },
     MetricDescriptor {
@@ -1112,7 +1121,7 @@ pub const DESCRIPTORS: [MetricDescriptor; EMITTED_METRIC_COUNT] = [
         valid_max: RegistryValidMax::Unbounded,
         parser_transform: ParserTransform::IdentityNonnegative,
         model_io_role: ModelIoRole::Target,
-        available_on: SM86_ONLY,
+        available_on: ALL_ARCHITECTURES,
         emit: emit_gmem_ld_sectors,
     },
     MetricDescriptor {
@@ -1123,7 +1132,7 @@ pub const DESCRIPTORS: [MetricDescriptor; EMITTED_METRIC_COUNT] = [
         valid_max: RegistryValidMax::Unbounded,
         parser_transform: ParserTransform::IdentityNonnegative,
         model_io_role: ModelIoRole::Target,
-        available_on: SM86_ONLY,
+        available_on: ALL_ARCHITECTURES,
         emit: emit_gmem_st_sectors,
     },
     MetricDescriptor {
@@ -1134,7 +1143,7 @@ pub const DESCRIPTORS: [MetricDescriptor; EMITTED_METRIC_COUNT] = [
         valid_max: RegistryValidMax::One,
         parser_transform: ParserTransform::PercentToFraction,
         model_io_role: ModelIoRole::Target,
-        available_on: SM86_ONLY,
+        available_on: ALL_ARCHITECTURES,
         emit: emit_l1tex_read_hit_rate,
     },
     MetricDescriptor {
@@ -1145,7 +1154,7 @@ pub const DESCRIPTORS: [MetricDescriptor; EMITTED_METRIC_COUNT] = [
         valid_max: RegistryValidMax::One,
         parser_transform: ParserTransform::PercentToFraction,
         model_io_role: ModelIoRole::Target,
-        available_on: SM86_ONLY,
+        available_on: ALL_ARCHITECTURES,
         emit: emit_l1tex_unified_hit_rate,
     },
     MetricDescriptor {
@@ -1156,7 +1165,7 @@ pub const DESCRIPTORS: [MetricDescriptor; EMITTED_METRIC_COUNT] = [
         valid_max: RegistryValidMax::One,
         parser_transform: ParserTransform::PercentToFraction,
         model_io_role: ModelIoRole::Target,
-        available_on: SM86_ONLY,
+        available_on: ALL_ARCHITECTURES,
         emit: emit_l2_hit_rate,
     },
     MetricDescriptor {
@@ -1167,7 +1176,7 @@ pub const DESCRIPTORS: [MetricDescriptor; EMITTED_METRIC_COUNT] = [
         valid_max: RegistryValidMax::Unbounded,
         parser_transform: ParserTransform::IdentityNonnegative,
         model_io_role: ModelIoRole::Target,
-        available_on: SM86_ONLY,
+        available_on: ALL_ARCHITECTURES,
         emit: emit_dram_read_sectors,
     },
     MetricDescriptor {
