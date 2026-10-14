@@ -25,6 +25,9 @@ struct CounterSnapshot<'a> {
     dram: Option<&'a DramStats>,
     front_end: FrontEndCounters,
     binding_cycles: Option<BindingCycles>,
+    /// Effective SM120 TMA global-to-shared payload demand, in 32-byte
+    /// sectors. This is a conditional sidecar demand arm, not engine timing.
+    tma_load_sectors: u64,
 }
 
 impl<'a> CounterSnapshot<'a> {
@@ -47,6 +50,10 @@ impl<'a> CounterSnapshot<'a> {
             dram: result.dram(),
             front_end: result.front_end(),
             binding_cycles,
+            tma_load_sectors: result
+                .trace_metrics()
+                .tma_sidecar_load_payload_bytes
+                .div_ceil(32),
         })
     }
 
@@ -67,6 +74,7 @@ impl<'a> CounterSnapshot<'a> {
             dram: counters.dram(),
             front_end: counters.front_end(),
             binding_cycles,
+            tma_load_sectors: 0,
         })
     }
 
@@ -1078,21 +1086,30 @@ fn emit_l2_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitError> {
     )?))
 }
 
-/// `dram__sectors_read.sum` — data demand plus compulsory executed SASS sectors.
+/// `dram__sectors_op_read.sum` — data demand plus compulsory executed SASS
+/// sectors. Effective SM120 runs additionally include observed global-to-shared
+/// TMA load payload sectors when the sidecar supplies them; this is a
+/// conditional demand model, not a recovered engine path.
 fn emit_dram_read_sectors(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitError> {
     let Some(dram) = snap.dram else {
         return Ok(EmitOutcome::Unavailable(Unavailable::MemModeLacksUnit {
             needs: MemUnit::Dram,
         }));
     };
-    let total = checked_sum(
-        "traffic_dram_read_sectors",
-        "data and compulsory instruction DRAM-read sectors",
-        &[
-            dram.read_sectors,
-            snap.front_end.compulsory_instruction_read_sectors(),
-        ],
-    )?;
+    let compulsory = snap.front_end.compulsory_instruction_read_sectors();
+    let total = if snap.arch == ArchId::Sm120 {
+        checked_sum(
+            "traffic_dram_read_sectors",
+            "data, TMA payload, and compulsory instruction DRAM-read sectors",
+            &[dram.read_sectors, snap.tma_load_sectors, compulsory],
+        )?
+    } else {
+        checked_sum(
+            "traffic_dram_read_sectors",
+            "data and compulsory instruction DRAM-read sectors",
+            &[dram.read_sectors, compulsory],
+        )?
+    };
     Ok(EmitOutcome::Predicted(MetricValue::Exact(total)))
 }
 

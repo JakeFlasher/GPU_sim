@@ -399,6 +399,11 @@ pub struct TraceMetrics {
     pub tma_sidecar_payload_bytes_missing: u64,
     pub tma_sidecar_load_records: u64,
     pub tma_sidecar_store_records: u64,
+    /// Payload bytes partitioned by transfer direction. The load partition is
+    /// a conditional lower-level demand input for effective SM120 memory
+    /// scenarios; it is never an engine-completion timestamp.
+    pub tma_sidecar_load_payload_bytes: u64,
+    pub tma_sidecar_store_payload_bytes: u64,
     pub tma_sidecar_zero_byte_records: u64,
     pub tma_sidecar_oob_or_empty_records: u64,
     /// Typed synchronization-sidecar observations. These are semantic
@@ -669,6 +674,14 @@ impl TraceMetrics {
             &mut self.tma_sidecar_store_records,
             u64::from(observation.is_store),
         )?;
+        if let Some(bytes) = observation.bytes {
+            if observation.is_load {
+                add(&mut self.tma_sidecar_load_payload_bytes, bytes)?;
+            }
+            if observation.is_store {
+                add(&mut self.tma_sidecar_store_payload_bytes, bytes)?;
+            }
+        }
         add(
             &mut self.tma_sidecar_zero_byte_records,
             u64::from(observation.zero_byte),
