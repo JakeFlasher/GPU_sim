@@ -21,20 +21,22 @@ explicit conditional scenarios.
 
 ## Effective cache scenario
 
-SM120 remains flat by default. For a bounded real-device cache experiment, the
-direct runner accepts an explicit effective L1 envelope:
+SM120 full replay is integrated `l1-l2` by default. It resolves effective L1
+and L2 envelopes automatically; explicit values override those defaults for a
+conditional scenario. Flat is reserved for the complementary fast frontier:
 
 ```bash
 sim/target/release/sim-run \
   --trace CAPTURE --control CONTROL.json \
   --arch-card arch_profiles/cards/sm_120-rtx-5090.json \
-  --sm120-alpha --mode l1 \
-  --sm120-effective-l1 1024:none:50:512
+  --sm120-alpha --mode l1-l2
 ```
 
-The fields are `line-capacity:mshr-count|none:hit-cycles:miss-cycles`. They
-are one measured scenario for a fully-associative effective model, not an
-RTX 5090 set/hash/associativity claim. `50/512` supersedes the invalid
-short-cycle `43/501` profile. The option is rejected unless the
-SM120 alpha lane and an L1 cache mode are selected; unresolved UTMA/TMA
+The default fields are `1024:none:50:512` for L1 and `100663296:1:16` for
+L2. They are effective scenarios, not RTX 5090 set/hash/associativity claims.
+The L1 fields are `line-capacity:mshr-count|none:hit-cycles:miss-cycles`;
+`50/512` supersedes the invalid
+short-cycle `43/501` profile. Full SM120 replay rejects flat and L1-only memory
+modes; these values are accepted as an explicit override of the integrated
+L1/L2 path. Unresolved UTMA/TMA
 completion remains a typed refusal rather than a generic global fallback.

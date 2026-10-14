@@ -16,7 +16,7 @@ python3 tools/sm120_corpus_replay.py \
   --capture-root /root/sm120_rtx_5090_capture \
   --output /root/sm120_replay_current \
   --mode both \
-  --memory-mode l1 \
+  --memory-mode l1-l2 \
   --fast-memory-mode flat \
   --sm120-effective-l1 1024:none:50:512 \
   --ncu-shaped-metrics \
@@ -24,9 +24,12 @@ python3 tools/sm120_corpus_replay.py \
 ```
 
 The explicit `--workers 12` is mandatory for every complete-corpus
-invocation. Full replay runs first; the complementary fast mode is
-flat-frontier-only. The effective `50/512` profile is a conditional cache
-scenario; protocol identity is built into the default SM120 route. The driver
+invocation. Full replay runs first and is required to use integrated `l1-l2`;
+the complementary fast mode is flat-frontier-only. If effective parameters
+are omitted, the binary resolves L1 `1024:none:50:512` and L2
+`100663296:1:16` automatically. They are conditional effective scenarios,
+not physical geometry claims; protocol identity is built into the default route.
+The driver
 publishes `full.jsonl.zst` and `fast.jsonl.zst`; no new uncompressed replay
 JSONL is produced.
 
