@@ -57,6 +57,8 @@ def allowed_units(unit: str) -> set[str]:
         "pct": {"%"},
         "count": {"inst", "sector", "request", "line", "wavefront", "byte", "warp"},
         "cycles": {"cycle"},
+        "inst/cycle": {"inst/cycle"},
+        "warp": {"warp"},
     }.get(unit, set())
 
 
@@ -100,6 +102,21 @@ def metric_entries(launch: dict[str, Any]) -> list[dict[str, Any]]:
                 "estimate": estimate,
                 "reason": None if estimate is not None else "observer_count_unavailable",
             })
+    native = launch.get("native_metrics", {})
+    native_metrics = native.get("metrics", {}) if isinstance(native, dict) else {}
+    for key, metric in native_metrics.items():
+        if not isinstance(metric, dict) or not metric.get("ncu_metric"):
+            continue
+        estimate = finite(metric.get("value"))
+        status = metric.get("status")
+        entries.append({
+            "metric": str(metric["ncu_metric"]),
+            "unit": "cycles" if metric.get("unit") == "cycle" else str(metric.get("unit", "")),
+            "status": "predicted" if status in {"modeled", "approximate", "observed_external"} and estimate is not None else "unavailable",
+            "estimate": estimate,
+            "reason": metric.get("semantics") if estimate is None else None,
+            "source_key": key,
+        })
     return entries
 
 

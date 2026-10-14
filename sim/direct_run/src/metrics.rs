@@ -585,11 +585,25 @@ pub(super) fn project(
         }
     }
     if result.arch() == ArchId::Sm120 {
-        // Architecture-neutral alpha rows.  They intentionally expose only
-        // trace cardinality and the causal issue frontier; no SM120 cache,
-        // scheduler-port, or cycle-domain equivalence is implied.  The warp
-        // instruction count is the one row that can be joined to NCU's
-        // instruction counter without importing an SM86 percentage formula.
+        // Architecture-neutral alpha rows. Values are model-relative and
+        // approximate; they do not recover SM120 scheduler topology or a
+        // hardware clock. The instruction count remains the trace cardinality
+        // used by the existing sector/instruction projections.
+        let modeled_elapsed = result
+            .modeled_completion_frontier()
+            .lower_bound_cycles()
+            .or_else(|| {
+                result
+                    .terminal_modeled_event_time()
+                    .and_then(|cycles| cycles.checked_add(1))
+            })
+            .unwrap_or(0);
+        let smsp_active_cycles: u128 = result
+            .per_sm()
+            .values()
+            .flat_map(|sm| sm.activity.smsp_active_cycles)
+            .map(u128::from)
+            .sum();
         m.insert(
             "alpha_warp_instructions".to_owned(),
             Metric::count(
@@ -606,6 +620,28 @@ pub(super) fn project(
                 "cycle",
                 u128::from(result.modeled_issue_lower_bound_cycles()),
                 "SM120 alpha causal issue lower bound; not a summed NCU cycle counter",
+            ),
+        );
+        m.insert(
+            "alpha_sm_inst_per_cycle_elapsed".to_owned(),
+            Metric::ratio(
+                Some("sm__inst_executed.avg.per_cycle_elapsed"),
+                "inst/cycle",
+                u128::from(result.instructions_issued()),
+                u128::from(modeled_elapsed),
+                true,
+                "trace instruction cardinality divided by the model-relative terminal frontier; not calibrated silicon IPC",
+            ),
+        );
+        m.insert(
+            "alpha_smsp_inst_per_cycle_active".to_owned(),
+            Metric::ratio(
+                Some("smsp__inst_executed.avg.per_cycle_active"),
+                "inst/cycle",
+                u128::from(result.instructions_issued()),
+                smsp_active_cycles,
+                true,
+                "trace instruction cardinality divided by summed model SMSP-active cycles; not a physical issue-width measurement",
             ),
         );
         m.insert(
