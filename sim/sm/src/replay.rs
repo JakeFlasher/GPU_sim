@@ -80,7 +80,7 @@ use crate::issue::{
     validate_memory_service_candidates,
 };
 
-const MAX_LAUNCH_ASYNC_DECISION_SNAPSHOTS: usize = 16_384;
+const MAX_LAUNCH_ASYNC_DECISION_SNAPSHOTS: usize = 1_024;
 
 fn append_bounded_async_decision_snapshots(
     metrics: &mut TraceMetrics,

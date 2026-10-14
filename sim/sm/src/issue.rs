@@ -1103,7 +1103,10 @@ impl ReadinessDiagnostics {
             }
         }
         next.async_groups.add_checked(&addend.async_groups)?;
-        const MAX_ASYNC_DECISION_SNAPSHOTS: usize = 16_384;
+        // Snapshots are optional diagnostics.  Keep the serialized report
+        // bounded even for very large multi-SM launches; the dropped count
+        // preserves the fact that sampling was truncated.
+        const MAX_ASYNC_DECISION_SNAPSHOTS: usize = 1_024;
         next.async_decision_snapshots_dropped = checked_readiness_add(
             "readiness.async_decision_snapshots_dropped",
             next.async_decision_snapshots_dropped,
@@ -9908,7 +9911,7 @@ impl<'a> SmCore<'a> {
         if let Some((committed_groups_before, required_prefix_len, readiness_cycle)) =
             async_snapshot
         {
-            if projected.async_decision_snapshots.len() >= 16_384 {
+            if projected.async_decision_snapshots.len() >= 1_024 {
                 projected.async_decision_snapshots_dropped = projected
                     .async_decision_snapshots_dropped
                     .checked_add(1)
