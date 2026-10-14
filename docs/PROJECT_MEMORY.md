@@ -31,3 +31,7 @@
 - Proprietary scheduler/cache topology, TMA engine completion, universal clock
   conversion, and formal unseen-workload accuracy are documented non-prerequisites
   under the university PhD closure boundary.
+- Post-remediation flat corpus run (commit `202132b6`) completed 339/339 roots
+  and 11,558 launches in both full and fast modes with 12 workers; walls were
+  84.541 s and 57.453 s. The async diagnostic snapshot cap was reduced to 1,024
+  after an earlier large grouped-GEMM report exceeded the driver output bound.
