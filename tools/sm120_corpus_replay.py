@@ -151,8 +151,10 @@ def _run_simulator(command: list[str], stdout_path: Path, stderr, timeout: float
     return (None if timed_out else process.returncode), timed_out, exceeded
 
 
-def replay(capture: Path, relative: str, control: Path, args, mode: str, logs: Path) -> dict:
+def replay(capture: Path, relative: str, control: Path, args, mode: str, logs: Path,
+           scope_override: str | None = None) -> dict:
     memory_mode = args.memory_mode if mode == "full" else args.fast_memory_mode
+    cache_scope = scope_override or args.cache_scope
     command = [str(args.sim_bin), "--trace", str(capture), "--control", str(control),
                "--arch-card", str(args.arch_card), "--sm120-alpha", "--mode",
                str(memory_mode)]
@@ -163,11 +165,12 @@ def replay(capture: Path, relative: str, control: Path, args, mode: str, logs: P
     if args.carded_dram and mode == "full":
         command.append("--carded-dram")
     if mode == "full":
-        command.extend(("--cache-scope", args.cache_scope))
+        command.extend(("--cache-scope", cache_scope))
         command.append("--ncu-shaped-metrics")
     if mode == "fast":
         command.append("--fast-frontier-only")
-    stderr_path = logs / (relative + ".stderr")
+    suffix = ".fallback-launch" if scope_override else ""
+    stderr_path = logs / (relative + suffix + ".stderr")
     started = time.perf_counter_ns()
     environment, removed_environment = _clean_replay_environment()
     row: dict = {}
@@ -222,6 +225,22 @@ def replay(capture: Path, relative: str, control: Path, args, mode: str, logs: P
     row.update(canonical_capture=relative, capture_dir=str(capture),
                driver_wall_ms=wall_ns / 1_000_000,
                replay_environment_removed=removed_environment)
+    if (
+        scope_override is None
+        and mode == "full"
+        and args.cache_scope == "stream-l2"
+        and row.get("status") != "ok"
+    ):
+        try:
+            detail = stderr_path.read_text(encoding="utf-8")
+        except OSError:
+            detail = ""
+        if "--cache-scope stream-l2 requires every launch in the trace to belong to one device and stream" in detail:
+            fallback = replay(capture, relative, control, args, mode, logs, "launch")
+            fallback["requested_cache_scope"] = "stream-l2"
+            fallback["cache_scope_fallback"] = "launch"
+            fallback["cache_scope_fallback_reason"] = "capture contains multiple device/stream identities"
+            return fallback
     return row
 
 
@@ -305,6 +324,7 @@ def main() -> int:
                "memory_mode": args.memory_mode,
                "fast_memory_mode": args.fast_memory_mode,
                "cache_scope": args.cache_scope,
+               "cache_scope_fallbacks": 0,
                "sm120_effective_l1": None,
                "sm120_effective_l2": None,
                "sm120_effective_l1_override": args.sm120_effective_l1,
@@ -361,6 +381,8 @@ def main() -> int:
                         output.write(json.dumps(row, separators=(",", ":"), allow_nan=False) + "\n")
                         output.flush()
                         counts[row["status"]] += 1
+                        if row.get("cache_scope_fallback"):
+                            summary["cache_scope_fallbacks"] += 1
                         if mode == "full" and row["status"] == "ok":
                             # Report the actual binary-resolved defaults, not
                             # absent override flags or duplicated Python constants.
