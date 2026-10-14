@@ -64,8 +64,9 @@ pub enum IssueResourceSource {
 /// Nothing in this structure is obtained from the SM86 architecture
 /// capability table.  Values are an executable, deliberately provisional
 /// envelope assembled from the retained M8 dependency/ILP and M9
-/// barrier/control probes.  The alpha lane is intended for Flat replay and
-/// sensitivity work; it is not a calibrated Blackwell silicon model.
+/// barrier/control probes. The alpha lane supplies the effective SM120 timing
+/// envelope for integrated full replay and the complementary fast frontier; it
+/// is not a calibrated Blackwell silicon model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Sm120AlphaConfig {
     pub l1_hit_cycles: u64,
@@ -722,8 +723,9 @@ impl IssueModelParams {
             resource_source: IssueResourceSource::Sm120Alpha,
             // The alpha lane deliberately does not instantiate any SM86
             // front-end, memory-pipeline, IMC, or constant-return capability.
-            // Flat replay therefore uses only the explicit scalar/barrier
-            // envelope below; cache/async lanes remain unavailable.
+            // The flat fast frontier therefore uses only the explicit
+            // scalar/barrier envelope below; cache/async lanes are supplied by
+            // the integrated full replay path.
             instruction_front_end: None,
             memory_issue_pipeline: None,
             scalar_execution_pipeline: Some(ScalarExecutionPipeline {
@@ -1401,8 +1403,8 @@ impl IssueModelParams {
     }
 
     /// Replace the alpha lane's L1 timing with an explicit effective envelope
-    /// measured by a real SM120 probe. Geometry remains a separate opt-in
-    /// value; ordinary flat replay never calls this path.
+    /// measured by a real SM120 probe. Geometry remains a separate effective
+    /// scenario value; the SM120 full path supplies it automatically.
     pub fn with_l1_timing(mut self, hit: u64, miss: u64) -> Result<Self, IssueError> {
         if hit == 0 || hit >= miss {
             return Err(IssueError::InvalidL1TimingOverride { hit, miss });

@@ -2363,7 +2363,7 @@ fn resolve_mode(
     {
         return Err(RunError::new(
             "arguments",
-            "SM120 cache mode requires --sm120-effective-l1; otherwise use --mode flat",
+            "SM120 cache mode requires --sm120-effective-l1; use the flat mode only with --fast-frontier-only",
         ));
     }
     if config.sm120_effective_l1.is_some()
