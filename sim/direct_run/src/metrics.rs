@@ -604,6 +604,10 @@ pub(super) fn project(
             .flat_map(|sm| sm.activity.smsp_active_cycles)
             .map(u128::from)
             .sum();
+        let tma_store_sectors = result
+            .trace_metrics()
+            .tma_sidecar_store_payload_bytes
+            .div_ceil(32);
         let sm_cycle_population = u128::from(sm_count);
         let elapsed_population_cycles = u128::from(modeled_elapsed)
             .checked_mul(sm_cycle_population)
@@ -646,6 +650,15 @@ pub(super) fn project(
                 smsp_active_cycles,
                 true,
                 "trace instruction cardinality divided by summed model SMSP-active cycles; not a physical issue-width measurement",
+            ),
+        );
+        m.insert(
+            "alpha_tma_store_demand_sectors".to_owned(),
+            Metric::count(
+                Some("dram__sectors_op_write.sum"),
+                "sector",
+                u128::from(tma_store_sectors),
+                "observed TMA store payload sectors; conditional demand accounting, not a DRAM acknowledgment",
             ),
         );
         m.insert(

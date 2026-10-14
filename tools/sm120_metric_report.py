@@ -59,6 +59,10 @@ def allowed_units(unit: str) -> set[str]:
         "cycles": {"cycle"},
         "inst/cycle": {"inst/cycle"},
         "warp": {"warp"},
+        "inst": {"inst"},
+        "sector": {"sector"},
+        "byte": {"byte"},
+        "request": {"request"},
     }.get(unit, set())
 
 
