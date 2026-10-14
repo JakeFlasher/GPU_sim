@@ -216,7 +216,7 @@ def reduce_mode(
 
 def render_summary(table: dict[str, dict[str, Any]]) -> dict[str, Any]:
     metrics: dict[str, Any] = {}
-    unavailable: dict[str, list[str]] = collections.defaultdict(list)
+    unavailable: dict[str, list[dict[str, Any]]] = collections.defaultdict(list)
     for name, row in sorted(table.items()):
         compared = row["compared"]
         errors = row["errors"]
@@ -236,7 +236,11 @@ def render_summary(table: dict[str, dict[str, Any]]) -> dict[str, Any]:
         }
         metrics[name] = item
         if row["predicted"] == 0:
-            unavailable[row["family"]].append(name)
+            unavailable[row["family"]].append({
+                "metric": name,
+                "rows": sum(row["prediction_status"].values()),
+                "reasons": dict(row["reasons"]),
+            })
     return {
         "metrics": metrics,
         "unavailable_by_family": {family_name: names for family_name, names in sorted(unavailable.items())},
@@ -277,8 +281,11 @@ def main() -> int:
             report.write(f"| `{name}` | {item['family']} | {','.join(item['modes'])} | {item['compared']} | {error['median'] if error['median'] is not None else '—'} | {error['p90'] if error['p90'] is not None else '—'} | {item['exact']} |\n")
         report.write("\n## Currently unavailable model families\n\n")
         report.write("Metrics with no simulator prediction in either retained mode are listed once by family; raw NCU distributions are intentionally omitted.\n\n")
-        for family_name, names in summary["unavailable_by_family"].items():
-            report.write(f"- **{family_name}:** {', '.join(f'`{name}`' for name in names)}\n")
+        for family_name, entries in summary["unavailable_by_family"].items():
+            names = ", ".join(
+                f"`{entry['metric']}` ({entry['rows']} rows)" for entry in entries
+            )
+            report.write(f"- **{family_name}:** {names}\n")
     return 0
 
 
