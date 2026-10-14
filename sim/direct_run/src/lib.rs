@@ -1368,6 +1368,17 @@ pub struct NcuMetricProjectionReport {
     pub outcome: EmitOutcome,
 }
 
+fn ncu_metric_name_for_arch(arch: sim_arch::ArchId, key: &str, default: &'static str) -> &'static str {
+    // Nsight's SM120 raw profiles expose the DRAM read demand under the
+    // operation-qualified label. Keep the internal registry key stable while
+    // emitting the architecture-qualified external name for post-replay joins.
+    if arch == sim_arch::ArchId::Sm120 && key == "traffic_dram_read_sectors" {
+        "dram__sectors_op_read.sum"
+    } else {
+        default
+    }
+}
+
 #[derive(Debug, Serialize)]
 pub struct CacheLookupPredictionReport {
     pub scope: &'static str,
@@ -2208,7 +2219,11 @@ fn launch_report(
             .map(|prediction| NcuMetricProjectionReport {
                 arch: prediction.arch().token().to_owned(),
                 key: prediction.key(),
-                ncu_metric: prediction.ncu_metric(),
+                ncu_metric: ncu_metric_name_for_arch(
+                    prediction.arch(),
+                    prediction.key(),
+                    prediction.ncu_metric(),
+                ),
                 unit: prediction.unit(),
                 outcome: *prediction.outcome(),
             })
