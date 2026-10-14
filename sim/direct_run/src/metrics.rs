@@ -787,6 +787,29 @@ pub(super) fn project(
                 ),
             );
         }
+        // TMA opcode families are already preserved in the dynamic trace.
+        // Emit their instruction cardinalities as a logical operation surface
+        // without treating opcode text as a physical engine assignment.
+        for (kind, ncu_metric) in [
+            ("UTMALDG", "smsp__inst_executed_op_tma_ld.sum"),
+            ("UTMASTG", "smsp__inst_executed_op_tma_st.sum"),
+        ] {
+            let count: u64 = trace
+                .by_opcode
+                .iter()
+                .filter(|(opcode, _)| opcode.split('.').next() == Some(kind))
+                .map(|(_, activity)| activity.warp_instructions)
+                .sum();
+            m.insert(
+                format!("{kind}_instructions"),
+                Metric::approximate_count(
+                    Some(ncu_metric),
+                    "inst",
+                    u128::from(count),
+                    "trace-derived TMA opcode cardinality; logical operation class, not physical engine scheduling",
+                ),
+            );
+        }
         m.insert(
             "alpha_active_sm_count".to_owned(),
             Metric::count(
