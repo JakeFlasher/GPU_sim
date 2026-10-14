@@ -3335,6 +3335,7 @@ fn extract_per_sm_blocks(
     // sm_id → blocks (launch index kept for in-SM ordering).
     let mut per_sm_blocks: BTreeMap<i32, Vec<BlockReplay>> = BTreeMap::new();
     let mut seen_indices: BTreeSet<i64> = BTreeSet::new();
+    let mut tma_dynamic_keys_seen: BTreeSet<TmaObservationKey> = BTreeSet::new();
     let mut traced_sm_by_launch_index: BTreeMap<i64, i32> = BTreeMap::new();
     let mut records_seen: u64 = 0;
     let mut instruction_sectors = BTreeSet::new();
@@ -3490,6 +3491,15 @@ fn extract_per_sm_blocks(
                         .is_some_and(|slot| {
                             matches!(opcode_head(slot.opcode_text()), "UTMALDG" | "UTMASTG" | "UBLKCP")
                         });
+                if is_tma_opcode {
+                    tma_dynamic_keys_seen.insert(TmaObservationKey {
+                        cta: block_id,
+                        warp: warp_id,
+                        instruction: record_ix,
+                        pc: inst.pc(),
+                        function: inst.function_unique_id(),
+                    });
+                }
                 if is_tma_opcode && (decode_sectors || preflight.is_none()) {
                     let key = TmaObservationKey {
                         cta: block_id,
@@ -3798,6 +3808,25 @@ fn extract_per_sm_blocks(
         blocks.sort_by_key(|b| b.launch_index);
     }
     trace_metrics.finish_coherence()?;
+    if let Some(observations) = observations {
+        let mut matched = 0_u64;
+        let mut unmatched = 0_u64;
+        for (key, observation) in &observations.tma {
+            if !observation.is_load || observation.source_sector_ids.is_empty() {
+                continue;
+            }
+            if tma_dynamic_keys_seen.contains(key) {
+                matched = matched.checked_add(1).ok_or(IssueError::CounterOverflow {
+                    counter: "TMA shadow dynamic identity matches",
+                })?;
+            } else {
+                unmatched = unmatched.checked_add(1).ok_or(IssueError::CounterOverflow {
+                    counter: "TMA shadow dynamic identity gaps",
+                })?;
+            }
+        }
+        trace_metrics.observe_tma_shadow_dynamic_identity(matched, unmatched)?;
+    }
     Ok(ExtractedKernel {
         per_sm_blocks,
         records_seen,

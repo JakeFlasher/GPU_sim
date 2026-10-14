@@ -28,6 +28,8 @@ def summarize(path: Path) -> dict:
         "hits": 0,
         "misses": 0,
         "address_unavailable": 0,
+        "dynamic_records_matched": 0,
+        "dynamic_records_unmatched": 0,
     }
     families: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     with open_jsonl_reader(path) as stream:
@@ -45,6 +47,12 @@ def summarize(path: Path) -> dict:
                     "misses": int(metrics.get("tma_shadow_l2_misses", 0)),
                     "address_unavailable": int(
                         metrics.get("tma_shadow_l2_address_unavailable", 0)
+                    ),
+                    "dynamic_records_matched": int(
+                        metrics.get("tma_shadow_dynamic_records_matched", 0)
+                    ),
+                    "dynamic_records_unmatched": int(
+                        metrics.get("tma_shadow_dynamic_records_unmatched", 0)
                     ),
                 }
                 if values["requests"] or values["address_unavailable"]:
@@ -76,19 +84,20 @@ def main() -> int:
         "",
         "Diagnostic/conditional source-address evidence only; NCU values were not used.",
         "",
-        "| captures | launches | launches with shadow | requests | hits | misses | unavailable |",
-        "|---:|---:|---:|---:|---:|---:|---:|",
-        "| {captures} | {launches} | {launches_with_source_shadow} | {requests} | {hits} | {misses} | {address_unavailable} |".format(**totals),
+        "| captures | launches | launches with shadow | requests | hits | misses | unavailable | matched | unmatched |",
+        "|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| {captures} | {launches} | {launches_with_source_shadow} | {requests} | {hits} | {misses} | {address_unavailable} | {dynamic_records_matched} | {dynamic_records_unmatched} |".format(**totals),
         "",
         "## Family totals",
         "",
-        "| family | requests | hits | misses | unavailable |",
-        "|---|---:|---:|---:|---:|",
+        "| family | requests | hits | misses | unavailable | matched | unmatched |",
+        "|---|---:|---:|---:|---:|---:|---:|",
     ]
     for key, value in result["families"].items():
         lines.append(
             f"| {key} | {value.get('requests', 0)} | {value.get('hits', 0)} | "
-            f"{value.get('misses', 0)} | {value.get('address_unavailable', 0)} |"
+            f"{value.get('misses', 0)} | {value.get('address_unavailable', 0)} | "
+            f"{value.get('dynamic_records_matched', 0)} | {value.get('dynamic_records_unmatched', 0)} |"
         )
     lines.extend(
         [

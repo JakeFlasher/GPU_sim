@@ -413,6 +413,10 @@ pub struct TraceMetrics {
     pub tma_shadow_l2_hits: u64,
     pub tma_shadow_l2_misses: u64,
     pub tma_shadow_l2_address_unavailable: u64,
+    /// Sidecar-to-dynamic identity coverage for source-order reasoning. A
+    /// matched key establishes same-instruction identity, not cross-warp time.
+    pub tma_shadow_dynamic_records_matched: u64,
+    pub tma_shadow_dynamic_records_unmatched: u64,
     /// Typed synchronization-sidecar observations. These are semantic
     /// joins only; they do not manufacture mbarrier completion timestamps.
     pub sync_sidecar_records_observed: u64,
@@ -711,6 +715,16 @@ impl TraceMetrics {
         add(&mut self.tma_shadow_l2_hits, hits)?;
         add(&mut self.tma_shadow_l2_misses, misses)?;
         add(&mut self.tma_shadow_l2_address_unavailable, unavailable)?;
+        Ok(())
+    }
+
+    pub(crate) fn observe_tma_shadow_dynamic_identity(
+        &mut self,
+        matched: u64,
+        unmatched: u64,
+    ) -> Result<(), crate::IssueError> {
+        add(&mut self.tma_shadow_dynamic_records_matched, matched)?;
+        add(&mut self.tma_shadow_dynamic_records_unmatched, unmatched)?;
         Ok(())
     }
 
