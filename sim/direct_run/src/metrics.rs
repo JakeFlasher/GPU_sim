@@ -604,6 +604,11 @@ pub(super) fn project(
             .flat_map(|sm| sm.activity.smsp_active_cycles)
             .map(u128::from)
             .sum();
+        let sm_active_cycles: u128 = result
+            .per_sm()
+            .values()
+            .map(|sm| u128::from(sm.activity.sm_active_cycles))
+            .sum();
         let tma_store_sectors = result
             .trace_metrics()
             .tma_sidecar_store_payload_bytes
@@ -650,6 +655,17 @@ pub(super) fn project(
                 smsp_active_cycles,
                 true,
                 "trace instruction cardinality divided by summed model SMSP-active cycles; not a physical issue-width measurement",
+            ),
+        );
+        m.insert(
+            "alpha_sm_inst_per_cycle_active".to_owned(),
+            Metric::ratio(
+                Some("sm__inst_executed.avg.per_cycle_active"),
+                "inst/cycle",
+                u128::from(result.instructions_issued()),
+                sm_active_cycles,
+                true,
+                "trace instruction cardinality divided by summed model SM-active cycles; not calibrated silicon IPC",
             ),
         );
         m.insert(
