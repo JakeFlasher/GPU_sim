@@ -13,6 +13,7 @@
   memory remains default because its effective timing residuals did not justify
   promotion. The new default-route corpus run is summarized in
   `replay_results/default_alpha_route_20261014/`.
+- The source cleanup is committed as `2a356ced`.
 - SM120 unified L1TEX metric projection uses sector-valid store/reduction terms;
   L2/DRAM remain unavailable. Effective L2 is a bounded 96 MiB/1-slice/16-way
   line-mod/LRU scenario with material residual and is not default.
