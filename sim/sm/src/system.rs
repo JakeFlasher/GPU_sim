@@ -339,6 +339,11 @@ pub struct L2SourceSplit {
     /// they do not alter L2 state or timing.
     pub read_lookup_requests: u64,
     pub read_lookup_hits: u64,
+    /// Subset of read lookup hits caused only by coalescing with an already
+    /// pending fill.  This is retained as a diagnostic so source-qualified
+    /// read observers can be compared with and without pending-merge hits;
+    /// it does not alter cache state or timing.
+    pub read_pending_merge_hits: u64,
     pub store_lookup_requests: u64,
     pub store_lookup_hits: u64,
     pub atomic_lookup_requests: u64,
@@ -567,6 +572,12 @@ impl L2SourceSplit {
                 .checked_add(other.read_lookup_hits)
                 .ok_or(SystemCounterError::Overflow {
                     counter: "L2 read lookup hits",
+                })?,
+            read_pending_merge_hits: self
+                .read_pending_merge_hits
+                .checked_add(other.read_pending_merge_hits)
+                .ok_or(SystemCounterError::Overflow {
+                    counter: "L2 read pending-merge lookup hits",
                 })?,
             store_lookup_requests: self
                 .store_lookup_requests
@@ -2578,6 +2589,7 @@ struct L2SystemCommit {
     lookup_observer_hits: u64,
     read_lookup_requests: u64,
     read_lookup_hits: u64,
+    read_pending_merge_hits: u64,
     store_lookup_requests: u64,
     store_lookup_hits: u64,
     atomic_lookup_requests: u64,
@@ -3702,6 +3714,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
     let mut lookup_observer_hits = 0_u64;
     let mut lookup_observer_requests = 0_u64;
     let mut read_lookup_hits = 0_u64;
+    let mut read_pending_merge_hits = 0_u64;
     let mut read_lookup_requests = 0_u64;
     let mut store_lookup_hits = 0_u64;
     let mut store_lookup_requests = 0_u64;
@@ -4300,6 +4313,11 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                                 } else {
                                     0
                                 },
+                                read_pending_merge_hits: if matches!(req.operation, MemoryOperation::Read) {
+                                    u64::from(preview.pending_merge_mask().count_ones())
+                                } else {
+                                    0
+                                },
                                 store_lookup_requests: if matches!(req.operation, MemoryOperation::Store) {
                                     lookup_observer_requests
                                 } else {
@@ -4369,6 +4387,11 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                         .checked_add(commit.read_lookup_hits)
                         .ok_or(SystemError::CounterOverflow {
                             counter: "L2 read lookup observer hits",
+                        })?;
+                    read_pending_merge_hits = read_pending_merge_hits
+                        .checked_add(commit.read_pending_merge_hits)
+                        .ok_or(SystemError::CounterOverflow {
+                            counter: "L2 read pending-merge lookup hits",
                         })?;
                     store_lookup_requests = store_lookup_requests
                         .checked_add(commit.store_lookup_requests)
@@ -5061,6 +5084,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
     staged_l2.replace_lookup_observer(lookup_hits, lookup_requests)?;
     l2_by_source.read_lookup_requests = read_lookup_requests;
     l2_by_source.read_lookup_hits = read_lookup_hits;
+    l2_by_source.read_pending_merge_hits = read_pending_merge_hits;
     l2_by_source.store_lookup_requests = store_lookup_requests;
     l2_by_source.store_lookup_hits = store_lookup_hits;
     l2_by_source.atomic_lookup_requests = atomic_lookup_requests;

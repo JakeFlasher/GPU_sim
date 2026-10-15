@@ -1861,6 +1861,11 @@ pub struct L2SourceCounterReport {
     pub bypass: L2SourceLaneReport,
     pub untagged: L2SourceLaneReport,
     pub store: L2SourceLaneReport,
+    /// Read-class lookup hits that did not arise solely from coalescing with
+    /// an already pending L2 fill.  This is diagnostic/conditional evidence;
+    /// the ordinary read endpoint retains the historical pending-merge count.
+    pub read_lookup_hits_without_pending_merges: u64,
+    pub read_pending_merge_hits: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -1879,6 +1884,10 @@ fn l2_source_counter_report(value: &L2SourceSplit) -> L2SourceCounterReport {
         bypass: lane(L2Source::Bypass),
         untagged: lane(L2Source::Untagged),
         store: lane(L2Source::Store),
+        read_lookup_hits_without_pending_merges: value
+            .read_lookup_hits
+            .saturating_sub(value.read_pending_merge_hits),
+        read_pending_merge_hits: value.read_pending_merge_hits,
     }
 }
 
