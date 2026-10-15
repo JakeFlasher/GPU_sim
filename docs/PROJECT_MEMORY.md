@@ -984,3 +984,13 @@ per mode, compressed artifacts, and all rows `ok`. Active-IPC mean APE was
 18.8695% on this source-diverse probe. A complete 339-root full-first/fast-
 second replay is required before promotion; the gate is improvement over Q37
 without a critical-family regression.
+
+The promotion replay completed successfully: 339/339 roots and 11,558
+launches per mode, full integrated L1+L2 first and fast flat second, exactly 12
+workers, and compressed artifacts at
+`replay_results/q73_ipc_control_stall_full_20261015/`. Full active-IPC mean
+APE is 19.70696% (median 15.5618%, P90 36.1166%), below Q37's 23.82553%;
+every named workload family improved. Q73 therefore closes the active-IPC
+residual as an effective observation metric. Aggregate hit-rate, DRAM/service,
+topology, and engine-completion gaps remain explicitly conditional or
+unavailable.
