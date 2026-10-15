@@ -907,3 +907,14 @@ full-first/fast-second real probes with 12 workers and compressed JSONL; the
 ordered and lexical counters matched. The IPC audit likewise found no source
 relation for a TMA/tensor completion tail that would generalize without
 worsening non-TMA rows. No scored L2 or IPC correction follows.
+
+
+## Round27 — final Q67/Q69 adversarial resolution (2026-10-15)
+
+No new runtime or logical defect was found. Ordered TMA sidecar shadow counters
+remain diagnostic and match lexical shadow results in selected probes; bounded
+L1 request masks remain non-scoring. The active-IPC residual is consistent
+with unmodeled TMA global-to-shared mbarrier service, but no qualified
+producer-to-generation relation or completion timing is available. Keep Q65 as
+the last scored 339-workload baseline and require a new typed relation before
+changing IPC/L2 defaults.
