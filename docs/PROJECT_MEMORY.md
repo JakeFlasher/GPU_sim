@@ -819,3 +819,22 @@ elapsed IPC 20.3993%; alternative SMSP/per-SM reductions are worse. Occupancy
 variation has no retained source-defined correction, so no hidden tail or
 NCU-fitted penalty is permitted. Q58 branch cardinality remains the accepted
 IPC-side improvement.
+
+## 2026-10-15 — Q63 shared bank-conflict correction
+
+Commit `9cb48b11` retains ideal per-lane-width shared wavefronts separately
+from address-derived wavefronts and emits bank-conflict excess as
+`max(actual - ideal, 0)`. Full 339-root replay (integrated L1+L2 first, flat
+fast second, 12 workers, compressed JSONL) reduced shared-load conflict mean
+APE from 26.13% to 21.8535%; store conflicts are 0.32385%. Timing is unchanged;
+remaining load residual is cross-client/LDSM scope and no topology factor is
+fitted.
+
+## 2026-10-15 — Q64/Q65 matrix scope and final combined replay
+
+Commit `3641433e` excludes LDSM/STSM from operation-qualified bank-conflict
+counters while retaining aggregate wavefront/timing work. Q64/Q65 full-corpus
+replay gives 0.90345% shared-load conflict APE over 675 positive rows and
+16.604% wavefront APE. Q65 also includes defensive L2 pending-mask commit
+`eb227837`; read-only L2 miss/hit remains 0.3474%/25.33% with no output delta.
+Remaining wavefront and TMA/L2 hit gaps require new scope evidence, not fitting.
