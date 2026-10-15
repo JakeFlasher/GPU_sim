@@ -967,3 +967,20 @@ are explicitly conditional/unavailable because no new source relation or
 dynamic completion signal is retained. This is complete under the effective
 PhD criterion, not a claim of proprietary RTL recovery or a universal timing
 model.
+
+## Q73 — conditional control-stall active-IPC continuation (2026-10-15)
+
+The Q37 per-SM ratio-of-sums active-IPC projection remains at 23.8255% mean
+APE on the complete corpus. Commit `4e35cdeb` adds a fixed observation-only
+arm: one fifth of each observed SM's exclusive `control_stall` readiness
+exposure is retained in the profiler-like active denominator. The arm does not
+alter replay timing, cache/service state, NCU inputs, or `completion_clock`; the
+fraction is a fixed alpha scenario, not an NCU-fitted factor.
+
+The selected real probe at
+`/dev/shm/sm120_alpha_tmp_20261013/q73_ipc_control_stall_probe_20261015/`
+completed full integrated L1+L2 before fast flat with 12 workers, 62 launches
+per mode, compressed artifacts, and all rows `ok`. Active-IPC mean APE was
+18.8695% on this source-diverse probe. A complete 339-root full-first/fast-
+second replay is required before promotion; the gate is improvement over Q37
+without a critical-family regression.
