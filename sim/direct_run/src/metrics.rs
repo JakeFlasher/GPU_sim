@@ -710,13 +710,15 @@ pub(super) fn project(
         // population, not the terminal/max observation endpoint used by
         // `sm__cycles_active.max`.  Build a separate effective sum by
         // extending each observed SM lifetime with the predeclared blended
-        // startup envelope already used by the SM120 observation model.  The
-        // blend is deliberately applied to the fixed startup component only;
-        // the variable instruction-sector envelope belongs to the terminal
-        // observation endpoint and would double-count active-lifetime work.
-        // Falling back to the raw sum preserves coverage when no SM is
-        // represented.  This remains an effective observation model, not a
-        // physical clock conversion.
+        // startup envelope already used by the SM120 observation model and a
+        // bounded fraction of that SM's exclusive control-stall exposure.
+        // Control-stall exposure is source-visible model state, but it is not
+        // a physical scheduler sample and must not alter replay timing.  The
+        // variable instruction-sector envelope belongs to the terminal
+        // observation endpoint and is deliberately not folded into this
+        // per-SM active denominator.  Falling back to the raw sum preserves
+        // coverage when no SM is represented.  This remains an effective
+        // observation model, not a physical clock conversion.
         let effective_sm_active_sum = result
             .per_sm()
             .values()
@@ -726,8 +728,16 @@ pub(super) fn project(
                 let blended_startup = u128::from(alpha.front_end_base_cycles)
                     .checked_mul(blend_num)?
                     .div_ceil(blend_den);
+                let control_num =
+                    u128::from(alpha.active_ipc_control_stall_numerator);
+                let control_den =
+                    u128::from(alpha.active_ipc_control_stall_denominator.max(1));
+                let control_stall = u128::from(sm.readiness.limiting_cycles.control_stall)
+                    .checked_mul(control_num)?
+                    .div_ceil(control_den);
                 sum.checked_add(u128::from(sm.activity.sm_active_cycles))?
                     .checked_add(blended_startup)
+                    .and_then(|value| value.checked_add(control_stall))
             });
         let effective_active_ipc_denominator = effective_sm_active_sum.unwrap_or(sm_active_cycles);
         m.insert(
@@ -738,7 +748,7 @@ pub(super) fn project(
                 u128::from(result.instructions_issued()),
                 effective_active_ipc_denominator,
                 true,
-                "trace instruction cardinality divided by the effective SM-active observation frontier when available; raw summed SM-active cycles are a fallback and neither form is calibrated silicon IPC",
+                "trace instruction cardinality divided by the effective SM-active observation frontier plus a bounded control-stall exposure arm when available; raw summed SM-active cycles are a fallback and neither form is calibrated silicon IPC",
             ),
         );
         m.insert(
