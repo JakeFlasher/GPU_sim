@@ -4931,6 +4931,8 @@ fn replay_kernel_with_schedule_and_l2_and_candidates_with_payload_events(
             trace_metrics.observe_l1_merge_audit(
                 audit.same_request_merges,
                 audit.older_pending_merges,
+                audit.ordinary_older_pending_merges,
+                audit.async_older_pending_merges,
             )?;
         }
     }

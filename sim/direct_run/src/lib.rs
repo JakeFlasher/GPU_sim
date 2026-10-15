@@ -2135,7 +2135,7 @@ fn cache_lookup_prediction_reports(
                     let lookups = origin.lookup_sectors();
                     let hits = origin
                         .hits
-                        .checked_add(metrics.l1_older_pending_merges_global)
+                        .checked_add(metrics.l1_ordinary_older_pending_merges_global)
                         .ok_or_else(|| {
                             RunError::new("cache lookup projection", "L1 pending-hit overflow")
                         })?

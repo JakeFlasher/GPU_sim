@@ -316,6 +316,10 @@ pub struct L1LookupBatch {
 pub struct L1MergeAudit {
     pub same_request_merges: [u64; 2],
     pub older_pending_merges: [u64; 2],
+    pub ordinary_same_request_merges: [u64; 2],
+    pub ordinary_older_pending_merges: [u64; 2],
+    pub async_same_request_merges: [u64; 2],
+    pub async_older_pending_merges: [u64; 2],
 }
 
 /// One origin's accounting lane. It mirrors the unified fields in
@@ -1383,6 +1387,18 @@ impl L1Cache {
             &mut self.merge_audit.same_request_merges
         };
         lane[origin.index()] = lane[origin.index()].saturating_add(1);
+        let route_lane = if batch.pending_merges_are_hits {
+            if sequence < batch.first_fill_sequence {
+                &mut self.merge_audit.async_older_pending_merges
+            } else {
+                &mut self.merge_audit.async_same_request_merges
+            }
+        } else if sequence < batch.first_fill_sequence {
+            &mut self.merge_audit.ordinary_older_pending_merges
+        } else {
+            &mut self.merge_audit.ordinary_same_request_merges
+        };
+        route_lane[origin.index()] = route_lane[origin.index()].saturating_add(1);
     }
 
     /// Select the explicit resident-hit writeback experiment. This does not

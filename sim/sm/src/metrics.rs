@@ -431,6 +431,10 @@ pub struct TraceMetrics {
     pub l1_same_request_merges_local: u64,
     pub l1_older_pending_merges_global: u64,
     pub l1_older_pending_merges_local: u64,
+    pub l1_ordinary_older_pending_merges_global: u64,
+    pub l1_ordinary_older_pending_merges_local: u64,
+    pub l1_async_older_pending_merges_global: u64,
+    pub l1_async_older_pending_merges_local: u64,
     /// Sidecar-to-dynamic identity coverage for source-order reasoning. A
     /// matched key establishes same-instruction identity, not cross-warp time.
     pub tma_shadow_dynamic_records_matched: u64,
@@ -750,11 +754,29 @@ impl TraceMetrics {
         &mut self,
         same_request: [u64; 2],
         older_pending: [u64; 2],
+        ordinary_older_pending: [u64; 2],
+        async_older_pending: [u64; 2],
     ) -> Result<(), crate::IssueError> {
         add(&mut self.l1_same_request_merges_global, same_request[0])?;
         add(&mut self.l1_same_request_merges_local, same_request[1])?;
         add(&mut self.l1_older_pending_merges_global, older_pending[0])?;
         add(&mut self.l1_older_pending_merges_local, older_pending[1])?;
+        add(
+            &mut self.l1_ordinary_older_pending_merges_global,
+            ordinary_older_pending[0],
+        )?;
+        add(
+            &mut self.l1_ordinary_older_pending_merges_local,
+            ordinary_older_pending[1],
+        )?;
+        add(
+            &mut self.l1_async_older_pending_merges_global,
+            async_older_pending[0],
+        )?;
+        add(
+            &mut self.l1_async_older_pending_merges_local,
+            async_older_pending[1],
+        )?;
         Ok(())
     }
 
