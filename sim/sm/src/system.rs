@@ -3862,13 +3862,15 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                                             counter: "L2 read lookup observer hits",
                                         })?,
                                 ),
-                                // ATOM is a returning write-class request.
-                                // The L2 tag-stage observer counts every
-                                // atomic sector as a lookup hit, while
-                                // `counted_hits` continues to describe
-                                // physical data presence for response
-                                // pricing.
-                                MemoryOperation::Atomic => (requested_sectors, requested_sectors),
+                                // ATOM is a returning write-class request,
+                                // but the sector lookup observer still uses
+                                // present sectors. Physical write-tag and RMW
+                                // accounting remain separate from this
+                                // source-unit hit/miss endpoint.
+                                MemoryOperation::Atomic => (
+                                    requested_sectors,
+                                    u64::from(lookup.present_sectors),
+                                ),
                                 // The source-unit TEX sector observer counts
                                 // write-class lookup sectors too.  Keep these
                                 // as per-sector requests; packet counts are a
