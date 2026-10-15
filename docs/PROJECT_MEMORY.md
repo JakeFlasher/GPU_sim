@@ -786,3 +786,27 @@ produced 110.05% hit APE and 1,480 zero-target false positives. Q55/Q56 added
 route and constant-client provenance, but the constant-excluding replacement
 still produced 25.89% positive-target APE and was removed. The default L1
 observer remains unchanged; physical and proprietary gaps remain explicit.
+
+## 2026-10-15 — Q57/Q58 side-metric continuation
+
+Q57 diagnostic commit `efea4707` records L2 read pending-merge hits separately
+from other read lookup hits. Real launch-cold and stream-L2 probes did not
+support excluding these hits or persisting L2 as a better NCU read endpoint;
+no cache/timing behavior changed and no merge/RMW factor was fitted.
+
+Q58 commit `7471be0b` fixes `smsp__inst_executed_op_branch.sum` population by
+including the CBU control-flow population (CALL/RET/EXIT/BSYNC/WARPSYNC/YIELD/
+BREAK/CONT) while excluding BMOV/BSSY. Selected real evidence improved the
+metric; the complete 339-root/11,558-launch full-integrated-L1+L2-first,
+fast-flat-second replay with 12 workers and compressed JSONL achieved 0.4892%
+mean APE (0% median/P90). This is a scoped instruction-cardinality projection,
+not a physical scheduler claim. Active IPC, L1/L2 hits and DRAM/service remain
+explicit residuals; NCU values remain post-replay comparison only.
+
+## 2026-10-15 — Q59 L1 hit-scope closure
+
+Round 21 showed that L1 global/unified hit residuals cannot be corrected by
+aggregate merge arithmetic. Pending, same-request, and line-fill alternatives
+worsen real Cutlass/MXFP8 rows; per-request sector masks and client scope are
+not retained. Keep Q45/Q55 provenance only, retain the effective-L1 default,
+and require a new source-visible scope before any further full replay.
