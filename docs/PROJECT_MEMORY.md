@@ -985,6 +985,19 @@ per mode, compressed artifacts, and all rows `ok`. Active-IPC mean APE was
 second replay is required before promotion; the gate is improvement over Q37
 without a critical-family regression.
 
+## Q74 — effective active-lifetime/front-end envelope (2026-10-15)
+
+Commit `4c15d7cc` supersedes the Q73 control-stall arm with a fixed effective
+observation envelope: two times each observed SM's traced active-lifetime union
+plus one fifth of the source-derived front-end envelope per observed SM. The
+four-capture real probe completed full integrated L1+L2 before fast flat with
+12 workers, 243 launches per mode, compressed output, and all rows `ok`;
+active-IPC mean APE was 18.3086% on that mixed scope. Independent short-kernel
+RTX 5090 NCU measurements are retained as endpoint context only and are not
+replay inputs or same-cell fits. A complete 339-root promotion replay is
+required; the gate is active-IPC mean APE below 10% without a critical family
+regression.
+
 The promotion replay completed successfully: 339/339 roots and 11,558
 launches per mode, full integrated L1+L2 first and fast flat second, exactly 12
 workers, and compressed artifacts at
