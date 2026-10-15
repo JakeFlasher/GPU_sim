@@ -35,6 +35,10 @@ struct DynamicObligations {
     captured_polling_query_instructions: u64,
     phase_readiness_observations: u64,
     ordered_relations: u64,
+    tma_generation_relations: u64,
+    tma_exact_payload_cohorts: u64,
+    tma_payload_accounted_relations: u64,
+    tma_phase_readiness_relations: u64,
     unresolved_generation_barriers: u64,
     unresolved_payload_barriers: u64,
     query_evaluation_observations: u64,
@@ -254,6 +258,39 @@ fn add_dynamic(
         report.ordered_relations = report
             .ordered_relations
             .saturating_add(relations.one_shot_relations);
+        report.tma_generation_relations = report
+            .tma_generation_relations
+            .saturating_add(relations.generation_relations.len() as u64);
+        report.tma_exact_payload_cohorts = report
+            .tma_exact_payload_cohorts
+            .saturating_add(relations
+                .generation_relations
+                .iter()
+                .filter(|relation| {
+                    relation.association
+                        == sim_trace::async_sidecars::TmaGenerationAssociation::ExactPayloadCohort
+                })
+                .count() as u64);
+        report.tma_payload_accounted_relations = report
+            .tma_payload_accounted_relations
+            .saturating_add(relations
+                .generation_relations
+                .iter()
+                .filter(|relation| {
+                    relation.service_state
+                        == sim_trace::async_sidecars::TmaServiceState::PayloadAccounted
+                })
+                .count() as u64);
+        report.tma_phase_readiness_relations = report
+            .tma_phase_readiness_relations
+            .saturating_add(relations
+                .generation_relations
+                .iter()
+                .filter(|relation| {
+                    relation.service_state
+                        == sim_trace::async_sidecars::TmaServiceState::PhaseReadinessObserved
+                })
+                .count() as u64);
         report.unresolved_generation_barriers = report
             .unresolved_generation_barriers
             .saturating_add(relations.unresolved_generation_barriers);
