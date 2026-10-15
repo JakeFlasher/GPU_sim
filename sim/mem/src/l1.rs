@@ -339,6 +339,31 @@ pub struct L1OriginCounters {
     pub reduction_hits: u64,
 }
 
+impl L1OriginCounters {
+    /// Effective L1TEX lookup-hit projection for sector metrics.
+    ///
+    /// The timing cache keeps same-request sectors as `merges` because they
+    /// share one in-flight fill and must not become independent timing hits.
+    /// Nsight's sector lookup surface counts the sectors covered by a newly
+    /// allocated line as four misses for a 128-byte/32-byte-sector line.  At
+    /// this observation boundary, convert the raw merge lane without changing
+    /// tags, fills, MSHRs, or replay timing.
+    pub const fn effective_lookup_hits(&self) -> u64 {
+        let fresh_line_merge_adjustment = self
+            .line_alloc_misses
+            .saturating_mul(SECTORS_PER_LINE.saturating_sub(1) as u64);
+        self.hits
+            .saturating_add(self.pending_lookup_hits)
+            .saturating_add(self.merges)
+            .saturating_sub(fresh_line_merge_adjustment)
+    }
+
+    /// Total read-sector lookups represented by this origin lane.
+    pub const fn lookup_sectors(&self) -> u64 {
+        self.hits.saturating_add(self.misses)
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct L1Counters {
     /// Architecture provenance bound by the owning [`L1Cache`]. `None` is

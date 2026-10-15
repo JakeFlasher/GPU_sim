@@ -518,7 +518,15 @@ fn alpha_mem_role(opcode_text: &str) -> MemRole {
         "LDG" if opcode.contains("STRONG.GPU") || opcode.contains(".CG") || opcode.contains(".CS") => {
             MemRole::BypassLoad(CacheOpToken::LdgECg)
         }
-        "LDG" => MemRole::BypassLoad(CacheOpToken::LdgECg),
+        // The SM120 alpha lane treats the bare `LDG.E` form as the default
+        // cacheable global-load route.  The captured Blackwell binaries emit
+        // the default cache operator without an explicit `.CA`; routing these
+        // instructions through the L2-only arm turns every repeated global
+        // sector into an artificial L1 miss and is the dominant source of the
+        // old 90--100% L1 hit-rate residuals.  This is an effective SM120
+        // assumption (the physical card remains typed-unavailable), so keep
+        // the explicit `.CG`/`.CS`/STRONG.GPU forms on the bypass path above.
+        "LDG" => MemRole::EligibleLoad(CacheOpToken::LdgECa),
         // LDGSTS is the legacy async-copy source protocol.  Keep its cache
         // policy separate from ordinary global loads so dynamic records with
         // validated memory metadata take the same route as sidecar-only

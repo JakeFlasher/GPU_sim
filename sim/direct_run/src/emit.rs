@@ -999,11 +999,7 @@ fn emit_l1tex_read_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitE
         }));
     };
     let global = l1.origin(MemoryOrigin::Global);
-    let num = checked_sum(
-        key,
-        "global-load lookup-hit numerator",
-        &[global.hits, global.pending_lookup_hits],
-    )?;
+    let num = global.effective_lookup_hits();
     let bypass = bypass_read_sectors(key, &global)?;
     let den = checked_sum(
         key,
@@ -1040,10 +1036,18 @@ fn emit_l1tex_unified_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, Em
         }));
     };
     let [store_hits, reduction_hits] = l1_write_hit_terms(snap.arch, l1);
+    let effective_read_hits = l1
+        .origin(MemoryOrigin::Global)
+        .effective_lookup_hits()
+        .checked_add(l1.origin(MemoryOrigin::Local).effective_lookup_hits())
+        .ok_or(EmitError::CounterOverflow {
+            key,
+            operation: "unified L1 effective lookup-hit numerator",
+        })?;
     let num = checked_sum(
         key,
         "unified L1TEX hit-rate numerator",
-        &[l1.hits, l1.pending_lookup_hits, store_hits, reduction_hits],
+        &[effective_read_hits, store_hits, reduction_hits],
     )?;
     let den = checked_sum(
         key,

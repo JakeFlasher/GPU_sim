@@ -2091,14 +2091,21 @@ fn cache_lookup_prediction_reports(
             "l1_global_read",
             "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum",
             "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_miss.sum",
-            l1.map(|counters| counters.origin(MemoryOrigin::Global).hits),
+            l1.map(|counters| counters.origin(MemoryOrigin::Global).effective_lookup_hits()),
         ),
         (
             EmittedMetricKey::CacheHitRateL1TexSector,
             "l1_unified",
             "l1tex__t_sectors_lookup_hit.sum",
             "l1tex__t_sectors_lookup_miss.sum",
-            l1.map(|counters| counters.hits),
+            l1.map(|counters| {
+                counters
+                    .origin(MemoryOrigin::Global)
+                    .effective_lookup_hits()
+                    .saturating_add(counters.origin(MemoryOrigin::Local).effective_lookup_hits())
+                    .saturating_add(counters.store_hits)
+                    .saturating_add(counters.reduction_hits)
+            }),
         ),
         (
             EmittedMetricKey::CacheHitRateL2Sector,
