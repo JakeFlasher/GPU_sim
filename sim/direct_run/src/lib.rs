@@ -2119,6 +2119,53 @@ fn cache_lookup_prediction_reports(
         .into_iter()
         .map(
             |(key, scope, ncu_hit_metric, ncu_miss_metric, resident_data_hits)| {
+                // The generic SM120 hit-rate descriptor is intentionally
+                // unavailable because its profiler client scope is broader
+                // than this TEX-sector observer.  Preserve the source-specific
+                // hit/miss observer directly from the conserving L2 counters.
+                if key == EmittedMetricKey::CacheHitRateL2Sector {
+                    let Some(counters) = l2 else {
+                        return Ok(CacheLookupPredictionReport {
+                            scope,
+                            ncu_hit_metric,
+                            ncu_miss_metric,
+                            status: "unavailable",
+                            observer: None,
+                            timing_state: None,
+                            detail: None,
+                        });
+                    };
+                    let hits = counters.lookup_hits;
+                    let lookups = counters.lookup_requests;
+                    let misses = lookups.checked_sub(hits).ok_or_else(|| {
+                        RunError::new(
+                            "cache lookup projection",
+                            format!("{scope} observer hits exceed total lookups"),
+                        )
+                    })?;
+                    let resident = counters.hits;
+                    let observer_resident_hits = hits.min(resident);
+                    return Ok(CacheLookupPredictionReport {
+                        scope,
+                        ncu_hit_metric,
+                        ncu_miss_metric,
+                        status: "predicted",
+                        observer: Some(CacheLookupObserverReport {
+                            hits,
+                            misses,
+                            lookups,
+                        }),
+                        timing_state: Some(CacheLookupTimingStateReport {
+                            resident_data_hits: resident,
+                            observer_resident_hits,
+                            physical_hits_not_observed: resident.saturating_sub(hits),
+                            remaining_lookups: misses,
+                            observer_reclassified_lookups: hits.saturating_sub(resident),
+                            role: "conserving_source_sector_observer; generic_hit_rate_alias_unjoined",
+                        }),
+                        detail: None,
+                    });
+                }
                 let prediction = bundle
                     .metrics()
                     .iter()
