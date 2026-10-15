@@ -2121,46 +2121,6 @@ fn cache_lookup_prediction_reports(
         .into_iter()
         .map(
             |(key, scope, ncu_hit_metric, ncu_miss_metric, resident_data_hits)| {
-                // On SM120 launches without TMA sidecar traffic, the
-                // source-qualified global-read observer uses the retained
-                // older-pending merge provenance. Same-request coalescing
-                // remains a miss. This is an effective observer correction;
-                // it does not alter cache state or timing.
-                if key == EmittedMetricKey::CacheHitRateL1TexReadSector
-                    && let (Some(counters), Some(metrics)) = (l1, trace)
-                    && metrics.tma_sidecar_load_records == 0
-                    && metrics.tma_sidecar_store_records == 0
-                {
-                    let origin = counters.origin(MemoryOrigin::Global);
-                    let lookups = origin.lookup_sectors();
-                    let hits = origin
-                        .hits
-                        .checked_add(metrics.l1_ordinary_older_pending_merges_global)
-                        .ok_or_else(|| {
-                            RunError::new("cache lookup projection", "L1 pending-hit overflow")
-                        })?
-                        .min(lookups);
-                    let misses = lookups.checked_sub(hits).ok_or_else(|| {
-                        RunError::new("cache lookup projection", "L1 pending hits exceed lookups")
-                    })?;
-                    return Ok(CacheLookupPredictionReport {
-                        scope,
-                        ncu_hit_metric,
-                        ncu_miss_metric,
-                        status: "predicted",
-                        observer: Some(CacheLookupObserverReport { hits, misses, lookups }),
-                        timing_state: Some(CacheLookupTimingStateReport {
-                            resident_data_hits: origin.hits,
-                            observer_resident_hits: hits,
-                            physical_hits_not_observed: origin.hits.saturating_sub(hits),
-                            remaining_lookups: misses,
-                            observer_reclassified_lookups:
-                                hits.saturating_sub(origin.hits),
-                            role: "sm120_global_read_observer_plus_older_pending_merges_same_request_coalescing_miss",
-                        }),
-                        detail: None,
-                    });
-                }
                 // The generic SM120 hit-rate descriptor is intentionally
                 // unavailable because its profiler client scope is broader
                 // than this TEX-sector observer.  Preserve the source-specific
