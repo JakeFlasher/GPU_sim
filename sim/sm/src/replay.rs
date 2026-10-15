@@ -4928,11 +4928,24 @@ fn replay_kernel_with_schedule_and_l2_and_candidates_with_payload_events(
     };
     for result in replay.per_sm.values() {
         if let Some(audit) = result.l1_merge_audit {
+            let (global_hits, global_lookups) = result
+                .l1
+                .map(|counters| {
+                    let origin = counters.origin(sim_mem::MemoryOrigin::Global);
+                    (origin.hits, origin.lookup_sectors())
+                })
+                .unwrap_or((0, 0));
             trace_metrics.observe_l1_merge_audit(
                 audit.same_request_merges,
                 audit.older_pending_merges,
                 audit.ordinary_older_pending_merges,
                 audit.async_older_pending_merges,
+                audit.ordinary_global_older_pending_merges,
+                audit.constant_global_older_pending_merges,
+                audit.constant_global_hits,
+                audit.constant_global_requests,
+                global_hits,
+                global_lookups,
             )?;
         }
     }

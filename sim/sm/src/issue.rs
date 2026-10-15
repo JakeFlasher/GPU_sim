@@ -87,7 +87,8 @@ use sim_arch::{
 };
 use sim_mem::{
     AsyncCopyCompletion, CacheOpToken, EvAccess, EvAccessUnobserved, FillKey, L1AccessError,
-    L1Cache, L1Config, L1Counters, L1LookupBatch, L1MergeAudit, L1MutationBudget, L1StorePolicy,
+    L1Cache, L1Config, L1Counters, L1LookupBatch, L1LookupClient, L1MergeAudit,
+    L1MutationBudget, L1StorePolicy,
     L1WriteLookupObserver, L1WriteLookupObserverPlan, L2Source, LdgstsL1Policy, MemRole,
     MemoryOrigin, decode_async_copy_completion, opcode_head,
 };
@@ -8404,7 +8405,14 @@ impl<'a> SmCore<'a> {
                 // their request mask — one L2 transaction per line per
                 // timestamp, priced on its worst sector.
                 let target = write_barrier.map(FillTarget::Barrier);
-                let lookup_batch = st.l1.begin_lookup_batch();
+                let lookup_client = if origin == MemoryOrigin::Local {
+                    L1LookupClient::Local
+                } else if constant_load {
+                    L1LookupClient::Constant
+                } else {
+                    L1LookupClient::OrdinaryGlobal
+                };
+                let lookup_batch = st.l1.begin_lookup_batch_for_client(lookup_client);
                 let mut known = write_barrier
                     .is_some()
                     .then(|| checked_cycle_add("shared L1 hit-pipeline floor", t, p.l1_hit_latency))

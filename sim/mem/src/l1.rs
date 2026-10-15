@@ -307,6 +307,7 @@ pub enum AccessOutcome {
 pub struct L1LookupBatch {
     first_fill_sequence: u64,
     pending_merges_are_hits: bool,
+    client: L1LookupClient,
 }
 
 /// Read-only provenance for L1 lookup merges.  These counters describe the
@@ -320,6 +321,19 @@ pub struct L1MergeAudit {
     pub ordinary_older_pending_merges: [u64; 2],
     pub async_same_request_merges: [u64; 2],
     pub async_older_pending_merges: [u64; 2],
+    pub ordinary_global_older_pending_merges: u64,
+    pub constant_global_older_pending_merges: u64,
+    pub constant_global_hits: u64,
+    pub constant_global_requests: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum L1LookupClient {
+    Unknown,
+    OrdinaryGlobal,
+    Constant,
+    Local,
+    AsyncCopy,
 }
 
 /// One origin's accounting lane. It mirrors the unified fields in
@@ -1399,6 +1413,48 @@ impl L1Cache {
             &mut self.merge_audit.ordinary_same_request_merges
         };
         route_lane[origin.index()] = route_lane[origin.index()].saturating_add(1);
+        if sequence < batch.first_fill_sequence && origin == MemoryOrigin::Global {
+            match batch.client {
+                L1LookupClient::OrdinaryGlobal => {
+                    self.merge_audit.ordinary_global_older_pending_merges = self
+                        .merge_audit
+                        .ordinary_global_older_pending_merges
+                        .saturating_add(1);
+                }
+                L1LookupClient::Constant => {
+                    self.merge_audit.constant_global_older_pending_merges = self
+                        .merge_audit
+                        .constant_global_older_pending_merges
+                        .saturating_add(1);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn record_constant_hit(&mut self, origin: MemoryOrigin) {
+        if self
+            .active_lookup_batch
+            .is_some_and(|batch| batch.client == L1LookupClient::Constant)
+        {
+            self.merge_audit.constant_global_hits = self
+                .merge_audit
+                .constant_global_hits
+                .saturating_add(u64::from(origin == MemoryOrigin::Global));
+        }
+    }
+
+    fn record_constant_request(&mut self, origin: MemoryOrigin) {
+        if origin == MemoryOrigin::Global
+            && self
+                .active_lookup_batch
+                .is_some_and(|batch| batch.client == L1LookupClient::Constant)
+        {
+            self.merge_audit.constant_global_requests = self
+                .merge_audit
+                .constant_global_requests
+                .saturating_add(1);
+        }
     }
 
     /// Select the explicit resident-hit writeback experiment. This does not
@@ -1727,9 +1783,14 @@ impl L1Cache {
     /// merges remain misses for this observer. The returned token must be
     /// retained if an MSHR-stalled remainder is retried later.
     pub fn begin_lookup_batch(&mut self) -> L1LookupBatch {
+        self.begin_lookup_batch_for_client(L1LookupClient::Unknown)
+    }
+
+    pub fn begin_lookup_batch_for_client(&mut self, client: L1LookupClient) -> L1LookupBatch {
         let batch = L1LookupBatch {
             first_fill_sequence: self.fill_seq.current(),
             pending_merges_are_hits: false,
+            client,
         };
         self.active_lookup_batch = Some(batch);
         batch
@@ -1742,6 +1803,7 @@ impl L1Cache {
         let batch = L1LookupBatch {
             first_fill_sequence: self.fill_seq.current(),
             pending_merges_are_hits: true,
+            client: L1LookupClient::AsyncCopy,
         };
         self.active_lookup_batch = Some(batch);
         batch
@@ -2613,6 +2675,7 @@ impl L1Cache {
     ) -> Result<CoreAccess, L1AccessError> {
         let line = sector_id >> 2;
         let sector = (sector_id & 3) as u8;
+        self.record_constant_request(origin);
         // A late child of an in-flight line allocation has its own sector
         // completion token. Check it before the parent line MSHR so later
         // accesses to that sector wait for the child response instead of
@@ -2680,6 +2743,7 @@ impl L1Cache {
                 .get(&line)
                 .is_some_and(|mask| mask & (1 << sector) != 0);
         if sector_present {
+            self.record_constant_hit(origin);
             let ready = fill_request.hit_ready(self.cfg.hit_latency)?;
             self.next_stamp.preflight("recency", 1)?;
             let counters = self

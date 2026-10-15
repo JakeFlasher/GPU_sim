@@ -71,7 +71,8 @@ pub use l1::{
     AccessOutcome, EvAccess, EvAccessUnobserved, FillKey, L1AccessError, L1Cache, L1Config,
     L1ConfigError, L1CounterError, L1CounterField, L1Counters, L1DirtyFlushPlan, L1DirtyLine,
     L1DirtyPayloadAdmissionPlan, L1DirtyResidency, L1InvalidationResult, L1LookupBatch,
-    L1MergeAudit, L1MutationBudget, L1OriginCounters, L1PayloadResidencyWitness, L1StorePolicy,
+    L1LookupClient, L1MergeAudit, L1MutationBudget, L1OriginCounters,
+    L1PayloadResidencyWitness, L1StorePolicy,
     L1WriteLookupObserver, L1WriteLookupObserverPlan, LINE_BYTES, PreparedSectorExpansion,
     SECTOR_BYTES, SECTORS_PER_LINE, SectorExpansionError, SectorExpansionPlan,
 };
