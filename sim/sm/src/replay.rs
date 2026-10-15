@@ -2717,6 +2717,7 @@ pub(crate) enum ExtractedCoverage {
 #[derive(Debug)]
 struct ExtractedKernel {
     per_sm_blocks: BTreeMap<i32, Vec<BlockReplay>>,
+    per_sm_instruction_read_sectors: BTreeMap<i32, u64>,
     records_seen: u64,
     coverage: ExtractedCoverage,
     shared_memory_residency: SharedMemoryResidency,
@@ -3299,6 +3300,25 @@ fn is_sync_sidecar_opcode(opcode: &str) -> bool {
     opcode.starts_with("SYNCS.") || opcode.starts_with("ARRIVES.")
 }
 
+/// Count distinct 32-byte instruction sectors assigned to one traced SM.
+/// This is kept separate from the launch-wide front-end count so a later
+/// effective observation envelope can use the same scope as active-lifetime
+/// IPC. It is metadata only and never contributes replay cycles.
+fn per_sm_instruction_sector_set(
+    blocks: &[BlockReplay],
+    function_unique_id: i32,
+) -> BTreeSet<(i32, u32)> {
+    let mut sectors = BTreeSet::new();
+    for block in blocks {
+        for warp in &block.warps {
+            for inst in &warp.insts {
+                sectors.insert((function_unique_id, inst.pc / 32));
+            }
+        }
+    }
+    sectors
+}
+
 /// Decode one launch into per-SM block replays on the traced placement.
 /// `decode_sectors` selects the L1-mode classification (lane decode +
 /// unique-sector expansion) over the flat-mode class check.
@@ -3339,6 +3359,7 @@ fn extract_per_sm_blocks(
     let mut traced_sm_by_launch_index: BTreeMap<i64, i32> = BTreeMap::new();
     let mut records_seen: u64 = 0;
     let mut instruction_sectors = BTreeSet::new();
+    let mut instruction_sectors_by_sm: BTreeMap<i32, BTreeSet<(i32, u32)>> = BTreeMap::new();
     let launch_resources = (loc.kernel().number_of_registers > 0
         || loc.kernel().size_shared_memory > 0
         || loc.kernel().shared_memory_static_bytes.is_some()
@@ -3697,10 +3718,18 @@ fn extract_per_sm_blocks(
         };
         placement.require_traced_sm(&path, sm)?;
         traced_sm_by_launch_index.insert(launch_index, sm);
-        per_sm_blocks.entry(sm).or_default().push(BlockReplay {
+        let block_replay = BlockReplay {
             launch_index,
             warps,
-        });
+        };
+        instruction_sectors_by_sm
+            .entry(sm)
+            .or_default()
+            .extend(per_sm_instruction_sector_set(
+                std::slice::from_ref(&block_replay),
+                expected_fuid,
+            ));
+        per_sm_blocks.entry(sm).or_default().push(block_replay);
     }
     // Completeness gate (fail-closed) on the path replay ACTUALLY consumes: a
     // subset trace (coverage < grid) is admissible ONLY with a valid
@@ -3829,6 +3858,16 @@ fn extract_per_sm_blocks(
     }
     Ok(ExtractedKernel {
         per_sm_blocks,
+        per_sm_instruction_read_sectors: instruction_sectors_by_sm
+            .into_iter()
+            .map(|(sm, sectors)| {
+                u64::try_from(sectors.len()).map(|count| (sm, count)).map_err(|_| {
+                    IssueError::CounterOverflow {
+                        counter: "per-SM compulsory instruction-read sector cardinality",
+                    }
+                })
+            })
+            .collect::<Result<BTreeMap<_, _>, _>>()?,
         records_seen,
         coverage,
         shared_memory_residency,
@@ -4640,6 +4679,7 @@ fn replay_kernel_with_schedule_and_l2_and_candidates_with_payload_events(
     let decode_sectors = !matches!(mode, ReplayMemMode::Flat) || alpha_flat_sector_decode;
     let ExtractedKernel {
         per_sm_blocks,
+        per_sm_instruction_read_sectors,
         records_seen,
         coverage,
         shared_memory_residency,
@@ -4722,6 +4762,10 @@ fn replay_kernel_with_schedule_and_l2_and_candidates_with_payload_events(
                     shared_memory_residency,
                     l1_config,
                 )?;
+                result.activity.front_end_instruction_read_sectors = per_sm_instruction_read_sectors
+                    .get(sm)
+                    .copied()
+                    .unwrap_or(0);
                 if async_copy_destination_fallback_sms.contains(sm) {
                     result.unmodeled_tails.ldgsts_dst_shared_timing = true;
                 }
@@ -4811,6 +4855,11 @@ fn replay_kernel_with_schedule_and_l2_and_candidates_with_payload_events(
             for sm in &async_copy_destination_fallback_sms {
                 if let Some(result) = sys.per_sm.get_mut(sm) {
                     result.unmodeled_tails.ldgsts_dst_shared_timing = true;
+                }
+            }
+            for (sm, sectors) in &per_sm_instruction_read_sectors {
+                if let Some(result) = sys.per_sm.get_mut(sm) {
+                    result.activity.front_end_instruction_read_sectors = *sectors;
                 }
             }
             for (sm, observation) in &instrumentation_order {

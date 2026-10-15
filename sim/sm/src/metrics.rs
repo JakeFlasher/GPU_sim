@@ -1471,6 +1471,10 @@ pub struct SmActivity {
     pub smsp_active_cycles: [u64; 4],
     pub instructions_per_smsp: [u64; 4],
     pub issue_active_cycles_per_smsp: [u64; 4],
+    /// Number of distinct executed instruction sectors assigned to this SM.
+    /// This is an observation-side scope anchor for a future per-SM effective
+    /// front-end envelope; it does not alter replay timing.
+    pub front_end_instruction_read_sectors: u64,
     pub warp_lifetimes: Vec<WarpLifetime>,
 }
 
@@ -1531,6 +1535,7 @@ impl SmActivity {
             smsp_active_cycles,
             instructions_per_smsp,
             issue_active_cycles_per_smsp,
+            front_end_instruction_read_sectors: 0,
             warp_lifetimes,
         }
     }
