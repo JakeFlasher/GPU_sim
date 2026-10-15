@@ -687,15 +687,37 @@ pub(super) fn project(
                 "weighted sum of per-SMSP trace instruction counters divided by summed model SMSP-active lifetimes; inactive traced SMSPs are excluded; not a physical issue-width measurement",
             ),
         );
+        // Keep the raw trace-lifetime ratio available as a diagnostic, but do
+        // not use it as the NCU `.avg.per_cycle_active` endpoint.  The raw
+        // denominator stops at the modeled active terminal event and omits
+        // the source-derived front-end observation envelope already used for
+        // the effective SM-active endpoint.  M28 showed that this omission
+        // dominates the IPC residual on the real corpus.  The effective
+        // denominator remains a conditional observation model; it is not a
+        // silicon issue-width or clock calibration.
+        m.insert(
+            "alpha_sm_inst_per_cycle_active_raw".to_owned(),
+            Metric::ratio(
+                None,
+                "inst/cycle",
+                u128::from(result.instructions_issued()),
+                sm_active_cycles,
+                true,
+                "raw trace instruction cardinality divided by summed model SM-active lifetimes over the observed active-SM population; diagnostic only, not the NCU endpoint",
+            ),
+        );
+        let effective_active_ipc_denominator = effective_sm_active_frontier
+            .map(u128::from)
+            .unwrap_or(sm_active_cycles);
         m.insert(
             "alpha_sm_inst_per_cycle_active".to_owned(),
             Metric::ratio(
                 Some("sm__inst_executed.avg.per_cycle_active"),
                 "inst/cycle",
                 u128::from(result.instructions_issued()),
-                sm_active_cycles,
+                effective_active_ipc_denominator,
                 true,
-                "weighted sum of per-SM trace instruction counters divided by summed model SM-active lifetimes over the observed active-SM population; inactive card instances are excluded; not calibrated silicon IPC",
+                "trace instruction cardinality divided by the effective SM-active observation frontier when available; raw summed SM-active cycles are a fallback and neither form is calibrated silicon IPC",
             ),
         );
         m.insert(
