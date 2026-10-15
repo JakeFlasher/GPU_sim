@@ -455,6 +455,20 @@ pub struct TraceMetrics {
     pub tma_shadow_l2_ordered_store_hits: u64,
     pub tma_shadow_l2_ordered_store_misses: u64,
     pub tma_shadow_l2_ordered_store_address_unavailable: u64,
+    /// Diagnostic-only joint L2 shadow interleaving ordinary dynamic sectors
+    /// with sidecar TMA sectors when a shared instrumentation-order token is
+    /// present. It never changes replay state, timing, or scored endpoints.
+    pub tma_joint_l2_requests: u64,
+    pub tma_joint_l2_hits: u64,
+    pub tma_joint_l2_misses: u64,
+    pub tma_joint_l2_tma_load_requests: u64,
+    pub tma_joint_l2_tma_load_hits: u64,
+    pub tma_joint_l2_tma_load_misses: u64,
+    pub tma_joint_l2_ordinary_read_requests: u64,
+    pub tma_joint_l2_ordinary_read_hits: u64,
+    pub tma_joint_l2_ordinary_read_misses: u64,
+    pub tma_joint_l2_order_unavailable: u64,
+    pub tma_joint_l2_events_dropped: u64,
     /// Read-only L1 request-boundary merge provenance. These counters are
     /// diagnostic; they do not change cache state or lookup projections.
     pub l1_same_request_merges_global: u64,
@@ -820,6 +834,30 @@ impl TraceMetrics {
             &mut self.tma_shadow_l2_ordered_store_address_unavailable,
             store[3],
         )?;
+        Ok(())
+    }
+
+    pub(crate) fn observe_tma_joint_l2(
+        &mut self,
+        requests: u64,
+        hits: u64,
+        misses: u64,
+        tma_load: [u64; 3],
+        ordinary_read: [u64; 3],
+        order_unavailable: u64,
+        events_dropped: u64,
+    ) -> Result<(), crate::IssueError> {
+        add(&mut self.tma_joint_l2_requests, requests)?;
+        add(&mut self.tma_joint_l2_hits, hits)?;
+        add(&mut self.tma_joint_l2_misses, misses)?;
+        add(&mut self.tma_joint_l2_tma_load_requests, tma_load[0])?;
+        add(&mut self.tma_joint_l2_tma_load_hits, tma_load[1])?;
+        add(&mut self.tma_joint_l2_tma_load_misses, tma_load[2])?;
+        add(&mut self.tma_joint_l2_ordinary_read_requests, ordinary_read[0])?;
+        add(&mut self.tma_joint_l2_ordinary_read_hits, ordinary_read[1])?;
+        add(&mut self.tma_joint_l2_ordinary_read_misses, ordinary_read[2])?;
+        add(&mut self.tma_joint_l2_order_unavailable, order_unavailable)?;
+        add(&mut self.tma_joint_l2_events_dropped, events_dropped)?;
         Ok(())
     }
 

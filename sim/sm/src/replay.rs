@@ -130,6 +130,112 @@ struct TmaShadowL2Stats {
     store: [u64; 4],
 }
 
+/// One address-derived event for a diagnostic joint L2 shadow. `order` is
+/// the producer's instrumentation token, never a cycle or engine timestamp.
+#[derive(Clone, Copy)]
+struct JointL2ShadowEvent {
+    order: u64,
+    sequence: u64,
+    sector_id: i64,
+    class: L2OpClass,
+    tma_load: bool,
+    ordinary_read: bool,
+}
+
+#[derive(Default)]
+struct JointL2ShadowStats {
+    requests: u64,
+    hits: u64,
+    misses: u64,
+    tma_load: [u64; 3],
+    ordinary_read: [u64; 3],
+    order_unavailable: u64,
+    events_dropped: u64,
+}
+
+const MAX_JOINT_L2_SHADOW_EVENTS: usize = 2_000_000;
+
+fn observe_joint_l2_shadow(
+    mut events: Vec<JointL2ShadowEvent>,
+    config: L2Config,
+    order_unavailable: u64,
+    events_dropped: u64,
+) -> Result<JointL2ShadowStats, ReplayError> {
+    events.sort_unstable_by_key(|event| (event.order, event.sequence));
+    let mut shadow = L2Model::new(config)?;
+    let mut stats = JointL2ShadowStats {
+        order_unavailable,
+        events_dropped,
+        ..JointL2ShadowStats::default()
+    };
+    for event in events {
+        let line_id = event.sector_id.div_euclid(4);
+        let sector = u8::try_from(event.sector_id.rem_euclid(4)).map_err(|_| {
+            ReplayError::System(SystemError::L2(
+                sim_mem::L2AccessError::SectorOutOfRange { sector: u8::MAX },
+            ))
+        })?;
+        let outcome = shadow
+            .access(line_id, sector, event.class)
+            .map_err(|error| ReplayError::System(SystemError::L2(error)))?;
+        stats.requests = stats.requests.checked_add(1).ok_or(IssueError::CounterOverflow {
+            counter: "joint TMA/L2 shadow requests",
+        })?;
+        let hit = u64::from(outcome.counted_hit);
+        let miss = u64::from(!outcome.counted_hit);
+        stats.hits = stats.hits.checked_add(hit).ok_or(IssueError::CounterOverflow {
+            counter: "joint TMA/L2 shadow hits",
+        })?;
+        stats.misses = stats.misses.checked_add(miss).ok_or(IssueError::CounterOverflow {
+            counter: "joint TMA/L2 shadow misses",
+        })?;
+        if event.tma_load {
+            stats.tma_load[0] = stats.tma_load[0].saturating_add(1);
+            stats.tma_load[1] = stats.tma_load[1].saturating_add(hit);
+            stats.tma_load[2] = stats.tma_load[2].saturating_add(miss);
+        }
+        if event.ordinary_read {
+            stats.ordinary_read[0] = stats.ordinary_read[0].saturating_add(1);
+            stats.ordinary_read[1] = stats.ordinary_read[1].saturating_add(hit);
+            stats.ordinary_read[2] = stats.ordinary_read[2].saturating_add(miss);
+        }
+    }
+    Ok(stats)
+}
+
+fn joint_l2_ordinary_span(kind: AccessKind) -> Option<(usize, usize, L2OpClass, bool)> {
+    match kind {
+        AccessKind::GlobalEligible { off, len, .. }
+        | AccessKind::GlobalUntagged { off, len }
+        | AccessKind::GlobalAsyncCopy {
+            off,
+            len,
+            l1_policy: LdgstsL1Policy::CacheAtAllLevels,
+            ..
+        } => Some((off, usize::from(len), L2OpClass::Read, true)),
+        AccessKind::GlobalBypass { off, len, token, .. } => Some((
+            off,
+            usize::from(len),
+            if token == CacheOpToken::Atom {
+                L2OpClass::WriteAtomic
+            } else {
+                L2OpClass::Read
+            },
+            token != CacheOpToken::Atom,
+        )),
+        AccessKind::GlobalStore { off, len }
+        | AccessKind::GlobalReduction { off, len, .. } => {
+            Some((off, usize::from(len), L2OpClass::WriteAtomic, false))
+        }
+        AccessKind::GlobalAsyncCopy { .. }
+        | AccessKind::LocalLoad { .. }
+        | AccessKind::LocalStore { .. }
+        | AccessKind::Shared { .. }
+        | AccessKind::NonMemory
+        | AccessKind::PredicatedOffMemory => None,
+    }
+}
+
 fn observe_tma_l2_shadow(
     observations: &BTreeMap<TmaObservationKey, TmaObservation>,
     config: L2Config,
@@ -3410,6 +3516,11 @@ fn extract_per_sm_blocks(
     let mut per_sm_blocks: BTreeMap<i32, Vec<BlockReplay>> = BTreeMap::new();
     let mut seen_indices: BTreeSet<i64> = BTreeSet::new();
     let mut tma_dynamic_keys_seen: BTreeSet<TmaObservationKey> = BTreeSet::new();
+    let collect_joint_l2 = tma_shadow_l2.is_some();
+    let mut joint_l2_events = Vec::new();
+    let mut joint_l2_order_unavailable = 0_u64;
+    let mut joint_l2_events_dropped = 0_u64;
+    let mut joint_l2_sequence = 0_u64;
     let mut traced_sm_by_launch_index: BTreeMap<i64, i32> = BTreeMap::new();
     let mut records_seen: u64 = 0;
     let mut instruction_sectors = BTreeSet::new();
@@ -3672,6 +3783,90 @@ fn extract_per_sm_blocks(
                         tma_observations,
                     )?
                 };
+                if collect_joint_l2 {
+                    let order = inst.instrumentation_order();
+                    if let Some((off, len, class, ordinary_read)) =
+                        joint_l2_ordinary_span(kind)
+                    {
+                        if len != 0 {
+                            let end = off.saturating_add(len);
+                            if let Some(span) = sectors.get(off..end) {
+                                if let Some(order) = order {
+                                    for &sector_id in span {
+                                        if joint_l2_events.len()
+                                            >= MAX_JOINT_L2_SHADOW_EVENTS
+                                        {
+                                            joint_l2_events_dropped =
+                                                joint_l2_events_dropped.saturating_add(1);
+                                            break;
+                                        }
+                                        joint_l2_events.push(JointL2ShadowEvent {
+                                            order,
+                                            sequence: joint_l2_sequence,
+                                            sector_id,
+                                            class,
+                                            tma_load: false,
+                                            ordinary_read,
+                                        });
+                                        joint_l2_sequence = joint_l2_sequence.saturating_add(1);
+                                    }
+                                } else {
+                                    joint_l2_order_unavailable =
+                                        joint_l2_order_unavailable.saturating_add(1);
+                                }
+                            }
+                        }
+                    }
+                    if is_tma_opcode {
+                        let key = TmaObservationKey {
+                            cta: block_id,
+                            warp: warp_id,
+                            instruction: record_ix,
+                            pc: inst.pc(),
+                            function: inst.function_unique_id(),
+                        };
+                        if let Some(observation) =
+                            tma_observations.and_then(|records| records.get(&key))
+                        {
+                            let ids = if observation.is_load {
+                                &observation.source_sector_ids[..]
+                            } else if observation.is_store {
+                                &observation.destination_sector_ids[..]
+                            } else {
+                                &[][..]
+                            };
+                            if ids.is_empty() {
+                                joint_l2_order_unavailable =
+                                    joint_l2_order_unavailable.saturating_add(1);
+                            } else if let Some(order) = order {
+                                let class = if observation.is_load {
+                                    L2OpClass::Read
+                                } else {
+                                    L2OpClass::WriteAtomic
+                                };
+                                for &sector_id in ids.iter() {
+                                    if joint_l2_events.len() >= MAX_JOINT_L2_SHADOW_EVENTS {
+                                        joint_l2_events_dropped =
+                                            joint_l2_events_dropped.saturating_add(1);
+                                        break;
+                                    }
+                                    joint_l2_events.push(JointL2ShadowEvent {
+                                        order,
+                                        sequence: joint_l2_sequence,
+                                        sector_id,
+                                        class,
+                                        tma_load: observation.is_load,
+                                        ordinary_read: false,
+                                    });
+                                    joint_l2_sequence = joint_l2_sequence.saturating_add(1);
+                                }
+                            } else {
+                                joint_l2_order_unavailable =
+                                    joint_l2_order_unavailable.saturating_add(1);
+                            }
+                        }
+                    }
+                }
                 let active_mask_present = inst.active_mask_present();
                 let predicate_mask_present = inst.predicate_mask_present();
                 let (opcode, pipeline) = schedule
@@ -3906,6 +4101,23 @@ fn extract_per_sm_blocks(
         blocks.sort_by_key(|b| b.launch_index);
     }
     trace_metrics.finish_coherence()?;
+    if let Some(l2) = tma_shadow_l2 {
+        let joint = observe_joint_l2_shadow(
+            joint_l2_events,
+            l2,
+            joint_l2_order_unavailable,
+            joint_l2_events_dropped,
+        )?;
+        trace_metrics.observe_tma_joint_l2(
+            joint.requests,
+            joint.hits,
+            joint.misses,
+            joint.tma_load,
+            joint.ordinary_read,
+            joint.order_unavailable,
+            joint.events_dropped,
+        )?;
+    }
     if let Some(observations) = observations {
         let mut matched = 0_u64;
         let mut unmatched = 0_u64;
