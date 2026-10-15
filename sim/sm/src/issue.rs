@@ -5179,7 +5179,11 @@ pub(crate) fn data_ready_time(
             };
             match l1 {
                 Some(l1) => {
-                    l1.begin_lookup_batch();
+                    let request_sectors = &sectors[off..off + usize::from(len)];
+                    l1.begin_lookup_batch_for_client_with_sectors(
+                        L1LookupClient::Unknown,
+                        request_sectors,
+                    );
                     let mut ready = needs_ready
                         .then(|| {
                             checked_cycle_add("L1 hit-pipeline floor", t, params.l1_hit_latency)
@@ -5234,7 +5238,8 @@ pub(crate) fn data_ready_time(
             ..
         } => match (l1, l1_policy) {
             (Some(l1), LdgstsL1Policy::CacheAtAllLevels) => {
-                l1.begin_async_copy_lookup_batch();
+                let request_sectors = &sectors[off..off + usize::from(len)];
+                l1.begin_async_copy_lookup_batch_with_sectors(request_sectors);
                 let mut ready = needs_ready
                     .then(|| {
                         checked_cycle_add("LDGSTS L1 hit-pipeline floor", t, params.l1_hit_latency)
@@ -8412,7 +8417,10 @@ impl<'a> SmCore<'a> {
                 } else {
                     L1LookupClient::OrdinaryGlobal
                 };
-                let lookup_batch = st.l1.begin_lookup_batch_for_client(lookup_client);
+                let request_sectors = &sectors[off..off + usize::from(len)];
+                let lookup_batch = st
+                    .l1
+                    .begin_lookup_batch_for_client_with_sectors(lookup_client, request_sectors);
                 let mut known = write_barrier
                     .is_some()
                     .then(|| checked_cycle_add("shared L1 hit-pipeline floor", t, p.l1_hit_latency))
@@ -8510,7 +8518,10 @@ impl<'a> SmCore<'a> {
                         barrier: write_barrier,
                     })
                     .or_else(|| write_barrier.map(FillTarget::Barrier));
-                let lookup_batch = st.l1.begin_async_copy_lookup_batch();
+                let request_sectors = &sectors[off..off + usize::from(len)];
+                let lookup_batch = st
+                    .l1
+                    .begin_async_copy_lookup_batch_with_sectors(request_sectors);
                 let mut known = (write_barrier.is_some() || source_active)
                     .then(|| {
                         checked_cycle_add(
@@ -11664,10 +11675,14 @@ impl<'a> SmCore<'a> {
                     l1_policy: LdgstsL1Policy::CacheAtAllLevels,
                     ..
                 } => {
+                    let request_sectors = &warp.sectors[off..off + usize::from(len)];
                     if matches!(inst.kind, AccessKind::GlobalAsyncCopy { .. }) {
-                        shadow.begin_async_copy_lookup_batch();
+                        shadow.begin_async_copy_lookup_batch_with_sectors(request_sectors);
                     } else {
-                        shadow.begin_lookup_batch();
+                        shadow.begin_lookup_batch_for_client_with_sectors(
+                            L1LookupClient::Unknown,
+                            request_sectors,
+                        );
                     }
                     let origin = match inst.kind {
                         AccessKind::GlobalEligible { .. } | AccessKind::GlobalAsyncCopy { .. } => {
@@ -11972,11 +11987,6 @@ impl<'a> SmCore<'a> {
                         _ => unreachable!("match arm admits only cacheable L1 accesses"),
                     };
                     let observe_ready = write_barrier.is_some() || source_active;
-                    if cacheable_async {
-                        shadow.begin_async_copy_lookup_batch();
-                    } else {
-                        shadow.begin_lookup_batch();
-                    }
                     let end =
                         off.checked_add(usize::from(len))
                             .ok_or(IssueError::CounterOverflow {
@@ -11988,6 +11998,14 @@ impl<'a> SmCore<'a> {
                             .ok_or(IssueError::CounterOverflow {
                                 counter: "issue sector cursor",
                             })?;
+                    if cacheable_async {
+                        shadow.begin_async_copy_lookup_batch_with_sectors(sectors);
+                    } else {
+                        shadow.begin_lookup_batch_for_client_with_sectors(
+                            L1LookupClient::Unknown,
+                            sectors,
+                        );
+                    }
                     let mut instruction_hit_service_charged = false;
                     for &sector in sectors {
                         let access = access_shared_l1(

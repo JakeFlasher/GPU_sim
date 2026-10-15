@@ -2812,6 +2812,87 @@ pub(super) fn project(
     }
     // Per-origin local cache counts were modeled but previously not exposed.
     if let Some(l1) = result.l1() {
+        // The request-mask audit is fixed-size and diagnostic-only.  Keep the
+        // detailed client×mask arrays in TraceMetrics for machine-readable
+        // inspection, while exposing only compact totals in the native report
+        // so a wide request cannot expand the metric surface.
+        let mask_audit = &trace.l1_request_mask_audit;
+        let request_count = mask_audit.request_count.iter().copied().sum();
+        let request_line_count = mask_audit.request_line_count.iter().copied().sum();
+        let request_mask_overflow = mask_audit.request_mask_overflow.iter().copied().sum();
+        let same_request_mask_merges: u64 = mask_audit
+            .same_request_merge_masks
+            .iter()
+            .flat_map(|counts| counts.iter())
+            .copied()
+            .sum();
+        let older_pending_mask_merges: u64 = mask_audit
+            .older_pending_merge_masks
+            .iter()
+            .flat_map(|counts| counts.iter())
+            .copied()
+            .sum();
+        for (name, value, unit, semantics) in [
+            (
+                "request_mask_audit_requests",
+                request_count,
+                "request",
+                "bounded per-request L1 line-mask audit; diagnostic only",
+            ),
+            (
+                "request_mask_audit_lines",
+                request_line_count,
+                "line",
+                "four-sector line footprints retained by the bounded L1 request audit",
+            ),
+            (
+                "request_mask_audit_same_request_merges",
+                same_request_mask_merges,
+                "sector",
+                "same-request pending-fill mask observations; diagnostic only",
+            ),
+            (
+                "request_mask_audit_older_pending_merges",
+                older_pending_mask_merges,
+                "sector",
+                "older-request pending-fill mask observations; diagnostic only",
+            ),
+            (
+                "request_mask_audit_overflow",
+                request_mask_overflow,
+                "request",
+                "requests exceeding the bounded temporary line-mask map",
+            ),
+        ] {
+            add_count_row(&mut m, name, None, unit, value, semantics);
+        }
+        for (index, name) in [
+            "unknown",
+            "ordinary_global",
+            "constant",
+            "local",
+            "async_copy",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            add_count_row(
+                &mut m,
+                format!("request_mask_audit_{name}_requests"),
+                None,
+                "request",
+                mask_audit.request_count[index],
+                "bounded L1 request client-scope audit; diagnostic only",
+            );
+            add_count_row(
+                &mut m,
+                format!("request_mask_audit_{name}_lines"),
+                None,
+                "line",
+                mask_audit.request_line_count[index],
+                "bounded L1 request client-scope line-mask audit; diagnostic only",
+            );
+        }
         let unified_rows = [
             ("hits", l1.hits, "sector"),
             ("misses", l1.misses, "sector"),

@@ -4946,6 +4946,7 @@ fn replay_kernel_with_schedule_and_l2_and_candidates_with_payload_events(
                 audit.constant_global_requests,
                 global_hits,
                 global_lookups,
+                audit.request_masks,
             )?;
         }
     }

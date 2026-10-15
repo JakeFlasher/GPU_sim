@@ -2,7 +2,9 @@
 use std::collections::BTreeMap;
 
 use serde::Serialize;
-use sim_mem::{opcode_head, AccessKind, CacheOpToken, LdgstsL1Policy};
+use sim_mem::{
+    opcode_head, AccessKind, CacheOpToken, L1RequestMaskAudit, LdgstsL1Policy,
+};
 use sim_semantics::{
     CandidateDomain, EvidenceKind, LatentFactors, LatentModelError, ResourceDemandEnvelope,
     ResourceDemandInterval,
@@ -453,6 +455,10 @@ pub struct TraceMetrics {
     pub l1_constant_global_requests: u64,
     pub l1_global_resident_hits: u64,
     pub l1_global_lookup_sectors: u64,
+    /// Fixed-size per-request four-sector mask/client audit. This is
+    /// diagnostic-only and does not feed cache state, timing, or scored
+    /// endpoints.
+    pub l1_request_mask_audit: L1RequestMaskAudit,
     /// Sidecar-to-dynamic identity coverage for source-order reasoning. A
     /// matched key establishes same-instruction identity, not cross-warp time.
     pub tma_shadow_dynamic_records_matched: u64,
@@ -780,6 +786,7 @@ impl TraceMetrics {
         constant_global_requests: u64,
         global_resident_hits: u64,
         global_lookup_sectors: u64,
+        request_mask_audit: L1RequestMaskAudit,
     ) -> Result<(), crate::IssueError> {
         add(&mut self.l1_same_request_merges_global, same_request[0])?;
         add(&mut self.l1_same_request_merges_local, same_request[1])?;
@@ -816,6 +823,34 @@ impl TraceMetrics {
         )?;
         add(&mut self.l1_global_resident_hits, global_resident_hits)?;
         add(&mut self.l1_global_lookup_sectors, global_lookup_sectors)?;
+        for client in 0..request_mask_audit.request_count.len() {
+            add(
+                &mut self.l1_request_mask_audit.request_count[client],
+                request_mask_audit.request_count[client],
+            )?;
+            add(
+                &mut self.l1_request_mask_audit.request_line_count[client],
+                request_mask_audit.request_line_count[client],
+            )?;
+            add(
+                &mut self.l1_request_mask_audit.request_mask_overflow[client],
+                request_mask_audit.request_mask_overflow[client],
+            )?;
+            for mask in 0..16 {
+                add(
+                    &mut self.l1_request_mask_audit.request_masks[client][mask],
+                    request_mask_audit.request_masks[client][mask],
+                )?;
+                add(
+                    &mut self.l1_request_mask_audit.same_request_merge_masks[client][mask],
+                    request_mask_audit.same_request_merge_masks[client][mask],
+                )?;
+                add(
+                    &mut self.l1_request_mask_audit.older_pending_merge_masks[client][mask],
+                    request_mask_audit.older_pending_merge_masks[client][mask],
+                )?;
+            }
+        }
         Ok(())
     }
 

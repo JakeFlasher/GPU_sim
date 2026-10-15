@@ -39,6 +39,7 @@
 //! LDGSTS merges into allocations from older warp instructions are observed as
 //! lookup hits, while same-instruction sector coalescing remains a miss.
 
+use serde::Serialize;
 use std::collections::{BTreeMap, HashMap};
 use std::num::NonZeroU32;
 
@@ -310,6 +311,49 @@ pub struct L1LookupBatch {
     client: L1LookupClient,
 }
 
+/// Fixed-size, read-only audit of the sector masks presented to one logical
+/// lookup request.  A mask is the four-sector footprint of one 128-byte line;
+/// a request touching several lines contributes one histogram observation per
+/// touched line.  The merge histograms use the observed resident/merge mask
+/// (including the sector being observed), split by whether that fill predates
+/// the request boundary.  Because the physical fill payload mask is not
+/// retained separately, these are conservative merge-footprint observations,
+/// not claims about the exact engine request payload.  These counters never participate in cache state,
+/// replacement, MSHR ownership, timing, or lookup projections.
+///
+/// The arrays are deliberately fixed at five clients × sixteen masks.  This
+/// keeps replay JSON bounded even for malformed or unusually wide traces;
+/// records exceeding the compact temporary line-map budget are represented by
+/// `request_mask_overflow` rather than retaining per-request addresses.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct L1RequestMaskAudit {
+    /// Number of lookup requests observed for each client, in
+    /// [`L1LookupClient::ALL`] order.
+    pub request_count: [u64; 5],
+    /// Number of per-line masks represented by each client.  This can exceed
+    /// `request_count` for requests spanning multiple cache lines.
+    pub request_line_count: [u64; 5],
+    /// Request line-mask histogram, indexed by client then four-bit mask.
+    pub request_masks: [[u64; 16]; 5],
+    /// Observed resident/merge masks seen on same-request sector coalescing,
+    /// indexed by client then mask.
+    pub same_request_merge_masks: [[u64; 16]; 5],
+    /// Observed resident/merge masks seen on merges into fills from an older
+    /// request, indexed by client then mask.
+    pub older_pending_merge_masks: [[u64; 16]; 5],
+    /// Number of requests whose line footprint exceeded the bounded
+    /// diagnostic map.  No addresses are retained for these requests.
+    pub request_mask_overflow: [u64; 5],
+}
+
+impl L1RequestMaskAudit {
+    pub const MAX_REQUEST_LINES: usize = 1024;
+
+    pub const fn client_index(client: L1LookupClient) -> usize {
+        client.index()
+    }
+}
+
 /// Read-only provenance for L1 lookup merges.  These counters describe the
 /// request boundary observed by the cache model; they do not alter tags,
 /// fills, MSHR ownership, replacement, or timing.
@@ -325,6 +369,9 @@ pub struct L1MergeAudit {
     pub constant_global_older_pending_merges: u64,
     pub constant_global_hits: u64,
     pub constant_global_requests: u64,
+    /// Bounded per-request sector-mask/client-scope audit.  This is nested so
+    /// existing merge counters retain their stable names in serialized output.
+    pub request_masks: L1RequestMaskAudit,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -334,6 +381,26 @@ pub enum L1LookupClient {
     Constant,
     Local,
     AsyncCopy,
+}
+
+impl L1LookupClient {
+    pub const ALL: [Self; 5] = [
+        Self::Unknown,
+        Self::OrdinaryGlobal,
+        Self::Constant,
+        Self::Local,
+        Self::AsyncCopy,
+    ];
+
+    pub const fn index(self) -> usize {
+        match self {
+            Self::Unknown => 0,
+            Self::OrdinaryGlobal => 1,
+            Self::Constant => 2,
+            Self::Local => 3,
+            Self::AsyncCopy => 4,
+        }
+    }
 }
 
 /// One origin's accounting lane. It mirrors the unified fields in
@@ -1391,11 +1458,12 @@ impl L1Cache {
         self.merge_audit
     }
 
-    fn record_merge_audit(&mut self, origin: MemoryOrigin, sequence: u64) {
+    fn record_merge_audit(&mut self, origin: MemoryOrigin, line: i64, sector: u8, sequence: u64) {
         let Some(batch) = self.active_lookup_batch else {
             return;
         };
-        let lane = if sequence < batch.first_fill_sequence {
+        let older_pending = sequence < batch.first_fill_sequence;
+        let lane = if older_pending {
             &mut self.merge_audit.older_pending_merges
         } else {
             &mut self.merge_audit.same_request_merges
@@ -1413,6 +1481,25 @@ impl L1Cache {
             &mut self.merge_audit.ordinary_same_request_merges
         };
         route_lane[origin.index()] = route_lane[origin.index()].saturating_add(1);
+        // Keep the observed resident/merge footprint separate from the request
+        // footprint:
+        // `sectors` may already contain sectors brought in by an earlier
+        // request, while the current sector is always part of the pending
+        // merge observed here.  The four-sector mask is all that is retained.
+        let observed_merge_mask = self
+            .sectors
+            .get(&line)
+            .copied()
+            .unwrap_or(0)
+            | (1_u8 << (sector & 3));
+        let client = batch.client.index();
+        let mask = usize::from(observed_merge_mask & 0x0f);
+        let merge_masks = if older_pending {
+            &mut self.merge_audit.request_masks.older_pending_merge_masks
+        } else {
+            &mut self.merge_audit.request_masks.same_request_merge_masks
+        };
+        merge_masks[client][mask] = merge_masks[client][mask].saturating_add(1);
         if sequence < batch.first_fill_sequence && origin == MemoryOrigin::Global {
             match batch.client {
                 L1LookupClient::OrdinaryGlobal => {
@@ -1429,6 +1516,40 @@ impl L1Cache {
                 }
                 _ => {}
             }
+        }
+    }
+
+    /// Record the fixed-size sector masks presented by one request.  The
+    /// caller supplies decoded sector identities for the request; this helper
+    /// folds them by 128-byte line without retaining request addresses.  The
+    /// temporary map is bounded because a compact diagnostic must not turn a
+    /// malformed sidecar into unbounded state.
+    fn record_request_masks(&mut self, client: L1LookupClient, sectors: &[i64]) {
+        let client_index = client.index();
+        let audit = &mut self.merge_audit.request_masks;
+        audit.request_count[client_index] = audit.request_count[client_index].saturating_add(1);
+        let mut line_masks: Vec<(i64, u8)> = Vec::new();
+        for &sector_id in sectors {
+            let line = sector_id >> 2;
+            let bit = 1_u8 << ((sector_id & 3) as u8);
+            if let Some((_, mask)) = line_masks.iter_mut().find(|(entry, _)| *entry == line) {
+                *mask |= bit;
+                continue;
+            }
+            if line_masks.len() >= L1RequestMaskAudit::MAX_REQUEST_LINES {
+                audit.request_mask_overflow[client_index] = audit.request_mask_overflow
+                    [client_index]
+                    .saturating_add(1);
+                continue;
+            }
+            line_masks.push((line, bit));
+        }
+        audit.request_line_count[client_index] = audit.request_line_count[client_index]
+            .saturating_add(line_masks.len() as u64);
+        for (_, mask) in line_masks {
+            audit.request_masks[client_index][usize::from(mask & 0x0f)] = audit.request_masks
+                [client_index][usize::from(mask & 0x0f)]
+                .saturating_add(1);
         }
     }
 
@@ -1796,6 +1917,21 @@ impl L1Cache {
         batch
     }
 
+    /// Start a lookup batch and retain only its bounded per-line sector-mask
+    /// summary for the diagnostic audit.  Cache tags, fills, MSHRs, recency,
+    /// and timing are unchanged.  The sector slice is not retained by the
+    /// returned token, so retries continue to carry only the existing compact
+    /// lookup identity.
+    pub fn begin_lookup_batch_for_client_with_sectors(
+        &mut self,
+        client: L1LookupClient,
+        sectors: &[i64],
+    ) -> L1LookupBatch {
+        let batch = self.begin_lookup_batch_for_client(client);
+        self.record_request_masks(client, sectors);
+        batch
+    }
+
     /// Start a cache-all LDGSTS source lookup. Independent sm_86 calibration
     /// shows that a merge into an older pending allocation is counted as an
     /// L1TEX lookup hit for this path; same-instruction coalescing is not.
@@ -1806,6 +1942,16 @@ impl L1Cache {
             client: L1LookupClient::AsyncCopy,
         };
         self.active_lookup_batch = Some(batch);
+        batch
+    }
+
+    /// Async-copy variant of [`Self::begin_lookup_batch_for_client_with_sectors`].
+    pub fn begin_async_copy_lookup_batch_with_sectors(
+        &mut self,
+        sectors: &[i64],
+    ) -> L1LookupBatch {
+        let batch = self.begin_async_copy_lookup_batch();
+        self.record_request_masks(L1LookupClient::AsyncCopy, sectors);
         batch
     }
 
@@ -2684,7 +2830,7 @@ impl L1Cache {
             && let Some(&(pending, sequence)) = self.sector_fills.get(&(line, sector, generation))
         {
             Self::preflight_fill_timing(pending, fill_request.timing())?;
-            self.record_merge_audit(origin, sequence);
+            self.record_merge_audit(origin, line, sector, sequence);
             let counters = if self.active_lookup_batch.is_some_and(|batch| {
                 batch.pending_merges_are_hits && sequence < batch.first_fill_sequence
             }) {
@@ -2710,7 +2856,7 @@ impl L1Cache {
         }
         if let Some(&(pending, sequence, generation)) = self.line_fills.get(&line) {
             Self::preflight_fill_timing(pending, fill_request.timing())?;
-            self.record_merge_audit(origin, sequence);
+            self.record_merge_audit(origin, line, sector, sequence);
             let counters = if self.active_lookup_batch.is_some_and(|batch| {
                 batch.pending_merges_are_hits && sequence < batch.first_fill_sequence
             }) {
@@ -2759,7 +2905,7 @@ impl L1Cache {
             && let Some(&(pending, sequence)) = self.sector_fills.get(&(line, sector, generation))
         {
             Self::preflight_fill_timing(pending, fill_request.timing())?;
-            self.record_merge_audit(origin, sequence);
+            self.record_merge_audit(origin, line, sector, sequence);
             let counters = if self.active_lookup_batch.is_some_and(|batch| {
                 batch.pending_merges_are_hits && sequence < batch.first_fill_sequence
             }) {
