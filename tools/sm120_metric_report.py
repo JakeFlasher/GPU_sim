@@ -74,6 +74,13 @@ def metric_entries(launch: dict[str, Any]) -> list[dict[str, Any]]:
     for prediction in launch.get("metric_predictions", []):
         if not isinstance(prediction, dict) or not prediction.get("ncu_metric"):
             continue
+        # The generic L2 hit-rate alias has broader/version-dependent client
+        # scope than the conserving TEX-sector observer. Keep its target in
+        # the unavailable inventory, but never score it as if the endpoints
+        # were identical. Source-specific hit/miss rows remain reportable via
+        # cache_lookup_predictions.
+        if prediction.get("ncu_metric") == "lts__t_sector_hit_rate.pct":
+            continue
         outcome = prediction.get("outcome")
         if not isinstance(outcome, dict):
             continue

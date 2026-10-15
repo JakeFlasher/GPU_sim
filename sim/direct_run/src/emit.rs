@@ -445,9 +445,6 @@ pub enum Unavailable {
     /// The replay's mem-mode did not attach the counting unit this metric
     /// reads (e.g. no L2 counters under `Flat`/`L1Const`).
     MemModeLacksUnit { needs: MemUnit },
-    /// The counter exists, but the installed profiler endpoint has a broader
-    /// or version-dependent client scope than this typed observer.
-    ScopeUnestablished { detail: &'static str },
 }
 
 impl Serialize for Unavailable {
@@ -466,12 +463,6 @@ impl Serialize for Unavailable {
                 let mut state = serializer.serialize_struct("Unavailable", 2)?;
                 state.serialize_field("reason", "mem_mode_lacks_unit")?;
                 state.serialize_field("needs", needs.as_str())?;
-                state.end()
-            }
-            Self::ScopeUnestablished { detail } => {
-                let mut state = serializer.serialize_struct("Unavailable", 2)?;
-                state.serialize_field("reason", "scope_unestablished")?;
-                state.serialize_field("detail", detail)?;
                 state.end()
             }
         }
@@ -1082,11 +1073,6 @@ fn emit_l1tex_unified_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, Em
 /// denominators differ.
 fn emit_l2_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitError> {
     let key = "cache_hit_rate_l2_sector";
-    if snap.arch == ArchId::Sm120 {
-        return Ok(EmitOutcome::Unavailable(Unavailable::ScopeUnestablished {
-            detail: "generic lts__t_sector_hit_rate.pct client scope is not established for the SM120 TEX-sector observer",
-        }));
-    }
     let Some(l2) = snap.l2 else {
         return Ok(EmitOutcome::Unavailable(Unavailable::MemModeLacksUnit {
             needs: MemUnit::Lts,
