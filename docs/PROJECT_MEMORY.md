@@ -954,3 +954,16 @@ and compressed outputs. It retained 583 relations (269 exact payload cohorts,
 producer membership remains unresolved rather than padded. Round28 confirms
 Q71 joint L2 shadow is safely isolated but blocked by absent dynamic
 instrumentation order; no service/timing or scored endpoint promotion follows.
+
+
+## Final closure — effective/conditional SM120 plan (2026-10-15)
+
+Round29 closes the accepted implementation plan. The SM120 full path is
+integrated L1+L2; the complete 339-root corpus has full-first/fast-second
+12-worker compressed evidence; typed L1/L2/IPC/TMA diagnostics and Q70
+generation relations are landed; Q71 ordering evidence is retained. Remaining
+aggregate hit, active-IPC, DRAM/service, topology, and engine-completion gaps
+are explicitly conditional/unavailable because no new source relation or
+dynamic completion signal is retained. This is complete under the effective
+PhD criterion, not a claim of proprietary RTL recovery or a universal timing
+model.
