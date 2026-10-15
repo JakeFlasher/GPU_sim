@@ -24,9 +24,10 @@ from sm120_replay_bench import join_ncu_rows, parse_ncu_raw
 def distribution(values: list[float]) -> dict[str, Any]:
     values = sorted(values)
     if not values:
-        return {"n": 0, "median": None, "p90": None}
+        return {"n": 0, "mean": None, "median": None, "p90": None}
     return {
         "n": len(values),
+        "mean": statistics.fmean(values),
         "median": statistics.median(values),
         "p90": values[int((len(values) - 1) * 0.90)],
     }
@@ -376,13 +377,14 @@ def main() -> int:
         report.write("Post-replay reduction of emitted predictions; NCU values were not replay inputs.\n\n")
         report.write("Each launch contributes at most once per metric and mode. Full and fast errors are not pooled; aliases and differing alternatives are retained in compressed rows, not counted as extra observations. Relative errors exclude zero targets.\n\n")
         for mode, mode_summary in by_mode.items():
-            report.write(f"## {mode.capitalize()} compared metrics\n\n| metric | family | compared | median absolute error | P90 | median APE | P90 APE | exact |\n|---|---|---:|---:|---:|---:|---:|---:|\n")
+            report.write(f"## {mode.capitalize()} compared metrics\n\n| metric | family | compared | median absolute error | P90 | mean APE | median APE | P90 APE | exact |\n|---|---|---:|---:|---:|---:|---:|---:|---:|\n")
             for name, item in mode_summary["metrics"].items():
                 if item["compared"] == 0:
                     continue
                 error = item["absolute_error"]
                 relative = item["relative_error_nonzero_targets"]
-                report.write(f"| `{name}` | {item['family']} | {item['compared']} | {error['median']} | {error['p90']} | {relative['median']} | {relative['p90']} | {item['exact']} |\n")
+                mean_ape = relative.get("mean")
+                report.write(f"| `{name}` | {item['family']} | {item['compared']} | {error['median']} | {error['p90']} | {mean_ape} | {relative['median']} | {relative['p90']} | {item['exact']} |\n")
         report.write("\n## Currently unavailable model families\n\n")
         report.write("Metrics with no simulator prediction in either retained mode are listed once by family; raw NCU distributions are intentionally omitted.\n\n")
         for family_name, entries in summary["unavailable_by_family"].items():
