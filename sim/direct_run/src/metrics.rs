@@ -2932,12 +2932,12 @@ pub(super) fn project(
         m.insert(
             "l2_tex_hit_rate_pct".into(),
             Metric::ratio(
-                Some("lts__t_sector_hit_rate.pct"),
+                None,
                 "%",
                 u128::from(l2.lookup_hits) * 100,
                 u128::from(l2.lookup_requests),
                 false,
-                "TEX-source lookup domain, excludes instruction and non-TEX traffic",
+                "TEX-source lookup hit rate over the conserving sector observer; the generic lts__t_sector_hit_rate.pct endpoint has broader/driver-version-dependent scope and is not silently joined",
             ),
         );
     }
