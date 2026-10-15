@@ -929,3 +929,17 @@ partial quant cohorts remain protocol-scoped candidates. A four-capture
 sidecar probe found 24 relations: 16 exact Cutlass cohorts and 8 quant
 candidates, all with phase-readiness observers. The relation is diagnostic and
 model-relative only; no replay timing or engine completion clock is added.
+
+## Q71 — joint TMA/L2 shadow ordering audit (2026-10-15)
+
+Commit `6b37f5cb` adds a bounded diagnostic-only joint L2 shadow. It can
+interleave ordinary dynamic global sectors and sidecar TMA source/destination
+sectors only when a shared `instrumentation_order` token is retained, using a
+separate effective `L2Model` capped at 2,000,000 events. It never changes
+replay cache state, timing, DRAM demand, or scored endpoints. The selected
+four-capture full-first/fast-second probe (30 launches per mode, exactly 12
+workers, compressed JSONL) completed all rows successfully, but no retained
+record exposed `instrumentation_order`; joint counters stayed zero and
+order-unavailable counts were nonzero. No L2 endpoint promotion or corpus
+replay follows. A future attempt requires a documented dynamic ordering token;
+file/warp order is not a substitute.
