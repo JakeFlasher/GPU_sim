@@ -847,3 +847,9 @@ and output-neutral. L1 aggregate hit, TMA/L2 hit, active IPC, and Cutlass branch
 residuals remain typed scope gaps. Future work requires a new source-visible
 relation before another full replay; no NCU fitting or lexical-order heuristic
 is accepted.
+
+## 2026-10-15 — evidence naming clarification
+
+Q57/Q58 IPC, L2 pending-merge, complete-branch, and stream-L2 artifacts are
+separate canonical directories; Q65 is the latest combined replay. They are
+not interchangeable or overwritten despite shared sequence labels.
