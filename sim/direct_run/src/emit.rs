@@ -28,10 +28,6 @@ struct CounterSnapshot<'a> {
     /// Effective SM120 TMA global-to-shared payload demand, in 32-byte
     /// sectors. This is a conditional sidecar demand arm, not engine timing.
     tma_load_sectors: u64,
-    /// Exact ordinary older-pending merge counts retained by the real-trace
-    /// L1 request-boundary audit. Aggregate launch-set snapshots do not carry
-    /// this provenance and use the bounded legacy projection instead.
-    l1_ordinary_older_pending_merges: Option<[u64; 2]>,
 }
 
 impl<'a> CounterSnapshot<'a> {
@@ -58,10 +54,6 @@ impl<'a> CounterSnapshot<'a> {
                 .trace_metrics()
                 .tma_sidecar_load_payload_bytes
                 .div_ceil(32),
-            l1_ordinary_older_pending_merges: Some([
-                result.trace_metrics().l1_ordinary_older_pending_merges_global,
-                result.trace_metrics().l1_ordinary_older_pending_merges_local,
-            ]),
         })
     }
 
@@ -83,24 +75,7 @@ impl<'a> CounterSnapshot<'a> {
             front_end: counters.front_end(),
             binding_cycles,
             tma_load_sectors: 0,
-            l1_ordinary_older_pending_merges: None,
         })
-    }
-
-    fn l1_lookup_hits(&self, origin: MemoryOrigin) -> u64 {
-        let Some(l1) = self.l1 else {
-            return 0;
-        };
-        let counters = l1.origin(origin);
-        self.l1_ordinary_older_pending_merges
-            .map(|audit| {
-                let index = match origin {
-                    MemoryOrigin::Global => 0,
-                    MemoryOrigin::Local => 1,
-                };
-                counters.effective_lookup_hits_from_audit(audit[index])
-            })
-            .unwrap_or_else(|| counters.effective_lookup_hits())
     }
 
     fn require_counter_architecture(&self) -> Result<(), EmitError> {
@@ -1031,7 +1006,7 @@ fn emit_l1tex_read_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitE
         }));
     };
     let global = l1.origin(MemoryOrigin::Global);
-    let num = snap.l1_lookup_hits(MemoryOrigin::Global);
+    let num = global.effective_lookup_hits();
     let bypass = bypass_read_sectors(key, &global)?;
     let den = checked_sum(
         key,
@@ -1068,9 +1043,10 @@ fn emit_l1tex_unified_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, Em
         }));
     };
     let [store_hits, reduction_hits] = l1_write_hit_terms(snap.arch, l1);
-    let effective_read_hits = snap
-        .l1_lookup_hits(MemoryOrigin::Global)
-        .checked_add(snap.l1_lookup_hits(MemoryOrigin::Local))
+    let effective_read_hits = l1
+        .origin(MemoryOrigin::Global)
+        .effective_lookup_hits()
+        .checked_add(l1.origin(MemoryOrigin::Local).effective_lookup_hits())
         .ok_or(EmitError::CounterOverflow {
             key,
             operation: "unified L1 effective lookup-hit numerator",
