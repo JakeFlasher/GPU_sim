@@ -706,9 +706,30 @@ pub(super) fn project(
                 "raw trace instruction cardinality divided by summed model SM-active lifetimes over the observed active-SM population; diagnostic only, not the NCU endpoint",
             ),
         );
-        let effective_active_ipc_denominator = effective_sm_active_frontier
-            .map(u128::from)
-            .unwrap_or(sm_active_cycles);
+        // NCU's `.avg.per_cycle_active` is a ratio-of-sums over the SM
+        // population, not the terminal/max observation endpoint used by
+        // `sm__cycles_active.max`.  Build a separate effective sum by
+        // extending each observed SM lifetime with the same source-derived
+        // front-end envelope, using that SM's retained instruction-sector
+        // provenance.  Falling back to the raw sum preserves coverage when
+        // the per-SM provenance is absent.  This remains an effective
+        // observation model, not a physical clock conversion.
+        let effective_sm_active_sum = result
+            .per_sm()
+            .values()
+            .try_fold(0_u128, |sum, sm| {
+                let sectors = u128::from(sm.activity.front_end_instruction_read_sectors);
+                let scaled = sectors
+                    .checked_mul(u128::from(alpha.front_end_line_cycles_numerator))?
+                    .checked_add(u128::from(
+                        alpha.front_end_line_cycles_denominator.saturating_sub(1),
+                    ))?
+                    / u128::from(alpha.front_end_line_cycles_denominator.max(1));
+                let envelope = u128::from(alpha.front_end_base_cycles).checked_add(scaled)?;
+                sum.checked_add(u128::from(sm.activity.sm_active_cycles))?
+                    .checked_add(envelope)
+            });
+        let effective_active_ipc_denominator = effective_sm_active_sum.unwrap_or(sm_active_cycles);
         m.insert(
             "alpha_sm_inst_per_cycle_active".to_owned(),
             Metric::ratio(
