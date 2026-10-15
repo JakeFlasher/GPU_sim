@@ -118,15 +118,22 @@ fn append_bounded_async_decision_snapshots(
 /// shared replay cache, timing, DRAM demand, or issue schedule. It is an
 /// effective observer projection: ordinary L1/L2 requests and TMA requests
 /// are not falsely serialized into one physical stream.
+#[derive(Default)]
+struct TmaShadowL2Stats {
+    requests: u64,
+    hits: u64,
+    misses: u64,
+    unavailable: u64,
+    load: [u64; 4],
+    store: [u64; 4],
+}
+
 fn observe_tma_l2_shadow(
     observations: &BTreeMap<TmaObservationKey, TmaObservation>,
     config: L2Config,
-) -> Result<(u64, u64, u64, u64), ReplayError> {
+) -> Result<TmaShadowL2Stats, ReplayError> {
     let mut shadow = L2Model::new(config)?;
-    let mut requests = 0_u64;
-    let mut hits = 0_u64;
-    let mut misses = 0_u64;
-    let mut unavailable = 0_u64;
+    let mut stats = TmaShadowL2Stats::default();
     for observation in observations.values() {
         let (sector_ids, class) = if observation.is_load {
             (&observation.source_sector_ids, L2OpClass::Read)
@@ -136,8 +143,12 @@ fn observe_tma_l2_shadow(
             continue;
         };
         if sector_ids.is_empty() {
-            unavailable = unavailable.checked_add(1).ok_or(IssueError::CounterOverflow {
+            stats.unavailable = stats.unavailable.checked_add(1).ok_or(IssueError::CounterOverflow {
                 counter: "TMA shadow L2 unavailable address records",
+            })?;
+            let lane = if observation.is_load { &mut stats.load } else { &mut stats.store };
+            lane[3] = lane[3].checked_add(1).ok_or(IssueError::CounterOverflow {
+                counter: "TMA shadow operation-class unavailable records",
             })?;
             continue;
         }
@@ -151,21 +162,31 @@ fn observe_tma_l2_shadow(
             let outcome = shadow
                 .access(line_id, sector, class)
                 .map_err(|error| ReplayError::System(SystemError::L2(error)))?;
-            requests = requests.checked_add(1).ok_or(IssueError::CounterOverflow {
+            stats.requests = stats.requests.checked_add(1).ok_or(IssueError::CounterOverflow {
                 counter: "TMA shadow L2 requests",
             })?;
+            let lane = if observation.is_load { &mut stats.load } else { &mut stats.store };
+            lane[0] = lane[0].checked_add(1).ok_or(IssueError::CounterOverflow {
+                counter: "TMA shadow operation-class requests",
+            })?;
             if outcome.counted_hit {
-                hits = hits.checked_add(1).ok_or(IssueError::CounterOverflow {
+                stats.hits = stats.hits.checked_add(1).ok_or(IssueError::CounterOverflow {
                     counter: "TMA shadow L2 hits",
                 })?;
+                lane[1] = lane[1].checked_add(1).ok_or(IssueError::CounterOverflow {
+                    counter: "TMA shadow operation-class hits",
+                })?;
             } else {
-                misses = misses.checked_add(1).ok_or(IssueError::CounterOverflow {
+                stats.misses = stats.misses.checked_add(1).ok_or(IssueError::CounterOverflow {
                     counter: "TMA shadow L2 misses",
+                })?;
+                lane[2] = lane[2].checked_add(1).ok_or(IssueError::CounterOverflow {
+                    counter: "TMA shadow operation-class misses",
                 })?;
             }
         }
     }
-    Ok((requests, hits, misses, unavailable))
+    Ok(stats)
 }
 use crate::metrics::TraceMetrics;
 use crate::program::{
@@ -3422,9 +3443,15 @@ fn extract_per_sm_blocks(
         .filter(|o| !o.tma.is_empty() || !o.sync.is_empty())
         .map(|o| sim_trace::obligations::ObligationFrontier::from_launch(o, cluster.into()).0);
     if let (Some(observations), Some(l2)) = (observations, tma_shadow_l2) {
-        let (requests, hits, misses, unavailable) =
-            observe_tma_l2_shadow(&observations.tma, l2)?;
-        trace_metrics.observe_tma_shadow_l2(requests, hits, misses, unavailable)?;
+        let stats = observe_tma_l2_shadow(&observations.tma, l2)?;
+        trace_metrics.observe_tma_shadow_l2(
+            stats.requests,
+            stats.hits,
+            stats.misses,
+            stats.unavailable,
+            stats.load,
+            stats.store,
+        )?;
     }
     let tma_observations = observations.map(|o| &o.tma);
     let sync_observations = observations.map(|o| &o.sync);

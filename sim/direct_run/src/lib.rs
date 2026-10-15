@@ -2316,9 +2316,15 @@ fn cache_lookup_prediction_reports(
     let read_scope = "l2_l1tex_read_operation_class";
     let read_hit_metric = "lts__t_sectors_srcunit_tex_op_read_lookup_hit.sum";
     let read_miss_metric = "lts__t_sectors_srcunit_tex_op_read_lookup_miss.sum";
-    let read_report = if trace.is_some_and(|metrics| {
-        metrics.tma_sidecar_load_records != 0 || metrics.tma_sidecar_store_records != 0
-    }) {
+    let load_shadow = trace.map(|metrics| {
+        (
+            metrics.tma_shadow_l2_load_requests,
+            metrics.tma_shadow_l2_load_hits,
+            metrics.tma_shadow_l2_load_misses,
+            metrics.tma_shadow_l2_load_address_unavailable,
+        )
+    });
+    let read_report = if load_shadow.is_some_and(|(_, _, _, unavailable)| unavailable != 0) {
         CacheLookupPredictionReport {
             scope: read_scope,
             ncu_hit_metric: read_hit_metric,
@@ -2329,10 +2335,21 @@ fn cache_lookup_prediction_reports(
             detail: None,
         }
     } else if let Some(split) = l2_by_source {
-        let hits = split.read_lookup_hits;
-        let lookups = split.read_lookup_requests;
-        let misses = lookups.checked_sub(hits).ok_or_else(|| {
-            RunError::new("cache lookup projection", "read lookup hits exceed requests")
+        let (shadow_requests, shadow_hits, shadow_misses, _) =
+            load_shadow.unwrap_or((0, 0, 0, 0));
+        let ordinary_hits = split.read_lookup_hits;
+        let ordinary_requests = split.read_lookup_requests;
+        let ordinary_misses = ordinary_requests.checked_sub(ordinary_hits).ok_or_else(|| {
+            RunError::new("cache lookup projection", "ordinary read hits exceed requests")
+        })?;
+        let hits = ordinary_hits.checked_add(shadow_hits).ok_or_else(|| {
+            RunError::new("cache lookup projection", "read lookup hit overflow")
+        })?;
+        let lookups = ordinary_requests.checked_add(shadow_requests).ok_or_else(|| {
+            RunError::new("cache lookup projection", "read lookup request overflow")
+        })?;
+        let misses = ordinary_misses.checked_add(shadow_misses).ok_or_else(|| {
+            RunError::new("cache lookup projection", "read lookup miss overflow")
         })?;
         CacheLookupPredictionReport {
             scope: read_scope,
@@ -2346,7 +2363,11 @@ fn cache_lookup_prediction_reports(
                 physical_hits_not_observed: 0,
                 remaining_lookups: misses,
                 observer_reclassified_lookups: 0,
-                role: "operation_class_read_lookup_observer_without_tma_sidecar",
+                role: if shadow_requests != 0 {
+                    "operation_class_read_lookup_observer_plus_complete_tma_load_shadow"
+                } else {
+                    "operation_class_read_lookup_observer"
+                },
             }),
             detail: None,
         }

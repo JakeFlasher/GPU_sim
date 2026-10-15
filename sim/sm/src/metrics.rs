@@ -417,6 +417,14 @@ pub struct TraceMetrics {
     pub tma_shadow_l2_hits: u64,
     pub tma_shadow_l2_misses: u64,
     pub tma_shadow_l2_address_unavailable: u64,
+    pub tma_shadow_l2_load_requests: u64,
+    pub tma_shadow_l2_load_hits: u64,
+    pub tma_shadow_l2_load_misses: u64,
+    pub tma_shadow_l2_load_address_unavailable: u64,
+    pub tma_shadow_l2_store_requests: u64,
+    pub tma_shadow_l2_store_hits: u64,
+    pub tma_shadow_l2_store_misses: u64,
+    pub tma_shadow_l2_store_address_unavailable: u64,
     /// Sidecar-to-dynamic identity coverage for source-order reasoning. A
     /// matched key establishes same-instruction identity, not cross-warp time.
     pub tma_shadow_dynamic_records_matched: u64,
@@ -714,11 +722,21 @@ impl TraceMetrics {
         hits: u64,
         misses: u64,
         unavailable: u64,
+        load: [u64; 4],
+        store: [u64; 4],
     ) -> Result<(), crate::IssueError> {
         add(&mut self.tma_shadow_l2_requests, requests)?;
         add(&mut self.tma_shadow_l2_hits, hits)?;
         add(&mut self.tma_shadow_l2_misses, misses)?;
         add(&mut self.tma_shadow_l2_address_unavailable, unavailable)?;
+        add(&mut self.tma_shadow_l2_load_requests, load[0])?;
+        add(&mut self.tma_shadow_l2_load_hits, load[1])?;
+        add(&mut self.tma_shadow_l2_load_misses, load[2])?;
+        add(&mut self.tma_shadow_l2_load_address_unavailable, load[3])?;
+        add(&mut self.tma_shadow_l2_store_requests, store[0])?;
+        add(&mut self.tma_shadow_l2_store_hits, store[1])?;
+        add(&mut self.tma_shadow_l2_store_misses, store[2])?;
+        add(&mut self.tma_shadow_l2_store_address_unavailable, store[3])?;
         Ok(())
     }
 
