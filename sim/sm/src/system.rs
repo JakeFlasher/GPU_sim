@@ -559,7 +559,7 @@ impl L2SourceSplit {
 #[cfg(feature = "reference")]
 use crate::issue::AdvanceDiagnostics;
 use crate::issue::{
-    AccessKind, AdmissionRequestWitness, Advance, BlockReplay, IssueError, IssueModelParams,
+    AdmissionRequestWitness, Advance, BlockReplay, IssueError, IssueModelParams,
     MemRequest, MemoryAdmissionCandidate, MemoryAdmissionCandidateState, MemoryOperation,
     MemoryServiceCandidate, MemoryWriteAck, PayloadStoreSite, ReplayHorizon, ReplyTo,
     SharedMemoryResidency, SmCore, SmMemMode, SmSimResult, TailFlags, checked_cycle_add,
@@ -3869,7 +3869,15 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                                 // physical data presence for response
                                 // pricing.
                                 MemoryOperation::Atomic => (requested_sectors, requested_sectors),
-                                MemoryOperation::Store | MemoryOperation::Reduction => (0, 0),
+                                // The source-unit TEX sector observer counts
+                                // write-class lookup sectors too.  Keep these
+                                // as per-sector requests; packet counts are a
+                                // separate endpoint and must not be mixed into
+                                // `lts__t_sectors_srcunit_tex`.
+                                MemoryOperation::Store | MemoryOperation::Reduction => (
+                                    requested_sectors,
+                                    u64::from(lookup.present_sectors),
+                                ),
                             };
                             let source_ix = req.source as usize;
                             let origin_masks = [
@@ -4877,24 +4885,19 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
         }
     }
 
-    // The L2 state machine above deliberately retains every physical sector
-    // mutation.  NCU's L1/TEX-origin write observer is a separate packetized
-    // stream: a regular store wavefront contributes its sectors-per-wavefront
-    // work package, while an explicit `.128` store preserves the full sector
-    // span.  Reconstruct this from the admitted trace/schedule only after the
-    // event stream drains; no target counter or timing value enters the rule.
-    let write_lookup_sectors = l2_write_observer_sectors(per_sm_blocks, schedule)?;
+    // The L2 state machine already counted every source-unit sector in the
+    // operation-specific observer.  Do not add a second packetized write
+    // stream here: packet counts belong to a separate requests endpoint and
+    // would undercount sector metrics while forcing write lookups to hits.
     let lookup_hits = initial_lookup_observer
         .lookup_hits
         .checked_add(lookup_observer_hits)
-        .and_then(|value| value.checked_add(write_lookup_sectors))
         .ok_or(SystemError::CounterOverflow {
             counter: "L2 lookup observer hits",
         })?;
     let lookup_requests = initial_lookup_observer
         .lookup_requests
         .checked_add(lookup_observer_requests)
-        .and_then(|value| value.checked_add(write_lookup_sectors))
         .ok_or(SystemError::CounterOverflow {
             counter: "L2 lookup observer requests",
         })?;
@@ -5049,73 +5052,6 @@ fn batchable_replyless_write(request: MemRequest) -> bool {
             request.operation,
             MemoryOperation::Store | MemoryOperation::Reduction
         )
-}
-
-/// Reconstruct the SM86 L2 write-observer sector work from the admitted
-/// instruction stream.  Nsight Compute defines an L2 request as carrying up
-/// to four sectors; the simulator's physical event stream intentionally keeps
-/// each sector mutation so cache state and response pricing remain exact.  For
-/// the observer, ordinary store instructions are packetized into one
-/// sectors-per-wavefront work package (`ceil(sectors / ceil(sectors / 4))`).
-/// Explicit 128-bit stores retain their complete sector span because their
-/// SASS encoding already expresses the full-width packet.  This is a
-/// topology rule, not a workload-specific fit, and it is applied equally to
-/// every admitted SM86 launch (including retained stream-L2 launches).
-fn l2_write_observer_sectors(
-    per_sm_blocks: &BTreeMap<i32, Vec<BlockReplay>>,
-    schedule: &FunctionSchedule,
-) -> Result<u64, SystemError> {
-    let mut total = 0_u64;
-    for blocks in per_sm_blocks.values() {
-        for block in blocks {
-            for warp in &block.warps {
-                for inst in &warp.insts {
-                    let (off, len) = match inst.kind {
-                        AccessKind::GlobalStore { off, len }
-                        | AccessKind::GlobalReduction { off, len, .. }
-                        | AccessKind::LocalStore { off, len } => (off, len),
-                        _ => continue,
-                    };
-                    if len == 0 {
-                        continue;
-                    }
-                    let end =
-                        off.checked_add(usize::from(len))
-                            .ok_or(SystemError::CounterOverflow {
-                                counter: "L2 write observer sector span",
-                            })?;
-                    if end > warp.sectors.len() {
-                        return Err(SystemError::CounterOverflow {
-                            counter: "L2 write observer sector span",
-                        });
-                    }
-                    let sectors = u64::from(len);
-                    let slot = schedule.by_pc.get(&u64::from(inst.pc)).ok_or(
-                        SystemError::CounterOverflow {
-                            counter: "L2 write observer schedule join",
-                        },
-                    )?;
-                    let opcode = slot
-                        .opcode_text()
-                        .split_ascii_whitespace()
-                        .next()
-                        .unwrap_or("");
-                    let observed = if opcode.split('.').any(|modifier| modifier == "128") {
-                        sectors
-                    } else {
-                        let wavefronts = sectors.div_ceil(4);
-                        sectors.div_ceil(wavefronts)
-                    };
-                    total = total
-                        .checked_add(observed)
-                        .ok_or(SystemError::CounterOverflow {
-                            counter: "L2 write observer sectors",
-                        })?;
-                }
-            }
-        }
-    }
-    Ok(total)
 }
 
 fn feedback_prices_request(

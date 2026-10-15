@@ -1811,7 +1811,11 @@ impl L2Model {
                 .ok_or(L2AccessError::ClockOverflow { clock })?;
             let sector_present = line_present && valid_mask & bit != 0;
             let counted_hit = sector_present || (line_present && class == L2OpClass::WriteAtomic);
-            let lookup_hit = counted_hit || class == L2OpClass::WriteAtomic;
+            // The sector lookup observer is distinct from physical write-tag
+            // accounting: a write to a resident line's absent sector remains
+            // a sector lookup miss.  Keep `counted_hit` for physical response
+            // pricing and expose only present sectors here.
+            let lookup_hit = sector_present;
 
             if !line_present {
                 let next_bip_counter =
@@ -1981,7 +1985,10 @@ impl L2Model {
             // data presence/response pricing, while the former mirrors the
             // operation-level NCU lookup counter (including same-mask sector
             // coalescing).
-            let lookup_hit = counted_hit || sector_pending || class == L2OpClass::WriteAtomic;
+            // A pending read allocation can satisfy a lookup observer hit,
+            // but operation class and write-tag accounting cannot turn an
+            // absent sector into a lookup hit.
+            let lookup_hit = sector_present || sector_pending;
             if !line_present {
                 let next_bip_counter =
                     if self.cfg.replacement == L2Replacement::Bip {
