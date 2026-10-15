@@ -165,3 +165,17 @@ Replay and post-replay generated JSONL artifacts must be written as
 compressed artifacts and legacy uncompressed paths. New uncompressed replay
 JSONL is prohibited. Workload-manifest `workload.jsonl` files are outside this
 artifact rule.
+
+Full replay specifically uses compressed `.jsonl.zst` output from this point
+forward; do not publish new plain full-replay JSONL.
+
+## Permanent NCU report presentation rule
+
+For NCU accuracy reports, consolidate all metrics with no simulator prediction
+in either retained replay mode into one compact, family-grouped “currently
+unavailable” section. Do not emit repeated per-metric `N/A` tables or raw NCU
+observation distributions for those metrics. Show distributions only for
+metrics emitted by at least one replay mode; retain exact unavailable
+names/counts in machine-readable inventory. State whether unavailability is
+configuration-scoped (for example, flat mode has no L1 unit) or truly
+unimplemented; do not infer the latter from a flat-run N/A.

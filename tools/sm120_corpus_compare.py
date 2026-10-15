@@ -91,6 +91,9 @@ def predictions(launch, mode):
 
 
 def compare(path, mode, profiles, output):
+    # Report renderers must aggregate metrics with no simulator prediction in
+    # either mode into one unavailable-by-family section: never score N/A as
+    # zero or repeat that metric's NCU distribution.
     key = "launches" if mode == "full" else "fast_frontier"
     counts = collections.Counter()
     statuses = collections.Counter()
