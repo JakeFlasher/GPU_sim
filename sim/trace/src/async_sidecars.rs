@@ -82,6 +82,10 @@ pub struct TmaObservation {
     /// TMA/L2 shadow metric; it is not a claim about the engine's request
     /// granularity or completion timing.
     pub source_sector_ids: Box<[i64]>,
+    /// Distinct 32-byte destination sectors projected from retained TMA
+    /// destination addresses. Used only by the conditional source-specific
+    /// L2 shadow observer for store-direction transfers.
+    pub destination_sector_ids: Box<[i64]>,
 }
 
 #[derive(Debug, Default)]
@@ -350,7 +354,7 @@ struct TmaSourceAddress {
     oob: bool,
 }
 
-fn compact_source_sector_ids(
+fn compact_sector_ids(
     values: Option<&[TmaSourceAddress]>,
 ) -> Result<Box<[i64]>, &'static str> {
     let Some(values) = values else {
@@ -407,6 +411,7 @@ struct Row {
     lane_mask: Option<u32>,
     value_mask_complete: Option<bool>,
     src_addresses: Option<Vec<TmaSourceAddress>>,
+    dst_addresses: Option<Vec<TmaSourceAddress>>,
 }
 
 impl AsyncSidecars {
@@ -512,7 +517,13 @@ impl AsyncSidecars {
                     }
                     let is_load = matches!(head, "UTMALDG" | "UBLKCP");
                     let source_sector_ids = if is_load {
-                        compact_source_sector_ids(row.src_addresses.as_deref())
+                        compact_sector_ids(row.src_addresses.as_deref())
+                            .map_err(|message| error(message.to_owned()))?
+                    } else {
+                        Box::new([])
+                    };
+                    let destination_sector_ids = if head == "UTMASTG" {
+                        compact_sector_ids(row.dst_addresses.as_deref())
                             .map_err(|message| error(message.to_owned()))?
                     } else {
                         Box::new([])
@@ -540,6 +551,7 @@ impl AsyncSidecars {
                         issue_clock: row.issue_clock,
                         completion_clock: row.completion_clock,
                         source_sector_ids,
+                        destination_sector_ids,
                     };
                     if launch.tma.insert(key, obs).is_some() {
                         return Err(error(format!(

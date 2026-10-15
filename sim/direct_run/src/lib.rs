@@ -2084,6 +2084,7 @@ fn cache_lookup_prediction_reports(
     bundle: &FullLaunchPredictions,
     l1: Option<&L1Counters>,
     l2: Option<&L2Counters>,
+    trace: Option<&TraceMetrics>,
 ) -> Result<Vec<CacheLookupPredictionReport>, RunError> {
     let specifications = [
         (
@@ -2135,15 +2136,49 @@ fn cache_lookup_prediction_reports(
                             detail: None,
                         });
                     };
-                    let hits = counters.lookup_hits;
-                    let lookups = counters.lookup_requests;
-                    let misses = lookups.checked_sub(hits).ok_or_else(|| {
+                    let ordinary_hits = counters.lookup_hits;
+                    let ordinary_lookups = counters.lookup_requests;
+                    let ordinary_misses = ordinary_lookups.checked_sub(ordinary_hits).ok_or_else(|| {
                         RunError::new(
                             "cache lookup projection",
                             format!("{scope} observer hits exceed total lookups"),
                         )
                     })?;
-                    let resident = counters.hits;
+                    // The sidecar shadow is a separate, address-derived
+                    // observer for TMA traffic.  Only merge it into the
+                    // source-specific TEX projection when every observed TMA
+                    // record has a usable source/destination sector set;
+                    // partial address coverage would silently undercount the
+                    // denominator.  It never changes replay state or timing.
+                    let shadow = trace.filter(|metrics| {
+                        metrics.tma_shadow_l2_requests != 0
+                            && metrics.tma_shadow_l2_address_unavailable == 0
+                    });
+                    let (shadow_hits, shadow_misses, shadow_requests, role) = shadow
+                        .map(|metrics| {
+                            (
+                                metrics.tma_shadow_l2_hits,
+                                metrics.tma_shadow_l2_misses,
+                                metrics.tma_shadow_l2_requests,
+                                "conserving_source_sector_observer_plus_complete_tma_address_shadow; generic_hit_rate_alias_unjoined",
+                            )
+                        })
+                        .unwrap_or((
+                            0,
+                            0,
+                            0,
+                            "conserving_source_sector_observer; generic_hit_rate_alias_unjoined",
+                        ));
+                    let hits = ordinary_hits.checked_add(shadow_hits).ok_or_else(|| {
+                        RunError::new("cache lookup projection", "TMA shadow hit counter overflow")
+                    })?;
+                    let misses = ordinary_misses.checked_add(shadow_misses).ok_or_else(|| {
+                        RunError::new("cache lookup projection", "TMA shadow miss counter overflow")
+                    })?;
+                    let lookups = ordinary_lookups.checked_add(shadow_requests).ok_or_else(|| {
+                        RunError::new("cache lookup projection", "TMA shadow lookup counter overflow")
+                    })?;
+                    let resident = counters.hits.saturating_add(shadow_hits);
                     let observer_resident_hits = hits.min(resident);
                     return Ok(CacheLookupPredictionReport {
                         scope,
@@ -2161,7 +2196,7 @@ fn cache_lookup_prediction_reports(
                             physical_hits_not_observed: resident.saturating_sub(hits),
                             remaining_lookups: misses,
                             observer_reclassified_lookups: hits.saturating_sub(resident),
-                            role: "conserving_source_sector_observer; generic_hit_rate_alias_unjoined",
+                            role,
                         }),
                         detail: None,
                     });
@@ -2346,7 +2381,12 @@ fn launch_report(
     let (metric_predictions, cache_lookup_predictions) = if include_metric_predictions {
         let bundle = emit_launch(&result).map_err(at("metric projection"))?;
         let cache_lookup_predictions =
-            cache_lookup_prediction_reports(&bundle, result.l1(), result.l2())?;
+            cache_lookup_prediction_reports(
+                &bundle,
+                result.l1(),
+                result.l2(),
+                Some(result.trace_metrics()),
+            )?;
         let metric_predictions = bundle
             .metrics()
             .iter()

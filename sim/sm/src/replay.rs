@@ -128,16 +128,20 @@ fn observe_tma_l2_shadow(
     let mut misses = 0_u64;
     let mut unavailable = 0_u64;
     for observation in observations.values() {
-        if !observation.is_load {
+        let (sector_ids, class) = if observation.is_load {
+            (&observation.source_sector_ids, L2OpClass::Read)
+        } else if observation.is_store {
+            (&observation.destination_sector_ids, L2OpClass::WriteAtomic)
+        } else {
             continue;
-        }
-        if observation.source_sector_ids.is_empty() {
+        };
+        if sector_ids.is_empty() {
             unavailable = unavailable.checked_add(1).ok_or(IssueError::CounterOverflow {
-                counter: "TMA shadow L2 unavailable source records",
+                counter: "TMA shadow L2 unavailable address records",
             })?;
             continue;
         }
-        for &sector_id in observation.source_sector_ids.iter() {
+        for &sector_id in sector_ids.iter() {
             let line_id = sector_id.div_euclid(4);
             let sector = u8::try_from(sector_id.rem_euclid(4)).map_err(|_| {
                 ReplayError::System(SystemError::L2(
@@ -145,7 +149,7 @@ fn observe_tma_l2_shadow(
                 ))
             })?;
             let outcome = shadow
-                .access(line_id, sector, L2OpClass::Read)
+                .access(line_id, sector, class)
                 .map_err(|error| ReplayError::System(SystemError::L2(error)))?;
             requests = requests.checked_add(1).ok_or(IssueError::CounterOverflow {
                 counter: "TMA shadow L2 requests",
@@ -3841,7 +3845,9 @@ fn extract_per_sm_blocks(
         let mut matched = 0_u64;
         let mut unmatched = 0_u64;
         for (key, observation) in &observations.tma {
-            if !observation.is_load || observation.source_sector_ids.is_empty() {
+            let has_address = (observation.is_load && !observation.source_sector_ids.is_empty())
+                || (observation.is_store && !observation.destination_sector_ids.is_empty());
+            if !has_address {
                 continue;
             }
             if tma_dynamic_keys_seen.contains(key) {
