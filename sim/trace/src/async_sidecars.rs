@@ -922,6 +922,12 @@ pub struct TmaGenerationRelation {
     pub phase_query_events: Vec<ObservationKey>,
     pub successful_phase_query_events: Vec<ObservationKey>,
     pub unsuccessful_phase_query_events: Vec<ObservationKey>,
+    /// Counts retain the full sidecar cardinality when event references are
+    /// bounded for compact replay output.
+    pub phase_query_event_count: u64,
+    pub successful_phase_query_event_count: u64,
+    pub unsuccessful_phase_query_event_count: u64,
+    pub event_refs_truncated: bool,
     /// No source sidecar in this relation provides an engine-originated
     /// completion event.  Model completion remains a separate scenario state.
     pub engine_completion_clock: &'static str,
@@ -1231,6 +1237,7 @@ impl LaunchObservations {
     ) -> Vec<TmaGenerationRelation> {
         type Barrier = ([u32; 3], u32, Option<u32>, Option<u32>);
         const MAX_RELATIONS: usize = 512;
+        const MAX_EVENT_REFS: usize = 64;
         let mut loads_by_barrier: BTreeMap<Barrier, Vec<(ObservationKey, &TmaObservation)>> =
             BTreeMap::new();
         for (&key, observation) in &self.tma {
@@ -1305,6 +1312,25 @@ impl LaunchObservations {
                 })
                 .map(|(key, _)| **key)
                 .collect();
+            let phase_query_event_count = phase_query_events.len() as u64;
+            let successful_phase_query_event_count = successful_phase_query_events.len() as u64;
+            let unsuccessful_phase_query_event_count =
+                unsuccessful_phase_query_events.len() as u64;
+            let event_refs_truncated = phase_query_events.len() > MAX_EVENT_REFS
+                || successful_phase_query_events.len() > MAX_EVENT_REFS
+                || unsuccessful_phase_query_events.len() > MAX_EVENT_REFS;
+            let phase_query_events: Vec<ObservationKey> = phase_query_events
+                .into_iter()
+                .take(MAX_EVENT_REFS)
+                .collect();
+            let successful_phase_query_events: Vec<ObservationKey> = successful_phase_query_events
+                .into_iter()
+                .take(MAX_EVENT_REFS)
+                .collect();
+            let unsuccessful_phase_query_events: Vec<ObservationKey> = unsuccessful_phase_query_events
+                .into_iter()
+                .take(MAX_EVENT_REFS)
+                .collect();
             let expected_transaction_bytes = matching_sync
                 .iter()
                 .filter_map(|(_, observation)| observation.expected_tx_bytes)
@@ -1367,6 +1393,10 @@ impl LaunchObservations {
                 phase_query_events,
                 successful_phase_query_events,
                 unsuccessful_phase_query_events,
+                phase_query_event_count,
+                successful_phase_query_event_count,
+                unsuccessful_phase_query_event_count,
+                event_refs_truncated,
                 engine_completion_clock: "unavailable: no engine-originated per-generation timestamp",
             });
         }
