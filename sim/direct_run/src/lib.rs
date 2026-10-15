@@ -2383,6 +2383,67 @@ fn cache_lookup_prediction_reports(
         }
     };
     reports.push(read_report);
+    for (scope, hit_metric, miss_metric, hits, lookups) in [
+        (
+            "l2_l1tex_atomic_operation_class",
+            "lts__t_sectors_srcunit_tex_op_atom_lookup_hit.sum",
+            "lts__t_sectors_srcunit_tex_op_atom_lookup_miss.sum",
+            l2_by_source.map(|split| split.atomic_lookup_hits),
+            l2_by_source.map(|split| split.atomic_lookup_requests),
+        ),
+        (
+            "l2_l1tex_reduction_operation_class",
+            "lts__t_sectors_srcunit_tex_op_red_lookup_hit.sum",
+            "lts__t_sectors_srcunit_tex_op_red_lookup_miss.sum",
+            l2_by_source.map(|split| split.reduction_lookup_hits),
+            l2_by_source.map(|split| split.reduction_lookup_requests),
+        ),
+    ] {
+        let report = if trace.is_some_and(|metrics| {
+            metrics.tma_sidecar_load_records != 0 || metrics.tma_sidecar_store_records != 0
+        }) {
+            CacheLookupPredictionReport {
+                scope,
+                ncu_hit_metric: hit_metric,
+                ncu_miss_metric: miss_metric,
+                status: "unavailable",
+                observer: None,
+                timing_state: None,
+                detail: None,
+            }
+        } else if let (Some(hits), Some(lookups)) = (hits, lookups) {
+            let misses = lookups.checked_sub(hits).ok_or_else(|| {
+                RunError::new("cache lookup projection", format!("{scope} hits exceed requests"))
+            })?;
+            CacheLookupPredictionReport {
+                scope,
+                ncu_hit_metric: hit_metric,
+                ncu_miss_metric: miss_metric,
+                status: "predicted",
+                observer: Some(CacheLookupObserverReport { hits, misses, lookups }),
+                timing_state: Some(CacheLookupTimingStateReport {
+                    resident_data_hits: hits,
+                    observer_resident_hits: hits,
+                    physical_hits_not_observed: 0,
+                    remaining_lookups: misses,
+                    observer_reclassified_lookups: 0,
+                    role: "operation_class_lookup_observer_without_tma_sidecar",
+                }),
+                detail: None,
+            }
+        } else {
+            CacheLookupPredictionReport {
+                scope,
+                ncu_hit_metric: hit_metric,
+                ncu_miss_metric: miss_metric,
+                status: "unavailable",
+                observer: None,
+                timing_state: None,
+                detail: None,
+            }
+        };
+        reports.push(report);
+    }
     Ok(reports)
 }
 
