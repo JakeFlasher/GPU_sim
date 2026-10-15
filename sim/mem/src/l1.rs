@@ -352,10 +352,21 @@ impl L1OriginCounters {
         let fresh_line_merge_adjustment = self
             .line_alloc_misses
             .saturating_mul(SECTORS_PER_LINE.saturating_sub(1) as u64);
-        self.hits
+        let projected = self
+            .hits
             .saturating_add(self.pending_lookup_hits)
             .saturating_add(self.merges)
-            .saturating_sub(fresh_line_merge_adjustment)
+            .saturating_sub(fresh_line_merge_adjustment);
+        // The observer is a projection over the physical sector domain.  A
+        // partially decoded/coalesced trace can expose more merge labels than
+        // the retained sector denominator; keep the projection typed and
+        // bounded rather than aborting an otherwise valid real launch.
+        let denominator = self.lookup_sectors();
+        if projected < denominator {
+            projected
+        } else {
+            denominator
+        }
     }
 
     /// Total read-sector lookups represented by this origin lane.
