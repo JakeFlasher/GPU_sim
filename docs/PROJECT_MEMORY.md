@@ -943,3 +943,14 @@ record exposed `instrumentation_order`; joint counters stayed zero and
 order-unavailable counts were nonzero. No L2 endpoint promotion or corpus
 replay follows. A future attempt requires a documented dynamic ordering token;
 file/warp order is not a substitute.
+
+
+## Q70 complete-corpus / Round28 resolution (2026-10-15)
+
+The typed TMA generation relation completed a full 339-root replay: 11,558
+launches per mode, full integrated L1+L2 first, fast flat second, 12 workers,
+and compressed outputs. It retained 583 relations (269 exact payload cohorts,
+314 protocol candidates), all with phase-readiness observations. Quant partial
+producer membership remains unresolved rather than padded. Round28 confirms
+Q71 joint L2 shadow is safely isolated but blocked by absent dynamic
+instrumentation order; no service/timing or scored endpoint promotion follows.
