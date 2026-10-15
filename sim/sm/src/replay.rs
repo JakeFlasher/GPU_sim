@@ -39,7 +39,9 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use serde::Serialize;
-use sim_trace::async_sidecars::{ObservationKey as TmaObservationKey, TmaObservation};
+use sim_trace::async_sidecars::{
+    LaunchObservations, ObservationKey as TmaObservationKey, TmaObservation,
+};
 
 use sim_arch::card::{ArchCard, CalibError};
 use sim_arch::{ArchId, LdgstsDestinationWavefrontProjection, Sku};
@@ -132,9 +134,36 @@ fn observe_tma_l2_shadow(
     observations: &BTreeMap<TmaObservationKey, TmaObservation>,
     config: L2Config,
 ) -> Result<TmaShadowL2Stats, ReplayError> {
+    observe_tma_l2_shadow_iter(observations.values(), config)
+}
+
+/// Run the same conditional TMA/L2 observer in the sidecar's first-seen
+/// stream order.  This is diagnostic only: the lexical keyed-map projection
+/// remains the scored/default endpoint because sidecar order is an emission
+/// sequence, not a documented engine chronology.
+fn observe_tma_l2_shadow_ordered(
+    observations: &LaunchObservations,
+    config: L2Config,
+) -> Result<TmaShadowL2Stats, ReplayError> {
+    let iter = if observations.tma_order.is_empty() {
+        observations.tma.values().collect::<Vec<_>>()
+    } else {
+        observations
+            .tma_order
+            .iter()
+            .filter_map(|key| observations.tma.get(key))
+            .collect::<Vec<_>>()
+    };
+    observe_tma_l2_shadow_iter(iter.into_iter(), config)
+}
+
+fn observe_tma_l2_shadow_iter<'a>(
+    observations: impl Iterator<Item = &'a TmaObservation>,
+    config: L2Config,
+) -> Result<TmaShadowL2Stats, ReplayError> {
     let mut shadow = L2Model::new(config)?;
     let mut stats = TmaShadowL2Stats::default();
-    for observation in observations.values() {
+    for observation in observations {
         let (sector_ids, class) = if observation.is_load {
             (&observation.source_sector_ids, L2OpClass::Read)
         } else if observation.is_store {
@@ -3451,6 +3480,15 @@ fn extract_per_sm_blocks(
             stats.unavailable,
             stats.load,
             stats.store,
+        )?;
+        let ordered = observe_tma_l2_shadow_ordered(observations, l2)?;
+        trace_metrics.observe_tma_shadow_l2_ordered(
+            ordered.requests,
+            ordered.hits,
+            ordered.misses,
+            ordered.unavailable,
+            ordered.load,
+            ordered.store,
         )?;
     }
     let tma_observations = observations.map(|o| &o.tma);

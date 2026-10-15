@@ -298,6 +298,10 @@ fn merge_operand_value(current: &mut Option<u64>, incoming: Option<u64>, conflic
 #[derive(Debug, Default)]
 pub struct LaunchObservations {
     pub tma: BTreeMap<ObservationKey, TmaObservation>,
+    /// First-seen order of unique TMA records in the sidecar stream. The map
+    /// remains the identity index; this vector is an optional conditional
+    /// shadow-order coordinate and is not asserted to be engine chronology.
+    pub tma_order: Vec<ObservationKey>,
     pub sync: BTreeMap<ObservationKey, SyncObservation>,
 }
 
@@ -558,6 +562,7 @@ impl AsyncSidecars {
                             "line {number} duplicates TMA instruction identity"
                         )));
                     }
+                    launch.tma_order.push(key);
                 } else {
                     let obs = launch.sync.entry(key).or_default();
                     let operation = barrier_operation(&row.opcode);

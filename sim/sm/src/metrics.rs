@@ -439,6 +439,22 @@ pub struct TraceMetrics {
     pub tma_shadow_l2_store_hits: u64,
     pub tma_shadow_l2_store_misses: u64,
     pub tma_shadow_l2_store_address_unavailable: u64,
+    /// Diagnostic replay of the same address-derived TMA/L2 shadow in the
+    /// sidecar's first-seen record order.  The lexical keyed-map shadow above
+    /// remains the scored endpoint; these counters never affect cache state,
+    /// timing, or NCU comparison selection.
+    pub tma_shadow_l2_ordered_requests: u64,
+    pub tma_shadow_l2_ordered_hits: u64,
+    pub tma_shadow_l2_ordered_misses: u64,
+    pub tma_shadow_l2_ordered_address_unavailable: u64,
+    pub tma_shadow_l2_ordered_load_requests: u64,
+    pub tma_shadow_l2_ordered_load_hits: u64,
+    pub tma_shadow_l2_ordered_load_misses: u64,
+    pub tma_shadow_l2_ordered_load_address_unavailable: u64,
+    pub tma_shadow_l2_ordered_store_requests: u64,
+    pub tma_shadow_l2_ordered_store_hits: u64,
+    pub tma_shadow_l2_ordered_store_misses: u64,
+    pub tma_shadow_l2_ordered_store_address_unavailable: u64,
     /// Read-only L1 request-boundary merge provenance. These counters are
     /// diagnostic; they do not change cache state or lookup projections.
     pub l1_same_request_merges_global: u64,
@@ -771,6 +787,39 @@ impl TraceMetrics {
         add(&mut self.tma_shadow_l2_store_hits, store[1])?;
         add(&mut self.tma_shadow_l2_store_misses, store[2])?;
         add(&mut self.tma_shadow_l2_store_address_unavailable, store[3])?;
+        Ok(())
+    }
+
+    pub(crate) fn observe_tma_shadow_l2_ordered(
+        &mut self,
+        requests: u64,
+        hits: u64,
+        misses: u64,
+        unavailable: u64,
+        load: [u64; 4],
+        store: [u64; 4],
+    ) -> Result<(), crate::IssueError> {
+        add(&mut self.tma_shadow_l2_ordered_requests, requests)?;
+        add(&mut self.tma_shadow_l2_ordered_hits, hits)?;
+        add(&mut self.tma_shadow_l2_ordered_misses, misses)?;
+        add(
+            &mut self.tma_shadow_l2_ordered_address_unavailable,
+            unavailable,
+        )?;
+        add(&mut self.tma_shadow_l2_ordered_load_requests, load[0])?;
+        add(&mut self.tma_shadow_l2_ordered_load_hits, load[1])?;
+        add(&mut self.tma_shadow_l2_ordered_load_misses, load[2])?;
+        add(
+            &mut self.tma_shadow_l2_ordered_load_address_unavailable,
+            load[3],
+        )?;
+        add(&mut self.tma_shadow_l2_ordered_store_requests, store[0])?;
+        add(&mut self.tma_shadow_l2_ordered_store_hits, store[1])?;
+        add(&mut self.tma_shadow_l2_ordered_store_misses, store[2])?;
+        add(
+            &mut self.tma_shadow_l2_ordered_store_address_unavailable,
+            store[3],
+        )?;
         Ok(())
     }
 
