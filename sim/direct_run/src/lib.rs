@@ -2084,6 +2084,7 @@ fn cache_lookup_prediction_reports(
     bundle: &FullLaunchPredictions,
     l1: Option<&L1Counters>,
     l2: Option<&L2Counters>,
+    l2_by_source: Option<&L2SourceSplit>,
     trace: Option<&TraceMetrics>,
 ) -> Result<Vec<CacheLookupPredictionReport>, RunError> {
     let specifications = [
@@ -2116,7 +2117,7 @@ fn cache_lookup_prediction_reports(
             l2.map(|counters| counters.hits),
         ),
     ];
-    specifications
+    let mut reports = specifications
         .into_iter()
         .map(
             |(key, scope, ncu_hit_metric, ncu_miss_metric, resident_data_hits)| {
@@ -2307,7 +2308,61 @@ fn cache_lookup_prediction_reports(
                 }
             },
         )
-        .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+    // Source-qualified read-only L2 endpoint. The operation-class counters
+    // are collected at the actual L2 request construction seam; do not infer
+    // them from the mixed source split or from NCU target values. TMA traffic
+    // remains unavailable here until load/store shadow classes are separated.
+    let read_scope = "l2_l1tex_read_operation_class";
+    let read_hit_metric = "lts__t_sectors_srcunit_tex_op_read_lookup_hit.sum";
+    let read_miss_metric = "lts__t_sectors_srcunit_tex_op_read_lookup_miss.sum";
+    let read_report = if trace.is_some_and(|metrics| {
+        metrics.tma_sidecar_load_records != 0 || metrics.tma_sidecar_store_records != 0
+    }) {
+        CacheLookupPredictionReport {
+            scope: read_scope,
+            ncu_hit_metric: read_hit_metric,
+            ncu_miss_metric: read_miss_metric,
+            status: "unavailable",
+            observer: None,
+            timing_state: None,
+            detail: None,
+        }
+    } else if let Some(split) = l2_by_source {
+        let hits = split.read_lookup_hits;
+        let lookups = split.read_lookup_requests;
+        let misses = lookups.checked_sub(hits).ok_or_else(|| {
+            RunError::new("cache lookup projection", "read lookup hits exceed requests")
+        })?;
+        CacheLookupPredictionReport {
+            scope: read_scope,
+            ncu_hit_metric: read_hit_metric,
+            ncu_miss_metric: read_miss_metric,
+            status: "predicted",
+            observer: Some(CacheLookupObserverReport { hits, misses, lookups }),
+            timing_state: Some(CacheLookupTimingStateReport {
+                resident_data_hits: hits,
+                observer_resident_hits: hits,
+                physical_hits_not_observed: 0,
+                remaining_lookups: misses,
+                observer_reclassified_lookups: 0,
+                role: "operation_class_read_lookup_observer_without_tma_sidecar",
+            }),
+            detail: None,
+        }
+    } else {
+        CacheLookupPredictionReport {
+            scope: read_scope,
+            ncu_hit_metric: read_hit_metric,
+            ncu_miss_metric: read_miss_metric,
+            status: "unavailable",
+            observer: None,
+            timing_state: None,
+            detail: None,
+        }
+    };
+    reports.push(read_report);
+    Ok(reports)
 }
 
 fn alpha_approximation_report(result: &FullKernelReplayResult) -> Option<AlphaApproximationReport> {
@@ -2385,6 +2440,7 @@ fn launch_report(
                 &bundle,
                 result.l1(),
                 result.l2(),
+                result.l2_by_source(),
                 Some(result.trace_metrics()),
             )?;
         let metric_predictions = bundle

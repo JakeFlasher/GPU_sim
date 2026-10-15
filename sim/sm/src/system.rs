@@ -334,6 +334,17 @@ pub struct L2SourceSplit {
     arch: Option<ArchId>,
     pub sectors: [u64; 4],
     pub hits: [u64; 4],
+    /// Operation-class lookup observer, separate from the mixed source lanes.
+    /// These fields are populated only when the request operation is known;
+    /// they do not alter L2 state or timing.
+    pub read_lookup_requests: u64,
+    pub read_lookup_hits: u64,
+    pub store_lookup_requests: u64,
+    pub store_lookup_hits: u64,
+    pub atomic_lookup_requests: u64,
+    pub atomic_lookup_hits: u64,
+    pub reduction_lookup_requests: u64,
+    pub reduction_lookup_hits: u64,
     origin_sectors: [[u64; 4]; 2],
     origin_hits: [[u64; 4]; 2],
 }
@@ -545,6 +556,54 @@ impl L2SourceSplit {
             arch: self.arch,
             sectors,
             hits,
+            read_lookup_requests: self
+                .read_lookup_requests
+                .checked_add(other.read_lookup_requests)
+                .ok_or(SystemCounterError::Overflow {
+                    counter: "L2 read lookup requests",
+                })?,
+            read_lookup_hits: self
+                .read_lookup_hits
+                .checked_add(other.read_lookup_hits)
+                .ok_or(SystemCounterError::Overflow {
+                    counter: "L2 read lookup hits",
+                })?,
+            store_lookup_requests: self
+                .store_lookup_requests
+                .checked_add(other.store_lookup_requests)
+                .ok_or(SystemCounterError::Overflow {
+                    counter: "L2 store lookup requests",
+                })?,
+            store_lookup_hits: self
+                .store_lookup_hits
+                .checked_add(other.store_lookup_hits)
+                .ok_or(SystemCounterError::Overflow {
+                    counter: "L2 store lookup hits",
+                })?,
+            atomic_lookup_requests: self
+                .atomic_lookup_requests
+                .checked_add(other.atomic_lookup_requests)
+                .ok_or(SystemCounterError::Overflow {
+                    counter: "L2 atomic lookup requests",
+                })?,
+            atomic_lookup_hits: self
+                .atomic_lookup_hits
+                .checked_add(other.atomic_lookup_hits)
+                .ok_or(SystemCounterError::Overflow {
+                    counter: "L2 atomic lookup hits",
+                })?,
+            reduction_lookup_requests: self
+                .reduction_lookup_requests
+                .checked_add(other.reduction_lookup_requests)
+                .ok_or(SystemCounterError::Overflow {
+                    counter: "L2 reduction lookup requests",
+                })?,
+            reduction_lookup_hits: self
+                .reduction_lookup_hits
+                .checked_add(other.reduction_lookup_hits)
+                .ok_or(SystemCounterError::Overflow {
+                    counter: "L2 reduction lookup hits",
+                })?,
             origin_sectors,
             origin_hits,
         };
@@ -2517,6 +2576,14 @@ struct L2SystemCommit {
     /// stream drains, so it never changes physical L2 state or response time.
     lookup_observer_requests: u64,
     lookup_observer_hits: u64,
+    read_lookup_requests: u64,
+    read_lookup_hits: u64,
+    store_lookup_requests: u64,
+    store_lookup_hits: u64,
+    atomic_lookup_requests: u64,
+    atomic_lookup_hits: u64,
+    reduction_lookup_requests: u64,
+    reduction_lookup_hits: u64,
 }
 
 /// Aggregate DRAM read-bandwidth model (the §6.3 "DRAM
@@ -3634,6 +3701,14 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
     let initial_lookup_observer = *checked_l2_counters(arch, l2)?;
     let mut lookup_observer_hits = 0_u64;
     let mut lookup_observer_requests = 0_u64;
+    let mut read_lookup_hits = 0_u64;
+    let mut read_lookup_requests = 0_u64;
+    let mut store_lookup_hits = 0_u64;
+    let mut store_lookup_requests = 0_u64;
+    let mut atomic_lookup_hits = 0_u64;
+    let mut atomic_lookup_requests = 0_u64;
+    let mut reduction_lookup_hits = 0_u64;
+    let mut reduction_lookup_requests = 0_u64;
     let mut staged_l2 = l2.try_snapshot()?;
     while let Some(ev) = queue.pop()? {
         #[cfg(feature = "reference")]
@@ -4215,6 +4290,46 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                                 observed_hits: counted_hits,
                                 lookup_observer_requests,
                                 lookup_observer_hits,
+                                read_lookup_requests: if matches!(req.operation, MemoryOperation::Read) {
+                                    lookup_observer_requests
+                                } else {
+                                    0
+                                },
+                                read_lookup_hits: if matches!(req.operation, MemoryOperation::Read) {
+                                    lookup_observer_hits
+                                } else {
+                                    0
+                                },
+                                store_lookup_requests: if matches!(req.operation, MemoryOperation::Store) {
+                                    lookup_observer_requests
+                                } else {
+                                    0
+                                },
+                                store_lookup_hits: if matches!(req.operation, MemoryOperation::Store) {
+                                    lookup_observer_hits
+                                } else {
+                                    0
+                                },
+                                atomic_lookup_requests: if matches!(req.operation, MemoryOperation::Atomic) {
+                                    lookup_observer_requests
+                                } else {
+                                    0
+                                },
+                                atomic_lookup_hits: if matches!(req.operation, MemoryOperation::Atomic) {
+                                    lookup_observer_hits
+                                } else {
+                                    0
+                                },
+                                reduction_lookup_requests: if matches!(req.operation, MemoryOperation::Reduction) {
+                                    lookup_observer_requests
+                                } else {
+                                    0
+                                },
+                                reduction_lookup_hits: if matches!(req.operation, MemoryOperation::Reduction) {
+                                    lookup_observer_hits
+                                } else {
+                                    0
+                                },
                             })
                         },
                     )?;
@@ -4244,6 +4359,46 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                         .checked_add(commit.lookup_observer_hits)
                         .ok_or(SystemError::CounterOverflow {
                             counter: "L2 lookup observer hits",
+                        })?;
+                    read_lookup_requests = read_lookup_requests
+                        .checked_add(commit.read_lookup_requests)
+                        .ok_or(SystemError::CounterOverflow {
+                            counter: "L2 read lookup observer requests",
+                        })?;
+                    read_lookup_hits = read_lookup_hits
+                        .checked_add(commit.read_lookup_hits)
+                        .ok_or(SystemError::CounterOverflow {
+                            counter: "L2 read lookup observer hits",
+                        })?;
+                    store_lookup_requests = store_lookup_requests
+                        .checked_add(commit.store_lookup_requests)
+                        .ok_or(SystemError::CounterOverflow {
+                            counter: "L2 store lookup observer requests",
+                        })?;
+                    store_lookup_hits = store_lookup_hits
+                        .checked_add(commit.store_lookup_hits)
+                        .ok_or(SystemError::CounterOverflow {
+                            counter: "L2 store lookup observer hits",
+                        })?;
+                    atomic_lookup_requests = atomic_lookup_requests
+                        .checked_add(commit.atomic_lookup_requests)
+                        .ok_or(SystemError::CounterOverflow {
+                            counter: "L2 atomic lookup observer requests",
+                        })?;
+                    atomic_lookup_hits = atomic_lookup_hits
+                        .checked_add(commit.atomic_lookup_hits)
+                        .ok_or(SystemError::CounterOverflow {
+                            counter: "L2 atomic lookup observer hits",
+                        })?;
+                    reduction_lookup_requests = reduction_lookup_requests
+                        .checked_add(commit.reduction_lookup_requests)
+                        .ok_or(SystemError::CounterOverflow {
+                            counter: "L2 reduction lookup observer requests",
+                        })?;
+                    reduction_lookup_hits = reduction_lookup_hits
+                        .checked_add(commit.reduction_lookup_hits)
+                        .ok_or(SystemError::CounterOverflow {
+                            counter: "L2 reduction lookup observer hits",
                         })?;
 
                     if observe_admission_groups
@@ -4904,6 +5059,14 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
             counter: "L2 lookup observer requests",
         })?;
     staged_l2.replace_lookup_observer(lookup_hits, lookup_requests)?;
+    l2_by_source.read_lookup_requests = read_lookup_requests;
+    l2_by_source.read_lookup_hits = read_lookup_hits;
+    l2_by_source.store_lookup_requests = store_lookup_requests;
+    l2_by_source.store_lookup_hits = store_lookup_hits;
+    l2_by_source.atomic_lookup_requests = atomic_lookup_requests;
+    l2_by_source.atomic_lookup_hits = atomic_lookup_hits;
+    l2_by_source.reduction_lookup_requests = reduction_lookup_requests;
+    l2_by_source.reduction_lookup_hits = reduction_lookup_hits;
 
     let mut per_sm = BTreeMap::new();
     let mut unmodeled_tails = TailFlags::default();
