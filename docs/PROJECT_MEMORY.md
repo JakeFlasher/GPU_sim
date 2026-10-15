@@ -998,6 +998,14 @@ replay inputs or same-cell fits. A complete 339-root promotion replay is
 required; the gate is active-IPC mean APE below 10% without a critical family
 regression.
 
+The complete Q74 promotion replay passed 339/339 roots and 11,558 launches per
+mode, full integrated L1+L2 first and fast flat second, exactly 12 workers, and
+compressed artifacts at `replay_results/q74_ipc_lifetime_full_20261015/`.
+Full active-IPC mean APE is 9.6082% (median 6.2505%, P90 17.1198%), below the
+10% target. Q74 is promoted as the default effective active-IPC projection;
+the Cutlass family residual is 29.12% and remains disclosed. Aggregate cache
+hit-rate, DRAM/service, topology, and engine-completion gaps remain typed.
+
 The promotion replay completed successfully: 339/339 roots and 11,558
 launches per mode, full integrated L1+L2 first and fast flat second, exactly 12
 workers, and compressed artifacts at
