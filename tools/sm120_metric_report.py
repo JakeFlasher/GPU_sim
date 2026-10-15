@@ -390,6 +390,12 @@ def render_summary(table: dict[str, dict[str, Any]]) -> dict[str, Any]:
     return {
         "metrics": metrics,
         "unavailable_by_family": {family_name: names for family_name, names in sorted(unavailable.items())},
+        "conflicted_metrics": sorted(
+            name for name, item in metrics.items() if item["alternative_conflicts"]
+        ),
+        "conflicted_metric_count": sum(
+            bool(item["alternative_conflicts"]) for item in metrics.values()
+        ),
         "available_metric_count": sum(item["predicted"] > 0 for item in metrics.values()),
         "compared_metric_count": sum(item["compared"] > 0 for item in metrics.values()),
     }
@@ -426,6 +432,9 @@ def main() -> int:
         "available_metric_count": len(available),
         "unavailable_metric_count": sum(map(len, unavailable.values())),
         "unavailable_by_family": dict(sorted(unavailable.items())),
+        "conflicted_metric_count": sum(
+            mode_summary["conflicted_metric_count"] for mode_summary in by_mode.values()
+        ),
     }
     (args.output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     with (args.output / "summary.md").open("w") as report:
@@ -448,6 +457,12 @@ def main() -> int:
                 f"`{entry['metric']}` ({entry['target_rows']} target rows)" for entry in entries
             )
             report.write(f"- **{family_name}:** {names}\n")
+        report.write("\n## Conflicting prediction alternatives\n\n")
+        report.write("Metrics with incompatible finite alternatives are retained in compressed rows but excluded from scoring until endpoint/scope provenance selects one.\n\n")
+        for mode, mode_summary in by_mode.items():
+            names = ", ".join(f"`{name}`" for name in mode_summary["conflicted_metrics"])
+            if names:
+                report.write(f"- **{mode}:** {names}\n")
     return 0
 
 
