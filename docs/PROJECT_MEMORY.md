@@ -810,3 +810,12 @@ aggregate merge arithmetic. Pending, same-request, and line-fill alternatives
 worsen real Cutlass/MXFP8 rows; per-request sector masks and client scope are
 not retained. Keep Q45/Q55 provenance only, retain the effective-L1 default,
 and require a new source-visible scope before any further full replay.
+
+## 2026-10-15 — Q60 IPC residual closure
+
+Round 20 audited the available SM/SMSP activity populations and aggregation
+choices. Q37's weighted per-SM active projection remains 23.8255% mean APE and
+elapsed IPC 20.3993%; alternative SMSP/per-SM reductions are worse. Occupancy
+variation has no retained source-defined correction, so no hidden tail or
+NCU-fitted penalty is permitted. Q58 branch cardinality remains the accepted
+IPC-side improvement.
