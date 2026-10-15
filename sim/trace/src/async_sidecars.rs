@@ -872,6 +872,61 @@ pub struct AsyncRelation {
     pub wait_visibility_clock: Option<u64>,
 }
 
+/// A generation-scoped producer cohort joined to one destination mbarrier
+/// accounting event.  This is an architectural/evidence relation only: it
+/// records which retained TMA payloads can explain the expected transaction
+/// bytes for the observed barrier operation.  It does not identify an engine
+/// completion instant or a physical TMA queue.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TmaGenerationAssociation {
+    /// One observed arrival, one raw destination barrier, and exact payload
+    /// conservation identify a single retained producer cohort.  Barrier
+    /// lifetime/phase bits can still remain outside the sidecar evidence.
+    ExactPayloadCohort,
+    /// A protocol-compatible candidate was retained, but lifetime or payload
+    /// membership is not unique enough for an exact cohort.
+    ProtocolScopedCandidate,
+    /// The available sidecars cannot form a safe producer-to-barrier join.
+    Unresolved,
+}
+
+/// Model-relative progress state for a joined cohort.  These states are
+/// monotonic evidence milestones, not timestamps and not engine completion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TmaServiceState {
+    Submitted,
+    PayloadAccounted,
+    PhaseReadinessObserved,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TmaGenerationRelation {
+    pub association: TmaGenerationAssociation,
+    pub service_state: TmaServiceState,
+    /// A local sequence number is only present for an exact one-shot cohort;
+    /// it is not a decoded architectural phase token.
+    pub cohort_index: Option<u64>,
+    pub barrier_cta: [u32; 3],
+    pub barrier_offset: u32,
+    pub barrier_address_raw: Option<u32>,
+    pub destination_cluster_rank: Option<u32>,
+    pub expected_transaction_bytes: Option<u64>,
+    pub observed_payload_bytes: u64,
+    pub payload_conservation: bool,
+    pub producer_warps: Vec<i32>,
+    pub producers: Vec<ObservationKey>,
+    pub accounting_events: Vec<ObservationKey>,
+    pub deferred_arrival_events: Vec<ObservationKey>,
+    pub phase_query_events: Vec<ObservationKey>,
+    pub successful_phase_query_events: Vec<ObservationKey>,
+    pub unsuccessful_phase_query_events: Vec<ObservationKey>,
+    /// No source sidecar in this relation provides an engine-originated
+    /// completion event.  Model completion remains a separate scenario state.
+    pub engine_completion_clock: &'static str,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct AsyncRelations {
     pub tma_loads: u64,
@@ -904,6 +959,9 @@ pub struct AsyncRelations {
     pub native_visibility_cycles: Option<u64>,
     pub native_issue_visibility_cycles: Option<u64>,
     pub relation_samples: Vec<AsyncRelation>,
+    /// Aggregate producer→mbarrier-generation relations.  This is bounded
+    /// evidence/model state and never feeds replay timing.
+    pub generation_relations: Vec<TmaGenerationRelation>,
     #[serde(skip)]
     observed_completion_intervals: BTreeSet<u64>,
     #[serde(skip)]
@@ -1159,6 +1217,162 @@ fn relate_barrier(
 }
 
 impl LaunchObservations {
+    /// Join global-to-shared TMA loads to destination-barrier accounting
+    /// cohorts using only retained sidecar identity and byte conservation.
+    ///
+    /// This deliberately handles the common one-shot cohort (one accounting
+    /// arrival and an exact sum of producer payloads).  Reused barriers or
+    /// multiple unresolved arrivals are retained as candidates instead of
+    /// pairing records by parity/file order.  The resulting service state is
+    /// model/evidence state; no engine completion timestamp is introduced.
+    pub fn tma_generation_relations(
+        &self,
+        cluster: [u32; 3],
+    ) -> Vec<TmaGenerationRelation> {
+        type Barrier = ([u32; 3], u32, Option<u32>, Option<u32>);
+        const MAX_RELATIONS: usize = 512;
+        let mut loads_by_barrier: BTreeMap<Barrier, Vec<(ObservationKey, &TmaObservation)>> =
+            BTreeMap::new();
+        for (&key, observation) in &self.tma {
+            if !observation.is_load {
+                continue;
+            }
+            let Some(offset) = observation.destination_barrier else {
+                continue;
+            };
+            loads_by_barrier
+                .entry((
+                    key.cta,
+                    offset,
+                    observation.destination_barrier_raw,
+                    observation.destination_cluster_rank,
+                ))
+                .or_default()
+                .push((key, observation));
+        }
+
+        let mut result = Vec::new();
+        for ((cta, offset, raw, rank), mut producers) in loads_by_barrier {
+            if result.len() >= MAX_RELATIONS {
+                break;
+            }
+            producers.sort_by_key(|(key, _)| *key);
+            let matching_sync: Vec<_> = self
+                .sync
+                .iter()
+                .filter(|(key, observation)| {
+                    key.cta == cta
+                        && observation.barrier_addresses.len() == 1
+                        && observation.barrier_addresses.first().copied() == Some(offset)
+                        && (raw.is_none()
+                            || observation.barrier_address_raw == raw
+                            || observation.barrier_address_raw.is_none())
+                        && (rank.is_none()
+                            || observation.barrier_cluster_rank.is_none()
+                            || observation.barrier_cluster_rank == rank)
+                })
+                .collect();
+            let accounting_events: Vec<_> = matching_sync
+                .iter()
+                .filter(|(_, observation)| {
+                    observation.is_arrival
+                        && !observation.is_async_copy_arrival
+                        && observation.expected_tx_bytes.is_some()
+                })
+                .map(|(key, _)| **key)
+                .collect();
+            let deferred_arrival_events: Vec<_> = matching_sync
+                .iter()
+                .filter(|(_, observation)| observation.is_async_copy_arrival)
+                .map(|(key, _)| **key)
+                .collect();
+            let phase_query_events: Vec<_> = matching_sync
+                .iter()
+                .filter(|(_, observation)| observation.is_phase_query)
+                .map(|(key, _)| **key)
+                .collect();
+            let successful_phase_query_events: Vec<_> = matching_sync
+                .iter()
+                .filter(|(_, observation)| {
+                    observation.is_phase_query && observation.successful_wait_lanes != 0
+                })
+                .map(|(key, _)| **key)
+                .collect();
+            let unsuccessful_phase_query_events: Vec<_> = matching_sync
+                .iter()
+                .filter(|(_, observation)| {
+                    observation.is_phase_query && observation.unsuccessful_wait_lanes != 0
+                })
+                .map(|(key, _)| **key)
+                .collect();
+            let expected_transaction_bytes = matching_sync
+                .iter()
+                .filter_map(|(_, observation)| observation.expected_tx_bytes)
+                .next();
+            let observed_payload_bytes = producers
+                .iter()
+                .try_fold(0_u64, |sum, (_, observation)| {
+                    sum.checked_add(observation.bytes?)
+                });
+            let (observed_payload_bytes, payload_conservation) = match observed_payload_bytes {
+                Some(bytes) => (
+                    bytes,
+                    expected_transaction_bytes.is_some_and(|expected| expected == bytes),
+                ),
+                None => (0, false),
+            };
+            let scope_exact = raw.is_some()
+                && (cluster == [1, 1, 1] || rank.is_none())
+                && producers.iter().all(|(_, observation)| observation.bytes.is_some());
+            let exact = accounting_events.len() == 1
+                && payload_conservation
+                && scope_exact
+                && !matching_sync.iter().any(|(_, observation)| {
+                    observation.interpretation_conflict || observation.operand_precision_lost
+                });
+            let association = if exact {
+                TmaGenerationAssociation::ExactPayloadCohort
+            } else if !producers.is_empty()
+                && (!accounting_events.is_empty() || !phase_query_events.is_empty())
+            {
+                TmaGenerationAssociation::ProtocolScopedCandidate
+            } else {
+                TmaGenerationAssociation::Unresolved
+            };
+            let service_state = if !successful_phase_query_events.is_empty() {
+                TmaServiceState::PhaseReadinessObserved
+            } else if payload_conservation {
+                TmaServiceState::PayloadAccounted
+            } else {
+                TmaServiceState::Submitted
+            };
+            let mut producer_warps: Vec<_> = producers.iter().map(|(key, _)| key.warp).collect();
+            producer_warps.sort();
+            producer_warps.dedup();
+            result.push(TmaGenerationRelation {
+                association,
+                service_state,
+                cohort_index: exact.then_some(0),
+                barrier_cta: cta,
+                barrier_offset: offset,
+                barrier_address_raw: raw,
+                destination_cluster_rank: rank,
+                expected_transaction_bytes,
+                observed_payload_bytes,
+                payload_conservation,
+                producer_warps,
+                producers: producers.into_iter().map(|(key, _)| key).collect(),
+                accounting_events,
+                deferred_arrival_events,
+                phase_query_events,
+                successful_phase_query_events,
+                unsuccessful_phase_query_events,
+                engine_completion_clock: "unavailable: no engine-originated per-generation timestamp",
+            });
+        }
+        result
+    }
+
     /// Build a conservative cross-warp phase-readiness view for a bounded
     /// single-barrier cohort.  This path is evidence-only and is intentionally
     /// separate from replay relations: it requires one producer warp, exact
@@ -1349,6 +1563,7 @@ impl LaunchObservations {
     pub fn relations(&self, _cluster: [u32; 3]) -> AsyncRelations {
         type Barrier = ([u32; 3], u32);
         let mut result = AsyncRelations::default();
+        result.generation_relations = self.tma_generation_relations(_cluster);
         let mut raw_producers: BTreeMap<(u32, [u32; 3]), Vec<(ObservationKey, &TmaObservation)>> =
             BTreeMap::new();
         let mut fallback_producers: BTreeMap<Barrier, Vec<(ObservationKey, &TmaObservation)>> =

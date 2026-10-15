@@ -237,6 +237,10 @@ pub struct ObligationFrontier {
     pub possible_obligations: Vec<&'static str>,
     pub unresolved_obligations: Vec<&'static str>,
     pub ledgers: Vec<BarrierLedger>,
+    /// Bounded global-to-shared producer cohorts joined to destination
+    /// mbarrier accounting.  These are evidence/model relations only; they
+    /// do not supply replay timing or an engine completion clock.
+    pub tma_generation_relations: Vec<crate::async_sidecars::TmaGenerationRelation>,
     pub consumer_frontiers: Vec<ConsumerFrontier>,
     pub consumer_obligations: Vec<ConsumerObligation>,
     pub frontier_alternative_budget: usize,
@@ -946,6 +950,7 @@ impl ObligationFrontier {
     ) -> (Self, Vec<PhaseReadinessObservation>) {
         let phase = observations.phase_readiness_observations(cluster);
         let relations = observations.relations(cluster);
+        let tma_generation_relations = relations.generation_relations.clone();
         let ledgers = build_ledgers(observations);
         let consumer_frontiers = build_frontiers(observations, &phase, &ledgers);
         let expected_arrival_obligations = observations
@@ -1069,7 +1074,8 @@ impl ObligationFrontier {
                 captured_polling_is_not_counterfactual: true,
                 qualified_synchronization_available: qualified_satisfied_generations != 0,
                 qualified_synchronization_applied: false,
-                qualified_synchronization_reason: "diagnostic frontier only; no counterfactual polling loop was substituted",
+                qualified_synchronization_reason:
+                    "diagnostic frontier only; no counterfactual polling loop was substituted",
                 qualified_phase_observations: qualified_satisfied_generations,
                 protocol_scoped_phase_candidates,
                 qualified_satisfied_generations,
@@ -1078,6 +1084,7 @@ impl ObligationFrontier {
                 possible_obligations,
                 unresolved_obligations,
                 ledgers,
+                tma_generation_relations,
                 consumer_frontiers,
                 consumer_obligations,
                 frontier_alternative_budget: FRONTIER_ALTERNATIVE_BUDGET,
@@ -1087,8 +1094,10 @@ impl ObligationFrontier {
                 post_result_narrowed_frontiers,
                 current_query_only_frontiers,
                 deferred_arrival_obligations,
-                engine_completion_clock: "unavailable: no engine-originated per-generation timestamp",
-                model_timing_input: "none: frontier is evidence/model diagnostics, not replay timing",
+                engine_completion_clock:
+                    "unavailable: no engine-originated per-generation timestamp",
+                model_timing_input:
+                    "none: frontier is evidence/model diagnostics, not replay timing",
             },
             phase,
         )
