@@ -2942,16 +2942,60 @@ pub(super) fn project(
         );
     }
     if let Some(dram) = result.dram() {
-        let dram_read_bytes = (u128::from(dram.read_sectors)
-            + u128::from(result.front_end().compulsory_instruction_read_sectors()))
-            * 32;
+        let l2_fetch_read_sectors = u128::from(dram.read_sectors);
+        let tma_payload_sectors = if result.arch() == ArchId::Sm120 {
+            u128::from(
+                result
+                    .trace_metrics()
+                    .tma_sidecar_load_payload_bytes
+                    .div_ceil(32),
+            )
+        } else {
+            0
+        };
+        let compulsory_instruction_sectors = u128::from(
+            result
+                .front_end()
+                .compulsory_instruction_read_sectors(),
+        );
+        let dram_read_sectors = l2_fetch_read_sectors
+            .saturating_add(tma_payload_sectors)
+            .saturating_add(compulsory_instruction_sectors);
+        let dram_read_bytes = dram_read_sectors * 32;
         m.insert(
             "dram_read_bytes".into(),
             Metric::count(
                 Some("dram__bytes_read.sum"),
                 "byte",
                 dram_read_bytes,
-                "modeled data reads plus compulsory instruction sectors; no byte-to-sector ambiguity",
+                "modeled L2-missing read demand plus SM120 TMA payload and compulsory instruction sectors; typed demand, not achieved DRAM service",
+            ),
+        );
+        m.insert(
+            "dram_l2_fetch_read_sectors".into(),
+            Metric::count(
+                None,
+                "sector",
+                l2_fetch_read_sectors,
+                "L2-missing data/RMW read demand; excludes TMA payload and instruction fetch",
+            ),
+        );
+        m.insert(
+            "dram_tma_payload_sectors".into(),
+            Metric::count(
+                None,
+                "sector",
+                tma_payload_sectors,
+                "SM120 sidecar TMA global-to-shared payload demand; not an L2 miss or completion timestamp",
+            ),
+        );
+        m.insert(
+            "dram_compulsory_instruction_sectors".into(),
+            Metric::count(
+                None,
+                "sector",
+                compulsory_instruction_sectors,
+                "distinct executed instruction-read sectors; demand observer only",
             ),
         );
         // This is intentionally a read-only rate estimate.  Total DRAM
