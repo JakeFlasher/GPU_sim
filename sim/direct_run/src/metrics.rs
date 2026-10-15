@@ -684,7 +684,7 @@ pub(super) fn project(
                 u128::from(result.instructions_issued()),
                 smsp_active_cycles,
                 true,
-                "trace instruction cardinality divided by summed model SMSP-active cycles; not a physical issue-width measurement",
+                "weighted sum of per-SMSP trace instruction counters divided by summed model SMSP-active lifetimes; inactive traced SMSPs are excluded; not a physical issue-width measurement",
             ),
         );
         m.insert(
@@ -695,7 +695,7 @@ pub(super) fn project(
                 u128::from(result.instructions_issued()),
                 sm_active_cycles,
                 true,
-                "trace instruction cardinality divided by summed model SM-active cycles; not calibrated silicon IPC",
+                "weighted sum of per-SM trace instruction counters divided by summed model SM-active lifetimes over the observed active-SM population; inactive card instances are excluded; not calibrated silicon IPC",
             ),
         );
         m.insert(
