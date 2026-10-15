@@ -1526,27 +1526,28 @@ impl L1Cache {
     /// malformed sidecar into unbounded state.
     fn record_request_masks(&mut self, client: L1LookupClient, sectors: &[i64]) {
         let client_index = client.index();
-        let audit = &mut self.merge_audit.request_masks;
-        audit.request_count[client_index] = audit.request_count[client_index].saturating_add(1);
-        let mut line_masks: Vec<(i64, u8)> = Vec::new();
+        let mut line_masks: HashMap<i64, u8> = HashMap::new();
+        let mut overflow = 0_u64;
         for &sector_id in sectors {
             let line = sector_id >> 2;
             let bit = 1_u8 << ((sector_id & 3) as u8);
-            if let Some((_, mask)) = line_masks.iter_mut().find(|(entry, _)| *entry == line) {
+            if let Some(mask) = line_masks.get_mut(&line) {
                 *mask |= bit;
                 continue;
             }
             if line_masks.len() >= L1RequestMaskAudit::MAX_REQUEST_LINES {
-                audit.request_mask_overflow[client_index] = audit.request_mask_overflow
-                    [client_index]
-                    .saturating_add(1);
+                overflow = overflow.saturating_add(1);
                 continue;
             }
-            line_masks.push((line, bit));
+            line_masks.insert(line, bit);
         }
+        let audit = &mut self.merge_audit.request_masks;
+        audit.request_count[client_index] = audit.request_count[client_index].saturating_add(1);
+        audit.request_mask_overflow[client_index] = audit.request_mask_overflow[client_index]
+            .saturating_add(u64::from(overflow != 0));
         audit.request_line_count[client_index] = audit.request_line_count[client_index]
             .saturating_add(line_masks.len() as u64);
-        for (_, mask) in line_masks {
+        for mask in line_masks.into_values() {
             audit.request_masks[client_index][usize::from(mask & 0x0f)] = audit.request_masks
                 [client_index][usize::from(mask & 0x0f)]
                 .saturating_add(1);
