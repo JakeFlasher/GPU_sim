@@ -309,6 +309,15 @@ pub struct L1LookupBatch {
     pending_merges_are_hits: bool,
 }
 
+/// Read-only provenance for L1 lookup merges.  These counters describe the
+/// request boundary observed by the cache model; they do not alter tags,
+/// fills, MSHR ownership, replacement, or timing.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct L1MergeAudit {
+    pub same_request_merges: [u64; 2],
+    pub older_pending_merges: [u64; 2],
+}
+
 /// One origin's accounting lane. It mirrors the unified fields in
 /// [`L1Counters`] but carries no architecture of its own; provenance remains
 /// bound once on the enclosing physical-cache snapshot.
@@ -1306,6 +1315,7 @@ pub struct L1Cache {
     /// Active logical request boundary for the lookup observer only. This does
     /// not participate in tags, MSHR ownership, replacement, or timing.
     active_lookup_batch: Option<L1LookupBatch>,
+    merge_audit: L1MergeAudit,
     /// Exact earliest timed in-flight fill. `None` means there is no timed
     /// fill (empty or event-driven), while `Some(u64::MAX)` is a real due
     /// cycle. `apply_fills` early-outs when `now` has not reached it.
@@ -1350,11 +1360,29 @@ impl L1Cache {
             line_generations: HashMap::new(),
             fill_seq: NextSequence::Available(0),
             active_lookup_batch: None,
+            merge_audit: L1MergeAudit::default(),
             min_fill_due: None,
             fill_timing: None,
             write_lookup_observer: None,
             counters: L1Counters::for_arch(arch),
         })
+    }
+
+    /// Return the observer-only request-boundary merge provenance.
+    pub const fn merge_audit(&self) -> L1MergeAudit {
+        self.merge_audit
+    }
+
+    fn record_merge_audit(&mut self, origin: MemoryOrigin, sequence: u64) {
+        let Some(batch) = self.active_lookup_batch else {
+            return;
+        };
+        let lane = if sequence < batch.first_fill_sequence {
+            &mut self.merge_audit.older_pending_merges
+        } else {
+            &mut self.merge_audit.same_request_merges
+        };
+        lane[origin.index()] = lane[origin.index()].saturating_add(1);
     }
 
     /// Select the explicit resident-hit writeback experiment. This does not
@@ -2577,6 +2605,7 @@ impl L1Cache {
             && let Some(&(pending, sequence)) = self.sector_fills.get(&(line, sector, generation))
         {
             Self::preflight_fill_timing(pending, fill_request.timing())?;
+            self.record_merge_audit(origin, sequence);
             let counters = if self.active_lookup_batch.is_some_and(|batch| {
                 batch.pending_merges_are_hits && sequence < batch.first_fill_sequence
             }) {
@@ -2602,6 +2631,7 @@ impl L1Cache {
         }
         if let Some(&(pending, sequence, generation)) = self.line_fills.get(&line) {
             Self::preflight_fill_timing(pending, fill_request.timing())?;
+            self.record_merge_audit(origin, sequence);
             let counters = if self.active_lookup_batch.is_some_and(|batch| {
                 batch.pending_merges_are_hits && sequence < batch.first_fill_sequence
             }) {
@@ -2649,6 +2679,7 @@ impl L1Cache {
             && let Some(&(pending, sequence)) = self.sector_fills.get(&(line, sector, generation))
         {
             Self::preflight_fill_timing(pending, fill_request.timing())?;
+            self.record_merge_audit(origin, sequence);
             let counters = if self.active_lookup_batch.is_some_and(|batch| {
                 batch.pending_merges_are_hits && sequence < batch.first_fill_sequence
             }) {

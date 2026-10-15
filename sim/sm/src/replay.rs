@@ -4926,6 +4926,14 @@ fn replay_kernel_with_schedule_and_l2_and_candidates_with_payload_events(
             replay
         }
     };
+    for result in replay.per_sm.values() {
+        if let Some(audit) = result.l1_merge_audit {
+            trace_metrics.observe_l1_merge_audit(
+                audit.same_request_merges,
+                audit.older_pending_merges,
+            )?;
+        }
+    }
     replay.front_end = front_end;
     replay.trace_metrics = trace_metrics;
     // A drained hypothetical service queue is not a completion relation for

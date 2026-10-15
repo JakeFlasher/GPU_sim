@@ -87,7 +87,7 @@ use sim_arch::{
 };
 use sim_mem::{
     AsyncCopyCompletion, CacheOpToken, EvAccess, EvAccessUnobserved, FillKey, L1AccessError,
-    L1Cache, L1Config, L1Counters, L1LookupBatch, L1MutationBudget, L1StorePolicy,
+    L1Cache, L1Config, L1Counters, L1LookupBatch, L1MergeAudit, L1MutationBudget, L1StorePolicy,
     L1WriteLookupObserver, L1WriteLookupObserverPlan, L2Source, LdgstsL1Policy, MemRole,
     MemoryOrigin, decode_async_copy_completion, opcode_head,
 };
@@ -1335,6 +1335,8 @@ pub struct SmSimResult {
     pub modeled_local_completion_cycles: Option<u64>,
     /// This SM's L1 counters when an L1 model was attached.
     pub l1: Option<L1Counters>,
+    /// Read-only request-boundary provenance for L1 merge classification.
+    pub l1_merge_audit: Option<L1MergeAudit>,
     /// Explicit capability gaps for write-class tails present in this replay.
     pub unmodeled_tails: TailFlags,
     /// Simulator-internal causal readiness diagnostics. These are not NCU
@@ -8033,6 +8035,7 @@ impl<'a> SmCore<'a> {
             cycles: self.t,
             modeled_local_completion_cycles,
             l1: self.mem.l1().map(|c| c.counters),
+            l1_merge_audit: self.mem.l1().map(L1Cache::merge_audit),
             unmodeled_tails: self.unmodeled_tails,
             readiness,
             activity,

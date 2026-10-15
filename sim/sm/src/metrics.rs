@@ -425,6 +425,12 @@ pub struct TraceMetrics {
     pub tma_shadow_l2_store_hits: u64,
     pub tma_shadow_l2_store_misses: u64,
     pub tma_shadow_l2_store_address_unavailable: u64,
+    /// Read-only L1 request-boundary merge provenance. These counters are
+    /// diagnostic; they do not change cache state or lookup projections.
+    pub l1_same_request_merges_global: u64,
+    pub l1_same_request_merges_local: u64,
+    pub l1_older_pending_merges_global: u64,
+    pub l1_older_pending_merges_local: u64,
     /// Sidecar-to-dynamic identity coverage for source-order reasoning. A
     /// matched key establishes same-instruction identity, not cross-warp time.
     pub tma_shadow_dynamic_records_matched: u64,
@@ -737,6 +743,18 @@ impl TraceMetrics {
         add(&mut self.tma_shadow_l2_store_hits, store[1])?;
         add(&mut self.tma_shadow_l2_store_misses, store[2])?;
         add(&mut self.tma_shadow_l2_store_address_unavailable, store[3])?;
+        Ok(())
+    }
+
+    pub(crate) fn observe_l1_merge_audit(
+        &mut self,
+        same_request: [u64; 2],
+        older_pending: [u64; 2],
+    ) -> Result<(), crate::IssueError> {
+        add(&mut self.l1_same_request_merges_global, same_request[0])?;
+        add(&mut self.l1_same_request_merges_local, same_request[1])?;
+        add(&mut self.l1_older_pending_merges_global, older_pending[0])?;
+        add(&mut self.l1_older_pending_merges_local, older_pending[1])?;
         Ok(())
     }
 
