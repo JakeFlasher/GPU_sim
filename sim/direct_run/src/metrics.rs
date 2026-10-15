@@ -2849,13 +2849,13 @@ pub(super) fn project(
                 "request_mask_audit_same_request_merges",
                 same_request_mask_merges,
                 "sector",
-                "same-request pending-fill mask observations; diagnostic only",
+                "same-request observed resident/merge mask observations; diagnostic only",
             ),
             (
                 "request_mask_audit_older_pending_merges",
                 older_pending_mask_merges,
                 "sector",
-                "older-request pending-fill mask observations; diagnostic only",
+                "older-request observed resident/merge mask observations; diagnostic only",
             ),
             (
                 "request_mask_audit_overflow",
