@@ -647,6 +647,18 @@ pub(super) fn project(
                     Some(raw)
                 }
             });
+        // Keep active-IPC's denominator in the same effective observation
+        // domain as `sm_active_cycles_effective`.  The raw alpha ratio below
+        // is a weighted trace-lifetime ratio; it is useful as a lower-bound
+        // diagnostic, but it systematically omits the source-derived
+        // front-end envelope that the active-cycle projection already
+        // exposes.  Reusing the effective frontier is a conditional SM120
+        // observation model, not a claim that the profiler's per-SM average
+        // has been reconstructed exactly.  If no terminal frontier exists,
+        // retain the raw ratio rather than inventing a timing value.
+        let effective_active_ipc_denominator = effective_sm_active_frontier
+            .map(u128::from)
+            .unwrap_or(sm_active_cycles);
         m.insert(
             "alpha_warp_instructions".to_owned(),
             Metric::count(
@@ -693,9 +705,9 @@ pub(super) fn project(
                 Some("sm__inst_executed.avg.per_cycle_active"),
                 "inst/cycle",
                 u128::from(result.instructions_issued()),
-                sm_active_cycles,
+                effective_active_ipc_denominator,
                 true,
-                "trace instruction cardinality divided by summed model SM-active cycles; not calibrated silicon IPC",
+                "trace instruction cardinality divided by the effective SM-active observation frontier when available; raw summed SM-active cycles are a fallback and neither form is calibrated silicon IPC",
             ),
         );
         m.insert(
