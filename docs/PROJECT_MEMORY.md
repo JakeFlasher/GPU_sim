@@ -871,3 +871,17 @@ sector-mask/client scope or another independent source relation; aggregate
 pending-merge formulas are not permitted as default corrections. Round24
 findings are archived in the proposal workspace's
 `adversarial_review/round24_next_phase_source_20261015/`.
+
+
+## Q67 — bounded L1 request-mask/client audit (2026-10-15)
+
+Commit `9ee5cafd` preserves fixed client×16 four-sector line-mask
+histograms for real SM120 lookup requests, plus observed same-request and
+older-pending merge footprints and bounded overflow counts. The audit is
+diagnostic-only: it does not alter cache state, timing, MSHR/replacement, or
+scored endpoints. A four-capture full-first/fast-second probe (30 launches per
+mode, 12 workers, compressed JSONL) completed successfully and exposed
+ordinary-global, async-copy, and partial-line strata with no overflow. The
+merge-mask fields are observed resident/merge footprints, not exact pending
+payload masks. The data is insufficient to promote an NCU hit correction;
+Q66's aggregate pending-merge rule remains reverted.
