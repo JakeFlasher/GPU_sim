@@ -709,25 +709,25 @@ pub(super) fn project(
         // NCU's `.avg.per_cycle_active` is a ratio-of-sums over the SM
         // population, not the terminal/max observation endpoint used by
         // `sm__cycles_active.max`.  Build a separate effective sum by
-        // extending each observed SM lifetime with the same source-derived
-        // front-end envelope, using that SM's retained instruction-sector
-        // provenance.  Falling back to the raw sum preserves coverage when
-        // the per-SM provenance is absent.  This remains an effective
-        // observation model, not a physical clock conversion.
+        // extending each observed SM lifetime with the predeclared blended
+        // startup envelope already used by the SM120 observation model.  The
+        // blend is deliberately applied to the fixed startup component only;
+        // the variable instruction-sector envelope belongs to the terminal
+        // observation endpoint and would double-count active-lifetime work.
+        // Falling back to the raw sum preserves coverage when no SM is
+        // represented.  This remains an effective observation model, not a
+        // physical clock conversion.
         let effective_sm_active_sum = result
             .per_sm()
             .values()
             .try_fold(0_u128, |sum, sm| {
-                let sectors = u128::from(sm.activity.front_end_instruction_read_sectors);
-                let scaled = sectors
-                    .checked_mul(u128::from(alpha.front_end_line_cycles_numerator))?
-                    .checked_add(u128::from(
-                        alpha.front_end_line_cycles_denominator.saturating_sub(1),
-                    ))?
-                    / u128::from(alpha.front_end_line_cycles_denominator.max(1));
-                let envelope = u128::from(alpha.front_end_base_cycles).checked_add(scaled)?;
+                let blend_num = u128::from(alpha.sm_active_observation_blend_numerator);
+                let blend_den = u128::from(alpha.sm_active_observation_blend_denominator.max(1));
+                let blended_startup = u128::from(alpha.front_end_base_cycles)
+                    .checked_mul(blend_num)?
+                    .div_ceil(blend_den);
                 sum.checked_add(u128::from(sm.activity.sm_active_cycles))?
-                    .checked_add(envelope)
+                    .checked_add(blended_startup)
             });
         let effective_active_ipc_denominator = effective_sm_active_sum.unwrap_or(sm_active_cycles);
         m.insert(
