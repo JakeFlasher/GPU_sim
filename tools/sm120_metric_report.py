@@ -166,6 +166,7 @@ def add_observation(
     target_metrics: dict[str, Any],
     mode: str,
     capture: str,
+    join_status: str,
 ) -> dict[str, Any]:
     name = entry["metric"]
     row = table.setdefault(name, {
@@ -183,6 +184,7 @@ def add_observation(
         "relative_errors": [],
         "errors_by_capture": collections.defaultdict(list),
         "relative_by_family": collections.defaultdict(list),
+        "relative_by_join": collections.defaultdict(list),
         "source_counts": collections.Counter(),
         "aliases_not_scored": 0,
         "different_numeric_alternatives": 0,
@@ -247,6 +249,7 @@ def add_observation(
     if relative is not None:
         row["relative_errors"].append(relative)
         row["relative_by_family"][capture.split("_", 1)[0]].append(relative)
+        row["relative_by_join"][join_status].append(relative)
     else:
         row["zero_targets"] += 1
     row["exact"] += int(error == 0.0)
@@ -288,7 +291,9 @@ def reduce_mode(
                 target_inventory.update(target_metrics.keys())
                 results = []
                 for entry in selected_entries(launch, mode):
-                    results.append(add_observation(table, entry, target_metrics, mode, rel))
+                    results.append(add_observation(
+                        table, entry, target_metrics, mode, rel, join["join_status"]
+                    ))
                 output.write(json.dumps({"capture": rel, "mode": mode, **join, "results": results}, separators=(",", ":"), allow_nan=False) + "\n")
     return dict(counts)
 
@@ -318,6 +323,9 @@ def render_summary(table: dict[str, dict[str, Any]]) -> dict[str, Any]:
             ]),
             "family_relative_error_nonzero_targets": {
                 name: distribution(values) for name, values in sorted(row["relative_by_family"].items())
+            },
+            "join_relative_error_nonzero_targets": {
+                name: distribution(values) for name, values in sorted(row["relative_by_join"].items())
             },
             "source_counts": dict(row["source_counts"]),
             "aliases_not_scored": row["aliases_not_scored"],
