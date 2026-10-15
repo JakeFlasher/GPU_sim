@@ -885,3 +885,14 @@ ordinary-global, async-copy, and partial-line strata with no overflow. The
 merge-mask fields are observed resident/merge footprints, not exact pending
 payload masks. The data is insufficient to promote an NCU hit correction;
 Q66's aggregate pending-merge rule remains reverted.
+
+
+## Round25 — Q67 request-mask audit adversarial resolution (2026-10-15)
+
+The post-Q67 review found no runtime or semantic defect. Request masks are
+exact per-line footprints; merge masks are observed resident/merge footprints,
+not exact pending payload masks. The fixed 1,024-line cap and overflow counter
+keep the diagnostic bounded. The selected real probe passed full integrated
+L1+L2 first/fast flat second with 12 workers and compressed outputs. No scored
+L1 endpoint or full corpus replay follows because the provenance does not yet
+resolve NCU client scope.
