@@ -896,3 +896,14 @@ keep the diagnostic bounded. The selected real probe passed full integrated
 L1+L2 first/fast flat second with 12 workers and compressed outputs. No scored
 L1 endpoint or full corpus replay follows because the provenance does not yet
 resolve NCU client scope.
+
+
+## Q68/Q69 — ordered TMA shadow diagnostic and IPC no-go (2026-10-15)
+
+Commit `5ec92d90` preserves first-seen TMA sidecar order and computes a second
+address-derived L2 shadow diagnostically. The lexical keyed shadow remains the
+scored endpoint. Four selected captures and a separate quant capture passed
+full-first/fast-second real probes with 12 workers and compressed JSONL; the
+ordered and lexical counters matched. The IPC audit likewise found no source
+relation for a TMA/tensor completion tail that would generalize without
+worsening non-TMA rows. No scored L2 or IPC correction follows.
