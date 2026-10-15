@@ -415,7 +415,7 @@ def main() -> int:
     for name in sorted((set(target_inventory) | declared) - available):
         unavailable[family(name)].append({"metric": name, "target_rows": target_inventory[name]})
     summary = {
-        "schema_version": 3,
+        "schema_version": 4,
         "scope": "post-replay metric predictions; NCU values never replay/model inputs",
         "selection": "one prediction per metric/launch/mode; finite declared metric, cache observer, native metric, then timing fallback; alternatives retained but not scored; no NCU-based selection",
         "sources": {"full": str(args.full), "fast": str(args.fast), "profiles": str(args.profiles)},
