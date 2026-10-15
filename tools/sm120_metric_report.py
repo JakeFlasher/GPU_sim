@@ -156,6 +156,19 @@ def selected_entries(launch: dict[str, Any], mode: str) -> list[dict[str, Any]]:
         alternatives = [entry for entry in entries if entry is not chosen]
         if alternatives:
             row["alternative_predictions"] = alternatives
+        predicted = [entry for entry in entries
+                     if entry["status"] == "predicted" and entry.get("estimate") is not None]
+        # A post-replay reducer must not silently choose between incompatible
+        # endpoints.  Equal numeric aliases remain compatible; differing
+        # values or units are retained as evidence but excluded from scoring.
+        if len(predicted) > 1:
+            values = {float(entry["estimate"]) for entry in predicted}
+            units = {entry.get("unit", "") for entry in predicted}
+            if len(values) > 1 or len(units) > 1:
+                row["status"] = "conflict"
+                row["estimate"] = None
+                row["reason"] = "incompatible_prediction_alternatives"
+                row["alternative_conflict"] = True
         result.append(row)
     return result
 
@@ -196,6 +209,7 @@ def add_observation(
         "source_counts": collections.Counter(),
         "aliases_not_scored": 0,
         "different_numeric_alternatives": 0,
+        "alternative_conflicts": 0,
         "zero_targets": 0,
         "exact": 0,
         "captures": set(),
@@ -218,12 +232,16 @@ def add_observation(
         and candidate["estimate"] != estimate
         for candidate in alternatives
     )
+    if entry.get("alternative_conflict"):
+        row["alternative_conflicts"] += 1
     result = {"metric": name, "source_key": entry["source_key"],
               "estimate": estimate, "model_status": status, "model_unit": entry["unit"]}
     if entry.get("semantics"):
         result["semantics"] = entry["semantics"]
     if alternatives:
         result["alternative_predictions"] = alternatives
+    if entry.get("alternative_conflict"):
+        result["alternative_conflict"] = True
     target = target_metrics.get(name, {})
     truth = finite(target.get("value")) if isinstance(target, dict) else None
     if status != "predicted" or estimate is None:
@@ -359,6 +377,7 @@ def render_summary(table: dict[str, dict[str, Any]]) -> dict[str, Any]:
             "source_counts": dict(row["source_counts"]),
             "aliases_not_scored": row["aliases_not_scored"],
             "different_numeric_alternatives": row["different_numeric_alternatives"],
+            "alternative_conflicts": row["alternative_conflicts"],
             "zero_targets": row["zero_targets"],
         }
         metrics[name] = item
