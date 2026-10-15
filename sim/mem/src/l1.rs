@@ -396,6 +396,27 @@ impl L1OriginCounters {
         }
     }
 
+    /// Use the request-boundary audit when it retained an exact count of
+    /// ordinary merges into fills allocated by an earlier logical request.
+    /// The legacy projection estimates same-request sector coalescing as
+    /// `line_alloc_misses * 3`, which is only valid for four-sector requests;
+    /// partial-sector requests need the observed merge classification.
+    pub const fn effective_lookup_hits_from_audit(
+        &self,
+        ordinary_older_pending_merges: u64,
+    ) -> u64 {
+        let projected = self
+            .hits
+            .saturating_add(self.pending_lookup_hits)
+            .saturating_add(ordinary_older_pending_merges);
+        let denominator = self.lookup_sectors();
+        if projected < denominator {
+            projected
+        } else {
+            denominator
+        }
+    }
+
     /// Total read-sector lookups represented by this origin lane.
     pub const fn lookup_sectors(&self) -> u64 {
         self.hits.saturating_add(self.misses)

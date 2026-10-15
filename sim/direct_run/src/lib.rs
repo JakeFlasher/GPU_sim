@@ -2096,13 +2096,31 @@ fn cache_lookup_prediction_reports(
     l2_by_source: Option<&L2SourceSplit>,
     trace: Option<&TraceMetrics>,
 ) -> Result<Vec<CacheLookupPredictionReport>, RunError> {
+    // Full launches retain request-boundary merge provenance. Use that exact
+    // ordinary older-pending count instead of estimating same-request
+    // coalescing as three sectors per fresh line; aggregate snapshots retain
+    // the bounded counter projection because they carry no audit.
+    let audited_lookup_hits = |origin: MemoryOrigin| {
+        let Some(counters) = l1 else {
+            return 0;
+        };
+        let origin_counters = counters.origin(origin);
+        trace
+            .map(|metrics| {
+                origin_counters.effective_lookup_hits_from_audit(match origin {
+                    MemoryOrigin::Global => metrics.l1_ordinary_older_pending_merges_global,
+                    MemoryOrigin::Local => metrics.l1_ordinary_older_pending_merges_local,
+                })
+            })
+            .unwrap_or_else(|| origin_counters.effective_lookup_hits())
+    };
     let specifications = [
         (
             EmittedMetricKey::CacheHitRateL1TexReadSector,
             "l1_global_read",
             "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum",
             "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_miss.sum",
-            l1.map(|counters| counters.origin(MemoryOrigin::Global).effective_lookup_hits()),
+            l1.map(|_| audited_lookup_hits(MemoryOrigin::Global)),
         ),
         (
             EmittedMetricKey::CacheHitRateL1TexSector,
@@ -2110,10 +2128,8 @@ fn cache_lookup_prediction_reports(
             "l1tex__t_sectors_lookup_hit.sum",
             "l1tex__t_sectors_lookup_miss.sum",
             l1.map(|counters| {
-                counters
-                    .origin(MemoryOrigin::Global)
-                    .effective_lookup_hits()
-                    .saturating_add(counters.origin(MemoryOrigin::Local).effective_lookup_hits())
+                audited_lookup_hits(MemoryOrigin::Global)
+                    .saturating_add(audited_lookup_hits(MemoryOrigin::Local))
                     .saturating_add(counters.store_hits)
                     .saturating_add(counters.reduction_hits)
             }),
