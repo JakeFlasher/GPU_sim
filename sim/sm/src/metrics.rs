@@ -111,6 +111,13 @@ pub struct MemoryTraffic {
     /// request; retaining it separately avoids calling wide accesses bank
     /// conflicts.
     pub ideal_bank_wavefronts: u64,
+    /// Actual wavefronts eligible for the NCU per-operation bank-conflict
+    /// surface. Matrix shared operations (LDSM/STSM) remain in
+    /// `bank_wavefronts` but are excluded here because NCU reports them in
+    /// the matrix operation class rather than `op_ld`/`op_st` conflicts.
+    pub bank_conflict_wavefronts: u64,
+    /// Width-only ideal wavefronts for `bank_conflict_wavefronts`.
+    pub ideal_bank_conflict_wavefronts: u64,
 }
 
 /// Trace-local physical-pipeline candidate domains. A dynamic SASS record
@@ -1567,6 +1574,18 @@ impl TraceMetrics {
         } = kind
         {
             add(&mut row.ideal_bank_wavefronts, ideal_wavefronts)?;
+            // Nsight's operation-qualified shared-load/store conflict rows
+            // do not include matrix loads/stores. Keep those operations in
+            // the aggregate wavefront surface, but exclude them from the
+            // corresponding conflict numerator.
+            let conflict_surface = !matches!(head, "LDSM" | "STSM");
+            if conflict_surface {
+                add(&mut row.bank_conflict_wavefronts, bank_wavefronts)?;
+                add(
+                    &mut row.ideal_bank_conflict_wavefronts,
+                    ideal_wavefronts,
+                )?;
+            }
         }
         Ok(())
     }

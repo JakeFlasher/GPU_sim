@@ -832,8 +832,10 @@ pub(super) fn project(
             let row = trace.memory.get(kind).cloned().unwrap_or_default();
             let requests = u128::from(row.requests);
             let wavefronts = u128::from(row.bank_wavefronts);
-            let ideal_wavefronts = u128::from(row.ideal_bank_wavefronts);
-            let conflicts = wavefronts.saturating_sub(ideal_wavefronts);
+            let conflict_wavefronts = u128::from(row.bank_conflict_wavefronts);
+            let ideal_conflict_wavefronts =
+                u128::from(row.ideal_bank_conflict_wavefronts);
+            let conflicts = conflict_wavefronts.saturating_sub(ideal_conflict_wavefronts);
             m.insert(
                 format!("{kind}_requests"),
                 Metric::approximate_count(
