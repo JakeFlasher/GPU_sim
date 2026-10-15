@@ -8,7 +8,7 @@ use sim_arch::card::ArchCard;
 use sim_arch::ArchId;
 use sim_mem::MemoryOrigin;
 use sim_sm::FullKernelReplayResult;
-use sim_sm::{GlobalMemoryIssueDiagnostics, ReadinessCauseCycles, ReadinessDiagnostics};
+use sim_sm::{GlobalMemoryIssueDiagnostics, ReadinessCauseCycles, ReadinessDiagnostics, Sm120AlphaConfig};
 use std::collections::BTreeMap;
 
 #[derive(Debug, Serialize)]
@@ -590,6 +590,7 @@ pub(super) fn project(
         // hardware clock. The instruction count remains the trace cardinality
         // used by the existing sector/instruction projections.
         let trace = result.trace_metrics();
+        let alpha = Sm120AlphaConfig::from_m8_m9();
         let modeled_elapsed = result
             .modeled_completion_frontier()
             .lower_bound_cycles()
@@ -632,6 +633,20 @@ pub(super) fn project(
         let elapsed_population_cycles = u128::from(modeled_elapsed)
             .checked_mul(sm_cycle_population)
             .unwrap_or(u128::MAX);
+        let effective_sm_active_frontier = result
+            .sm_active_terminal_event_time()
+            .and_then(|raw| {
+                let elapsed = raw
+                    .checked_add(super::sm120_front_end_envelope_cycles(result).unwrap_or(0))?;
+                let blend_num = alpha.sm_active_observation_blend_numerator;
+                let blend_den = alpha.sm_active_observation_blend_denominator.max(1);
+                if elapsed > raw {
+                    let delta = elapsed - raw;
+                    raw.checked_add(delta.saturating_mul(blend_num).div_ceil(blend_den))
+                } else {
+                    Some(raw)
+                }
+            });
         m.insert(
             "alpha_warp_instructions".to_owned(),
             Metric::count(
@@ -682,6 +697,22 @@ pub(super) fn project(
                 true,
                 "trace instruction cardinality divided by summed model SM-active cycles; not calibrated silicon IPC",
             ),
+        );
+        m.insert(
+            "sm_active_cycles_effective".to_owned(),
+            match effective_sm_active_frontier {
+                Some(cycles) => Metric::approximate_count(
+                    Some("sm__cycles_active.max"),
+                    "cycle",
+                    u128::from(cycles),
+                    "causal SM-active lower bound blended with the declared effective front-end observation envelope; not physical active-cycle timing",
+                ),
+                None => Metric::unavailable(
+                    Some("sm__cycles_active.max"),
+                    "cycle",
+                    "no modeled SM-active terminal frontier",
+                ),
+            },
         );
         m.insert(
             "sm_elapsed_cycles_effective".to_owned(),

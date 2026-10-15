@@ -97,6 +97,12 @@ pub struct Sm120AlphaConfig {
     pub front_end_base_cycles: u64,
     pub front_end_line_cycles_numerator: u64,
     pub front_end_line_cycles_denominator: u64,
+    /// Effective observation blend between the causal SM-active lower bound
+    /// and the elapsed/front-end envelope when projecting the profiler's
+    /// max-active endpoint. This is an observation model, not a scheduler
+    /// capacity or a hardware timing constant.
+    pub sm_active_observation_blend_numerator: u64,
+    pub sm_active_observation_blend_denominator: u64,
     pub scalar_initiation_interval_cycles: u64,
     pub scalar_in_flight_capacity: u32,
     pub barrier_warp_initiation_interval_cycles: u64,
@@ -115,7 +121,7 @@ impl Sm120AlphaConfig {
     /// executor.  Reports should obtain this value from the configuration
     /// instead of copying a profile name beside independently hard-coded
     /// timing/occupancy fields.
-    pub const PROFILE_ID: &'static str = "sm120_m8_m9_sensitivity_v1_provisional";
+    pub const PROFILE_ID: &'static str = "sm120_m8_m9_effective_observation_v2";
 
     pub const fn profile_id() -> &'static str {
         Self::PROFILE_ID
@@ -155,6 +161,8 @@ impl Sm120AlphaConfig {
             front_end_base_cycles: 3900,
             front_end_line_cycles_numerator: 3,
             front_end_line_cycles_denominator: 2,
+            sm_active_observation_blend_numerator: 2,
+            sm_active_observation_blend_denominator: 5,
             scalar_initiation_interval_cycles: 1,
             scalar_in_flight_capacity: 8,
             // The P9 barrier-warp sweep (w1/w8/w32 calibration, w16 held-out)
