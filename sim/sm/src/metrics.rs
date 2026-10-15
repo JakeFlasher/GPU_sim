@@ -1458,7 +1458,31 @@ impl TraceMetrics {
                 .or_default();
             add(entry, 1)?;
         }
-        if matches!(head, "BRA" | "BRX" | "BRXU" | "JMP" | "JMX" | "JMXU") {
+        // Nsight's SMSP branch counter is the CBU instruction population,
+        // excluding only BMOV and BSSY.  The old projection counted only the
+        // direct branch heads, which systematically omitted control-flow
+        // instructions such as BSYNC, EXIT, WARPSYNC, BREAK, and CONT.  Keep
+        // this separate from the SASS branch subset (the `sm__sass_*` metric
+        // family) and from the branch-target observer below: this is a
+        // warp-instruction cardinality, so predicated-off records still count
+        // once when the warp executed the instruction.
+        if matches!(
+            head,
+            "BRA"
+                | "BRX"
+                | "BRXU"
+                | "JMP"
+                | "JMX"
+                | "JMXU"
+                | "CALL"
+                | "RET"
+                | "EXIT"
+                | "BSYNC"
+                | "WARPSYNC"
+                | "YIELD"
+                | "BREAK"
+                | "CONT"
+        ) {
             add(&mut self.branch_warp_instructions, 1)?;
             add(
                 &mut self.branch_mixed_predicate_warp_instructions,
