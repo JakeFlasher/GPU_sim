@@ -831,8 +831,10 @@ impl L2EventMaskPreview {
         self.fill_mask
     }
 
-    /// Requested read sectors already owned by a matching allocation's pending
-    /// lower-level fetch. They remain lookup misses but issue no duplicate fetch.
+    /// Requested read sectors that were already owned by a matching allocation's
+    /// pending lower-level fetch before this access began. They remain lookup
+    /// misses but issue no duplicate fetch. Pending bits opened by this access
+    /// are never reported here.
     pub const fn pending_merge_mask(self) -> u8 {
         self.pending_merge_mask
     }
@@ -1951,7 +1953,15 @@ impl L2Model {
         });
         let mut line_present = resident.is_some();
         let mut valid_mask = resident.map_or(0, |way| ways[way].mask);
-        let mut pending_mask = resident.map_or(0, |way| ways[way].pending_mask);
+        // Preserve the age boundary for this request. `pending_mask` is
+        // mutated while the ascending sector walk constructs the new line
+        // allocation; using that mutable value to classify a later sector
+        // would make a fill opened by this request look like an older fill.
+        // The coalescing endpoint is only valid for sectors pending before
+        // this access began. Each sector bit is visited once today, but the
+        // explicit snapshot keeps that protocol invariant local to the
+        // classifier rather than relying on the walk shape.
+        let preexisting_pending_mask = resident.map_or(0, |way| ways[way].pending_mask);
         let mut allocation_generation = match resident {
             Some(way) => Some(
                 ways[way]
@@ -1978,7 +1988,7 @@ impl L2Model {
                 .checked_add(1)
                 .ok_or(L2AccessError::ClockOverflow { clock })?;
             let sector_present = line_present && valid_mask & bit != 0;
-            let sector_pending = line_present && pending_mask & bit != 0;
+            let sector_pending = line_present && preexisting_pending_mask & bit != 0;
             let counted_hit = sector_present || (line_present && class == L2OpClass::WriteAtomic);
             // L2's tag-stage lookup observer counts a pending allocation as a
             // hit.  This is distinct from `counted_hit`: the latter drives
@@ -2078,11 +2088,9 @@ impl L2Model {
                 } else {
                     fill_mask |= bit;
                 }
-                pending_mask |= bit;
             }
             if class == L2OpClass::WriteAtomic {
                 valid_mask |= bit;
-                pending_mask &= !bit;
             }
             line_present = true;
         }
