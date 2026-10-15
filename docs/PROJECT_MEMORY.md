@@ -838,3 +838,12 @@ replay gives 0.90345% shared-load conflict APE over 675 positive rows and
 16.604% wavefront APE. Q65 also includes defensive L2 pending-mask commit
 `eb227837`; read-only L2 miss/hit remains 0.3474%/25.33% with no output delta.
 Remaining wavefront and TMA/L2 hit gaps require new scope evidence, not fitting.
+
+## 2026-10-15 — Round 23 post-Q65 adversarial closure
+
+The post-Q65 review found no additional safe source/model correction. Shared
+conflict semantics are source-scoped; L2 pending-mask hardening is defensive
+and output-neutral. L1 aggregate hit, TMA/L2 hit, active IPC, and Cutlass branch
+residuals remain typed scope gaps. Future work requires a new source-visible
+relation before another full replay; no NCU fitting or lexical-order heuristic
+is accepted.
