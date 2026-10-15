@@ -2297,6 +2297,11 @@ pub enum ValidatedSectorPlan<'a> {
 pub struct ValidatedMemoryInstruction {
     sectors: CompactSectorPlan,
     projection: u32,
+    /// Ideal 32-bank/4-byte-word shared service work for this instruction;
+    /// zero for non-shared routes.  This is retained separately from the
+    /// route-disjoint `projection` so the effective bank-conflict report can
+    /// subtract unavoidable wide-access wavefronts rather than one request.
+    shared_ideal_wavefronts: u32,
     meta: CompactMemoryMeta,
     /// Zero means absent; otherwise this is wire enum value + 1. Keeping the
     /// tiny closed enum in one byte preserves the compact metadata bound.
@@ -2478,6 +2483,13 @@ impl ValidatedMemoryInstruction {
         self.projection
     }
 
+    /// Unavoidable wavefronts from per-lane access width, excluding bank
+    /// conflicts.  A 4-byte access requires one wavefront; an 8-byte access
+    /// requires two, even when every lane maps to a distinct bank.
+    pub const fn shared_bank_ideal_wavefronts_32x4(&self) -> u32 {
+        self.shared_ideal_wavefronts
+    }
+
     /// Backing allocation identity for an address-carrying global atomic.
     ///
     /// The full reader has already required this id to resolve to the
@@ -2613,6 +2625,17 @@ impl ValidatedWarp {
                                 record: format!("{label} warp={map_key} inst={record_ix}"),
                                 source,
                             })?
+                    } else {
+                        0
+                    };
+                let shared_bank_ideal_wavefronts_32x4 =
+                    if matches!(resolved_route, Ok(ValidatedMemoryRoute::Shared)) {
+                        project_shared_bank_ideal_wavefronts_32x4(preflight).map_err(|source| {
+                            TraceError::SharedBankProjection {
+                                record: format!("{label} warp={map_key} inst={record_ix}"),
+                                source,
+                            }
+                        })?
                     } else {
                         0
                     };
@@ -2775,6 +2798,7 @@ impl ValidatedWarp {
                 memories.push(ValidatedMemoryInstruction {
                     sectors: sector_plan,
                     projection,
+                    shared_ideal_wavefronts: shared_bank_ideal_wavefronts_32x4,
                     meta: CompactMemoryMeta::new(
                         meta.op_class,
                         meta.access_kind,
@@ -7080,6 +7104,52 @@ pub fn project_shared_bank_wavefronts_32x4(
         u32::try_from(wavefronts)
             .unwrap_or_else(|_| unreachable!("bounded projection escaped u32")),
     )
+}
+
+/// Compute the ideal shared-memory wavefront count for one instruction under
+/// the same 32-bank/4-byte-word contract as
+/// [`project_shared_bank_wavefronts_32x4`].  The ideal count is the maximum
+/// number of 4-byte words any active lane must transfer.  It therefore
+/// preserves the unavoidable multi-wavefront cost of a wide per-lane access
+/// (for example, an 8-byte load needs at least two wavefronts) while ignoring
+/// inter-lane bank conflicts.  Nsight's shared-memory bank-conflict surface
+/// measures excess wavefronts above this ideal, not excess above one request.
+pub fn project_shared_bank_ideal_wavefronts_32x4(
+    preflight: PreflightedMemoryAccess<'_>,
+) -> Result<u32, SharedBankProjectionError> {
+    let mut ideal_words = 0_u64;
+    let mut failure = None;
+    preflight.visit_addresses(|access| {
+        if failure.is_some() {
+            return;
+        }
+        if access.data_width_bytes <= 0 {
+            failure = Some(SharedBankProjectionError::LaneWordLimit {
+                lane: 0,
+                words: 0,
+                limit: MAX_SHARED_WORDS_PER_LANE,
+            });
+            return;
+        }
+        let width = u64::try_from(access.data_width_bytes).unwrap_or_else(|_| unreachable!());
+        let words = width
+            .checked_add((SHARED_BANK_WORD_BYTES_32X4 as u64) - 1)
+            .and_then(|value| value.checked_div(SHARED_BANK_WORD_BYTES_32X4 as u64))
+            .unwrap_or(u64::MAX);
+        if words > MAX_SHARED_WORDS_PER_LANE {
+            failure = Some(SharedBankProjectionError::LaneWordLimit {
+                lane: 0,
+                words,
+                limit: MAX_SHARED_WORDS_PER_LANE,
+            });
+            return;
+        }
+        ideal_words = ideal_words.max(words);
+    });
+    if let Some(failure) = failure {
+        return Err(failure);
+    }
+    Ok(u32::try_from(ideal_words).unwrap_or_else(|_| unreachable!()))
 }
 
 #[derive(Debug, Clone, Copy)]

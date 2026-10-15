@@ -832,7 +832,8 @@ pub(super) fn project(
             let row = trace.memory.get(kind).cloned().unwrap_or_default();
             let requests = u128::from(row.requests);
             let wavefronts = u128::from(row.bank_wavefronts);
-            let conflicts = wavefronts.saturating_sub(requests);
+            let ideal_wavefronts = u128::from(row.ideal_bank_wavefronts);
+            let conflicts = wavefronts.saturating_sub(ideal_wavefronts);
             m.insert(
                 format!("{kind}_requests"),
                 Metric::approximate_count(
@@ -877,7 +878,7 @@ pub(super) fn project(
                     Some(conflict_metric),
                     "wavefront",
                     conflicts,
-                    "wavefronts beyond one per shared instruction; effective bank-conflict projection, not a cross-client profiler total",
+                    "wavefronts beyond the per-lane-width ideal; effective bank-conflict projection, not a cross-client profiler total",
                 ),
             );
         }
@@ -2077,7 +2078,7 @@ pub(super) fn project(
             ),
         );
         m.insert(format!("{key}_bank_wavefronts"), if trace.sectors_decoded {
-            Metric::ratio(Some(ncu), "wavefront", row.map_or(0, |r| u128::from(r.bank_wavefronts)), 1, true, "32-bank/4-byte-word broadcast-collapsed service work; wide accesses and LDSM can differ from hardware wavefronts")
+            Metric::ratio(Some(ncu), "wavefront", row.map_or(0, |r| u128::from(r.bank_wavefronts)), 1, true, "32-bank/4-byte-word broadcast-collapsed shared service work; ideal wide-access wavefronts are retained separately from bank-conflict excess")
         } else { Metric::unavailable(Some(ncu), "wavefront", "flat replay does not preserve shared bank topology") });
     }
     let lsu_requests: u64 = trace.memory.values().map(|row| row.requests).sum();

@@ -256,6 +256,10 @@ pub enum AccessKind {
     /// is executable.
     Shared {
         wavefronts: u64,
+        /// Unavoidable wavefronts from per-lane access width. This is kept
+        /// separate from `wavefronts` so reports can subtract ideal wide-load
+        /// service before calling the remainder a bank conflict.
+        ideal_wavefronts: u64,
     },
     /// Local-memory load (LDL): modeled sectors in the same physical L1/L2
     /// hierarchy as Global traffic, with Local accounting provenance.

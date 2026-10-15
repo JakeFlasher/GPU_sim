@@ -1387,7 +1387,7 @@ fn sm120_flat_service_work(kind: AccessKind, opcode_text: &str) -> Option<(bool,
             true,
             u64::from(len).saturating_mul(sm120_flat_global_service_rate(opcode_text)),
         )),
-        AccessKind::Shared { wavefronts } if wavefronts != 0 => Some((
+        AccessKind::Shared { wavefronts, .. } if wavefronts != 0 => Some((
             false,
             wavefronts.saturating_mul(SM120_FLAT_SHARED_SERVICE_CYCLES_PER_WAVEFRONT),
         )),
@@ -5164,7 +5164,7 @@ pub(crate) fn data_ready_time(
                 Ok(None)
             }
         }
-        AccessKind::Shared { wavefronts } => {
+        AccessKind::Shared { wavefronts, .. } => {
             if needs_ready {
                 params.shared_ready(t, wavefronts).map(Some)
             } else {
@@ -6306,7 +6306,7 @@ impl<'a> SmCore<'a> {
                             sm120_flat_global_sectors = sm120_flat_global_sectors.saturating_add(u64::from(len));
 
                         }
-                        AccessKind::Shared { wavefronts } => {
+                        AccessKind::Shared { wavefronts, .. } => {
                             sm120_flat_shared_wavefronts = sm120_flat_shared_wavefronts.saturating_add(wavefronts);
                         }
                         AccessKind::NonMemory
@@ -8385,7 +8385,7 @@ impl<'a> SmCore<'a> {
                     Ok(None)
                 }
             }
-            AccessKind::Shared { wavefronts } => {
+            AccessKind::Shared { wavefronts, .. } => {
                 if write_barrier.is_some() {
                     p.shared_ready(t, wavefronts).map(Some)
                 } else {
@@ -11287,7 +11287,7 @@ impl<'a> SmCore<'a> {
             AccessKind::NonMemory if needs_ready => {
                 self.params.non_memory_ready(t)?;
             }
-            AccessKind::Shared { wavefronts } if needs_ready => {
+            AccessKind::Shared { wavefronts, .. } if needs_ready => {
                 self.params.shared_ready(t, wavefronts)?;
             }
             AccessKind::NonMemory | AccessKind::PredicatedOffMemory | AccessKind::Shared { .. } => {
@@ -12962,7 +12962,7 @@ impl<'a> SmCore<'a> {
                 })
             } else if self.sm120_flat_shared_medium {
                 let wavefronts = match inst.kind {
-                    AccessKind::Shared { wavefronts } => wavefronts,
+                    AccessKind::Shared { wavefronts, .. } => wavefronts,
                     _ => 0,
                 };
                 if wavefronts == 0 {

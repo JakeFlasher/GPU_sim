@@ -106,6 +106,11 @@ pub struct MemoryTraffic {
     pub sector_aliases: u64,
     /// Shared 32-bank/4-byte-word service work, not NCU sampled stalls.
     pub bank_wavefronts: u64,
+    /// Unavoidable shared service work from per-lane access width. NCU's
+    /// bank-conflict counter is excess over this ideal, not excess over one
+    /// request; retaining it separately avoids calling wide accesses bank
+    /// conflicts.
+    pub ideal_bank_wavefronts: u64,
 }
 
 /// Trace-local physical-pipeline candidate domains. A dynamic SASS record
@@ -1499,7 +1504,7 @@ impl TraceMetrics {
         }
         let (key, sectors, bank_wavefronts) = match kind {
             AccessKind::NonMemory | AccessKind::PredicatedOffMemory => return Ok(()),
-            AccessKind::Shared { wavefronts } => (
+            AccessKind::Shared { wavefronts, .. } => (
                 if head == "STS" {
                     "shared_store"
                 } else if head.starts_with("ATOM") {
@@ -1555,7 +1560,15 @@ impl TraceMetrics {
                 sectors.saturating_sub(unique_sectors),
             )?;
         }
-        add(&mut row.bank_wavefronts, bank_wavefronts)
+        add(&mut row.bank_wavefronts, bank_wavefronts)?;
+        if let AccessKind::Shared {
+            ideal_wavefronts,
+            ..
+        } = kind
+        {
+            add(&mut row.ideal_bank_wavefronts, ideal_wavefronts)?;
+        }
+        Ok(())
     }
 }
 

@@ -5712,6 +5712,7 @@ struct CompactReplayMemory<'a> {
 fn compact_shared_kind(memory: &ValidatedMemoryInstruction) -> AccessKind {
     AccessKind::Shared {
         wavefronts: u64::from(memory.shared_bank_wavefronts_32x4()),
+        ideal_wavefronts: u64::from(memory.shared_bank_ideal_wavefronts_32x4()),
     }
 }
 
