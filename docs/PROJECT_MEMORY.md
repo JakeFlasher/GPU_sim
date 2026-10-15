@@ -853,3 +853,21 @@ is accepted.
 Q57/Q58 IPC, L2 pending-merge, complete-branch, and stream-L2 artifacts are
 separate canonical directories; Q65 is the latest combined replay. They are
 not interchangeable or overwritten despite shared sequence labels.
+
+
+## Q66 / Round24 — audited L1 candidate rejected (2026-10-15)
+
+A temporary commit `3dc7c25b` routed launch-scoped L1 lookup emission through
+the retained ordinary older-pending merge audit instead of the legacy
+`line_alloc_misses * 3` projection. The selected full-first real probe was
+favorable, but retrospective evaluation against the retained Q65 full corpus
+showed that the substitution is not general: approximately 106.60% mean
+positive-target APE and 1,536 zero-target false positives; a narrower
+resident-plus-ordinary variant remained approximately 40.57% APE with 1,271
+false positives. Commit `cf79b9cc` reverts the candidate. Physical cache state,
+timing, L2, IPC, and default scored routes were never changed. Merge audit
+fields remain diagnostic. Future L1 improvement requires per-request
+sector-mask/client scope or another independent source relation; aggregate
+pending-merge formulas are not permitted as default corrections. Round24
+findings are archived in the proposal workspace's
+`adversarial_review/round24_next_phase_source_20261015/`.
