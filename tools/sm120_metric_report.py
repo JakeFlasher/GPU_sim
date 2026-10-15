@@ -169,8 +169,12 @@ def add_observation(
     join_status: str,
 ) -> dict[str, Any]:
     name = entry["metric"]
+    workload_family = capture.split("_", 1)[0]
     row = table.setdefault(name, {
+        # `family` is retained as a compatibility alias for the metric family.
         "family": family(name),
+        "metric_family": family(name),
+        "workload_families": set(),
         "modes": set(),
         "prediction_status": collections.Counter(),
         "reasons": collections.Counter(),
@@ -180,10 +184,14 @@ def add_observation(
         "unit_mismatch": 0,
         "target_missing": 0,
         "zero_opportunity": 0,
+        "prediction_value_missing": 0,
+        "predicted_zero_on_zero_target": 0,
+        "predicted_nonzero_on_zero_target": 0,
         "errors": [],
         "relative_errors": [],
         "errors_by_capture": collections.defaultdict(list),
         "relative_by_family": collections.defaultdict(list),
+        "relative_by_workload_family": collections.defaultdict(list),
         "relative_by_join": collections.defaultdict(list),
         "source_counts": collections.Counter(),
         "aliases_not_scored": 0,
@@ -194,6 +202,7 @@ def add_observation(
     })
     row["modes"].add(mode)
     row["captures"].add(capture)
+    row["workload_families"].add(workload_family)
     status = entry["status"]
     row["prediction_status"][status] += 1
     if entry.get("reason"):
@@ -218,8 +227,8 @@ def add_observation(
     target = target_metrics.get(name, {})
     truth = finite(target.get("value")) if isinstance(target, dict) else None
     if status != "predicted" or estimate is None:
-        if status == "predicted":
-            row["zero_opportunity"] += 1
+        if status == "predicted" and estimate is None:
+            row["prediction_value_missing"] += 1
         return {**result, "status": "model_unavailable", "reason": entry.get("reason")}
     row["predicted"] += 1
     if truth is None:
@@ -227,6 +236,12 @@ def add_observation(
         return {**result, "status": "target_missing"}
     row["target_available"] += 1
     result.update(target=truth, target_unit=target.get("unit"))
+    if truth == 0:
+        row["zero_opportunity"] += 1
+        if estimate == 0:
+            row["predicted_zero_on_zero_target"] += 1
+        else:
+            row["predicted_nonzero_on_zero_target"] += 1
     # NCU exports these documented count metrics with an empty unit on SM120.
     # This is a name-qualified count relation, not permission to equate arbitrary
     # unitless metrics with wavefronts or to convert timing domains.
@@ -248,7 +263,8 @@ def add_observation(
     relative = error / abs(truth) if truth != 0 else None
     if relative is not None:
         row["relative_errors"].append(relative)
-        row["relative_by_family"][capture.split("_", 1)[0]].append(relative)
+        row["relative_by_family"][workload_family].append(relative)
+        row["relative_by_workload_family"][workload_family].append(relative)
         row["relative_by_join"][join_status].append(relative)
     else:
         row["zero_targets"] += 1
@@ -304,8 +320,14 @@ def render_summary(table: dict[str, dict[str, Any]]) -> dict[str, Any]:
     for name, row in sorted(table.items()):
         compared = row["compared"]
         errors = row["errors"]
+        workload_relative = {
+            name: distribution(values)
+            for name, values in sorted(row["relative_by_workload_family"].items())
+        }
         item = {
             "family": row["family"],
+            "metric_family": row["metric_family"],
+            "workload_families": sorted(row["workload_families"]),
             "modes": sorted(row["modes"]),
             "predicted": row["predicted"],
             "compared": compared,
@@ -313,6 +335,9 @@ def render_summary(table: dict[str, dict[str, Any]]) -> dict[str, Any]:
             "target_missing": row["target_missing"],
             "unit_mismatch": row["unit_mismatch"],
             "zero_opportunity": row["zero_opportunity"],
+            "prediction_value_missing": row["prediction_value_missing"],
+            "predicted_zero_on_zero_target": row["predicted_zero_on_zero_target"],
+            "predicted_nonzero_on_zero_target": row["predicted_nonzero_on_zero_target"],
             "exact": row["exact"],
             "prediction_status": dict(row["prediction_status"]),
             "reasons": dict(row["reasons"]),
@@ -324,6 +349,10 @@ def render_summary(table: dict[str, dict[str, Any]]) -> dict[str, Any]:
             "family_relative_error_nonzero_targets": {
                 name: distribution(values) for name, values in sorted(row["relative_by_family"].items())
             },
+            # The old key is metric-family stratification.  Keep it for
+            # compatibility and expose the workload-family stratification
+            # under an unambiguous name.
+            "workload_family_relative_error_nonzero_targets": workload_relative,
             "join_relative_error_nonzero_targets": {
                 name: distribution(values) for name, values in sorted(row["relative_by_join"].items())
             },
@@ -334,7 +363,7 @@ def render_summary(table: dict[str, dict[str, Any]]) -> dict[str, Any]:
         }
         metrics[name] = item
         if row["predicted"] == 0:
-            unavailable[row["family"]].append({
+            unavailable[row["metric_family"]].append({
                 "metric": name,
                 "rows": sum(row["prediction_status"].values()),
                 "reasons": dict(row["reasons"]),
@@ -367,7 +396,7 @@ def main() -> int:
     for name in sorted((set(target_inventory) | declared) - available):
         unavailable[family(name)].append({"metric": name, "target_rows": target_inventory[name]})
     summary = {
-        "schema_version": 2,
+        "schema_version": 3,
         "scope": "post-replay metric predictions; NCU values never replay/model inputs",
         "selection": "one prediction per metric/launch/mode; finite declared metric, cache observer, native metric, then timing fallback; alternatives retained but not scored; no NCU-based selection",
         "sources": {"full": str(args.full), "fast": str(args.fast), "profiles": str(args.profiles)},
