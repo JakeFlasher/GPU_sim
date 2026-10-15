@@ -918,3 +918,14 @@ with unmodeled TMA global-to-shared mbarrier service, but no qualified
 producer-to-generation relation or completion timing is available. Keep Q65 as
 the last scored 339-workload baseline and require a new typed relation before
 changing IPC/L2 defaults.
+
+
+## Q70 — typed TMA global-to-shared generation relation (2026-10-15)
+
+Commit `7b01297c` adds bounded `TmaGenerationRelation` evidence joining TMA
+producer cohorts to destination mbarrier accounting. Exact one-shot cohorts
+require raw identity, one arrival, and exact summed payload conservation;
+partial quant cohorts remain protocol-scoped candidates. A four-capture
+sidecar probe found 24 relations: 16 exact Cutlass cohorts and 8 quant
+candidates, all with phase-readiness observers. The relation is diagnostic and
+model-relative only; no replay timing or engine completion clock is added.
