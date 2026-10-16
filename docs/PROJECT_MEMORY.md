@@ -43,6 +43,8 @@ The canonical result is exposed as:
 The latest post-cleanup verification is retained at
 `/root/sm120_rtx_5090_capture/replay_results/current_full_replay_20261016/`; it
 completed the same full-before-fast 339-root run with twelve workers.
+The current shared-memory refinement result is retained at
+`/root/sm120_rtx_5090_capture/replay_results/current_full_replay_20261016_shared_memory/`.
 
 Current full-lane mean APEs include:
 
@@ -52,6 +54,13 @@ Current full-lane mean APEs include:
 - unified L1 lookup: 60.7210%;
 - LSU global-load L1 lookup: 44.5013%;
 - unqualified DRAM read sectors: 50.5194%.
+
+The shared-memory projection now partitions ordinary LDS/STS opcode classes
+from LDSM/STSM and accumulates bank-conflict excess per instruction. The
+corresponding full-lane means are 0.1049% (shared-load SASS instructions),
+16.3564% (shared-load wavefronts), 3.7771% (shared-store wavefronts),
+49.2552% (shared-load bank conflicts), and 30.8590% (shared-store bank
+conflicts), with no regression in other scored metrics.
 
 Aggregate L1 scope, unqualified DRAM/service and physical topology, and the
 internal TMA completion clock remain typed residuals. A boundary-clipped TMA

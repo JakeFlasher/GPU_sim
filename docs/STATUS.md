@@ -26,6 +26,8 @@ The authoritative complete-corpus result is available through
 The latest post-cleanup verification is retained at
 `/root/sm120_rtx_5090_capture/replay_results/current_full_replay_20261016/`; it
 contains successful full and fast streams for every root and launch.
+The current shared-memory refinement result is at
+`/root/sm120_rtx_5090_capture/replay_results/current_full_replay_20261016_shared_memory/`.
 Representative full-lane mean APEs are:
 
 | Metric | Mean APE |
@@ -36,6 +38,13 @@ Representative full-lane mean APEs are:
 | Unified L1 lookup | 60.7210% |
 | LSU global-load L1 lookup | 44.5013% |
 | DRAM read sectors | 50.5194% |
+
+The shared-memory projection now partitions ordinary LDS/STS opcode classes
+from LDSM/STSM and accumulates bank-conflict excess per instruction. Its
+complete-corpus means are **0.1049%** for shared-load SASS instructions,
+**16.3564%** for shared-load wavefronts, **3.7771%** for shared-store
+wavefronts, **49.2552%** for shared-load bank conflicts, and **30.8590%** for
+shared-store bank conflicts; no other scored metric changed.
 
 These scores are effective metric projections. Aggregate L1 client scope,
 DRAM/service and topology, and engine completion remain explicit residuals.
