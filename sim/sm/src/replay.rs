@@ -243,6 +243,78 @@ fn observe_tma_l2_shadow(
     observe_tma_l2_shadow_iter(observations.values(), config)
 }
 
+fn tma_sidecar_reuse_summary(
+    observations: &LaunchObservations,
+) -> (u64, u64, u64, u64, u64) {
+    let mut all_sectors = BTreeSet::new();
+    let mut all_lines = BTreeSet::new();
+    let mut sum_record_unique_sectors = 0_u64;
+    let mut sum_record_unique_lines = 0_u64;
+    let mut intra_record_duplicate_refs = 0_u64;
+    for observation in observations.tma.values() {
+        let ids = if observation.is_load {
+            &observation.source_sector_ids
+        } else if observation.is_store {
+            &observation.destination_sector_ids
+        } else {
+            continue;
+        };
+        sum_record_unique_sectors = sum_record_unique_sectors
+            .saturating_add(observation.diagnostic.unique_sector_count);
+        sum_record_unique_lines = sum_record_unique_lines
+            .saturating_add(observation.diagnostic.unique_line_count);
+        intra_record_duplicate_refs = intra_record_duplicate_refs
+            .saturating_add(observation.diagnostic.intra_record_duplicate_sector_refs);
+        for &sector in ids.iter() {
+            all_sectors.insert(sector);
+            all_lines.insert(sector.div_euclid(4));
+        }
+    }
+    (
+        sum_record_unique_sectors,
+        sum_record_unique_lines,
+        u64::try_from(all_sectors.len()).unwrap_or(u64::MAX),
+        u64::try_from(all_lines.len()).unwrap_or(u64::MAX),
+        intra_record_duplicate_refs,
+    )
+}
+
+fn async_clock_sandwich_summary(
+    observations: &LaunchObservations,
+    relations: &sim_trace::async_sidecars::AsyncRelations,
+) -> (u64, u64, u64, u64) {
+    let mut pairs = 0_u64;
+    let mut invalid = 0_u64;
+    let mut lower_sum = 0_u64;
+    let mut upper_sum = 0_u64;
+    for relation in &relations.relation_samples {
+        let (Some(issue), Some(acquire)) = (
+            relation.producer_issue_clock,
+            relation.wait_visibility_clock,
+        ) else {
+            continue;
+        };
+        if acquire < issue {
+            invalid = invalid.saturating_add(1);
+            continue;
+        }
+        let last_false = observations
+            .sync
+            .get(&relation.wait)
+            .and_then(|observation| observation.last_unsuccessful_query_clock);
+        if last_false.is_some_and(|clock| clock < issue || clock > acquire) {
+            invalid = invalid.saturating_add(1);
+            continue;
+        }
+        let lower = last_false.map_or(0, |clock| clock - issue);
+        let upper = acquire - issue;
+        pairs = pairs.saturating_add(1);
+        lower_sum = lower_sum.saturating_add(lower);
+        upper_sum = upper_sum.saturating_add(upper);
+    }
+    (pairs, invalid, lower_sum, upper_sum)
+}
+
 /// Run the same conditional TMA/L2 observer in the sidecar's first-seen
 /// stream order.  This is diagnostic only: the lexical keyed-map projection
 /// remains the scored/default endpoint because sidecar order is an emission
@@ -3582,6 +3654,32 @@ fn extract_per_sm_blocks(
     trace_metrics.async_obligations = observations
         .filter(|o| !o.tma.is_empty() || !o.sync.is_empty())
         .map(|o| sim_trace::obligations::ObligationFrontier::from_launch(o, cluster.into()).0);
+    if let Some(observations) = observations {
+        let (
+            sum_record_unique_sectors,
+            sum_record_unique_lines,
+            launch_unique_sectors,
+            launch_unique_lines,
+            intra_record_duplicate_refs,
+        ) = tma_sidecar_reuse_summary(observations);
+        trace_metrics.observe_tma_sidecar_reuse(
+            sum_record_unique_sectors,
+            sum_record_unique_lines,
+            launch_unique_sectors,
+            launch_unique_lines,
+            intra_record_duplicate_refs,
+        )?;
+        if let Some(relations) = trace_metrics.async_relations.as_ref() {
+            let (pairs, invalid, lower_sum, upper_sum) =
+                async_clock_sandwich_summary(observations, relations);
+            trace_metrics.observe_async_clock_sandwich(
+                pairs,
+                invalid,
+                lower_sum,
+                upper_sum,
+            )?;
+        }
+    }
     if let (Some(observations), Some(l2)) = (observations, tma_shadow_l2) {
         let stats = observe_tma_l2_shadow(&observations.tma, l2)?;
         trace_metrics.observe_tma_shadow_l2(

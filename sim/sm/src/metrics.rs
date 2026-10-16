@@ -435,6 +435,20 @@ pub struct TraceMetrics {
     pub tma_sidecar_unique_line_count: u64,
     pub tma_sidecar_intra_record_duplicate_sector_refs: u64,
     pub tma_sidecar_nominal_box_overage_bytes_diagnostic: u64,
+    /// Launch-level decomposition of sidecar address multiplicity. These
+    /// counters separate intra-record byte/address fanout from true
+    /// inter-record sector and line reuse; they are diagnostic only.
+    pub tma_sidecar_sum_record_unique_sectors: u64,
+    pub tma_sidecar_sum_record_unique_lines: u64,
+    pub tma_sidecar_inter_record_duplicate_sectors: u64,
+    pub tma_sidecar_inter_record_shared_lines: u64,
+    pub tma_sidecar_intra_record_duplicate_refs: u64,
+    /// Hardware-clock observation brackets derived from existing sidecars.
+    /// These are interval evidence, never a completion clock or replay input.
+    pub async_clock_sandwich_pairs_observed: u64,
+    pub async_clock_sandwich_invalid_pairs: u64,
+    pub async_clock_sandwich_lower_span_sum: u64,
+    pub async_clock_sandwich_upper_span_sum: u64,
     /// Address-derived conditional TMA/L2 shadow stream. These counters are
     /// separate from the shared replay L2 state and never affect scheduling,
     /// response timing, or DRAM service.
@@ -846,6 +860,51 @@ impl TraceMetrics {
         add(&mut self.tma_shadow_l2_store_hits, store[1])?;
         add(&mut self.tma_shadow_l2_store_misses, store[2])?;
         add(&mut self.tma_shadow_l2_store_address_unavailable, store[3])?;
+        Ok(())
+    }
+
+    pub(crate) fn observe_tma_sidecar_reuse(
+        &mut self,
+        sum_record_unique_sectors: u64,
+        sum_record_unique_lines: u64,
+        launch_unique_sectors: u64,
+        launch_unique_lines: u64,
+        intra_record_duplicate_refs: u64,
+    ) -> Result<(), crate::IssueError> {
+        add(
+            &mut self.tma_sidecar_sum_record_unique_sectors,
+            sum_record_unique_sectors,
+        )?;
+        add(
+            &mut self.tma_sidecar_sum_record_unique_lines,
+            sum_record_unique_lines,
+        )?;
+        add(
+            &mut self.tma_sidecar_inter_record_duplicate_sectors,
+            sum_record_unique_sectors.saturating_sub(launch_unique_sectors),
+        )?;
+        add(
+            &mut self.tma_sidecar_inter_record_shared_lines,
+            sum_record_unique_lines.saturating_sub(launch_unique_lines),
+        )?;
+        add(
+            &mut self.tma_sidecar_intra_record_duplicate_refs,
+            intra_record_duplicate_refs,
+        )?;
+        Ok(())
+    }
+
+    pub(crate) fn observe_async_clock_sandwich(
+        &mut self,
+        pairs: u64,
+        invalid_pairs: u64,
+        lower_span_sum: u64,
+        upper_span_sum: u64,
+    ) -> Result<(), crate::IssueError> {
+        add(&mut self.async_clock_sandwich_pairs_observed, pairs)?;
+        add(&mut self.async_clock_sandwich_invalid_pairs, invalid_pairs)?;
+        add(&mut self.async_clock_sandwich_lower_span_sum, lower_span_sum)?;
+        add(&mut self.async_clock_sandwich_upper_span_sum, upper_span_sum)?;
         Ok(())
     }
 
