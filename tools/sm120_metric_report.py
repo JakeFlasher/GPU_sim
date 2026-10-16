@@ -68,6 +68,33 @@ def allowed_units(unit: str) -> set[str]:
     }.get(unit, set())
 
 
+def join_provenance_tier(join: dict[str, Any]) -> str:
+    """Describe launch association without treating it as hardware identity."""
+    status = join.get("join_status")
+    if status == "identity":
+        return "Tier1ExactKernelIdGridBlock"
+    if status == "ordered_fallback" and join.get("order_basis") == "kernel_id_rank":
+        return "Tier2DeterministicOrderGridBlock"
+    if status == "ordered_fallback":
+        return "Tier3OrderedFallback"
+    return "Unmatched"
+
+
+def client_scope_class(metric: str) -> str:
+    """Name the documented counter scope; do not imply cross-client equality."""
+    if metric.startswith("lts__t_sectors_srcunit_tex_op_read_lookup_"):
+        return "SourceAndOpQualified"
+    if metric.startswith("lts__t_sectors_srcunit_tex_lookup_"):
+        return "SourceQualifiedMixedOp"
+    if metric.startswith("l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_"):
+        return "LsuGlobalReadQualified"
+    if metric.startswith("l1tex__t_sector_pipe_lsu_mem_global_op_ld_"):
+        return "LsuGlobalReadQualified"
+    if metric.startswith("dram__") or metric.startswith("l1tex__t_sectors_lookup_"):
+        return "UnqualifiedAllClients"
+    return "OtherOrUnclassified"
+
+
 def metric_entries(launch: dict[str, Any]) -> list[dict[str, Any]]:
     """Normalize native metric and cache-observer predictions."""
     entries: list[dict[str, Any]] = []
@@ -187,6 +214,7 @@ def add_observation(
     mode: str,
     capture: str,
     join_status: str,
+    join_tier: str,
 ) -> dict[str, Any]:
     name = entry["metric"]
     workload_family = capture.split("_", 1)[0]
@@ -242,7 +270,9 @@ def add_observation(
     if entry.get("alternative_conflict"):
         row["alternative_conflicts"] += 1
     result = {"metric": name, "source_key": entry["source_key"],
-              "estimate": estimate, "model_status": status, "model_unit": entry["unit"]}
+              "estimate": estimate, "model_status": status, "model_unit": entry["unit"],
+              "join_provenance_tier": join_tier,
+              "client_scope_class": client_scope_class(name)}
     if entry.get("semantics"):
         result["semantics"] = entry["semantics"]
     if alternatives:
@@ -323,9 +353,12 @@ def reduce_mode(
             counts["launches"] += len(launches)
             for join in join_ncu_rows(launches, ncu):
                 counts[f"join_{join['join_status']}"] += 1
+                join_tier = join_provenance_tier(join)
                 li, ni = join.get("launch_index"), join.get("ncu_row_index")
                 if li is None or ni is None:
-                    output.write(json.dumps({"capture": rel, "mode": mode, **join}) + "\n")
+                    output.write(json.dumps({"capture": rel, "mode": mode,
+                                             "join_provenance_tier": join_tier,
+                                             **join}) + "\n")
                     continue
                 launch = launches[li]
                 target_metrics = ncu[ni].get("metrics", {})
@@ -333,9 +366,11 @@ def reduce_mode(
                 results = []
                 for entry in selected_entries(launch, mode):
                     results.append(add_observation(
-                        table, entry, target_metrics, mode, rel, join["join_status"]
+                        table, entry, target_metrics, mode, rel, join["join_status"], join_tier
                     ))
-                output.write(json.dumps({"capture": rel, "mode": mode, **join, "results": results}, separators=(",", ":"), allow_nan=False) + "\n")
+                output.write(json.dumps({"capture": rel, "mode": mode,
+                                         "join_provenance_tier": join_tier,
+                                         **join, "results": results}, separators=(",", ":"), allow_nan=False) + "\n")
     return dict(counts)
 
 
