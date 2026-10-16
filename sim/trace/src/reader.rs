@@ -7102,8 +7102,15 @@ const MAX_SHARED_WORDS_PER_LANE: u64 = 1_024;
 const MAX_SHARED_WORDS_PER_INSTRUCTION: u64 = 65_536;
 
 /// Reduce effective shared addresses to the exact bank-wavefront observable for
-/// 32 banks with 4-byte words. Identical word addresses collapse as broadcasts;
-/// the result is the maximum distinct-word count on any bank.
+/// 32 banks with 4-byte words.
+///
+/// Ordinary loads/stores use the broadcast rule: repeated references to one
+/// 32-bit word are serviced by one bank word.  Shared atomics are different:
+/// each active lane performs an independent read-modify-write, so even lanes
+/// targeting the same word must be serialized by the bank's atomic unit.  The
+/// access-kind metadata is part of the trace contract and lets us keep those
+/// two observers separate without treating global atomics as shared traffic
+/// (this function is only called after the route has resolved to `Shared`).
 pub fn project_shared_bank_wavefronts_32x4(
     preflight: PreflightedMemoryAccess<'_>,
     word_scratch: &mut Vec<i64>,
@@ -7166,8 +7173,16 @@ pub fn project_shared_bank_wavefronts_32x4(
         return Err(failure);
     }
 
-    word_scratch.sort_unstable();
-    word_scratch.dedup();
+    let is_shared_atomic = preflight.meta().access_kind
+        == Some(pb::MemoryOpAccessKind::Atomic)
+        || preflight.meta().op_class == pb::MemoryOpClass::Atomic;
+    if !is_shared_atomic {
+        // Shared LDS/STS broadcasts collapse repeated references to one
+        // 32-bit word.  Keep this legacy path byte-for-byte identical for
+        // ordinary shared accesses.
+        word_scratch.sort_unstable();
+        word_scratch.dedup();
+    }
     let mut bank_words = [0_u64; SHARED_BANK_COUNT_32X4 as usize];
     for &word in word_scratch.iter() {
         let bank = word.rem_euclid(SHARED_BANK_COUNT_32X4) as usize;
