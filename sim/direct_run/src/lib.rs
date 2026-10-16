@@ -24,6 +24,7 @@ use crate::emit::{
 };
 use serde::{Deserialize, Serialize};
 use sim_arch::card::{ArchCard, CalibError};
+use sim_arch::ArchId;
 use sim_arch::spec::{ArchitectureSpec, ResourceKind};
 use sim_mem::{
     coalesce_payloads, enrich_native_payload_records, join_native_payload_records,
@@ -2110,11 +2111,34 @@ fn cache_lookup_prediction_reports(
             "l1tex__t_sectors_lookup_hit.sum",
             "l1tex__t_sectors_lookup_miss.sum",
             l1.map(|counters| {
-                counters
-                    .origin(MemoryOrigin::Global)
-                    .effective_lookup_hits()
-                    .saturating_add(counters.origin(MemoryOrigin::Local).effective_lookup_hits())
-                    .saturating_add(counters.store_hits)
+                let local = counters.origin(MemoryOrigin::Local);
+                let observer = trace.filter(|metrics| {
+                    counters.arch() == Some(ArchId::Sm120)
+                        && metrics.local_interleaved_dynamic_store_records != 0
+                        && metrics.local_interleaved_l1_store_hits != 0
+                });
+                let read_hits = observer.map_or_else(
+                    || {
+                        counters
+                            .origin(MemoryOrigin::Global)
+                            .effective_lookup_hits()
+                            .saturating_add(local.effective_lookup_hits())
+                    },
+                    |metrics| {
+                        counters
+                            .origin(MemoryOrigin::Global)
+                            .effective_lookup_hits()
+                            .saturating_add(metrics.local_interleaved_l1_load_hits)
+                    },
+                );
+                let store_hits = observer.map_or(counters.store_hits, |metrics| {
+                    counters
+                        .origin(MemoryOrigin::Global)
+                        .store_hits
+                        .saturating_add(metrics.local_interleaved_l1_store_hits)
+                });
+                read_hits
+                    .saturating_add(store_hits)
                     .saturating_add(counters.reduction_hits)
             }),
         ),

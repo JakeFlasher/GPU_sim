@@ -13,6 +13,7 @@ use sim_sm::{
     DramStats, FrontEndCounters, FullCounterEstimatorProvenance, FullKernelReplayResult,
     FullLaunchCoverage, FullLaunchSetCounters, FullLaunchTimingDiagnostic, L2SourceSplit,
     LaunchSetScope, ModeledCompletionFrontier, ReplayConfiguration, SystemCounterError, TailFlags,
+    TraceMetrics,
 };
 
 /// The exact counter fields the emission layer reads, borrowed. The type is
@@ -27,6 +28,7 @@ struct CounterSnapshot<'a> {
     dram: Option<&'a DramStats>,
     front_end: FrontEndCounters,
     binding_cycles: Option<BindingCycles>,
+    trace_metrics: Option<&'a TraceMetrics>,
     /// Effective SM120 TMA global-to-shared payload demand, in 32-byte
     /// sectors. This is a conditional sidecar demand arm, not engine timing.
     tma_load_sectors: u64,
@@ -56,6 +58,7 @@ impl<'a> CounterSnapshot<'a> {
             dram: result.dram(),
             front_end: result.front_end(),
             binding_cycles,
+            trace_metrics: Some(result.trace_metrics()),
             tma_load_sectors: result
                 .trace_metrics()
                 .tma_sidecar_load_payload_bytes
@@ -81,6 +84,7 @@ impl<'a> CounterSnapshot<'a> {
             dram: counters.dram(),
             front_end: counters.front_end(),
             binding_cycles,
+            trace_metrics: None,
             tma_load_sectors: 0,
             partial_store_sectors: 0,
         })
@@ -1050,27 +1054,79 @@ fn emit_l1tex_unified_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, Em
             needs: MemUnit::L1Tex,
         }));
     };
-    let [store_hits, reduction_hits] = l1_write_hit_terms(snap.arch, l1);
-    let effective_read_hits = l1
-        .origin(MemoryOrigin::Global)
+    let local = l1.origin(MemoryOrigin::Local);
+    let local_read_requests = local.lookup_sectors();
+    let local_store_sectors = local.store_sectors;
+    let use_local_observer = snap.arch == ArchId::Sm120
+        && snap.trace_metrics.is_some_and(|metrics| {
+            metrics.local_interleaved_dynamic_store_records != 0
+                && metrics.local_interleaved_l1_store_hits != 0
+        });
+    let (local_read_hits, local_read_den, local_store_hits, local_store_den) =
+        if use_local_observer {
+            let metrics = snap.trace_metrics.expect("observer predicate proved");
+            (
+                metrics.local_interleaved_l1_load_hits,
+                metrics.local_interleaved_load_sectors,
+                metrics.local_interleaved_l1_store_hits,
+                metrics.local_interleaved_store_sectors,
+            )
+        } else {
+            (
+                local.effective_lookup_hits(),
+                local_read_requests,
+                local.store_hits,
+                local_store_sectors,
+            )
+        };
+    let global = l1.origin(MemoryOrigin::Global);
+    let effective_read_hits = global
         .effective_lookup_hits()
-        .checked_add(l1.origin(MemoryOrigin::Local).effective_lookup_hits())
+        .checked_add(local_read_hits)
         .ok_or(EmitError::CounterOverflow {
             key,
             operation: "unified L1 effective lookup-hit numerator",
         })?;
+    let [default_store_hits, reduction_hits] = l1_write_hit_terms(snap.arch, l1);
+    let store_hits = if use_local_observer {
+        global
+            .store_hits
+            .checked_add(local_store_hits)
+            .ok_or(EmitError::CounterOverflow {
+                key,
+                operation: "unified L1 store-hit numerator",
+            })?
+    } else {
+        default_store_hits
+    };
     let num = checked_sum(
         key,
         "unified L1TEX hit-rate numerator",
         &[effective_read_hits, store_hits, reduction_hits],
     )?;
+    let base_read_den = l1
+        .hits
+        .checked_add(l1.misses)
+        .and_then(|total| total.checked_sub(local_read_requests))
+        .and_then(|total| total.checked_add(local_read_den))
+        .ok_or(EmitError::CounterOverflow {
+            key,
+            operation: "unified L1 read denominator",
+        })?;
+    let base_store_den = l1
+        .store_sectors
+        .checked_sub(local_store_sectors)
+        .and_then(|total| total.checked_add(local_store_den))
+        .ok_or(EmitError::CounterOverflow {
+            key,
+            operation: "unified L1 store denominator",
+        })?;
     let den = checked_sum(
         key,
         "unified L1TEX hit-rate denominator",
         &[
-            l1.hits,
-            l1.misses,
-            l1.store_sectors,
+            base_read_den,
+            base_store_den,
             l1.reduction_sectors,
             l1.bypass_sectors,
             l1.untagged_sectors,

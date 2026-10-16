@@ -3909,6 +3909,12 @@ fn extract_per_sm_blocks(
                 let partial_store_sectors = preflight
                     .as_ref()
                     .map_or(0, |memory| warp.partial_store_sectors(memory.memory));
+                let local_interleaved_sectors = preflight.as_ref().map_or(&[][..], |memory| {
+                    warp.local_interleaved_sector_plan(memory.memory)
+                });
+                let local_interleaved_dynamic = preflight
+                    .as_ref()
+                    .is_some_and(|memory| memory.memory.local_interleaved_is_dynamic());
                 let kind = if decode_sectors {
                     classify_compact_with_l1(
                         preflight,
@@ -4049,6 +4055,11 @@ fn extract_per_sm_blocks(
                     kind,
                     pipeline,
                     &sectors,
+                )?;
+                trace_metrics.observe_local_interleaved(
+                    kind,
+                    local_interleaved_sectors,
+                    local_interleaved_dynamic,
                 )?;
                 if let Some(slot) = schedule.issue_slot(u64::from(inst.pc())) {
                     trace_metrics

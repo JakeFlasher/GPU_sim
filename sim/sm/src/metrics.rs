@@ -363,6 +363,24 @@ pub struct TraceMetrics {
     pub instructions: InstructionActivity,
     pub by_opcode: BTreeMap<String, InstructionActivity>,
     pub memory: BTreeMap<String, MemoryTraffic>,
+    pub local_interleaved_load_requests: u64,
+    pub local_interleaved_load_sectors: u64,
+    pub local_interleaved_store_requests: u64,
+    pub local_interleaved_store_sectors: u64,
+    pub local_interleaved_dynamic_records: u64,
+    pub local_interleaved_dynamic_store_records: u64,
+    pub local_interleaved_l1_load_hits: u64,
+    pub local_interleaved_l1_load_misses: u64,
+    pub local_interleaved_l1_store_hits: u64,
+    pub local_interleaved_l1_store_misses: u64,
+    pub local_interleaved_l2_store_hits: u64,
+    pub local_interleaved_l2_store_misses: u64,
+    #[serde(skip)]
+    pub(crate) local_interleaved_l1_lines: BTreeMap<i64, (u8, u64)>,
+    #[serde(skip)]
+    pub(crate) local_interleaved_l2_lines: BTreeMap<i64, u8>,
+    #[serde(skip)]
+    pub(crate) local_interleaved_l1_stamp: u64,
     /// Source-derived partial store sectors. This is a potential
     /// read-modify-write demand bound and never enters DRAM accounting alone.
     pub partial_store_sectors: u64,
@@ -774,6 +792,150 @@ fn decoded_sector_stats(kind: AccessKind, sector_arena: &[i64]) -> Option<(u64, 
 }
 
 impl TraceMetrics {
+    pub(crate) fn observe_local_interleaved(
+        &mut self,
+        kind: AccessKind,
+        sectors: &[i64],
+        dynamic: bool,
+    ) -> Result<(), crate::IssueError> {
+        if sectors.is_empty() {
+            return Ok(());
+        }
+        if dynamic {
+            self.local_interleaved_dynamic_records = self
+                .local_interleaved_dynamic_records
+                .checked_add(1)
+                .ok_or(crate::IssueError::CounterOverflow {
+                    counter: "local interleaved dynamic records",
+                })?;
+            if matches!(kind, AccessKind::LocalStore { .. }) {
+                self.local_interleaved_dynamic_store_records = self
+                    .local_interleaved_dynamic_store_records
+                    .checked_add(1)
+                    .ok_or(crate::IssueError::CounterOverflow {
+                        counter: "local interleaved dynamic store records",
+                    })?;
+            }
+        }
+        let (requests, total) = match kind {
+            AccessKind::LocalLoad { .. } => (
+                &mut self.local_interleaved_load_requests,
+                &mut self.local_interleaved_load_sectors,
+            ),
+            AccessKind::LocalStore { .. } => (
+                &mut self.local_interleaved_store_requests,
+                &mut self.local_interleaved_store_sectors,
+            ),
+            _ => return Ok(()),
+        };
+        *requests = requests.checked_add(1).ok_or(crate::IssueError::CounterOverflow {
+            counter: "local interleaved requests",
+        })?;
+        *total = total
+            .checked_add(u64::try_from(sectors.len()).unwrap_or(u64::MAX))
+            .ok_or(crate::IssueError::CounterOverflow {
+                counter: "local interleaved sectors",
+            })?;
+        for &sector_id in sectors {
+            let line = sector_id.div_euclid(4);
+            let bit = 1_u8 << sector_id.rem_euclid(4) as u8;
+            let l1_hit = self
+                .local_interleaved_l1_lines
+                .get(&line)
+                .is_some_and(|(mask, _)| mask & bit != 0);
+            match kind {
+                AccessKind::LocalLoad { .. } => {
+                    if l1_hit {
+                        self.local_interleaved_l1_load_hits = self
+                            .local_interleaved_l1_load_hits
+                            .checked_add(1)
+                            .ok_or(crate::IssueError::CounterOverflow {
+                                counter: "local interleaved L1 load hits",
+                            })?;
+                    } else {
+                        self.local_interleaved_l1_load_misses = self
+                            .local_interleaved_l1_load_misses
+                            .checked_add(1)
+                            .ok_or(crate::IssueError::CounterOverflow {
+                                counter: "local interleaved L1 load misses",
+                            })?;
+                        self.local_interleaved_touch_l1(line, bit)?;
+                    }
+                    *self.local_interleaved_l2_lines.entry(line).or_default() |= bit;
+                }
+                AccessKind::LocalStore { .. } => {
+                    if l1_hit {
+                        self.local_interleaved_l1_store_hits = self
+                            .local_interleaved_l1_store_hits
+                            .checked_add(1)
+                            .ok_or(crate::IssueError::CounterOverflow {
+                                counter: "local interleaved L1 store hits",
+                            })?;
+                    } else {
+                        self.local_interleaved_l1_store_misses = self
+                            .local_interleaved_l1_store_misses
+                            .checked_add(1)
+                            .ok_or(crate::IssueError::CounterOverflow {
+                                counter: "local interleaved L1 store misses",
+                            })?;
+                    }
+                    if self
+                        .local_interleaved_l2_lines
+                        .get(&line)
+                        .is_some_and(|mask| mask & bit != 0)
+                    {
+                        self.local_interleaved_l2_store_hits = self
+                            .local_interleaved_l2_store_hits
+                            .checked_add(1)
+                            .ok_or(crate::IssueError::CounterOverflow {
+                                counter: "local interleaved L2 store hits",
+                            })?;
+                    } else {
+                        self.local_interleaved_l2_store_misses = self
+                            .local_interleaved_l2_store_misses
+                            .checked_add(1)
+                            .ok_or(crate::IssueError::CounterOverflow {
+                                counter: "local interleaved L2 store misses",
+                            })?;
+                    }
+                    *self.local_interleaved_l2_lines.entry(line).or_default() |= bit;
+                }
+                _ => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn local_interleaved_touch_l1(
+        &mut self,
+        line: i64,
+        bit: u8,
+    ) -> Result<(), crate::IssueError> {
+        self.local_interleaved_l1_stamp = self
+            .local_interleaved_l1_stamp
+            .checked_add(1)
+            .ok_or(crate::IssueError::CounterOverflow {
+                counter: "local interleaved L1 stamp",
+            })?;
+        if let Some((mask, stamp)) = self.local_interleaved_l1_lines.get_mut(&line) {
+            *mask |= bit;
+            *stamp = self.local_interleaved_l1_stamp;
+            return Ok(());
+        }
+        if self.local_interleaved_l1_lines.len() >= 1024 {
+            if let Some((&victim, _)) = self
+                .local_interleaved_l1_lines
+                .iter()
+                .min_by_key(|(_, (_, stamp))| *stamp)
+            {
+                self.local_interleaved_l1_lines.remove(&victim);
+            }
+        }
+        self.local_interleaved_l1_lines
+            .insert(line, (bit, self.local_interleaved_l1_stamp));
+        Ok(())
+    }
+
     pub(crate) fn observe_tma_sidecar_payload(
         &mut self,
         observation: Option<&sim_trace::async_sidecars::TmaObservation>,

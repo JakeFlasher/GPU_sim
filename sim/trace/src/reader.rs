@@ -2296,6 +2296,12 @@ pub enum ValidatedSectorPlan<'a> {
 /// already-validated allocation id for address-carrying Global atomics.
 pub struct ValidatedMemoryInstruction {
     sectors: CompactSectorPlan,
+    /// Diagnostic-only local sector span after reconstructing the physical
+    /// warp-lane interleave of local-memory offsets. The replay sector plan
+    /// intentionally remains the legacy logical-offset projection until the
+    /// observer is independently admitted.
+    local_interleaved: CompactSectorPlan,
+    local_interleaved_dynamic: bool,
     projection: u32,
     partial_store_sectors: u64,
     /// Ideal 32-bank/4-byte-word shared service work for this instruction;
@@ -2479,6 +2485,10 @@ impl ValidatedMemoryInstruction {
         self.meta.has_effective_lanes()
     }
 
+    pub const fn local_interleaved_is_dynamic(&self) -> bool {
+        self.local_interleaved_dynamic
+    }
+
     /// Maximum distinct 4-byte words targeting one of 32 banks after collapsing
     /// broadcasts. Zero means the record had no effective shared address.
     /// Architecture timing must explicitly admit this named projection before
@@ -2581,6 +2591,7 @@ pub struct ValidatedWarp {
     ldgsts_source_sector_cohort_masks: Vec<u32>,
     route_errors: Vec<ValidatedMemoryRouteError>,
     sectors: Vec<i64>,
+    local_interleaved_sectors: Vec<i64>,
     sector_errors: Vec<ValidatedSectorError>,
 }
 
@@ -2608,6 +2619,7 @@ impl ValidatedWarp {
         let mut ldgsts_source_sector_cohort_masks = Vec::new();
         let mut route_errors = Vec::new();
         let mut sectors = Vec::new();
+        let mut local_interleaved_sectors = Vec::new();
         let mut sector_errors = Vec::new();
         let mut shared_word_scratch = Vec::new();
         for (record_ix, instruction) in warp.instructions.into_iter().enumerate() {
@@ -2699,6 +2711,34 @@ impl ValidatedWarp {
                 let global_atomic_transactions = meta.op_class == pb::MemoryOpClass::Atomic
                     && matches!(resolved_route, Ok(ValidatedMemoryRoute::Global))
                     && payload_contract.carries_atomic_addresses();
+                let local_interleaved = if matches!(
+                    resolved_route,
+                    Ok(ValidatedMemoryRoute::Local)
+                ) {
+                    match compact_sector_vector_for_operand(preflight, None, true) {
+                        Ok(staged) => {
+                            let start = local_interleaved_sectors.len();
+                            let len = u16::try_from(staged.len()).unwrap_or(0);
+                            if usize::from(len) == staged.len() {
+                                local_interleaved_sectors.extend_from_slice(&staged);
+                                CompactSectorPlan::ready(start, len)
+                            } else {
+                                CompactSectorPlan::ready(local_interleaved_sectors.len(), 0)
+                            }
+                        }
+                        Err(_) => CompactSectorPlan::ready(local_interleaved_sectors.len(), 0),
+                    }
+                } else {
+                    CompactSectorPlan::ready(local_interleaved_sectors.len(), 0)
+                };
+                let local_interleaved_dynamic = matches!(
+                    resolved_route,
+                    Ok(ValidatedMemoryRoute::Local)
+                ) && preflight
+                    .instruction()
+                    .addresses
+                    .iter()
+                    .any(|address| address.compression_format == lanes::FORMAT_BASE_DELTA);
                 let sector_projection = if matches!(
                     resolved_route,
                     Ok(ValidatedMemoryRoute::Global | ValidatedMemoryRoute::Local)
@@ -2710,6 +2750,7 @@ impl ValidatedWarp {
                             preflight,
                             (is_async_copy_source && payload_contract.carries_ldgsts_destination())
                                 .then_some(0),
+                            false,
                         )
                     })
                 } else {
@@ -2854,6 +2895,8 @@ impl ValidatedWarp {
                 };
                 memories.push(ValidatedMemoryInstruction {
                     sectors: sector_plan,
+                    local_interleaved,
+                    local_interleaved_dynamic,
                     projection,
                     partial_store_sectors,
                     shared_ideal_wavefronts: shared_bank_ideal_wavefronts_32x4,
@@ -2906,6 +2949,7 @@ impl ValidatedWarp {
             ldgsts_source_sector_cohort_masks,
             route_errors,
             sectors,
+            local_interleaved_sectors,
             sector_errors,
         })
     }
@@ -3099,6 +3143,23 @@ impl ValidatedWarp {
             }
             _ => unreachable!("validated sector plan carried an unknown phase"),
         }
+    }
+
+    pub fn local_interleaved_sector_plan<'a>(
+        &'a self,
+        memory: &ValidatedMemoryInstruction,
+    ) -> &'a [i64] {
+        if memory.local_interleaved.error_phase != CompactSectorPlan::READY {
+            return &[];
+        }
+        let start = usize::try_from(memory.local_interleaved.offset_or_error)
+            .unwrap_or_else(|_| unreachable!("local interleaved arena offset escaped usize"));
+        let end = start
+            .checked_add(usize::from(memory.local_interleaved.len))
+            .unwrap_or_else(|| unreachable!("local interleaved span overflowed"));
+        self.local_interleaved_sectors
+            .get(start..end)
+            .unwrap_or_else(|| unreachable!("local interleaved span escaped its arena"))
     }
 }
 
@@ -3385,6 +3446,7 @@ fn compact_memory_route(
 fn compact_sector_vector_for_operand(
     preflight: PreflightedMemoryAccess<'_>,
     selected_operand: Option<usize>,
+    local_interleave: bool,
 ) -> Result<Vec<i64>, (ValidatedSectorErrorPhase, ValidatedSectorError)> {
     let mut intervals = Vec::new();
     let mut early_error = None;
@@ -3403,6 +3465,35 @@ fn compact_sector_vector_for_operand(
             if base == lanes::LANE_INACTIVE_SENTINEL {
                 continue;
             }
+            let base = if local_interleave {
+                let word = base.div_euclid(4);
+                let byte = base.rem_euclid(4);
+                let Some(lane_word) = word
+                    .checked_mul(i64::try_from(lanes::LANES_PER_WARP).unwrap_or(32))
+                    .and_then(|value| value.checked_add(i64::try_from(lane).unwrap_or(0)))
+                else {
+                    early_error = Some(ValidatedSectorError::AddressOverflow {
+                        lane,
+                        base,
+                        data_width_bytes: access.data_width_bytes,
+                    });
+                    return;
+                };
+                let Some(expanded) = lane_word
+                    .checked_mul(4)
+                    .and_then(|value| value.checked_add(byte))
+                else {
+                    early_error = Some(ValidatedSectorError::AddressOverflow {
+                        lane,
+                        base,
+                        data_width_bytes: access.data_width_bytes,
+                    });
+                    return;
+                };
+                expanded
+            } else {
+                base
+            };
             let Some(last_address) = base.checked_add(width_offset) else {
                 early_error = Some(ValidatedSectorError::AddressOverflow {
                     lane,
@@ -3531,7 +3622,7 @@ fn compact_sector_vector_for_operand(
 fn compact_atomic_sector_transaction_vector_32b(
     preflight: PreflightedMemoryAccess<'_>,
 ) -> Result<Vec<i64>, (ValidatedSectorErrorPhase, ValidatedSectorError)> {
-    let unique = compact_sector_vector_for_operand(preflight, None)?;
+    let unique = compact_sector_vector_for_operand(preflight, None, false)?;
     if unique.is_empty() {
         return Ok(unique);
     }
