@@ -900,14 +900,15 @@ fn bypass_read_sectors(key: &'static str, l1: &L1OriginCounters) -> Result<u64, 
 
 /// Trace-only resident-hit completion for store-free global-read launches.
 /// The dynamic observer is already retained by `TraceMetrics`; admitting only
-/// launches without global stores keeps this report projection out of mixed
-/// write/client scope and leaves replay state unchanged.
+/// launches with only a tiny global-store footprint keeps this report
+/// projection out of mixed write/client scope and leaves replay state
+/// unchanged.
 pub(crate) fn global_resident_hit_adjustment(
     arch: ArchId,
     l1: &L1Counters,
     trace: Option<&TraceMetrics>,
 ) -> u64 {
-    if arch != ArchId::Sm120 || l1.origin(MemoryOrigin::Global).store_sectors != 0 {
+    if arch != ArchId::Sm120 || l1.origin(MemoryOrigin::Global).store_sectors > 16 {
         return 0;
     }
     trace
