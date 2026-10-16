@@ -2170,8 +2170,30 @@ fn cache_lookup_prediction_reports(
                             detail: None,
                         });
                     };
-                    let ordinary_hits = counters.lookup_hits;
-                    let ordinary_lookups = counters.lookup_requests;
+                    let local_observer = trace.filter(|metrics| {
+                        counters.arch() == Some(ArchId::Sm120)
+                            && metrics.local_interleaved_dynamic_store_records != 0
+                            && metrics.local_interleaved_l1_store_hits != 0
+                            && metrics.local_interleaved_store_sectors != 0
+                    });
+                    let (ordinary_hits, ordinary_lookups, local_role) =
+                        if let (Some(metrics), Some(split)) = (local_observer, l2_by_source) {
+                            let (local_store_sectors, local_store_hits) =
+                                split.source_for_origin(MemoryOrigin::Local, L2Source::Store);
+                            let extra_sectors = metrics
+                                .local_interleaved_store_sectors
+                                .saturating_sub(local_store_sectors);
+                            let extra_hits = metrics
+                                .local_interleaved_l2_store_hits
+                                .saturating_sub(local_store_hits);
+                            (
+                                counters.lookup_hits.saturating_add(extra_hits),
+                                counters.lookup_requests.saturating_add(extra_sectors),
+                                " plus_dynamic_local_store_interleave_observer",
+                            )
+                        } else {
+                            (counters.lookup_hits, counters.lookup_requests, "")
+                        };
                     let ordinary_misses = ordinary_lookups.checked_sub(ordinary_hits).ok_or_else(|| {
                         RunError::new(
                             "cache lookup projection",
@@ -2268,7 +2290,11 @@ fn cache_lookup_prediction_reports(
                             physical_hits_not_observed: resident.saturating_sub(hits),
                             remaining_lookups: misses,
                             observer_reclassified_lookups: hits.saturating_sub(resident),
-                            role,
+                            role: if local_role.is_empty() {
+                                role
+                            } else {
+                                "cache_state_plus_dynamic_local_store_interleave_observer"
+                            },
                         }),
                         detail: None,
                     });
