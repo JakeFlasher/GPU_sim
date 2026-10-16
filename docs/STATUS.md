@@ -35,3 +35,28 @@ effective-L1 capacity on four real captures; neither was promoted. Stream-L2
 worsened the selected unified L1 hit-rate residual and the larger capacity was
 non-discriminating. Remaining hit-rate residuals are therefore still typed as
 scope/client/join uncertainty rather than a justified geometry constant.
+
+## Q79 — partial-TMA source-TEX projection (2026-10-16)
+
+Commit `05442f3e` adds a narrowly guarded observation-side projection for
+partial TMA address coverage. Complete address coverage keeps the existing
+shadow. For complete, aligned payload summaries with incomplete mixed
+addresses, the projection admits only a per-direction load shadow whose
+request cardinality matches payload-derived sectors and counts payload-bearing
+partial stores as cold/write misses. It never imports aliased partial-store
+shadow hits; missing/malformed payload summaries keep the ordinary fallback.
+Replay cache state, timing, DRAM demand, IPC, and `completion_clock` are
+unchanged.
+
+The exact four-capture gate completed 243 launches per mode and the five-capture
+probe 246 launches per mode, full integrated L1+L2 first and fast flat second,
+with 12 workers and all rows `ok`. The complete run is
+`replay_results/q79_partial_tma_source_full_20261016/`: 339/339 roots and
+11,558/11,558 launches per mode, all `ok`, compressed artifacts.
+
+Against Q75 on identical full-corpus joins, source-TEX hit mean APE improved
+60.1535% → 59.9332% (P90/max unchanged) and source-TEX miss mean APE improved
+2.57315% → 2.30313% (P90 3.03030% → 2.80561%, maximum unchanged). There were
+zero worsened rows and every family maximum was unchanged or lower; all other
+scored metrics were bit-for-bit unchanged. The quant_005 512-sector read-hit
+gap remains unavailable because descriptor/OOB padding is not cache-hit evidence.

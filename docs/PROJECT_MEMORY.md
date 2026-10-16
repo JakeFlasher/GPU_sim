@@ -1049,3 +1049,21 @@ was promoted or landed. The remaining L1/L2 hit residual is confounded by
 ordinary-vs-LDGSTS/TMA client scope, ordered-fallback NCU joins, and profiler
 pass behavior. No scalar cache geometry or lifetime change is justified without
 a concrete source relation; Q75 remains the default.
+
+## Q79 — partial-TMA source-TEX projection (2026-10-16)
+
+`05442f3e` promotes a real-trace-validated source-TEX observer projection for
+partial TMA address coverage. It uses actual aligned payload bytes, validated
+per-direction load shadow only on exact cardinality, and cold/write-miss store
+payload accounting; aliased partial-store shadow hits are excluded. Missing
+payload fields retain the ordinary fallback. The change is metric-only and
+leaves replay state, timing, DRAM demand, IPC, and completion semantics alone.
+
+The four-capture gate (243 launches/mode) and complete 339-root run (11,558
+launches/mode) passed full L1+L2 before fast flat with exactly 12 workers and
+compressed artifacts. Relative to Q75, source-TEX hit mean APE fell from
+60.1535% to 59.9332% and source-TEX miss mean APE from 2.57315% to 2.30313%,
+with no worsened rows, unchanged maxima/family maxima, and no changes to other
+scored metrics. Quant_005 launch 1 is 2,577 source misses versus NCU 2,580;
+the remaining 512 read hits are not inferred from nominal descriptor padding.
+`completion_clock` remains unavailable.
