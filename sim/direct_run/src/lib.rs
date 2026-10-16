@@ -19,7 +19,8 @@ use std::str::FromStr;
 use std::time::Instant;
 
 use crate::emit::{
-    emit_launch, global_resident_hit_adjustment, EmitOutcome, EmittedMetricKey,
+    emit_launch, global_read_resident_hit_adjustment, global_resident_hit_adjustment,
+    EmitOutcome, EmittedMetricKey,
     FullLaunchPredictions, MetricValue, Unavailable, Unit,
 };
 use serde::{Deserialize, Serialize};
@@ -2107,7 +2108,7 @@ fn cache_lookup_prediction_reports(
             "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_miss.sum",
             l1.map(|counters| {
                 counters.origin(MemoryOrigin::Global).effective_lookup_hits()
-                    .saturating_add(global_resident_hit_adjustment(
+                    .saturating_add(global_read_resident_hit_adjustment(
                         counters.arch().unwrap_or(ArchId::Sm86),
                         counters,
                         trace,

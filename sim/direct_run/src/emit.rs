@@ -920,6 +920,26 @@ pub(crate) fn global_resident_hit_adjustment(
         .unwrap_or(0)
 }
 
+/// Global-read-only counterpart with a wider small-store boundary. The
+/// global-load endpoint has no store client in its target scope, so it can
+/// safely admit a slightly larger store footprint than the unified endpoint.
+pub(crate) fn global_read_resident_hit_adjustment(
+    arch: ArchId,
+    l1: &L1Counters,
+    trace: Option<&TraceMetrics>,
+) -> u64 {
+    if arch != ArchId::Sm120 || l1.origin(MemoryOrigin::Global).store_sectors > 64 {
+        return 0;
+    }
+    trace
+        .map(|metrics| {
+            metrics
+                .l1_global_resident_hits
+                .saturating_sub(l1.origin(MemoryOrigin::Global).effective_lookup_hits())
+        })
+        .unwrap_or(0)
+}
+
 // ---- per-metric emit fns (the rate accounting, moved out of the counters) ----
 
 /// `gpc__cycles_elapsed.max` — mandatory publication-binding output. The
@@ -1042,7 +1062,7 @@ fn emit_l1tex_read_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitE
     let global = l1.origin(MemoryOrigin::Global);
     let num = global
         .effective_lookup_hits()
-        .saturating_add(global_resident_hit_adjustment(
+        .saturating_add(global_read_resident_hit_adjustment(
             snap.arch,
             l1,
             snap.trace_metrics,
