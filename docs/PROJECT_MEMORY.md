@@ -47,6 +47,8 @@ The current shared-memory refinement result is retained at
 `/root/sm120_rtx_5090_capture/replay_results/current_full_replay_20261016_shared_memory/`.
 The current shared-memory and atomic-observer result is retained at
 `/root/sm120_rtx_5090_capture/replay_results/current_full_replay_20261016_shared_memory_atomic_alias/`.
+The current effective-observation result is retained at
+`/root/sm120_rtx_5090_capture/replay_results/current_full_replay_20261016_effective_observation/`.
 
 Current full-lane mean APEs include:
 
@@ -66,6 +68,10 @@ conflicts), with no regression in other scored metrics.
 
 The scoped global-atomic observer arm reduces shared-atomic wavefront mean APE
 from 64.4022% to 1.6116%; global atomic opcode classification remains separate.
+
+The launch-boundary elapsed-IPC observation arm reduces mean APE from 20.3993%
+to 13.6860% and P90 from 38.5692% to 27.8167%; maximum and other metric
+families are unchanged.
 
 Aggregate L1 scope, unqualified DRAM/service and physical topology, and the
 internal TMA completion clock remain typed residuals. A boundary-clipped TMA
