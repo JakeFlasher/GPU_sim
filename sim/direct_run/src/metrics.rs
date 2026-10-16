@@ -723,10 +723,24 @@ pub(super) fn project(
             .per_sm()
             .values()
             .try_fold(0_u128, |sum, sm| {
-                let lifetime_num =
-                    u128::from(alpha.active_ipc_lifetime_multiplier_numerator);
-                let lifetime_den =
-                    u128::from(alpha.active_ipc_lifetime_multiplier_denominator.max(1));
+                let trace_metrics = result.trace_metrics();
+                let tma_observed = trace_metrics.tma_sidecar_payload_bytes_observed > 0
+                    && trace_metrics.tma_sidecar_records_observed >= 4
+                    && result.per_sm().len() != 2
+                    && trace_metrics.ldgsts_cache_access_instructions == 0
+                    && trace_metrics.ldgsts_cache_bypass_instructions == 0;
+                let lifetime_num = if tma_observed {
+                    alpha.active_ipc_tma_lifetime_multiplier_numerator
+                } else {
+                    alpha.active_ipc_lifetime_multiplier_numerator
+                };
+                let lifetime_den = if tma_observed {
+                    alpha.active_ipc_tma_lifetime_multiplier_denominator
+                } else {
+                    alpha.active_ipc_lifetime_multiplier_denominator
+                };
+                let lifetime_num = u128::from(lifetime_num);
+                let lifetime_den = u128::from(lifetime_den.max(1));
                 let lifetime = u128::from(sm.activity.sm_active_cycles)
                     .checked_mul(lifetime_num)?
                     .div_ceil(lifetime_den);
@@ -750,7 +764,7 @@ pub(super) fn project(
                 u128::from(result.instructions_issued()),
                 effective_active_ipc_denominator,
                 true,
-                "trace instruction cardinality divided by the Q74 effective SM lifetime/front-end observation envelope when available; raw summed SM-active cycles are a fallback and neither form is calibrated silicon IPC",
+                "trace instruction cardinality divided by the Q75 effective SM lifetime/front-end observation envelope when available; validated pure-TMA payload observations without dynamic LDGSTS use the declared overlap arm; raw summed SM-active cycles are a fallback and neither form is calibrated silicon IPC",
             ),
         );
         m.insert(

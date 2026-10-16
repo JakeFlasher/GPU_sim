@@ -108,6 +108,14 @@ pub struct Sm120AlphaConfig {
     /// it is not a physical scheduler or clock claim.
     pub active_ipc_lifetime_multiplier_numerator: u64,
     pub active_ipc_lifetime_multiplier_denominator: u64,
+    /// Effective active-IPC lifetime multiplier for a validated pure-TMA
+    /// launch. The pure path is identified by a multi-transfer (at least four
+    /// records), payload-bearing sidecar, a non-two-SM scope, and zero
+    /// dynamic LDGSTS instructions; mixed, two-SM, or one-off paths retain
+    /// the generic arm. This is an observation-domain arm, not a TMA engine
+    /// latency or completion timestamp.
+    pub active_ipc_tma_lifetime_multiplier_numerator: u64,
+    pub active_ipc_tma_lifetime_multiplier_denominator: u64,
     /// Fraction of the source-derived front-end envelope retained per
     /// observed SM in the active-IPC endpoint.  This is an effective
     /// observation assumption, not a fetch-cache timing constant.
@@ -131,7 +139,7 @@ impl Sm120AlphaConfig {
     /// executor.  Reports should obtain this value from the configuration
     /// instead of copying a profile name beside independently hard-coded
     /// timing/occupancy fields.
-    pub const PROFILE_ID: &'static str = "sm120_m8_m9_effective_observation_v2";
+    pub const PROFILE_ID: &'static str = "sm120_m8_m9_effective_observation_v3";
 
     pub const fn profile_id() -> &'static str {
         Self::PROFILE_ID
@@ -178,6 +186,13 @@ impl Sm120AlphaConfig {
             // effective scenario inputs and do not alter replay timing.
             active_ipc_lifetime_multiplier_numerator: 2,
             active_ipc_lifetime_multiplier_denominator: 1,
+            // Q75's bounded pure-TMA overlap arm retains eight fifths of the
+            // generic lifetime envelope. Mixed TMA/LDGSTS paths do not use
+            // this arm. It changes only the active-IPC observation
+            // projection; replay scheduling and completion semantics remain
+            // untouched.
+            active_ipc_tma_lifetime_multiplier_numerator: 8,
+            active_ipc_tma_lifetime_multiplier_denominator: 5,
             active_ipc_front_end_numerator: 1,
             active_ipc_front_end_denominator: 5,
             scalar_initiation_interval_cycles: 1,

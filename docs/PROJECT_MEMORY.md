@@ -1015,3 +1015,27 @@ every named workload family improved. Q73 therefore closes the active-IPC
 residual as an effective observation metric. Aggregate hit-rate, DRAM/service,
 topology, and engine-completion gaps remain explicitly conditional or
 unavailable.
+
+## Q75 — pure-TMA active-IPC overlap arm (2026-10-16)
+
+Q75 adds a source-qualified, metric-only effective arm for multi-transfer
+pure-TMA launches. A launch must have at least four payload-bearing TMA sidecar
+records, zero dynamic LDGSTS cache/bypass instructions, and a non-two-SM scope;
+its active-IPC lifetime contribution uses 8/5 of the generic lifetime arm.
+Mixed, one-off, and two-SM paths retain Q74. Replay scheduling, L1/L2 state,
+service timing, and `completion_clock` are unchanged.
+
+The selected probe is archived at
+`/root/sm120_rtx_5090_capture/replay_results/q75_pure_tma_ipc_probe_20261016/`;
+the complete promotion run is at
+`/root/sm120_rtx_5090_capture/replay_results/q75_pure_tma_ipc_full_20261016/`.
+Both used full integrated L1+L2 before fast flat, exactly 12 workers, and
+compressed artifacts. The complete run passed 339/339 roots and 11,558 launches
+per mode.
+
+Full active-IPC mean APE is 9.5537% (median 6.2304%, P90 17.0335%), improving
+Q74's 9.6082% mean and 17.1198% P90. Maximum relative error remains 481.1891%,
+every family maximum is unchanged or lower, and the paired comparison has 42
+improved launches and zero worsened launches. Q75 is the current default
+effective active-IPC projection; it is not a physical TMA completion or clock
+calibration.
