@@ -7329,6 +7329,9 @@ pub fn project_shared_bank_wavefronts_32x4(
             9..=16 => 8_usize,
             _ => 0_usize,
         };
+        let pack_sparse_active_loads = lanes_per_phase != 0
+            && max_data_width_bytes <= 8
+            && preflight.meta().access_kind == Some(pb::MemoryOpAccessKind::Load);
         if lanes_per_phase != 0 {
             // A whole-warp broadcast is still one service word even when the
             // operand is wide.  CUTLASS epilogues in particular issue a
@@ -7361,17 +7364,32 @@ pub fn project_shared_bank_wavefronts_32x4(
                 // This preserves the measured broadcast behavior while the
                 // phased path below handles genuinely lane-varying accesses.
             } else {
+                // Load requests packetize active lane spans by payload
+                // capacity, not by physical lane-number windows. Stores
+                // retain the established fixed half/quarter-warp packets;
+                // their baseline is already exact on the real corpus.
+                let active_lanes: Vec<usize> = lane_spans
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(lane, spans)| (!spans.is_empty()).then_some(lane))
+                    .collect();
                 let mut total_wavefronts = 0_u64;
                 let phase_count = 32_usize / lanes_per_phase;
                 for phase in 0..phase_count {
                     word_scratch.clear();
-                    let lane_lo = phase * lanes_per_phase;
-                    let lane_hi = lane_lo + lanes_per_phase;
                     preflight.visit_addresses(|access| {
                         let width = i128::from(access.data_width_bytes);
                         for (lane, &address) in access.lane_vector.iter().enumerate() {
-                            if lane < lane_lo
-                                || lane >= lane_hi
+                            let in_phase = if pack_sparse_active_loads {
+                                active_lanes
+                                    .chunks(lanes_per_phase)
+                                    .nth(phase)
+                                    .is_some_and(|phase_lanes| phase_lanes.contains(&lane))
+                            } else {
+                                let lane_lo = phase * lanes_per_phase;
+                                lane >= lane_lo && lane < lane_lo + lanes_per_phase
+                            };
+                            if !in_phase
                                 || address == lanes::LANE_INACTIVE_SENTINEL
                             {
                                 continue;
