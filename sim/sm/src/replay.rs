@@ -245,12 +245,20 @@ fn observe_tma_l2_shadow(
 
 fn tma_sidecar_reuse_summary(
     observations: &LaunchObservations,
-) -> (u64, u64, u64, u64, u64) {
+) -> (u64, u64, u64, u64, u64, u64, u64, u64, u64, u64, u64, u64, u64) {
     let mut all_sectors = BTreeSet::new();
     let mut all_lines = BTreeSet::new();
     let mut sum_record_unique_sectors = 0_u64;
     let mut sum_record_unique_lines = 0_u64;
     let mut intra_record_duplicate_refs = 0_u64;
+    let mut load_sum_sectors = 0_u64;
+    let mut store_sum_sectors = 0_u64;
+    let mut load_sum_lines = 0_u64;
+    let mut store_sum_lines = 0_u64;
+    let mut load_sectors = BTreeSet::new();
+    let mut store_sectors = BTreeSet::new();
+    let mut load_lines = BTreeSet::new();
+    let mut store_lines = BTreeSet::new();
     for observation in observations.tma.values() {
         let ids = if observation.is_load {
             &observation.source_sector_ids
@@ -265,17 +273,45 @@ fn tma_sidecar_reuse_summary(
             .saturating_add(observation.diagnostic.unique_line_count);
         intra_record_duplicate_refs = intra_record_duplicate_refs
             .saturating_add(observation.diagnostic.intra_record_duplicate_sector_refs);
+        if observation.is_load {
+            load_sum_sectors = load_sum_sectors
+                .saturating_add(observation.diagnostic.unique_sector_count);
+            load_sum_lines = load_sum_lines
+                .saturating_add(observation.diagnostic.unique_line_count);
+        } else {
+            store_sum_sectors = store_sum_sectors
+                .saturating_add(observation.diagnostic.unique_sector_count);
+            store_sum_lines = store_sum_lines
+                .saturating_add(observation.diagnostic.unique_line_count);
+        }
         for &sector in ids.iter() {
             all_sectors.insert(sector);
             all_lines.insert(sector.div_euclid(4));
+            if observation.is_load {
+                load_sectors.insert(sector);
+                load_lines.insert(sector.div_euclid(4));
+            } else {
+                store_sectors.insert(sector);
+                store_lines.insert(sector.div_euclid(4));
+            }
         }
     }
+    let cross_sectors = load_sectors.intersection(&store_sectors).count();
+    let cross_lines = load_lines.intersection(&store_lines).count();
     (
         sum_record_unique_sectors,
         sum_record_unique_lines,
         u64::try_from(all_sectors.len()).unwrap_or(u64::MAX),
         u64::try_from(all_lines.len()).unwrap_or(u64::MAX),
         intra_record_duplicate_refs,
+        load_sum_sectors,
+        store_sum_sectors,
+        load_sum_lines,
+        store_sum_lines,
+        u64::try_from(load_sectors.len()).unwrap_or(u64::MAX),
+        u64::try_from(store_sectors.len()).unwrap_or(u64::MAX),
+        u64::try_from(cross_sectors).unwrap_or(u64::MAX),
+        u64::try_from(cross_lines).unwrap_or(u64::MAX),
     )
 }
 
@@ -3661,6 +3697,14 @@ fn extract_per_sm_blocks(
             launch_unique_sectors,
             launch_unique_lines,
             intra_record_duplicate_refs,
+            load_sum_sectors,
+            store_sum_sectors,
+            load_sum_lines,
+            store_sum_lines,
+            load_unique_sectors,
+            store_unique_sectors,
+            cross_direction_sectors,
+            cross_direction_lines,
         ) = tma_sidecar_reuse_summary(observations);
         trace_metrics.observe_tma_sidecar_reuse(
             sum_record_unique_sectors,
@@ -3668,6 +3712,16 @@ fn extract_per_sm_blocks(
             launch_unique_sectors,
             launch_unique_lines,
             intra_record_duplicate_refs,
+        )?;
+        trace_metrics.observe_tma_directional_reuse(
+            load_sum_sectors,
+            store_sum_sectors,
+            load_sum_lines,
+            store_sum_lines,
+            load_unique_sectors,
+            store_unique_sectors,
+            cross_direction_sectors,
+            cross_direction_lines,
         )?;
         if let Some(relations) = trace_metrics.async_relations.as_ref() {
             let (pairs, invalid, lower_sum, upper_sum) =

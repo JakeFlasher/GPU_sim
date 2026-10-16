@@ -443,6 +443,14 @@ pub struct TraceMetrics {
     pub tma_sidecar_inter_record_duplicate_sectors: u64,
     pub tma_sidecar_inter_record_shared_lines: u64,
     pub tma_sidecar_intra_record_duplicate_refs: u64,
+    pub tma_sidecar_load_sum_record_unique_sectors: u64,
+    pub tma_sidecar_store_sum_record_unique_sectors: u64,
+    pub tma_sidecar_load_sum_record_unique_lines: u64,
+    pub tma_sidecar_store_sum_record_unique_lines: u64,
+    pub tma_sidecar_load_inter_record_duplicate_sectors: u64,
+    pub tma_sidecar_store_inter_record_duplicate_sectors: u64,
+    pub tma_sidecar_cross_direction_shared_sectors: u64,
+    pub tma_sidecar_cross_direction_shared_lines: u64,
     /// Hardware-clock observation brackets derived from existing sidecars.
     /// These are interval evidence, never a completion clock or replay input.
     pub async_clock_sandwich_pairs_observed: u64,
@@ -905,6 +913,40 @@ impl TraceMetrics {
         add(&mut self.async_clock_sandwich_invalid_pairs, invalid_pairs)?;
         add(&mut self.async_clock_sandwich_lower_span_sum, lower_span_sum)?;
         add(&mut self.async_clock_sandwich_upper_span_sum, upper_span_sum)?;
+        Ok(())
+    }
+
+    pub(crate) fn observe_tma_directional_reuse(
+        &mut self,
+        load_sum_sectors: u64,
+        store_sum_sectors: u64,
+        load_sum_lines: u64,
+        store_sum_lines: u64,
+        load_unique_sectors: u64,
+        store_unique_sectors: u64,
+        cross_direction_sectors: u64,
+        cross_direction_lines: u64,
+    ) -> Result<(), crate::IssueError> {
+        add(&mut self.tma_sidecar_load_sum_record_unique_sectors, load_sum_sectors)?;
+        add(&mut self.tma_sidecar_store_sum_record_unique_sectors, store_sum_sectors)?;
+        add(&mut self.tma_sidecar_load_sum_record_unique_lines, load_sum_lines)?;
+        add(&mut self.tma_sidecar_store_sum_record_unique_lines, store_sum_lines)?;
+        add(
+            &mut self.tma_sidecar_load_inter_record_duplicate_sectors,
+            load_sum_sectors.saturating_sub(load_unique_sectors),
+        )?;
+        add(
+            &mut self.tma_sidecar_store_inter_record_duplicate_sectors,
+            store_sum_sectors.saturating_sub(store_unique_sectors),
+        )?;
+        add(
+            &mut self.tma_sidecar_cross_direction_shared_sectors,
+            cross_direction_sectors,
+        )?;
+        add(
+            &mut self.tma_sidecar_cross_direction_shared_lines,
+            cross_direction_lines,
+        )?;
         Ok(())
     }
 
