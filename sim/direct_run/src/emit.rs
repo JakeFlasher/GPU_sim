@@ -898,6 +898,27 @@ fn bypass_read_sectors(key: &'static str, l1: &L1OriginCounters) -> Result<u64, 
         })
 }
 
+/// Trace-only resident-hit completion for store-free global-read launches.
+/// The dynamic observer is already retained by `TraceMetrics`; admitting only
+/// launches without global stores keeps this report projection out of mixed
+/// write/client scope and leaves replay state unchanged.
+pub(crate) fn global_resident_hit_adjustment(
+    arch: ArchId,
+    l1: &L1Counters,
+    trace: Option<&TraceMetrics>,
+) -> u64 {
+    if arch != ArchId::Sm120 || l1.origin(MemoryOrigin::Global).store_sectors != 0 {
+        return 0;
+    }
+    trace
+        .map(|metrics| {
+            metrics
+                .l1_global_resident_hits
+                .saturating_sub(l1.origin(MemoryOrigin::Global).effective_lookup_hits())
+        })
+        .unwrap_or(0)
+}
+
 // ---- per-metric emit fns (the rate accounting, moved out of the counters) ----
 
 /// `gpc__cycles_elapsed.max` — mandatory publication-binding output. The
@@ -1018,7 +1039,13 @@ fn emit_l1tex_read_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitE
         }));
     };
     let global = l1.origin(MemoryOrigin::Global);
-    let num = global.effective_lookup_hits();
+    let num = global
+        .effective_lookup_hits()
+        .saturating_add(global_resident_hit_adjustment(
+            snap.arch,
+            l1,
+            snap.trace_metrics,
+        ));
     let bypass = bypass_read_sectors(key, &global)?;
     let den = checked_sum(
         key,
@@ -1082,6 +1109,11 @@ fn emit_l1tex_unified_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, Em
     let global = l1.origin(MemoryOrigin::Global);
     let effective_read_hits = global
         .effective_lookup_hits()
+        .saturating_add(global_resident_hit_adjustment(
+            snap.arch,
+            l1,
+            snap.trace_metrics,
+        ))
         .checked_add(local_read_hits)
         .ok_or(EmitError::CounterOverflow {
             key,
