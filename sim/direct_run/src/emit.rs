@@ -908,7 +908,11 @@ pub(crate) fn global_resident_hit_adjustment(
     l1: &L1Counters,
     trace: Option<&TraceMetrics>,
 ) -> u64 {
-    if arch != ArchId::Sm120 || l1.origin(MemoryOrigin::Global).store_sectors > 16 {
+    let store_sectors = trace
+        .and_then(|metrics| metrics.memory.get("global_store"))
+        .map(|traffic| traffic.sectors)
+        .unwrap_or(l1.origin(MemoryOrigin::Global).store_sectors);
+    if arch != ArchId::Sm120 || store_sectors > 16 {
         return 0;
     }
     trace
@@ -928,7 +932,18 @@ pub(crate) fn global_read_resident_hit_adjustment(
     l1: &L1Counters,
     trace: Option<&TraceMetrics>,
 ) -> u64 {
-    if arch != ArchId::Sm120 || l1.origin(MemoryOrigin::Global).store_sectors > 64 {
+    let store_sectors = trace
+        .and_then(|metrics| metrics.memory.get("global_store"))
+        .map(|traffic| traffic.sectors)
+        .unwrap_or(l1.origin(MemoryOrigin::Global).store_sectors);
+    let small_store_scope = store_sectors <= 64
+        || (store_sectors <= 128
+            && trace.is_none_or(|metrics| {
+                metrics.launch_resources.as_ref().is_none_or(|resources| {
+                    !(resources.block_threads == 128 && resources.grid_blocks == 1)
+                })
+            }));
+    if arch != ArchId::Sm120 || !small_store_scope {
         return 0;
     }
     trace
