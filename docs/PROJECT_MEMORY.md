@@ -1095,3 +1095,10 @@ bit-identical scored outputs. Quant_005 launch 1 shows 2,560 per-record/launch
 unique sectors, 640 lines, zero inter-record reuse/shared lines, 54,784
 intra-record duplicate references, and no usable paired clocks. No completion
 clock or timing input is synthesized.
+
+## Q84 — join and client-scope provenance (2026-10-16)
+
+`84200733` adds report-only join tiers and client-scope classes. Q83 probe
+comparisons were regenerated with identical scored estimates and joins; these
+metadata tags make source-qualified versus unqualified residuals explicit
+without changing replay or NCU comparison values.

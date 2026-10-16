@@ -93,3 +93,10 @@ all scored estimates bit-for-bit identical to Q82. Quant_005 launch 1 has zero
 inter-record duplicate sectors and shared lines, 54,784 intra-record duplicate
 references, and zero usable clock pairs; these are evidence-coverage facts, not
 cache hits, timing constants, or completion timestamps.
+
+## Q84 — join/client-scope provenance tags (2026-10-16)
+
+Report commit `84200733` adds metadata-only launch association tiers and metric
+client-scope classes to post-replay comparison rows. The Q83 five-capture report
+was regenerated with the tags; scored estimates, joins, row counts, and APE
+summaries remain unchanged. Tags never filter workloads or alter replay.
