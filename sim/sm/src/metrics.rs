@@ -120,6 +120,11 @@ pub struct MemoryTraffic {
     pub bank_conflict_wavefronts: u64,
     /// Width-only ideal wavefronts for `bank_conflict_wavefronts`.
     pub ideal_bank_conflict_wavefronts: u64,
+    /// Sum of per-instruction excess wavefronts above that instruction's
+    /// width-only ideal.  This must be accumulated before aggregation:
+    /// subtracting the two launch-wide sums lets a low-conflict wide access
+    /// cancel a genuinely conflicting narrow access.
+    pub bank_conflict_excess_wavefronts: u64,
 }
 
 /// Trace-local physical-pipeline candidate domains. A dynamic SASS record
@@ -1780,7 +1785,14 @@ impl TraceMetrics {
         let (key, sectors, bank_wavefronts) = match kind {
             AccessKind::NonMemory | AccessKind::PredicatedOffMemory => return Ok(()),
             AccessKind::Shared { wavefronts, .. } => (
-                if head == "STS" {
+                // Collective matrix stores are the store-side counterpart
+                // of LDSM.  Keeping STSM in the load bucket makes the
+                // operation-qualified opcode counters report matrix stores
+                // as shared loads and leaves the aggregate store-wavefront
+                // observer empty.  Preserve both matrix forms in their
+                // direction-specific buckets; the conflict surface below
+                // still excludes them from ordinary LDS/STS bank conflicts.
+                if matches!(head, "STS" | "STSM") {
                     "shared_store"
                 } else if head.starts_with("ATOM") {
                     "shared_atomic"
@@ -1852,6 +1864,10 @@ impl TraceMetrics {
                 add(
                     &mut row.ideal_bank_conflict_wavefronts,
                     ideal_wavefronts,
+                )?;
+                add(
+                    &mut row.bank_conflict_excess_wavefronts,
+                    bank_wavefronts.saturating_sub(ideal_wavefronts),
                 )?;
             }
         }

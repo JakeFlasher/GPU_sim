@@ -858,11 +858,38 @@ pub(super) fn project(
         ] {
             let row = trace.memory.get(kind).cloned().unwrap_or_default();
             let requests = u128::from(row.requests);
+            // The generic shared-load/store memory buckets also contain the
+            // collective matrix forms LDSM/STSM.  Nsight exposes those forms
+            // through their own opcode counters, while the operation
+            // qualified `shared_ld`/`shared_st` instruction counters count
+            // only the ordinary LDS/STS forms.  Keep matrix traffic in the
+            // bank-wavefront surface (which is an aggregate shared client
+            // observer), but remove it from the opcode-class projections.
+            // This is a semantic partition of the captured opcode stream,
+            // not a fitted scale or an NCU-derived correction.
+            let matrix_opcode = match kind {
+                "shared_load" => "LDSM",
+                "shared_store" => "STSM",
+                "shared_atomic" => "",
+                _ => unreachable!("shared metric table has a closed operation set"),
+            };
+            let matrix_requests: u128 = if matrix_opcode.is_empty() {
+                0
+            } else {
+                trace
+                    .by_opcode
+                    .iter()
+                    .filter(|(opcode, _)| opcode.split('.').next() == Some(matrix_opcode))
+                    .map(|(_, activity)| u128::from(activity.warp_instructions))
+                    .sum()
+            };
+            let opcode_requests = requests.saturating_sub(matrix_requests);
             let wavefronts = u128::from(row.bank_wavefronts);
-            let conflict_wavefronts = u128::from(row.bank_conflict_wavefronts);
-            let ideal_conflict_wavefronts =
-                u128::from(row.ideal_bank_conflict_wavefronts);
-            let conflicts = conflict_wavefronts.saturating_sub(ideal_conflict_wavefronts);
+            // `bank_conflict_excess_wavefronts` is already the sum of each
+            // instruction's nonnegative excess.  Do not subtract launch-wide
+            // aggregates: a wide access with no conflict must not cancel a
+            // separate narrow access that does have a conflict.
+            let conflicts = u128::from(row.bank_conflict_excess_wavefronts);
             m.insert(
                 format!("{kind}_requests"),
                 Metric::approximate_count(
@@ -887,8 +914,8 @@ pub(super) fn project(
                     Metric::approximate_count(
                         Some(&ncu_metric),
                         "inst",
-                        requests,
-                        "trace-derived logical shared-memory opcode cardinality; no physical pipe assignment implied",
+                        opcode_requests,
+                        "trace-derived ordinary shared-memory opcode cardinality; collective matrix forms are emitted in their dedicated opcode class",
                     ),
                 );
             }
