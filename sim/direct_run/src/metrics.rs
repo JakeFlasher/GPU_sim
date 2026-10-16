@@ -630,8 +630,33 @@ pub(super) fn project(
             .tma_sidecar_store_payload_bytes
             .div_ceil(32);
         let sm_cycle_population = u128::from(sm_count);
+        // An elapsed-IPC observation includes one launch-boundary scheduling
+        // epoch in addition to the epochs represented by the traced CTA
+        // population.  Use only captured launch geometry and the modeled four
+        // SMSP population; this is a dimensionless observation-boundary arm,
+        // not a fitted clock multiplier or an issue-width claim.  Large grids
+        // make the boundary negligible, while short one-dimensional launches
+        // retain the startup epoch that the raw terminal frontier omits.
+        let grid_blocks = result
+            .coverage()
+            .launch()
+            .grid_blocks()
+            .unwrap_or(1)
+            .max(1);
+        let smsps_per_sm = result
+            .per_sm()
+            .values()
+            .next()
+            .map_or(1_u128, |sm| sm.activity.smsp_active_cycles.len() as u128)
+            .max(1);
+        let observation_population = u128::from(grid_blocks)
+            .checked_add(smsps_per_sm)
+            .unwrap_or(u128::MAX)
+            .max(1);
         let elapsed_population_cycles = u128::from(modeled_elapsed)
             .checked_mul(sm_cycle_population)
+            .and_then(|cycles| cycles.checked_mul(observation_population + 1))
+            .map(|cycles| cycles.div_ceil(observation_population))
             .unwrap_or(u128::MAX);
         let effective_sm_active_frontier = result
             .sm_active_terminal_event_time()
