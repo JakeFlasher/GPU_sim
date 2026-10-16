@@ -1109,3 +1109,10 @@ without changing replay or NCU comparison values.
 cross-direction sector/line counters on top of Q83. The real five-capture probe
 was bit-identical on all scored outputs. Quant_005 launch 1 has no directional
 inter-record overlap; no diagnostic value becomes a cache or timing input.
+
+## Q86 — B2/B3 offline closure (2026-10-16)
+
+Zero-replay O1/O2 analysis found no tail-safe DRAM substitution and no safe
+L1 upward observer reclassification. B2/B3 are formally closed as typed
+client-scope, overfetch, and topology residuals; Q79 remains authoritative and
+Q82–Q85 remain diagnostic-only.

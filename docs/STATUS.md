@@ -109,3 +109,11 @@ passed with all scored estimates bit-for-bit identical to Q84. Quant_005 launch
 1 has load 1,536 sectors/384 lines, store 1,024 sectors/256 lines, and zero
 load-load, store-store, or cross-direction inter-record overlap. These fields
 remain structural diagnostics only.
+
+## Q86 — zero-replay B2/B3 closure (2026-10-16)
+
+Offline O1/O2 analysis of the Q79 full artifact found no DRAM structural
+predicate with improvement and zero worsened rows. L1 physical-hit additions
+were unavailable; ordinary and async pending-merge additions worsened many
+rows. B2 aggregate L1 and B3 unqualified DRAM/service residuals remain typed
+client-scope/overfetch/topology gaps; no replay was run.
