@@ -1,6 +1,6 @@
 //! Cache-operator classification from SASS opcode text — a lockstep port
 //! of `the trace producer cache-op decoder`'s token rules
-//! (closed 12-token vocabulary, priority-ordered matching, and the sm_86
+//! (closed cache-operator vocabulary, priority-ordered matching, and the sm_86
 //! bare-`LDG.E` → `.CA` default), applied to the control-bits sidecar's
 //! per-pc `opcode_text` instead of a separate cuobjdump pass.
 //!
@@ -24,7 +24,7 @@
 
 use sim_arch::{ArchError, ArchId, BareLdgEDefault, CapabilityError, LdgstsL1CacheSemantics};
 
-/// The closed 12-token vocabulary (schema lockstep with
+/// The closed cache-operator vocabulary (schema lockstep with
 /// `cache_op_map.schema.json` and the Python tuple).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CacheOpToken {
@@ -32,6 +32,9 @@ pub enum CacheOpToken {
     LdgECg,
     LdgECs,
     LdgEEf,
+    /// `LDG.E.NA`: PTX `ld.global.L1::no_allocate`; the request may
+    /// consult lower levels but must not allocate the fetched line in L1.
+    LdgENa,
     LdgEStrongSm,
     LdgEStrongGpu,
     Ldl,
@@ -66,8 +69,8 @@ pub fn derive_l1_eligible(token: CacheOpToken) -> bool {
 pub const BARE_LDG_E_DEFAULTS_TO_CA: &[&str] = &["sm_86"];
 
 /// Source-cache route encoded by an architecture-supported `LDGSTS` SASS form.
-/// This is separate from [`CacheOpToken`] so the stable 12-token
-/// vocabulary remains stable while async-copy completion retains its own type.
+/// This is separate from [`CacheOpToken`] so cache-operator classification
+/// remains independent while async-copy completion retains its own type.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LdgstsL1Policy {
     CacheAtAllLevels,
@@ -162,6 +165,7 @@ pub fn classify_opcode_for_arch(
                     (Some("CG"), _) => CacheOpToken::LdgECg,
                     (Some("CS"), _) => CacheOpToken::LdgECs,
                     (Some("EF"), _) => CacheOpToken::LdgEEf,
+                    (Some("NA"), _) => CacheOpToken::LdgENa,
                     // No explicit cache modifier: require the carded
                     // architecture default instead of borrowing sm_86.
                     _ => match arch.bare_ldg_e_default().require("bare_ldg_e_default")? {

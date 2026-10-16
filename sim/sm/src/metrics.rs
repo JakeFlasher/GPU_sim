@@ -1385,7 +1385,8 @@ impl TraceMetrics {
                     | sim_mem::CacheOpToken::LdgEStrongGpu
                     | sim_mem::CacheOpToken::Ldgsts
                     | sim_mem::CacheOpToken::LdgECa
-                    | sim_mem::CacheOpToken::LdgEEf,
+                    | sim_mem::CacheOpToken::LdgEEf
+                    | sim_mem::CacheOpToken::LdgENa,
                 ..
             } => (off, len, false),
             AccessKind::GlobalStore { off, len }

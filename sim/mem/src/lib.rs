@@ -7,7 +7,7 @@
 //!   model supplies the real warp interleaving the Python pool scheduler
 //!   stood in for.
 //! - [`cache_op`]: cache-operator classification from the control-bits
-//!   sidecar's per-pc SASS text (closed 12-token vocabulary + eligibility
+//!   sidecar's per-pc SASS text (typed cache-operator vocabulary + eligibility
 //!   partition in lockstep with `l1_cache_op_classifier.py`; the
 //!   classifier's OWN manifest artifacts are not consumed — its section
 //!   extraction mixes fatbin arch slices, see the module doc).

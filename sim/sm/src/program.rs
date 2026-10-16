@@ -515,7 +515,12 @@ fn alpha_mem_role(opcode_text: &str) -> MemRole {
             // a bare LDG.E remains conservative/bypass.
             MemRole::EligibleLoad(CacheOpToken::LdgECa)
         }
-        "LDG" if opcode.contains("STRONG.GPU") || opcode.contains(".CG") || opcode.contains(".CS") => {
+        "LDG" if opcode.contains(".NA") => MemRole::BypassLoad(CacheOpToken::LdgENa),
+        "LDG"
+            if opcode.contains("STRONG.GPU")
+                || opcode.contains(".CG")
+                || opcode.contains(".CS") =>
+        {
             MemRole::BypassLoad(CacheOpToken::LdgECg)
         }
         // The SM120 alpha lane treats the bare `LDG.E` form as the default
