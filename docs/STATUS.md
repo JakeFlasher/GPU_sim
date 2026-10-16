@@ -60,3 +60,19 @@ Against Q75 on identical full-corpus joins, source-TEX hit mean APE improved
 zero worsened rows and every family maximum was unchanged or lower; all other
 scored metrics were bit-for-bit unchanged. The quant_005 512-sector read-hit
 gap remains unavailable because descriptor/OOB padding is not cache-hit evidence.
+
+## Q80/Q81/Q82 follow-up (2026-10-16)
+
+The proposed TMA-shadow write-tag reinterpretation and zero-byte coverage fix
+were tested on real complete/partial captures and rejected: complete source-TEX
+hit/miss rows worsened, while the zero-byte-only arm made quant_005 source
+misses 1,809 versus 2,580 NCU misses. The proposed TMA-L2-miss-to-DRAM-read
+projection was evaluated offline and worsened 30 launches, so neither change
+was landed or replayed on the full corpus.
+
+Commit `6c1b5a05` instead lands quarantined typed sidecar provenance: transfer
+product checks, tensor-map summary, coordinates, raw valid/OOB references,
+unique sectors/lines, duplicate-sector counts, and nominal-box overage. A
+five-capture, 246-launch/mode, 12-worker full/fast probe passed with every
+scored estimate bit-for-bit identical to Q79. These fields are diagnostics only;
+`completion_clock` and physical topology remain unavailable.

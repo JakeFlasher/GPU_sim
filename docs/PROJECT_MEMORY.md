@@ -1067,3 +1067,18 @@ with no worsened rows, unchanged maxima/family maxima, and no changes to other
 scored metrics. Quant_005 launch 1 is 2,577 source misses versus NCU 2,580;
 the remaining 512 read hits are not inferred from nominal descriptor padding.
 `completion_clock` remains unavailable.
+
+## Q80/Q81/Q82 — follow-up response (2026-10-16)
+
+The proposed direct TMA-shadow `counted_hit` → sector-presence correction was
+adversarially probed. Complete-address source-TEX rows worsened, showing that
+the NCU source client can include write-tag behavior; the zero-byte-only
+coverage fix made quant_005 source output 768 hits/1,809 misses and was also
+rejected. A DRAM projection using TMA L2 load misses was tested offline and
+worsened 30 launches. No Q80/Q81 scoring or full replay was retained.
+
+Q82 commit `6c1b5a05` adds only quarantined typed sidecar provenance. The probe
+passed with bit-identical scored outputs; transfer-product consistency, tensor
+map/coordinate summaries, valid/OOB counts, unique sectors/lines, duplicate
+sector references, and nominal-box overage remain diagnostic observations and
+never become demand, timing, or hit inputs.
