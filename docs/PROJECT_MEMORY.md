@@ -51,6 +51,8 @@ The current effective-observation result is retained at
 `/root/sm120_rtx_5090_capture/replay_results/current_full_replay_20261016_effective_observation/`.
 The current partial-store RMW result is retained at
 `/root/sm120_rtx_5090_capture/replay_results/current_full_replay_20261016_partial_store_rmw/`.
+The current partial global/local-store RMW result is retained at
+`/root/sm120_rtx_5090_capture/replay_results/current_full_replay_20261016_partial_store_rmw_local/`.
 
 Current full-lane mean APEs include:
 
@@ -78,6 +80,9 @@ families are unchanged.
 The partial-sector global-store RMW arm reduces DRAM read mean APE from 50.5194%
 to 50.3123% and P90 from 90.9404% to 90.7480%, with no regression in other
 scored metrics.
+
+Including decoded local-store byte gaps further reduces DRAM read mean APE to
+50.3119% without changing other scored metrics.
 
 Aggregate L1 scope, unqualified DRAM/service and physical topology, and the
 internal TMA completion clock remain typed residuals. A boundary-clipped TMA
