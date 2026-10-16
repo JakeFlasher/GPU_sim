@@ -86,6 +86,29 @@ pub struct TmaObservation {
     /// destination addresses. Used only by the conditional source-specific
     /// L2 shadow observer for store-direction transfers.
     pub destination_sector_ids: Box<[i64]>,
+    /// Raw sidecar provenance retained for diagnostics only. These fields are
+    /// never passed to the cache/service model or used as nominal demand.
+    pub diagnostic: TmaDiagnosticProvenance,
+}
+
+/// Typed, bounded provenance for one TMA sidecar record. Address enumeration
+/// is intentionally summarized; raw byte arrays are not retained in memory.
+/// The fields are evidence annotations, not timing or replay parameters.
+#[derive(Debug, Clone, Default)]
+pub struct TmaDiagnosticProvenance {
+    pub transfer_count: Option<u64>,
+    pub transfer_size: Option<u64>,
+    pub tensor_map_data_type: Option<u8>,
+    pub tensor_map_rank: Option<u8>,
+    pub tensor_map_box_dims: Box<[u64]>,
+    pub tensor_map_box_bytes: Option<u64>,
+    pub coords: Box<[i64]>,
+    pub raw_valid_address_refs: u64,
+    pub raw_oob_address_refs: u64,
+    pub unique_sector_count: u64,
+    pub unique_line_count: u64,
+    pub intra_record_duplicate_sector_refs: u64,
+    pub transfer_product_matches: Option<bool>,
 }
 
 #[derive(Debug, Default)]
@@ -358,25 +381,59 @@ struct TmaSourceAddress {
     oob: bool,
 }
 
+#[derive(Deserialize)]
+struct TmaTensorMap {
+    data_type: Option<u8>,
+    rank: Option<u8>,
+    box_dims: Option<Vec<u64>>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct SectorDiagnostics {
+    raw_valid_address_refs: u64,
+    raw_oob_address_refs: u64,
+    unique_sector_count: u64,
+    unique_line_count: u64,
+    intra_record_duplicate_sector_refs: u64,
+}
+
 fn compact_sector_ids(
     values: Option<&[TmaSourceAddress]>,
-) -> Result<Box<[i64]>, &'static str> {
+) -> Result<(Box<[i64]>, SectorDiagnostics), &'static str> {
     let Some(values) = values else {
-        return Ok(Box::new([]));
+        return Ok((Box::new([]), SectorDiagnostics::default()));
     };
     let mut seen = BTreeSet::new();
     let mut sectors = Vec::new();
+    let mut diagnostics = SectorDiagnostics::default();
     for value in values {
         if value.oob {
+            diagnostics.raw_oob_address_refs = diagnostics.raw_oob_address_refs
+                .checked_add(1)
+                .ok_or("TMA OOB-address diagnostic counter overflow")?;
             continue;
         }
+        diagnostics.raw_valid_address_refs = diagnostics.raw_valid_address_refs
+            .checked_add(1)
+            .ok_or("TMA valid-address diagnostic counter overflow")?;
         let sector = value.address >> 5;
         let sector = i64::try_from(sector).map_err(|_| "TMA source address exceeds the signed sector-id domain")?;
         if seen.insert(sector) {
             sectors.push(sector);
         }
     }
-    Ok(sectors.into_boxed_slice())
+    diagnostics.unique_sector_count = u64::try_from(sectors.len())
+        .map_err(|_| "TMA unique-sector diagnostic counter overflow")?;
+    diagnostics.intra_record_duplicate_sector_refs = diagnostics
+        .raw_valid_address_refs
+        .saturating_sub(diagnostics.unique_sector_count);
+    let mut lines = BTreeSet::new();
+    for &sector in &sectors {
+        lines.insert(sector.div_euclid(4));
+    }
+    diagnostics.unique_line_count = u64::try_from(lines.len())
+        .map_err(|_| "TMA unique-line diagnostic counter overflow")?;
+    Ok((sectors.into_boxed_slice(), diagnostics))
 }
 
 // Do not flatten a serde map here: it would materialize the enormous address
@@ -416,6 +473,10 @@ struct Row {
     value_mask_complete: Option<bool>,
     src_addresses: Option<Vec<TmaSourceAddress>>,
     dst_addresses: Option<Vec<TmaSourceAddress>>,
+    transfer_count: Option<u64>,
+    transfer_size: Option<u64>,
+    tensor_map: Option<TmaTensorMap>,
+    coords: Option<Vec<i64>>,
 }
 
 impl AsyncSidecars {
@@ -520,18 +581,47 @@ impl AsyncSidecars {
                         )));
                     }
                     let is_load = matches!(head, "UTMALDG" | "UBLKCP");
-                    let source_sector_ids = if is_load {
+                    let (source_sector_ids, source_diagnostics) = if is_load {
                         compact_sector_ids(row.src_addresses.as_deref())
                             .map_err(|message| error(message.to_owned()))?
                     } else {
-                        Box::new([])
+                        (Vec::<i64>::new().into_boxed_slice(), SectorDiagnostics::default())
                     };
-                    let destination_sector_ids = if head == "UTMASTG" {
+                    let (destination_sector_ids, destination_diagnostics) = if head == "UTMASTG" {
                         compact_sector_ids(row.dst_addresses.as_deref())
                             .map_err(|message| error(message.to_owned()))?
                     } else {
-                        Box::new([])
+                        (Vec::<i64>::new().into_boxed_slice(), SectorDiagnostics::default())
                     };
+                    let sector_diagnostics = if is_load {
+                        source_diagnostics
+                    } else {
+                        destination_diagnostics
+                    };
+                    let tensor_map_data_type = row.tensor_map.as_ref().and_then(|map| map.data_type);
+                    let tensor_map_rank = row.tensor_map.as_ref().and_then(|map| map.rank);
+                    let tensor_map_box_dims = row
+                        .tensor_map
+                        .as_ref()
+                        .and_then(|map| map.box_dims.as_ref())
+                        .cloned()
+                        .unwrap_or_default();
+                    let tensor_map_box_bytes = row.tensor_map.as_ref().and_then(|map| {
+                        let element_bytes = match map.data_type {
+                            Some(0) => Some(1_u64), // UINT8 in the live SM120 sidecar
+                            Some(7) => Some(4_u64), // FLOAT32 in the live SM120 sidecar
+                            _ => None,
+                        }?;
+                        map.box_dims
+                            .as_ref()?
+                            .iter()
+                            .try_fold(element_bytes, |acc, dim| acc.checked_mul(*dim))
+                    });
+                    let transfer_product_matches = row
+                        .transfer_count
+                        .zip(row.transfer_size)
+                        .zip(row.byte_count)
+                        .map(|((count, size), bytes)| count.checked_mul(size) == Some(bytes));
                     let obs = TmaObservation {
                         bytes: row.byte_count,
                         // Blackwell lowers the bulk tensor/mbarrier transfer
@@ -556,6 +646,22 @@ impl AsyncSidecars {
                         completion_clock: row.completion_clock,
                         source_sector_ids,
                         destination_sector_ids,
+                        diagnostic: TmaDiagnosticProvenance {
+                            transfer_count: row.transfer_count,
+                            transfer_size: row.transfer_size,
+                            tensor_map_data_type,
+                            tensor_map_rank,
+                            tensor_map_box_dims: tensor_map_box_dims.into_boxed_slice(),
+                            tensor_map_box_bytes,
+                            coords: row.coords.unwrap_or_default().into_boxed_slice(),
+                            raw_valid_address_refs: sector_diagnostics.raw_valid_address_refs,
+                            raw_oob_address_refs: sector_diagnostics.raw_oob_address_refs,
+                            unique_sector_count: sector_diagnostics.unique_sector_count,
+                            unique_line_count: sector_diagnostics.unique_line_count,
+                            intra_record_duplicate_sector_refs: sector_diagnostics
+                                .intra_record_duplicate_sector_refs,
+                            transfer_product_matches,
+                        },
                     };
                     if launch.tma.insert(key, obs).is_some() {
                         return Err(error(format!(

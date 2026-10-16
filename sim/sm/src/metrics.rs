@@ -424,6 +424,17 @@ pub struct TraceMetrics {
     pub tma_sidecar_store_payload_bytes: u64,
     pub tma_sidecar_zero_byte_records: u64,
     pub tma_sidecar_oob_or_empty_records: u64,
+    /// Quarantined sidecar provenance diagnostics. These counters are
+    /// descriptive only and never feed demand, cache state, timing, or NCU
+    /// target selection.
+    pub tma_sidecar_transfer_product_matched_records: u64,
+    pub tma_sidecar_transfer_product_mismatched_records: u64,
+    pub tma_sidecar_raw_valid_address_refs: u64,
+    pub tma_sidecar_raw_oob_address_refs: u64,
+    pub tma_sidecar_unique_sector_count: u64,
+    pub tma_sidecar_unique_line_count: u64,
+    pub tma_sidecar_intra_record_duplicate_sector_refs: u64,
+    pub tma_sidecar_nominal_box_overage_bytes_diagnostic: u64,
     /// Address-derived conditional TMA/L2 shadow stream. These counters are
     /// separate from the shared replay L2 state and never affect scheduling,
     /// response timing, or DRAM service.
@@ -777,6 +788,40 @@ impl TraceMetrics {
             &mut self.tma_sidecar_oob_or_empty_records,
             u64::from(observation.oob_or_empty),
         )?;
+        match observation.diagnostic.transfer_product_matches {
+            Some(true) => add(&mut self.tma_sidecar_transfer_product_matched_records, 1)?,
+            Some(false) => add(&mut self.tma_sidecar_transfer_product_mismatched_records, 1)?,
+            None => {}
+        }
+        add(
+            &mut self.tma_sidecar_raw_valid_address_refs,
+            observation.diagnostic.raw_valid_address_refs,
+        )?;
+        add(
+            &mut self.tma_sidecar_raw_oob_address_refs,
+            observation.diagnostic.raw_oob_address_refs,
+        )?;
+        add(
+            &mut self.tma_sidecar_unique_sector_count,
+            observation.diagnostic.unique_sector_count,
+        )?;
+        add(
+            &mut self.tma_sidecar_unique_line_count,
+            observation.diagnostic.unique_line_count,
+        )?;
+        add(
+            &mut self.tma_sidecar_intra_record_duplicate_sector_refs,
+            observation.diagnostic.intra_record_duplicate_sector_refs,
+        )?;
+        if let (Some(nominal), Some(bytes)) = (
+            observation.diagnostic.tensor_map_box_bytes,
+            observation.bytes,
+        ) {
+            add(
+                &mut self.tma_sidecar_nominal_box_overage_bytes_diagnostic,
+                nominal.saturating_sub(bytes),
+            )?;
+        }
         Ok(())
     }
 
