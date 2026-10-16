@@ -32,6 +32,8 @@ The current shared-memory and atomic-observer result is at
 `/root/sm120_rtx_5090_capture/replay_results/current_full_replay_20261016_shared_memory_atomic_alias/`.
 The current effective-observation result is at
 `/root/sm120_rtx_5090_capture/replay_results/current_full_replay_20261016_effective_observation/`.
+The current partial-store RMW result is at
+`/root/sm120_rtx_5090_capture/replay_results/current_full_replay_20261016_partial_store_rmw/`.
 Representative full-lane mean APEs are:
 
 | Metric | Mean APE |
@@ -56,6 +58,10 @@ from **64.4022%** to **1.6116%** without changing other scored metrics.
 The elapsed-IPC observation boundary reduces mean APE from **20.3993%** to
 **13.6860%** and P90 from **38.5692%** to **27.8167%**; maximum and other
 metric families are unchanged.
+
+The partial-sector global-store RMW arm reduces DRAM read mean APE from
+**50.5194%** to **50.3123%** and P90 from **90.9404%** to **90.7480%**, with
+no regression in other scored metrics.
 
 These scores are effective metric projections. Aggregate L1 client scope,
 DRAM/service and topology, and engine completion remain explicit residuals.

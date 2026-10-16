@@ -6,7 +6,9 @@
 
 use serde::ser::{Serialize, SerializeStruct, Serializer};
 use sim_arch::ArchId;
-use sim_mem::{L1CounterError, L1Counters, L1OriginCounters, L2Counters, MemoryOrigin};
+use sim_mem::{
+    L1CounterError, L1Counters, L1OriginCounters, L2Counters, L2Source, MemoryOrigin,
+};
 use sim_sm::{
     DramStats, FrontEndCounters, FullCounterEstimatorProvenance, FullKernelReplayResult,
     FullLaunchCoverage, FullLaunchSetCounters, FullLaunchTimingDiagnostic, L2SourceSplit,
@@ -28,6 +30,10 @@ struct CounterSnapshot<'a> {
     /// Effective SM120 TMA global-to-shared payload demand, in 32-byte
     /// sectors. This is a conditional sidecar demand arm, not engine timing.
     tma_load_sectors: u64,
+    /// Potential partial-store RMW sectors derived from traced byte coverage.
+    /// Emission intersects this with a modeled cold-store population before
+    /// charging a conditional DRAM read.
+    partial_global_store_sectors: u64,
 }
 
 impl<'a> CounterSnapshot<'a> {
@@ -54,6 +60,7 @@ impl<'a> CounterSnapshot<'a> {
                 .trace_metrics()
                 .tma_sidecar_load_payload_bytes
                 .div_ceil(32),
+            partial_global_store_sectors: result.trace_metrics().partial_global_store_sectors,
         })
     }
 
@@ -75,6 +82,7 @@ impl<'a> CounterSnapshot<'a> {
             front_end: counters.front_end(),
             binding_cycles,
             tma_load_sectors: 0,
+            partial_global_store_sectors: 0,
         })
     }
 
@@ -1119,11 +1127,24 @@ fn emit_dram_read_sectors(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitErr
         }));
     };
     let compulsory = snap.front_end.compulsory_instruction_read_sectors();
+    let partial_store_rmw = snap
+        .l2_by_source
+        .and_then(|split| {
+            let (store_sectors, store_hits) = split.source(L2Source::Store);
+            let store_misses = store_sectors.checked_sub(store_hits)?;
+            Some(snap.partial_global_store_sectors.min(store_misses))
+        })
+        .unwrap_or(0);
     let total = if snap.arch == ArchId::Sm120 {
         checked_sum(
             "traffic_dram_read_sectors",
-            "data, TMA payload, and compulsory instruction DRAM-read sectors",
-            &[dram.read_sectors, snap.tma_load_sectors, compulsory],
+            "data, conditional partial-store RMW, TMA payload, and compulsory instruction DRAM-read sectors",
+            &[
+                dram.read_sectors,
+                partial_store_rmw,
+                snap.tma_load_sectors,
+                compulsory,
+            ],
         )?
     } else {
         checked_sum(

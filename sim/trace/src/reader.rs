@@ -2297,6 +2297,7 @@ pub enum ValidatedSectorPlan<'a> {
 pub struct ValidatedMemoryInstruction {
     sectors: CompactSectorPlan,
     projection: u32,
+    partial_store_sectors: u64,
     /// Ideal 32-bank/4-byte-word shared service work for this instruction;
     /// zero for non-shared routes.  This is retained separately from the
     /// route-disjoint `projection` so the effective bank-conflict report can
@@ -2783,6 +2784,18 @@ impl ValidatedWarp {
                 } else {
                     CompactSectorPlan::ready(sectors.len(), 0)
                 };
+                let partial_store_sectors = if meta.access_kind == Some(pb::MemoryOpAccessKind::Store)
+                    && matches!(resolved_route, Ok(ValidatedMemoryRoute::Global))
+                {
+                    project_partial_store_sectors(preflight).map_err(|source| {
+                        TraceError::EffectiveDataBytes {
+                            record: format!("{label} warp={map_key} inst={record_ix}"),
+                            source,
+                        }
+                    })?
+                } else {
+                    0
+                };
                 let route = match resolved_route {
                     Ok(route) => CompactMemoryRoute::ready(route),
                     Err(error) => {
@@ -2798,6 +2811,7 @@ impl ValidatedWarp {
                 memories.push(ValidatedMemoryInstruction {
                     sectors: sector_plan,
                     projection,
+                    partial_store_sectors,
                     shared_ideal_wavefronts: shared_bank_ideal_wavefronts_32x4,
                     meta: CompactMemoryMeta::new(
                         meta.op_class,
@@ -2944,6 +2958,13 @@ impl ValidatedWarp {
     pub fn effective_data_bytes(&self, memory: &ValidatedMemoryInstruction) -> u64 {
         self.async_copy_projection(memory)
             .map_or(0, |projection| projection.effective_data_bytes)
+    }
+
+    /// Potential partial-sector global-store RMW demand from decoded byte
+    /// coverage. The hierarchy layer must intersect this with modeled cold
+    /// store sectors before charging a lower-level read.
+    pub fn partial_store_sectors(&self, memory: &ValidatedMemoryInstruction) -> u64 {
+        memory.partial_store_sectors
     }
 
     /// Exact LDGSTS source/destination topology when the trace contract carries
@@ -6995,6 +7016,58 @@ pub fn project_effective_data_bytes(
     } else {
         Ok(bytes)
     }
+}
+
+/// Count sectors whose decoded byte coverage is partial for one global store
+/// instruction. This is a trace-side RMW-demand bound: it does not assert that
+/// the line missed in L2, and callers must intersect it with their modeled
+/// store-miss population before charging any lower-level read.
+pub fn project_partial_store_sectors(
+    preflight: PreflightedMemoryAccess<'_>,
+) -> Result<u64, EffectiveDataBytesError> {
+    let mut coverage = BTreeMap::<i64, u32>::new();
+    let mut overflowed = false;
+    preflight.visit_addresses(|access| {
+        if overflowed {
+            return;
+        }
+        let width = match u64::try_from(access.data_width_bytes) {
+            Ok(width) => width,
+            Err(_) => {
+                overflowed = true;
+                return;
+            }
+        };
+        for &address in access.lane_vector.iter() {
+            if address == lanes::LANE_INACTIVE_SENTINEL {
+                continue;
+            }
+            for byte in 0..width {
+                let byte_address = match i128::from(address).checked_add(i128::from(byte)) {
+                    Some(value) => value,
+                    None => {
+                        overflowed = true;
+                        break;
+                    }
+                };
+                let sector = byte_address.div_euclid(32);
+                let offset = byte_address.rem_euclid(32) as u32;
+                let Ok(sector) = i64::try_from(sector) else {
+                    overflowed = true;
+                    break;
+                };
+                let entry = coverage.entry(sector).or_default();
+                *entry |= 1_u32 << offset;
+            }
+            if overflowed {
+                break;
+            }
+        }
+    });
+    if overflowed {
+        return Err(EffectiveDataBytesError::Overflow);
+    }
+    Ok(coverage.values().filter(|mask| **mask != u32::MAX).count() as u64)
 }
 
 fn project_operand_effective_data_bytes(

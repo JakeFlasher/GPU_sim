@@ -363,6 +363,9 @@ pub struct TraceMetrics {
     pub instructions: InstructionActivity,
     pub by_opcode: BTreeMap<String, InstructionActivity>,
     pub memory: BTreeMap<String, MemoryTraffic>,
+    /// Source-derived partial global-store sectors. This is a potential
+    /// read-modify-write demand bound and never enters DRAM accounting alone.
+    pub partial_global_store_sectors: u64,
     pub by_pipeline: BTreeMap<String, InstructionActivity>,
     /// NCU-style logical pipe projections. These are deliberately separate
     /// from the issue scheduler's resource classes above.

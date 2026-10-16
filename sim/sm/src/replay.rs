@@ -3906,6 +3906,9 @@ fn extract_per_sm_blocks(
                         Some(_) => {}
                     }
                 }
+                let partial_store_sectors = preflight
+                    .as_ref()
+                    .map_or(0, |memory| warp.partial_store_sectors(memory.memory));
                 let kind = if decode_sectors {
                     classify_compact_with_l1(
                         preflight,
@@ -3935,6 +3938,14 @@ fn extract_per_sm_blocks(
                         tma_observations,
                     )?
                 };
+                if matches!(kind, AccessKind::GlobalStore { .. }) {
+                    trace_metrics.partial_global_store_sectors = trace_metrics
+                        .partial_global_store_sectors
+                        .checked_add(partial_store_sectors)
+                        .ok_or(IssueError::CounterOverflow {
+                            counter: "partial global-store sectors",
+                        })?;
+                }
                 if collect_joint_l2 {
                     let order = inst.instrumentation_order();
                     if let Some((off, len, class, ordinary_read)) =
