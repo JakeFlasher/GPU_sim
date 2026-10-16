@@ -1102,3 +1102,10 @@ clock or timing input is synthesized.
 comparisons were regenerated with identical scored estimates and joins; these
 metadata tags make source-qualified versus unqualified residuals explicit
 without changing replay or NCU comparison values.
+
+## Q85 — directional reuse provenance (2026-10-16)
+
+`5dc6827a` adds load/store-partitioned inter-record duplicate and
+cross-direction sector/line counters on top of Q83. The real five-capture probe
+was bit-identical on all scored outputs. Quant_005 launch 1 has no directional
+inter-record overlap; no diagnostic value becomes a cache or timing input.

@@ -100,3 +100,12 @@ Report commit `84200733` adds metadata-only launch association tiers and metric
 client-scope classes to post-replay comparison rows. The Q83 five-capture report
 was regenerated with the tags; scored estimates, joins, row counts, and APE
 summaries remain unchanged. Tags never filter workloads or alter replay.
+
+## Q85 — directional TMA reuse diagnostics (2026-10-16)
+
+Commit `5dc6827a` partitions Q83 reuse provenance into load-load,
+store-store, and cross-direction sector/line overlap. The five-capture probe
+passed with all scored estimates bit-for-bit identical to Q84. Quant_005 launch
+1 has load 1,536 sectors/384 lines, store 1,024 sectors/256 lines, and zero
+load-load, store-store, or cross-direction inter-record overlap. These fields
+remain structural diagnostics only.
