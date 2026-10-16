@@ -31,7 +31,7 @@ use sim_trace::{ExecInfo, TraceDir};
 
 fn sm86_card() -> ArchCard {
     // The card is COMMITTED repo data (not machine-local evidence), so an
-    // in-repo path is fine here. The M1 traces are sm_86 captures.
+    // in-repo path is fine here. The retained traces are sm_86 captures.
     let path = PathBuf::from("../../arch_profiles/cards/sm_86.json");
     ArchCard::load(&path).expect("committed sm_86 card loads")
 }

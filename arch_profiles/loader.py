@@ -6,7 +6,7 @@ per-architecture constants — historically hardcoded in per-device dicts
 ``_BARE_LDG_E_DEFAULTS_TO_CA``, the NVML reference operating point, the L1/L2
 geometry cards) — into **input data cards** read through one loader.
 
-Design (grounded in the seam research, esp. Q9 "token vocabulary"):
+Design: keep build-arch vocabulary separate from deployment identity:
 
 * The canonical architecture identity is the **bare ``sm_XX`` token** (e.g.
   ``sm_86``, ``sm_120``). This matches ``provenance_audit._canonicalize_request_arch``
@@ -16,7 +16,7 @@ Design (grounded in the seam research, esp. Q9 "token vocabulary"):
 * A device-tier **SKU** (``rtx_3090_ti`` or ``rtx_5090``) selects the card
   facts used by the deployment.
 * ``build_arch_family`` (a compile-time concern) is kept SEPARATE from the
-  deploy/collection ``arch_id`` (Q5): a fatbin may legitimately carry server
+  deploy/collection ``arch_id``: a fatbin may legitimately carry server
   slices ``sm_90a`` / ``sm_120a`` that are never valid deploy arches.
 
 The loader intentionally preserves the retained sm_86 compatibility values;
@@ -544,7 +544,7 @@ def resolve_context(
 
 
 # ---------------------------------------------------------------------------
-# Resolution (the alias landmine fix, Q9)
+# Resolve aliases without conflating build and deployment identity
 # ---------------------------------------------------------------------------
 def _aliases() -> dict[str, Any]:
     return _load_json(_ALIASES_PATH)
@@ -625,7 +625,7 @@ def resolve_sku(token: str | tuple[int, int], *, strict: bool = True) -> str | N
 
 
 def build_arch_family_for(cc: tuple[int, int]) -> list[str]:
-    """Return the fatbin build-arch family for a compute capability (Q5).
+    """Return the fatbin build-arch family for a compute capability.
 
     NB: this is a *build*-time vocabulary and may include server arches
     (``sm_90a``, ``sm_120a``) that are forbidden as deploy ``arch_id`` values.

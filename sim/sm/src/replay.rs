@@ -26,7 +26,7 @@
 //! v0 limitation (fail-closed, not silent): every dynamic record of a
 //! launch must carry the launch's own `function_unique_id` — traced device
 //! function CALLs would need per-segment schedules and are rejected typed
-//! until a trace exercises them (none of the 17 M1 traces does).
+//! until a trace exercises them.
 //!
 //! Memory discipline: threadblock payloads are decoded and semantically
 //! validated once when `TraceDir` captures the immutable snapshot. The reader

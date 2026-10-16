@@ -8,7 +8,7 @@
 //! control-bits sidecar (`sim_sm::ControlSidecar`, keyed by function name
 //! and pc).
 //!
-//! Join facts, verified on all 17 M1 traces (2026-07-06):
+//! Join facts checked against the retained trace corpus:
 //! - every traced instruction's `function_unique_id` matches a kernel's
 //!   `unique_function_id` here;
 //! - `kernel_name` minus its trailing `___<digits>` instance suffix equals

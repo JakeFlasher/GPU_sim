@@ -77,7 +77,7 @@ never create reviewer swarms or recurring approval ceremonies.
 ## No procedural machinery
 
 **Permanent alpha-scope ban:** do not add, restore, invoke, or maintain any
-M5/M6 authority, receipt, audit, provenance, hashing, signing, approval,
+authority, receipt, audit, provenance, hashing, signing, approval,
 freeze, sealing, admission, or validation workflow machinery. Do not require
 such artifacts for research execution, model runs, or commits, and do not
 reintroduce them under a different name. Local runtime error handling and

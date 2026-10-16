@@ -6,8 +6,9 @@
 //!
 //! WHY the sidecar text and not the classifier's own manifests: the
 //! Python classifier's kernel-section extraction concatenates SASS
-//! sections across EVERY fatbin arch slice (measured 2026-07-06 on the
-//! M1 layernorm binary: 12 tagged "LDG.E" pcs of which only 4 are LDG
+//! sections across every fatbin architecture slice. A representative sidecar
+//! contains tagged "LDG.E" PCs from several slices, while only
+//! the traced target slice contributes executable LDG instructions.
 //! instructions in the traced sm_86 section — one is the STG at 0x9a0,
 //! and pcs appear twice because the sm_80 slice's layout bleeds in). The
 //! Phase-1E control-bits extractor handles arch sections correctly

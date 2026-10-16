@@ -590,7 +590,7 @@ pub(super) fn project(
         // hardware clock. The instruction count remains the trace cardinality
         // used by the existing sector/instruction projections.
         let trace = result.trace_metrics();
-        let alpha = Sm120AlphaConfig::from_m8_m9();
+        let alpha = Sm120AlphaConfig::default_sm120_effective();
         let modeled_elapsed = result
             .modeled_completion_frontier()
             .lower_bound_cycles()
@@ -691,7 +691,8 @@ pub(super) fn project(
         // not use it as the NCU `.avg.per_cycle_active` endpoint.  The raw
         // denominator stops at the modeled active terminal event and omits
         // the source-derived front-end observation envelope already used for
-        // the effective SM-active endpoint.  M28 showed that this omission
+        // the effective SM-active endpoint. The retained corpus comparison showed
+        // that this omission
         // dominates the IPC residual on the real corpus.  The effective
         // denominator remains a conditional observation model; it is not a
         // silicon issue-width or clock calibration.
@@ -709,7 +710,7 @@ pub(super) fn project(
         // NCU's `.avg.per_cycle_active` is a ratio-of-sums over the SM
         // population, not the terminal/max observation endpoint used by
         // `sm__cycles_active.max`.  Build a separate effective sum by
-        // extending each observed SM lifetime with the Q74 effective lifetime
+        // extending each observed SM lifetime with the effective lifetime
         // and front-end observation arms.  The traced lifetime is a causal
         // union, while the NCU active-cycle sum includes a broader observed
         // active interval; the multiplier and envelope are therefore kept as
@@ -764,7 +765,7 @@ pub(super) fn project(
                 u128::from(result.instructions_issued()),
                 effective_active_ipc_denominator,
                 true,
-                "trace instruction cardinality divided by the Q75 effective SM lifetime/front-end observation envelope when available; validated pure-TMA payload observations without dynamic LDGSTS use the declared overlap arm; raw summed SM-active cycles are a fallback and neither form is calibrated silicon IPC",
+                "trace instruction cardinality divided by the effective SM lifetime/front-end observation envelope when available; validated pure-TMA payload observations without dynamic LDGSTS use the declared overlap arm; raw summed SM-active cycles are a fallback and neither form is calibrated silicon IPC",
             ),
         );
         m.insert(

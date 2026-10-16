@@ -2064,7 +2064,7 @@ fn admit_launch_evidence_in_base(
     let wire_summary = trace_dir.validation_summary();
     let trace_stats = trace_dir.stats().ok_or(ManifestError::EdgeUnverifiable {
         edge: "stats_csv",
-        reason: "Q1009 launch admission requires snapshotted non-vacuous producer counters",
+        reason: "launch admission requires snapshotted non-vacuous producer counters",
     })?;
 
     let (exec_path, exec_raw, exec_digest) = read_manifest_artifact(

@@ -5,7 +5,7 @@
 //! order on `(time, seq)`, where `seq` is the insertion sequence number. Payload data
 //! belongs in the caller's typed `kind`; there is no separate FFI payload
 //! handle. Two runs over the same inputs therefore produce bit-identical
-//! schedules — a prerequisite for the M2 accuracy gates (a simulator whose
+//! schedules — a prerequisite for reproducible comparisons (a simulator whose
 //! outputs wobble run-to-run cannot be compared against deterministic-class
 //! NCU counts).
 //!

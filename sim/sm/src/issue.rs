@@ -13228,7 +13228,7 @@ impl<'a> SmCore<'a> {
             // count. A retiring instruction has no next eligibility to observe.
             if !retires_warp {
                 // The retained SM120 high-word control decoder is a
-                // transport hypothesis. P9's dependent-chain calibration
+                // transport hypothesis. Dependent-chain calibration
                 // shows that applying its scalar stall field on top of the
                 // measured family latency double-counts readiness. Keep the
                 // field for non-scalar classes, but let the calibrated

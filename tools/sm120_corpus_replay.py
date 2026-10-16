@@ -156,7 +156,7 @@ def replay(capture: Path, relative: str, control: Path, args, mode: str, logs: P
     memory_mode = args.memory_mode if mode == "full" else args.fast_memory_mode
     cache_scope = scope_override or args.cache_scope
     command = [str(args.sim_bin), "--trace", str(capture), "--control", str(control),
-               "--arch-card", str(args.arch_card), "--sm120-alpha", "--mode",
+               "--arch-card", str(args.arch_card), "--mode",
                str(memory_mode)]
     if args.sm120_effective_l1 and memory_mode != "flat":
         command.extend(("--sm120-effective-l1", args.sm120_effective_l1))
@@ -166,7 +166,6 @@ def replay(capture: Path, relative: str, control: Path, args, mode: str, logs: P
         command.append("--carded-dram")
     if mode == "full":
         command.extend(("--cache-scope", cache_scope))
-        command.append("--ncu-shaped-metrics")
     if mode == "fast":
         command.append("--fast-frontier-only")
     suffix = ".fallback-launch" if scope_override else ""
@@ -265,9 +264,6 @@ def main() -> int:
                         help="override the default effective L2 parameters: CAPACITY_BYTES:SLICES:ASSOCIATIVITY")
     parser.add_argument("--carded-dram", action="store_true",
                         help="enable the architecture-card DRAM path (for l1-l2 mode)")
-    # Accepted for old command lines; full replay always emits these projections.
-    parser.add_argument("--ncu-shaped-metrics", action="store_true", default=True,
-                        help=argparse.SUPPRESS)
     parser.add_argument("--timeout", type=float, default=1200, help="seconds per complete capture replay")
     parser.add_argument("--max-sim-output-bytes", type=int, default=512 * 1024 * 1024,
                         help="bounded simulator stdout retained by the driver")
@@ -330,8 +326,7 @@ def main() -> int:
                "sm120_effective_l1_override": args.sm120_effective_l1,
                "sm120_effective_l2_override": args.sm120_effective_l2,
                "carded_dram": bool(args.carded_dram),
-               "ncu_shaped_metrics": bool(args.ncu_shaped_metrics and "full" in modes),
-               "ncu_shaped_metrics_requested": bool(args.ncu_shaped_metrics),
+               "ncu_shaped_metrics": bool("full" in modes),
                "workers": args.workers,
                "ncu_used_as_input": False, "modes": {}}
     for mode in modes:
@@ -398,7 +393,7 @@ def main() -> int:
             "driver_total_wall_ns": time.perf_counter_ns() - started,
             "jsonl_artifact": str(args.output / f"{mode}.jsonl.zst"),
             "jsonl_compression": jsonl_compression_description(),
-            "ncu_shaped_metrics_applied": bool(args.ncu_shaped_metrics and mode == "full"),
+            "ncu_shaped_metrics_applied": bool(mode == "full"),
         }
         (args.output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     print(json.dumps(summary, indent=2))

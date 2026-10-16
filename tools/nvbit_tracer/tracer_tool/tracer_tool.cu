@@ -6995,7 +6995,8 @@ void *recv_thread_fun(void *args) {
            * resolved_allocation_id == 0. */
           uint32_t resolved_allocation_id = 0;
           // Allocation-identity gate. Plain global loads/stores resolve as
-          // before (kGlobal, unconditional — preserves the frozen M1 anchor).
+          // before (kGlobal, unconditional, preserving the established trace
+          // contract).
           // A GLOBAL/GENERIC-space atomic resolves the same way; a SHARED
           // atomic (ATOMS) is exempt and keeps resolved_allocation_id == 0.
           // ASYNC_COPY follows its per-operand space: the LDGSTS global source

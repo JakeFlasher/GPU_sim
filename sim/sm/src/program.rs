@@ -2,7 +2,7 @@
 //! Phase-1E control-bits sidecar — the issue-control table the SM model
 //! replays against (design §6.2).
 //!
-//! Join key (verified byte-exact on all 17 M1 traces, 2026-07-06):
+//! Join key (checked against the retained trace corpus):
 //! `ExecInfo.kernels[fuid].function_name` == sidecar function key, and the
 //! two static pc sets are EQUAL. Both directions of that equality are
 //! enforced fail-closed here: a pc only in the exec info means the sidecar
@@ -587,7 +587,7 @@ fn protocol_op(opcode_text: &str) -> ProtocolOp {
     }
 }
 
-/// M8/M9-derived scalar/barrier cadence.  Uncharacterized tensor, SFU,
+/// Effective scalar/barrier cadence.  Uncharacterized tensor, SFU,
 /// branch, and async-control forms remain dispatch-only rather than borrowing
 /// an SM86 interval.
 fn classify_pipeline_sm120_alpha(
@@ -626,7 +626,7 @@ fn classify_pipeline_sm120_alpha(
 }
 
 /// The retained high-word control decoder is not a proven SM120 stall
-/// encoding. P9's dependent arithmetic probes show that applying its scalar
+/// encoding. Dependent arithmetic measurements show that applying the scalar
 /// stall/yield field on top of the calibrated family pipeline double-counts
 /// readiness. Keep the decoded field for non-scalar/control classes until a
 /// scope-aligned SM120 control experiment establishes its meaning.
@@ -966,7 +966,7 @@ pub fn build_schedules_with_pipeline_arch(
 
 /// Build an explicitly opt-in SM120 alpha schedule.  The returned schedule
 /// retains `sm_120`; the scalar/barrier cadence comes only from the supplied
-/// M8/M9 envelope and never from an SM86 capability table.
+/// effective envelope and never from an SM86 capability table.
 pub fn build_schedules_sm120_alpha(
     exec: &ExecInfo,
     sidecar: &ControlSidecar,

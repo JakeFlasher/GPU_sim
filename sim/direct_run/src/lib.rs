@@ -673,13 +673,13 @@ fn resolve_issue_with_metadata(
         if arch != sim_arch::ArchId::Sm120 {
             return Err(RunError::new(
                 "issue configuration",
-                "--sm120-alpha requires an sm_120 architecture card",
+                "SM120 effective mode requires an sm_120 architecture card",
             ));
         }
         if config.architecture_spec.is_some() || config.hypothetical_issue_ports.is_some() {
             return Err(RunError::new(
                 "arguments",
-                "--sm120-alpha cannot combine with --architecture-spec or --hypothetical-issue-ports",
+                "SM120 effective mode cannot combine with --architecture-spec or --hypothetical-issue-ports",
             ));
         }
         let alpha = alpha_config();
@@ -695,7 +695,7 @@ fn resolve_issue_with_metadata(
     if config.sm120_effective_l1.is_some() {
         return Err(RunError::new(
             "arguments",
-            "--sm120-effective-l1 requires --sm120-alpha",
+            "--sm120-effective-l1 requires an sm_120 architecture card",
         ));
     }
     let issue = match card.required_issue_resources() {
@@ -740,7 +740,7 @@ fn resolve_issue_with_metadata(
 }
 
 pub(crate) const fn alpha_config() -> Sm120AlphaConfig {
-    Sm120AlphaConfig::from_m8_m9()
+    Sm120AlphaConfig::default_sm120_effective()
 }
 
 /// Resolve the deliberately narrow architecture-spec bridge into the one
@@ -1986,7 +1986,7 @@ pub(crate) fn sm120_front_end_envelope_cycles(
     if result.arch() != sim_arch::ArchId::Sm120 {
         return None;
     }
-    let config = Sm120AlphaConfig::from_m8_m9();
+    let config = Sm120AlphaConfig::default_sm120_effective();
     if config.front_end_line_cycles_denominator == 0 {
         return None;
     }
@@ -2624,7 +2624,7 @@ fn resolve_mode(
     {
         return Err(RunError::new(
             "arguments",
-            "--sm120-effective-l1 requires --sm120-alpha with --mode l1 or --mode l1-l2",
+            "--sm120-effective-l1 requires an sm_120 architecture card and --mode l1 or --mode l1-l2",
         ));
     }
     if config.sm120_effective_l2.is_some()
@@ -2632,7 +2632,7 @@ fn resolve_mode(
     {
         return Err(RunError::new(
             "arguments",
-            "--sm120-effective-l2 requires --sm120-alpha with --mode l1-l2",
+            "--sm120-effective-l2 requires an sm_120 architecture card and --mode l1-l2",
         ));
     }
     if config.dirty_writeback_capacity_sectors == Some(0) {

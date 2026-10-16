@@ -21,12 +21,10 @@ const USAGE: &str = "Usage: sim-run --trace DIR --control FILE --arch-card FILE 
 [--hypothetical-issue-ports N] \
 [--architecture-spec FILE] \
 [--fast-frontier-only] \
-[--sm120-alpha] \
 [--sm120-effective-l1 CAPACITY:MSHR|none:HIT:MISS] \
 [--sm120-effective-l2 CAPACITY:SLICES:ASSOCIATIVITY] \
 [--latent-envelope] \
 [--service-stage-role independent_post_replay|residual_closure|replacement_timing] \
-[--ncu-shaped-metrics] \
 [--ncu-csv FILE] [--ncu-launch ID] \
 [--launch-resources FILE] \
 [--native-payload-sidecar FILE] \
@@ -173,12 +171,10 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
     let mut hypothetical_issue_ports = None;
     let mut architecture_spec = None;
     let mut fast_frontier_only = false;
-    let mut sm120_alpha = false;
     let mut sm120_effective_l1 = None;
     let mut sm120_effective_l2 = None;
     let mut latent_envelope = false;
     let mut kernel_id = None;
-    let mut ncu_shaped_metrics = false;
     let mut ncu_csv = None;
     let mut ncu_launch = None;
     let mut launch_resources = None;
@@ -325,9 +321,6 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
             value if value == OsStr::new("--fast-frontier-only") => {
                 fast_frontier_only = true;
             }
-            value if value == OsStr::new("--sm120-alpha") => {
-                sm120_alpha = true;
-            }
             value if value == OsStr::new("--sm120-effective-l1") => {
                 let raw = take_value(&mut args, "--sm120-effective-l1")?;
                 let raw = raw.to_str().ok_or_else(|| {
@@ -344,9 +337,6 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
             }
             value if value == OsStr::new("--latent-envelope") => {
                 latent_envelope = true;
-            }
-            value if value == OsStr::new("--ncu-shaped-metrics") => {
-                ncu_shaped_metrics = true;
             }
             value if value == OsStr::new("--ncu-csv") => {
                 ncu_csv = Some(PathBuf::from(take_value(&mut args, "--ncu-csv")?));
@@ -462,9 +452,9 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
         hypothetical_issue_ports,
         architecture_spec,
         kernel_id,
-        ncu_shaped_metrics,
+        ncu_shaped_metrics: false,
         fast_frontier_only,
-        sm120_alpha,
+        sm120_alpha: false,
         sm120_effective_l1,
         sm120_effective_l2,
         ncu_csv,

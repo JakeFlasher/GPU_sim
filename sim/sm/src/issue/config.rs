@@ -63,8 +63,8 @@ pub enum IssueResourceSource {
 ///
 /// Nothing in this structure is obtained from the SM86 architecture
 /// capability table.  Values are an executable, deliberately provisional
-/// envelope assembled from the retained M8 dependency/ILP and M9
-/// barrier/control probes. The alpha lane supplies the effective SM120 timing
+/// envelope assembled from retained dependency, barrier, and control
+/// observations. The alpha lane supplies the effective SM120 timing
 /// envelope for integrated full replay and the complementary fast frontier; it
 /// is not a calibrated Blackwell silicon model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -90,8 +90,8 @@ pub struct Sm120AlphaConfig {
     pub fma_initiation_interval_cycles: u64,
     pub mad_initiation_interval_cycles: u64,
     pub add_initiation_interval_cycles: u64,
-    /// Logical front-end warm/footprint envelope calibrated from P10 endpoint
-    /// probes. It is an effective GPC observation envelope, not an
+    /// Logical front-end warm/footprint envelope calibrated from endpoint
+    /// observations. It is an effective GPC observation envelope, not an
     /// instruction-cache geometry claim; the fast stage and full SM120 GPC
     /// projection may consume it.
     pub front_end_base_cycles: u64,
@@ -139,23 +139,23 @@ impl Sm120AlphaConfig {
     /// executor.  Reports should obtain this value from the configuration
     /// instead of copying a profile name beside independently hard-coded
     /// timing/occupancy fields.
-    pub const PROFILE_ID: &'static str = "sm120_m8_m9_effective_observation_v3";
+    pub const PROFILE_ID: &'static str = "sm120_effective_observation_v1";
 
     pub const fn profile_id() -> &'static str {
         Self::PROFILE_ID
     }
 
-    /// Initial explicit M8/M9 envelope used by the CLI convenience flag.
+    /// Initial effective envelope used by the CLI convenience flag.
     /// These values are intentionally visible in one alpha-only constructor;
     /// no call into an SM86 capability/default constructor is made.
-    pub const fn from_m8_m9() -> Self {
+    pub const fn default_sm120_effective() -> Self {
         Self {
             l1_hit_cycles: 32,
             l2_hit_cycles: 160,
             dram_cycles: 520,
             shared_cycles: 20,
             shared_additional_wavefront_cycles: 1,
-            // P9 scheduler calibration keeps scalar and barrier families
+            // Scheduler calibration keeps scalar and barrier families
             // separate; this is a generic fallback for unclassified scalar
             // forms, not a claim that every INT/FP opcode has this latency.
             non_memory_write_barrier_cycles: 8,
@@ -165,14 +165,14 @@ impl Sm120AlphaConfig {
             max_resident_warps_per_sm: 48,
             max_resident_blocks_per_sm: 24,
             scalar_latency_cycles: 23,
-            // P9 scheduler depth sweep: approximately 4.44 cycles per
+            // Dependent-chain measurements indicate approximately 4.44 cycles per
             // dependent FFMA/MAD and 1.44 cycles per dependent ADD; values
             // are rounded upward for a conservative readiness envelope.
             fma_latency_cycles: 5,
             mad_latency_cycles: 5,
             add_latency_cycles: 2,
             fma_initiation_interval_cycles: 1,
-            // Fixed-work P9 sweeps show independent IMAD/MAD chains sustain
+            // Fixed-work measurements show independent IMAD/MAD chains sustain
             // roughly two clock cycles per operation on this SKU.
             mad_initiation_interval_cycles: 2,
             add_initiation_interval_cycles: 1,
@@ -181,12 +181,12 @@ impl Sm120AlphaConfig {
             front_end_line_cycles_denominator: 2,
             sm_active_observation_blend_numerator: 2,
             sm_active_observation_blend_denominator: 5,
-            // Q74 retains a twofold lifetime observation envelope and one
-            // fifth of the front-end envelope per observed SM.  These are
+            // The effective lifetime arm retains a twofold observation envelope and one
+            // fifth of the front-end envelope per observed SM. These are
             // effective scenario inputs and do not alter replay timing.
             active_ipc_lifetime_multiplier_numerator: 2,
             active_ipc_lifetime_multiplier_denominator: 1,
-            // Q75's bounded pure-TMA overlap arm retains eight fifths of the
+            // The pure-TMA overlap arm retains eight fifths of the
             // generic lifetime envelope. Mixed TMA/LDGSTS paths do not use
             // this arm. It changes only the active-IPC observation
             // projection; replay scheduling and completion semantics remain
@@ -197,7 +197,7 @@ impl Sm120AlphaConfig {
             active_ipc_front_end_denominator: 5,
             scalar_initiation_interval_cycles: 1,
             scalar_in_flight_capacity: 8,
-            // The P9 barrier-warp sweep (w1/w8/w32 calibration, w16 held-out)
+            // Barrier-warp measurements across several widths
             // is approximately two SM cycles per warp arrival in the measured
             // launch envelope.  This remains a behavioral calibration knob.
             barrier_warp_initiation_interval_cycles: 2,
@@ -208,7 +208,7 @@ impl Sm120AlphaConfig {
             // supplies their semantics.
             ldgsts_l1_mshr_floor: 1,
             ldgsts_cache_all_payload_bytes_per_cycle: 1,
-            // P14 independent TMA shape calibration uses a distinct bypass
+            // Independent TMA shape measurements use a distinct bypass
             // payload service arm; LDGSTS cache-all keeps its own rate.
             ldgsts_bypass_payload_bytes_per_cycle: 4,
             ldgsts_cache_all_destination_wavefront_cycles: 1,
@@ -633,7 +633,7 @@ impl IssueModelParams {
             });
         }
         // The card carries the public CC12.0 architectural ceiling (32
-        // blocks/SM).  The alpha profile intentionally uses the M8 row-level
+        // blocks/SM).  The alpha profile intentionally uses the effective row-level
         // resource envelope (24 blocks/SM) so a shape-specific occupancy
         // observation is not mistaken for the card maximum.  Accept a
         // profile no larger than the card ceiling and keep the row value in
@@ -809,7 +809,7 @@ impl IssueModelParams {
     /// replay should call [`Self::from_card_alpha`] so runtime limits remain
     /// bound to the selected RTX 5090 card.
     pub fn sm120_alpha() -> Result<Self, IssueError> {
-        let config = Sm120AlphaConfig::from_m8_m9();
+        let config = Sm120AlphaConfig::default_sm120_effective();
         let runtime = config;
         if runtime.max_resident_warps_per_sm == 0 || runtime.max_resident_blocks_per_sm == 0 {
             return Err(IssueError::CardedResourceMismatch {

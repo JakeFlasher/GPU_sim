@@ -1,5 +1,5 @@
 {
-  "_doc": "Build-arch families (Q5). This is a compile-time vocabulary kept separate from deploy/collection arch_id. Server slices are not deployment identities. Seed values mirror the active arch resolver and common.mk gencode tokens.",
+  "_doc": "Build-arch families. This is a compile-time vocabulary kept separate from deploy/collection arch_id. Server slices are not deployment identities. Seed values mirror the active arch resolver and common.mk gencode tokens.",
 
   "compute_capability_to_build_family": {
     "8.6": ["sm_86"],
