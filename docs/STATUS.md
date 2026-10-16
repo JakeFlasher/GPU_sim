@@ -29,3 +29,9 @@ The complete Q75 replay passed 339/339 roots and 11,558 launches per mode with
 full integrated L1+L2 first, fast flat second, exactly 12 workers, and compressed
 artifacts. Full active-IPC mean APE is 9.5537% (median 6.2304%, P90 17.0335%),
 with unchanged maximum/family maxima and no paired-launch regression.
+
+Q76 L1/L2 diagnosis (2026-10-16) tested stream-L2 lifetime and a 4096-line
+effective-L1 capacity on four real captures; neither was promoted. Stream-L2
+worsened the selected unified L1 hit-rate residual and the larger capacity was
+non-discriminating. Remaining hit-rate residuals are therefore still typed as
+scope/client/join uncertainty rather than a justified geometry constant.

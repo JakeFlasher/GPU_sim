@@ -1039,3 +1039,13 @@ every family maximum is unchanged or lower, and the paired comparison has 42
 improved launches and zero worsened launches. Q75 is the current default
 effective active-IPC projection; it is not a physical TMA completion or clock
 calibration.
+
+## Q76 — L1/L2 residual diagnosis (2026-10-16)
+
+A bounded real-trace probe tested persistent stream-L2 scope and a 4096-line
+SM120 effective-L1 capacity. Stream-L2 worsened the selected unified L1
+hit-rate residual; the larger capacity was non-discriminating. Neither change
+was promoted or landed. The remaining L1/L2 hit residual is confounded by
+ordinary-vs-LDGSTS/TMA client scope, ordered-fallback NCU joins, and profiler
+pass behavior. No scalar cache geometry or lifetime change is justified without
+a concrete source relation; Q75 remains the default.
