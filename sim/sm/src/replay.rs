@@ -3938,12 +3938,15 @@ fn extract_per_sm_blocks(
                         tma_observations,
                     )?
                 };
-                if matches!(kind, AccessKind::GlobalStore { .. }) {
-                    trace_metrics.partial_global_store_sectors = trace_metrics
-                        .partial_global_store_sectors
+                if matches!(
+                    kind,
+                    AccessKind::GlobalStore { .. } | AccessKind::LocalStore { .. }
+                ) {
+                    trace_metrics.partial_store_sectors = trace_metrics
+                        .partial_store_sectors
                         .checked_add(partial_store_sectors)
                         .ok_or(IssueError::CounterOverflow {
-                            counter: "partial global-store sectors",
+                            counter: "partial store sectors",
                         })?;
                 }
                 if collect_joint_l2 {

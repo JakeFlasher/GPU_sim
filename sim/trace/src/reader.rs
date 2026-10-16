@@ -2785,7 +2785,10 @@ impl ValidatedWarp {
                     CompactSectorPlan::ready(sectors.len(), 0)
                 };
                 let partial_store_sectors = if meta.access_kind == Some(pb::MemoryOpAccessKind::Store)
-                    && matches!(resolved_route, Ok(ValidatedMemoryRoute::Global))
+                    && matches!(
+                        resolved_route,
+                        Ok(ValidatedMemoryRoute::Global | ValidatedMemoryRoute::Local)
+                    )
                 {
                     project_partial_store_sectors(preflight).map_err(|source| {
                         TraceError::EffectiveDataBytes {

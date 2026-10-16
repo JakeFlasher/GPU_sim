@@ -33,7 +33,7 @@ struct CounterSnapshot<'a> {
     /// Potential partial-store RMW sectors derived from traced byte coverage.
     /// Emission intersects this with a modeled cold-store population before
     /// charging a conditional DRAM read.
-    partial_global_store_sectors: u64,
+    partial_store_sectors: u64,
 }
 
 impl<'a> CounterSnapshot<'a> {
@@ -60,7 +60,7 @@ impl<'a> CounterSnapshot<'a> {
                 .trace_metrics()
                 .tma_sidecar_load_payload_bytes
                 .div_ceil(32),
-            partial_global_store_sectors: result.trace_metrics().partial_global_store_sectors,
+            partial_store_sectors: result.trace_metrics().partial_store_sectors,
         })
     }
 
@@ -82,7 +82,7 @@ impl<'a> CounterSnapshot<'a> {
             front_end: counters.front_end(),
             binding_cycles,
             tma_load_sectors: 0,
-            partial_global_store_sectors: 0,
+            partial_store_sectors: 0,
         })
     }
 
@@ -1132,7 +1132,7 @@ fn emit_dram_read_sectors(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitErr
         .and_then(|split| {
             let (store_sectors, store_hits) = split.source(L2Source::Store);
             let store_misses = store_sectors.checked_sub(store_hits)?;
-            Some(snap.partial_global_store_sectors.min(store_misses))
+            Some(snap.partial_store_sectors.min(store_misses))
         })
         .unwrap_or(0);
     let total = if snap.arch == ArchId::Sm120 {
