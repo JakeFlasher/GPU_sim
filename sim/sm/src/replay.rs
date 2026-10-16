@@ -6128,8 +6128,13 @@ struct CompactReplayMemory<'a> {
 
 fn compact_shared_kind(memory: &ValidatedMemoryInstruction) -> AccessKind {
     AccessKind::Shared {
-        wavefronts: u64::from(memory.shared_bank_wavefronts_32x4()),
-        ideal_wavefronts: u64::from(memory.shared_bank_ideal_wavefronts_32x4()),
+        // Keep scheduler timing on the established whole-warp projection.
+        wavefronts: u64::from(memory.shared_bank_legacy_wavefronts_32x4()),
+        ideal_wavefronts: u64::from(memory.shared_bank_legacy_ideal_wavefronts_32x4()),
+        // The phase-local projection is an L1TEX observer only. It must not
+        // alter issue, MIO occupancy, or cycle/IPC state.
+        data_wavefronts: u64::from(memory.shared_bank_wavefronts_32x4()),
+        data_ideal_wavefronts: u64::from(memory.shared_bank_ideal_wavefronts_32x4()),
     }
 }
 

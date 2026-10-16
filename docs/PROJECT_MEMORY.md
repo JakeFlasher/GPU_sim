@@ -53,6 +53,8 @@ The current partial-store RMW result is retained at
 `/root/sm120_rtx_5090_capture/replay_results/current_full_replay_20261016_partial_store_rmw/`.
 The current partial global/local-store RMW result is retained at
 `/root/sm120_rtx_5090_capture/replay_results/current_full_replay_20261016_partial_store_rmw_local/`.
+The current phase-local shared crossbar observer result is retained at
+`/root/sm120_rtx_5090_capture/replay_results/current_full_replay_20261016_shared_decoupled/`.
 
 Current full-lane mean APEs include:
 
@@ -61,14 +63,16 @@ Current full-lane mean APEs include:
 - source-TEX mixed lookup misses: 2.3031%;
 - unified L1 lookup: 60.7210%;
 - LSU global-load L1 lookup: 44.5013%;
-- unqualified DRAM read sectors: 50.5194%.
+- unqualified DRAM read sectors: 50.3119%.
 
 The shared-memory projection now partitions ordinary LDS/STS opcode classes
 from LDSM/STSM and accumulates bank-conflict excess per instruction. The
-corresponding full-lane means are 0.1049% (shared-load SASS instructions),
-16.3564% (shared-load wavefronts), 3.7771% (shared-store wavefronts),
-49.2552% (shared-load bank conflicts), and 30.8590% (shared-store bank
-conflicts), with no regression in other scored metrics.
+current full-lane means are 0.1049% (shared-load SASS instructions), 9.0018%
+(shared-load wavefronts), 0.0837% (shared-store wavefronts), 2.3789%
+(shared-load bank conflicts), and 1.9629% (shared-store bank conflicts).
+Phase-local data-pipe observers are decoupled from whole-warp scheduler timing;
+other metric families remain unchanged apart from the already-landed atomic
+observer's tiny sub-0.001-point IPC difference.
 
 The scoped global-atomic observer arm reduces shared-atomic wavefront mean APE
 from 64.4022% to 1.6116%; global atomic opcode classification remains separate.
@@ -83,6 +87,17 @@ scored metrics.
 
 Including decoded local-store byte gaps further reduces DRAM read mean APE to
 50.3119% without changing other scored metrics.
+
+The shared-memory projector preserves repeated words for shared atomic
+read-modify-write operations while retaining broadcast deduplication for
+ordinary LDS/STS. The source-TEX lookup observer deliberately remains
+sector-presence based: a real-capture experiment that substituted physical
+write-tag hits worsened mixed hit and miss errors. Physical write-tag counts
+remain available for RMW/service accounting only.
+
+The comparison reporter scores every shape-compatible launch in a capture. An
+ordered fallback association is retained when profiler and tracer spellings
+differ, and is labelled separately from exact identity rather than dropped.
 
 Aggregate L1 scope, unqualified DRAM/service and physical topology, and the
 internal TMA completion clock remain typed residuals. A boundary-clipped TMA

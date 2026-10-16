@@ -2303,6 +2303,10 @@ pub struct ValidatedMemoryInstruction {
     /// route-disjoint `projection` so the effective bank-conflict report can
     /// subtract unavoidable wide-access wavefronts rather than one request.
     shared_ideal_wavefronts: u32,
+    /// Whole-warp projection retained for SM scheduler timing.
+    shared_legacy_wavefronts: u32,
+    /// Whole-warp width-only ideal retained for scheduler accounting.
+    shared_legacy_ideal_wavefronts: u32,
     meta: CompactMemoryMeta,
     /// Zero means absent; otherwise this is wire enum value + 1. Keeping the
     /// tiny closed enum in one byte preserves the compact metadata bound.
@@ -2491,6 +2495,17 @@ impl ValidatedMemoryInstruction {
         self.shared_ideal_wavefronts
     }
 
+    /// Whole-warp shared service projection used by the SM scheduler. The
+    /// phase-local observer projection is intentionally separate.
+    pub const fn shared_bank_legacy_wavefronts_32x4(&self) -> u32 {
+        self.shared_legacy_wavefronts
+    }
+
+    /// Whole-warp width-only ideal used by the scheduler-side projection.
+    pub const fn shared_bank_legacy_ideal_wavefronts_32x4(&self) -> u32 {
+        self.shared_legacy_ideal_wavefronts
+    }
+
     /// Backing allocation identity for an address-carrying global atomic.
     ///
     /// The full reader has already required this id to resolve to the
@@ -2629,6 +2644,21 @@ impl ValidatedWarp {
                     } else {
                         0
                     };
+                let shared_legacy_bank_wavefronts_32x4 =
+                    if matches!(resolved_route, Ok(ValidatedMemoryRoute::Shared)) {
+                        project_shared_bank_wavefronts_32x4_legacy(
+                            preflight,
+                            &mut shared_word_scratch,
+                        )
+                        .map_err(|source| {
+                            TraceError::SharedBankProjection {
+                                record: format!("{label} warp={map_key} inst={record_ix}"),
+                                source,
+                            }
+                        })?
+                    } else {
+                        0
+                    };
                 let shared_bank_ideal_wavefronts_32x4 =
                     if matches!(resolved_route, Ok(ValidatedMemoryRoute::Shared)) {
                         project_shared_bank_ideal_wavefronts_32x4(preflight).map_err(|source| {
@@ -2637,6 +2667,17 @@ impl ValidatedWarp {
                                 source,
                             }
                         })?
+                    } else {
+                        0
+                    };
+                let shared_legacy_bank_ideal_wavefronts_32x4 =
+                    if matches!(resolved_route, Ok(ValidatedMemoryRoute::Shared)) {
+                        project_shared_bank_ideal_wavefronts_32x4_legacy(preflight).map_err(
+                            |source| TraceError::SharedBankProjection {
+                                record: format!("{label} warp={map_key} inst={record_ix}"),
+                                source,
+                            },
+                        )?
                     } else {
                         0
                     };
@@ -2784,12 +2825,12 @@ impl ValidatedWarp {
                 } else {
                     CompactSectorPlan::ready(sectors.len(), 0)
                 };
-                let partial_store_sectors = if meta.access_kind == Some(pb::MemoryOpAccessKind::Store)
+                let partial_store_sectors = if meta.access_kind
+                    == Some(pb::MemoryOpAccessKind::Store)
                     && matches!(
                         resolved_route,
                         Ok(ValidatedMemoryRoute::Global | ValidatedMemoryRoute::Local)
-                    )
-                {
+                    ) {
                     project_partial_store_sectors(preflight).map_err(|source| {
                         TraceError::EffectiveDataBytes {
                             record: format!("{label} warp={map_key} inst={record_ix}"),
@@ -2816,6 +2857,8 @@ impl ValidatedWarp {
                     projection,
                     partial_store_sectors,
                     shared_ideal_wavefronts: shared_bank_ideal_wavefronts_32x4,
+                    shared_legacy_wavefronts: shared_legacy_bank_wavefronts_32x4,
+                    shared_legacy_ideal_wavefronts: shared_legacy_bank_ideal_wavefronts_32x4,
                     meta: CompactMemoryMeta::new(
                         meta.op_class,
                         meta.access_kind,
@@ -7117,6 +7160,192 @@ pub fn project_shared_bank_wavefronts_32x4(
 ) -> Result<u32, SharedBankProjectionError> {
     word_scratch.clear();
     let mut projected_words = 0_u64;
+    let mut max_data_width_bytes = 0_i32;
+    let mut failure = None;
+    preflight.visit_addresses(|access| {
+        if failure.is_some() {
+            return;
+        }
+        max_data_width_bytes = max_data_width_bytes.max(access.data_width_bytes);
+        let width = i128::from(access.data_width_bytes);
+        for (lane, &address) in access.lane_vector.iter().enumerate() {
+            if address == lanes::LANE_INACTIVE_SENTINEL {
+                continue;
+            }
+            let first_word = i128::from(address).div_euclid(SHARED_BANK_WORD_BYTES_32X4);
+            let last_byte = i128::from(address) + width - 1;
+            let last_word = last_byte.div_euclid(SHARED_BANK_WORD_BYTES_32X4);
+            let words = u64::try_from(last_word - first_word + 1)
+                .unwrap_or_else(|_| unreachable!("positive data width produced a negative span"));
+            if words > MAX_SHARED_WORDS_PER_LANE {
+                failure = Some(SharedBankProjectionError::LaneWordLimit {
+                    lane,
+                    words,
+                    limit: MAX_SHARED_WORDS_PER_LANE,
+                });
+                return;
+            }
+            let Some(next_projected_words) = projected_words.checked_add(words) else {
+                failure = Some(SharedBankProjectionError::InstructionWordLimit {
+                    words: u64::MAX,
+                    limit: MAX_SHARED_WORDS_PER_INSTRUCTION,
+                });
+                return;
+            };
+            if next_projected_words > MAX_SHARED_WORDS_PER_INSTRUCTION {
+                failure = Some(SharedBankProjectionError::InstructionWordLimit {
+                    words: next_projected_words,
+                    limit: MAX_SHARED_WORDS_PER_INSTRUCTION,
+                });
+                return;
+            }
+            let additional = usize::try_from(words)
+                .unwrap_or_else(|_| unreachable!("bounded word span escaped usize"));
+            if word_scratch.try_reserve(additional).is_err() {
+                failure = Some(SharedBankProjectionError::CapacityUnavailable { additional });
+                return;
+            }
+            for word in first_word..=last_word {
+                word_scratch.push(
+                    i64::try_from(word)
+                        .unwrap_or_else(|_| unreachable!("i64 byte address word escaped i64")),
+                );
+            }
+            projected_words = next_projected_words;
+        }
+    });
+    if let Some(failure) = failure {
+        return Err(failure);
+    }
+
+    let is_shared_atomic = preflight.meta().access_kind == Some(pb::MemoryOpAccessKind::Atomic)
+        || preflight.meta().op_class == pb::MemoryOpClass::Atomic;
+    if !is_shared_atomic {
+        // SM120 services a 64-bit shared access in two independent 16-lane
+        // phases and a 128-bit access in four independent 8-lane phases.
+        // Broadcast collapse is local to each phase; deduplicating the whole
+        // warp would incorrectly let one phase satisfy another.  Keep widths
+        // above 128 bits on the historical whole-warp path because their
+        // packetization is not represented by this compact contract.
+        let lanes_per_phase = match max_data_width_bytes {
+            5..=8 => 16_usize,
+            9..=16 => 8_usize,
+            _ => 0_usize,
+        };
+        if lanes_per_phase != 0 {
+            // A whole-warp broadcast is still one service word even when the
+            // operand is wide.  CUTLASS epilogues in particular issue a
+            // vector load/store with every lane naming the same shared
+            // fragment; forcing that through four quarter-warps would turn a
+            // true broadcast into four fabricated wavefronts.  Detect this
+            // source-level topology and retain the historical whole-warp
+            // collapse for it.  Nonuniform lane spans use the phase model.
+            let mut lane_spans: [Vec<(i128, i128)>; 32] = std::array::from_fn(|_| Vec::new());
+            preflight.visit_addresses(|access| {
+                let width = i128::from(access.data_width_bytes);
+                for (lane, &address) in access.lane_vector.iter().enumerate() {
+                    if address == lanes::LANE_INACTIVE_SENTINEL {
+                        continue;
+                    }
+                    let first_word = i128::from(address).div_euclid(SHARED_BANK_WORD_BYTES_32X4);
+                    let last_byte = i128::from(address) + width - 1;
+                    let last_word = last_byte.div_euclid(SHARED_BANK_WORD_BYTES_32X4);
+                    lane_spans[lane].push((first_word, last_word));
+                }
+            });
+            let broadcast_signature = lane_spans.iter().find(|spans| !spans.is_empty());
+            let all_active_lanes_broadcast = broadcast_signature.is_some()
+                && lane_spans
+                    .iter()
+                    .filter(|spans| !spans.is_empty())
+                    .all(|spans| Some(spans) == broadcast_signature);
+            if all_active_lanes_broadcast {
+                // Fall through to the existing whole-warp sort/dedup path.
+                // This preserves the measured broadcast behavior while the
+                // phased path below handles genuinely lane-varying accesses.
+            } else {
+                let mut total_wavefronts = 0_u64;
+                let phase_count = 32_usize / lanes_per_phase;
+                for phase in 0..phase_count {
+                    word_scratch.clear();
+                    let lane_lo = phase * lanes_per_phase;
+                    let lane_hi = lane_lo + lanes_per_phase;
+                    preflight.visit_addresses(|access| {
+                        let width = i128::from(access.data_width_bytes);
+                        for (lane, &address) in access.lane_vector.iter().enumerate() {
+                            if lane < lane_lo
+                                || lane >= lane_hi
+                                || address == lanes::LANE_INACTIVE_SENTINEL
+                            {
+                                continue;
+                            }
+                            let first_word =
+                                i128::from(address).div_euclid(SHARED_BANK_WORD_BYTES_32X4);
+                            let last_byte = i128::from(address) + width - 1;
+                            let last_word = last_byte.div_euclid(SHARED_BANK_WORD_BYTES_32X4);
+                            for word in first_word..=last_word {
+                                word_scratch.push(i64::try_from(word).unwrap_or_else(|_| {
+                                    unreachable!("i64 byte address word escaped i64")
+                                }));
+                            }
+                        }
+                    });
+                    if word_scratch.is_empty() {
+                        continue;
+                    }
+                    word_scratch.sort_unstable();
+                    word_scratch.dedup();
+                    let mut bank_words = [0_u64; SHARED_BANK_COUNT_32X4 as usize];
+                    let mut bank_overflow = None;
+                    for &word in word_scratch.iter() {
+                        let bank = word.rem_euclid(SHARED_BANK_COUNT_32X4) as usize;
+                        let Some(next) = bank_words[bank].checked_add(1) else {
+                            bank_overflow = Some(bank as u8);
+                            break;
+                        };
+                        bank_words[bank] = next;
+                    }
+                    if let Some(bank) = bank_overflow {
+                        return Err(SharedBankProjectionError::CountOverflow { bank });
+                    }
+                    total_wavefronts = total_wavefronts
+                        .checked_add(bank_words.into_iter().max().unwrap_or(0))
+                        .ok_or(SharedBankProjectionError::CountOverflow { bank: 0 })?;
+                }
+                return u32::try_from(total_wavefronts)
+                    .map_err(|_| SharedBankProjectionError::CountOverflow { bank: 0 });
+            }
+        }
+
+        // Shared LDS/STS broadcasts collapse repeated references to one
+        // 32-bit word.  Keep this legacy path byte-for-byte identical for
+        // ordinary shared accesses.
+        word_scratch.sort_unstable();
+        word_scratch.dedup();
+    }
+    let mut bank_words = [0_u64; SHARED_BANK_COUNT_32X4 as usize];
+    for &word in word_scratch.iter() {
+        let bank = word.rem_euclid(SHARED_BANK_COUNT_32X4) as usize;
+        bank_words[bank] = bank_words[bank]
+            .checked_add(1)
+            .ok_or(SharedBankProjectionError::CountOverflow { bank: bank as u8 })?;
+    }
+    let wavefronts = bank_words.into_iter().max().unwrap_or(0);
+    Ok(
+        u32::try_from(wavefronts)
+            .unwrap_or_else(|_| unreachable!("bounded projection escaped u32")),
+    )
+}
+
+/// Whole-warp shared service projection retained for scheduler timing. This
+/// deliberately excludes the phase-local observer refinement so changing the
+/// L1TEX counter model cannot change SM issue or cycle state.
+pub fn project_shared_bank_wavefronts_32x4_legacy(
+    preflight: PreflightedMemoryAccess<'_>,
+    word_scratch: &mut Vec<i64>,
+) -> Result<u32, SharedBankProjectionError> {
+    word_scratch.clear();
+    let mut projected_words = 0_u64;
     let mut failure = None;
     preflight.visit_addresses(|access| {
         if failure.is_some() {
@@ -7172,14 +7401,9 @@ pub fn project_shared_bank_wavefronts_32x4(
     if let Some(failure) = failure {
         return Err(failure);
     }
-
-    let is_shared_atomic = preflight.meta().access_kind
-        == Some(pb::MemoryOpAccessKind::Atomic)
+    let is_shared_atomic = preflight.meta().access_kind == Some(pb::MemoryOpAccessKind::Atomic)
         || preflight.meta().op_class == pb::MemoryOpClass::Atomic;
     if !is_shared_atomic {
-        // Shared LDS/STS broadcasts collapse repeated references to one
-        // 32-bit word.  Keep this legacy path byte-for-byte identical for
-        // ordinary shared accesses.
         word_scratch.sort_unstable();
         word_scratch.dedup();
     }
@@ -7190,11 +7414,48 @@ pub fn project_shared_bank_wavefronts_32x4(
             .checked_add(1)
             .ok_or(SharedBankProjectionError::CountOverflow { bank: bank as u8 })?;
     }
-    let wavefronts = bank_words.into_iter().max().unwrap_or(0);
-    Ok(
-        u32::try_from(wavefronts)
-            .unwrap_or_else(|_| unreachable!("bounded projection escaped u32")),
-    )
+    u32::try_from(bank_words.into_iter().max().unwrap_or(0))
+        .map_err(|_| SharedBankProjectionError::CountOverflow { bank: 0 })
+}
+
+/// Whole-warp width-only ideal paired with the scheduler projection.
+pub fn project_shared_bank_ideal_wavefronts_32x4_legacy(
+    preflight: PreflightedMemoryAccess<'_>,
+) -> Result<u32, SharedBankProjectionError> {
+    let mut ideal_words = 0_u64;
+    let mut failure = None;
+    preflight.visit_addresses(|access| {
+        if failure.is_some() {
+            return;
+        }
+        if access.data_width_bytes <= 0 {
+            failure = Some(SharedBankProjectionError::LaneWordLimit {
+                lane: 0,
+                words: 0,
+                limit: MAX_SHARED_WORDS_PER_LANE,
+            });
+            return;
+        }
+        let width = u64::try_from(access.data_width_bytes)
+            .unwrap_or_else(|_| unreachable!("validated width escaped u64"));
+        let words = width
+            .checked_add((SHARED_BANK_WORD_BYTES_32X4 as u64) - 1)
+            .and_then(|value| value.checked_div(SHARED_BANK_WORD_BYTES_32X4 as u64))
+            .unwrap_or(u64::MAX);
+        if words > MAX_SHARED_WORDS_PER_LANE {
+            failure = Some(SharedBankProjectionError::LaneWordLimit {
+                lane: 0,
+                words,
+                limit: MAX_SHARED_WORDS_PER_LANE,
+            });
+            return;
+        }
+        ideal_words = ideal_words.max(words);
+    });
+    if let Some(failure) = failure {
+        return Err(failure);
+    }
+    u32::try_from(ideal_words).map_err(|_| SharedBankProjectionError::CountOverflow { bank: 0 })
 }
 
 /// Compute the ideal shared-memory wavefront count for one instruction under
@@ -7209,10 +7470,18 @@ pub fn project_shared_bank_ideal_wavefronts_32x4(
     preflight: PreflightedMemoryAccess<'_>,
 ) -> Result<u32, SharedBankProjectionError> {
     let mut ideal_words = 0_u64;
+    let mut max_data_width_bytes = 0_i32;
+    let mut active_lane_mask = 0_u32;
     let mut failure = None;
     preflight.visit_addresses(|access| {
         if failure.is_some() {
             return;
+        }
+        max_data_width_bytes = max_data_width_bytes.max(access.data_width_bytes);
+        for (lane, &address) in access.lane_vector.iter().enumerate() {
+            if address != lanes::LANE_INACTIVE_SENTINEL {
+                active_lane_mask |= 1_u32 << lane;
+            }
         }
         if access.data_width_bytes <= 0 {
             failure = Some(SharedBankProjectionError::LaneWordLimit {
@@ -7239,6 +7508,27 @@ pub fn project_shared_bank_ideal_wavefronts_32x4(
     });
     if let Some(failure) = failure {
         return Err(failure);
+    }
+
+    // Match the phased service model used by
+    // `project_shared_bank_wavefronts_32x4`: one ideal wavefront per active
+    // half-warp (64-bit) or quarter-warp (128-bit).  The <=32-bit path and
+    // widths above 128 bits retain the historical width-only ideal.
+    let lanes_per_phase = match max_data_width_bytes {
+        5..=8 => 16_u32,
+        9..=16 => 8_u32,
+        _ => 0_u32,
+    };
+    if lanes_per_phase != 0 {
+        let mut phases = 0_u32;
+        let phase_count = 32_u32 / lanes_per_phase;
+        for phase in 0..phase_count {
+            let phase_mask = ((1_u32 << lanes_per_phase) - 1) << (phase * lanes_per_phase);
+            if active_lane_mask & phase_mask != 0 {
+                phases = phases.saturating_add(1);
+            }
+        }
+        return Ok(phases);
     }
     Ok(u32::try_from(ideal_words).unwrap_or_else(|_| unreachable!()))
 }

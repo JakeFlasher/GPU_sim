@@ -36,6 +36,8 @@ The current partial-store RMW result is at
 `/root/sm120_rtx_5090_capture/replay_results/current_full_replay_20261016_partial_store_rmw/`.
 The current partial global/local-store RMW result is at
 `/root/sm120_rtx_5090_capture/replay_results/current_full_replay_20261016_partial_store_rmw_local/`.
+The current phase-local shared crossbar observer result is at
+`/root/sm120_rtx_5090_capture/replay_results/current_full_replay_20261016_shared_decoupled/`.
 Representative full-lane mean APEs are:
 
 | Metric | Mean APE |
@@ -45,14 +47,17 @@ Representative full-lane mean APEs are:
 | Source-TEX mixed lookup miss | 2.3031% |
 | Unified L1 lookup | 60.7210% |
 | LSU global-load L1 lookup | 44.5013% |
-| DRAM read sectors | 50.5194% |
+| DRAM read sectors | 50.3119% |
 
 The shared-memory projection now partitions ordinary LDS/STS opcode classes
 from LDSM/STSM and accumulates bank-conflict excess per instruction. Its
 complete-corpus means are **0.1049%** for shared-load SASS instructions,
-**16.3564%** for shared-load wavefronts, **3.7771%** for shared-store
-wavefronts, **49.2552%** for shared-load bank conflicts, and **30.8590%** for
-shared-store bank conflicts; no other scored metric changed.
+**9.0018%** for shared-load wavefronts, **0.0837%** for shared-store
+wavefronts, **2.3789%** for shared-load bank conflicts, and **1.9629%** for
+shared-store bank conflicts. Phase-local data-pipe observers are decoupled
+from whole-warp scheduler timing; all other metric families remain unchanged
+apart from the already-landed atomic observer's tiny sub-0.001-point IPC
+difference.
 
 The scoped global-atomic observer arm reduces shared-atomic wavefront mean APE
 from **64.4022%** to **1.6116%** without changing other scored metrics.
@@ -67,6 +72,19 @@ no regression in other scored metrics.
 
 Including decoded local-store byte gaps further reduces DRAM read mean APE to
 **50.3119%** without changing other scored metrics.
+
+The shared-memory trace projector preserves repeated 32-bit words for shared
+atomic read-modify-write accesses and keeps broadcast deduplication for
+ordinary LDS/STS. Bounded real-capture probes complete successfully. A direct
+promotion of physical L2 write-tag hits into the mixed source-TEX lookup
+observer was rejected on real captures because it worsened both hit and miss
+errors; sector presence remains the scored observer while write-tag accounting
+is retained for physical RMW/service paths.
+
+Comparison reports score all shape-compatible launches from the same capture,
+including ordered fallback joins when profiler and tracer kernel spellings
+differ. Exact and fallback associations are labelled separately rather than
+silently dropping fallback results.
 
 These scores are effective metric projections. Aggregate L1 client scope,
 DRAM/service and topology, and engine completion remain explicit residuals.

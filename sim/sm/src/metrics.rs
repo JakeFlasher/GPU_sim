@@ -1787,7 +1787,7 @@ impl TraceMetrics {
         }
         let (key, sectors, bank_wavefronts) = match kind {
             AccessKind::NonMemory | AccessKind::PredicatedOffMemory => return Ok(()),
-            AccessKind::Shared { wavefronts, .. } => (
+            AccessKind::Shared { data_wavefronts, .. } => (
                 // Collective matrix stores are the store-side counterpart
                 // of LDSM.  Keeping STSM in the load bucket makes the
                 // operation-qualified opcode counters report matrix stores
@@ -1803,7 +1803,7 @@ impl TraceMetrics {
                     "shared_load"
                 },
                 0,
-                wavefronts,
+                data_wavefronts,
             ),
             AccessKind::LocalLoad { len, .. } => ("local_load", u64::from(len), 0),
             AccessKind::LocalStore { len, .. } => ("local_store", u64::from(len), 0),
@@ -1852,25 +1852,26 @@ impl TraceMetrics {
         }
         add(&mut row.bank_wavefronts, bank_wavefronts)?;
         if let AccessKind::Shared {
-            ideal_wavefronts,
+            data_wavefronts,
+            data_ideal_wavefronts,
             ..
         } = kind
         {
-            add(&mut row.ideal_bank_wavefronts, ideal_wavefronts)?;
+            add(&mut row.ideal_bank_wavefronts, data_ideal_wavefronts)?;
             // Nsight's operation-qualified shared-load/store conflict rows
             // do not include matrix loads/stores. Keep those operations in
             // the aggregate wavefront surface, but exclude them from the
             // corresponding conflict numerator.
             let conflict_surface = !matches!(head, "LDSM" | "STSM");
             if conflict_surface {
-                add(&mut row.bank_conflict_wavefronts, bank_wavefronts)?;
+                add(&mut row.bank_conflict_wavefronts, data_wavefronts)?;
                 add(
                     &mut row.ideal_bank_conflict_wavefronts,
-                    ideal_wavefronts,
+                    data_ideal_wavefronts,
                 )?;
                 add(
                     &mut row.bank_conflict_excess_wavefronts,
-                    bank_wavefronts.saturating_sub(ideal_wavefronts),
+                    data_wavefronts.saturating_sub(data_ideal_wavefronts),
                 )?;
             }
         }

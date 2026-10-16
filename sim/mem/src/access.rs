@@ -255,11 +255,18 @@ pub enum AccessKind {
     /// Architecture-local issue timing decides whether this projection
     /// is executable.
     Shared {
+        /// Scheduler-visible whole-warp service projection. This remains
+        /// independent of phase-local observer accounting.
         wavefronts: u64,
         /// Unavoidable wavefronts from per-lane access width. This is kept
         /// separate from `wavefronts` so reports can subtract ideal wide-load
         /// service before calling the remainder a bank conflict.
         ideal_wavefronts: u64,
+        /// L1TEX data-pipe wavefronts after phase-local broadcast and bank
+        /// arbitration. The SM scheduler must not consume this field.
+        data_wavefronts: u64,
+        /// Ideal phase count paired with `data_wavefronts`.
+        data_ideal_wavefronts: u64,
     },
     /// Local-memory load (LDL): modeled sectors in the same physical L1/L2
     /// hierarchy as Global traffic, with Local accounting provenance.
