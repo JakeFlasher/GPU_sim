@@ -1082,3 +1082,7 @@ passed with bit-identical scored outputs; transfer-product consistency, tensor
 map/coordinate summaries, valid/OOB counts, unique sectors/lines, duplicate
 sector references, and nominal-box overage remain diagnostic observations and
 never become demand, timing, or hit inputs.
+
+A pre-probe sign check rejected the proposed shared-memory-carveout L1 arm:
+816/830 positive-target nonzero-SMEM global-load rows already underpredict or
+match NCU hits, so capacity reduction would worsen them. No L1 replay was run.

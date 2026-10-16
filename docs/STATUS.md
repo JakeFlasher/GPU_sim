@@ -76,3 +76,9 @@ unique sectors/lines, duplicate-sector counts, and nominal-box overage. A
 five-capture, 246-launch/mode, 12-worker full/fast probe passed with every
 scored estimate bit-for-bit identical to Q79. These fields are diagnostics only;
 `completion_clock` and physical topology remain unavailable.
+
+The proposed shared-memory-carveout L1 refinement was also stopped before
+replay: in the existing Q79 artifact, 816 of 830 positive-target global-load
+L1 rows with nonzero launch shared memory already have simulator hits at or
+below NCU hits, so reducing effective capacity cannot satisfy the tail-safe
+sign condition.
