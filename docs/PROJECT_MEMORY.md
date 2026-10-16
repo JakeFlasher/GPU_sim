@@ -40,6 +40,9 @@ no supported interface exposes a generation-keyed engine event and timestamp.
 The canonical result is exposed as:
 
 `/root/sm120_rtx_5090_capture/replay_results/authoritative_full_replay_20261016/`
+The latest post-cleanup verification is retained at
+`/root/sm120_rtx_5090_capture/replay_results/current_full_replay_20261016/`; it
+completed the same full-before-fast 339-root run with twelve workers.
 
 Current full-lane mean APEs include:
 

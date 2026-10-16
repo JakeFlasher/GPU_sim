@@ -23,7 +23,9 @@ exactly twelve workers.
 
 The authoritative complete-corpus result is available through
 `/root/sm120_rtx_5090_capture/replay_results/authoritative_full_replay_20261016/`.
-It contains successful full and fast streams for every root and launch.
+The latest post-cleanup verification is retained at
+`/root/sm120_rtx_5090_capture/replay_results/current_full_replay_20261016/`; it
+contains successful full and fast streams for every root and launch.
 Representative full-lane mean APEs are:
 
 | Metric | Mean APE |
