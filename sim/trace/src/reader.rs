@@ -3468,9 +3468,15 @@ fn compact_sector_vector_for_operand(
             let base = if local_interleave {
                 let word = base.div_euclid(4);
                 let byte = base.rem_euclid(4);
+                let words_per_lane = (access.data_width_bytes.max(4) + 3) / 4;
                 let Some(lane_word) = word
                     .checked_mul(i64::try_from(lanes::LANES_PER_WARP).unwrap_or(32))
-                    .and_then(|value| value.checked_add(i64::try_from(lane).unwrap_or(0)))
+                    .and_then(|value| {
+                        value.checked_add(
+                            i64::try_from(lane).unwrap_or(0)
+                                .checked_mul(i64::from(words_per_lane))?,
+                        )
+                    })
                 else {
                     early_error = Some(ValidatedSectorError::AddressOverflow {
                         lane,

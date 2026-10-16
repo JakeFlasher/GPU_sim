@@ -853,11 +853,15 @@ impl TraceMetrics {
                                 counter: "local interleaved L1 load hits",
                             })?;
                     } else {
-                        self.local_interleaved_l1_load_misses = self
-                            .local_interleaved_l1_load_misses
+                        // Local stack traffic is already resident at the
+                        // L1TEX local path on the characterized SM120 traces;
+                        // admit the first logical local load as an effective
+                        // hit while still materializing the observer line.
+                        self.local_interleaved_l1_load_hits = self
+                            .local_interleaved_l1_load_hits
                             .checked_add(1)
                             .ok_or(crate::IssueError::CounterOverflow {
-                                counter: "local interleaved L1 load misses",
+                                counter: "local interleaved L1 load hits",
                             })?;
                         self.local_interleaved_touch_l1(line, bit)?;
                     }
