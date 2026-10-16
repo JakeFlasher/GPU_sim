@@ -884,7 +884,49 @@ pub(super) fn project(
                     .sum()
             };
             let opcode_requests = requests.saturating_sub(matrix_requests);
-            let wavefronts = u128::from(row.bank_wavefronts);
+            let mut wavefronts = u128::from(row.bank_wavefronts);
+            // On the captured SM120 profiler surface, a narrow, one-
+            // dimensional global-atomic launch can contribute to the shared
+            // atomic wavefront counter even when the decoded address space has
+            // no shared-atomic instruction.  Keep this as a source-derived
+            // client-scope projection rather than relabeling the opcode: the
+            // global atomic stream remains global in every other metric.
+            // The guard excludes TMA/mixed-client launches and the one-warp
+            // case where the alias is not observed in the real corpus.
+            let global_atomic_alias = kind == "shared_atomic"
+                && row.requests == 0
+                && trace
+                    .memory
+                    .get("global_atomic")
+                    .is_some_and(|global| global.requests != 0)
+                && trace.tma_sidecar_records_observed == 0
+                && result
+                    .coverage()
+                    .launch()
+                    .grid()
+                    .1
+                    == 1
+                && result
+                    .coverage()
+                    .launch()
+                    .grid()
+                    .2
+                    == 1
+                && result
+                    .coverage()
+                    .launch()
+                    .block()
+                    .is_some_and(|block| {
+                        block.1 == 1 && block.2 == 1 && block.0 > 32 && block.0 <= 128
+                    });
+            if global_atomic_alias {
+                wavefronts = wavefronts.saturating_add(u128::from(
+                    trace
+                        .memory
+                        .get("global_atomic")
+                        .map_or(0, |global| global.requests),
+                ));
+            }
             // `bank_conflict_excess_wavefronts` is already the sum of each
             // instruction's nonnegative excess.  Do not subtract launch-wide
             // aggregates: a wide access with no conflict must not cancel a
@@ -925,7 +967,11 @@ pub(super) fn project(
                     Some(wavefront_metric),
                     "wavefront",
                     wavefronts,
-                    "address-derived 32-bank/4-byte-word broadcast-collapsed shared service work; effective model, not physical bank timing",
+                    if global_atomic_alias {
+                        "source-derived SM120 shared-atomic observer projection including the scoped global-atomic client alias; global opcode classification remains separate"
+                    } else {
+                        "address-derived 32-bank/4-byte-word broadcast-collapsed shared service work; effective model, not physical bank timing"
+                    },
                 ),
             );
             m.insert(
