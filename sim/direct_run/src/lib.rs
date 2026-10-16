@@ -1827,6 +1827,7 @@ pub struct CounterReport {
 #[derive(Debug, Serialize)]
 pub struct FrontEndCounterReport {
     pub compulsory_instruction_read_sectors: u64,
+    pub compulsory_constant_read_sectors: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -2040,6 +2041,7 @@ fn counters(
         records_seen,
         front_end: FrontEndCounterReport {
             compulsory_instruction_read_sectors: front_end.compulsory_instruction_read_sectors(),
+            compulsory_constant_read_sectors: front_end.compulsory_constant_read_sectors(),
         },
         l1: l1.map(|value| L1CounterReport {
             hits: value.hits,

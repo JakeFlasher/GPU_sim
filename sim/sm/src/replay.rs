@@ -1194,6 +1194,10 @@ struct FoldedKernelReplay {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct FrontEndCounters {
     compulsory_instruction_read_sectors: u64,
+    /// Distinct 32-byte constant-bank sectors referenced by executed static
+    /// SASS instructions. This is an observation-only non-TEX demand term;
+    /// it never changes instruction timing or cache state.
+    compulsory_constant_read_sectors: u64,
 }
 
 impl FrontEndCounters {
@@ -1201,11 +1205,18 @@ impl FrontEndCounters {
         self.compulsory_instruction_read_sectors
     }
 
+    pub const fn compulsory_constant_read_sectors(self) -> u64 {
+        self.compulsory_constant_read_sectors
+    }
+
     fn add_checked(self, other: Self) -> Option<Self> {
         Some(Self {
             compulsory_instruction_read_sectors: self
                 .compulsory_instruction_read_sectors
                 .checked_add(other.compulsory_instruction_read_sectors)?,
+            compulsory_constant_read_sectors: self
+                .compulsory_constant_read_sectors
+                .checked_add(other.compulsory_constant_read_sectors)?,
         })
     }
 }
@@ -3587,6 +3598,74 @@ fn per_sm_instruction_sector_set(
     sectors
 }
 
+/// Extract distinct 32-byte constant-bank sectors from one static SASS
+/// instruction. Constant references are retained as source metadata only;
+/// malformed/non-numeric operands are ignored rather than guessed.
+fn static_constant_sectors(opcode_text: &str) -> Box<[u64]> {
+    fn literal(bytes: &[u8]) -> Option<u64> {
+        let text = std::str::from_utf8(bytes).ok()?.trim();
+        if let Some(hex) = text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")) {
+            u64::from_str_radix(hex, 16).ok()
+        } else {
+            text.parse().ok()
+        }
+    }
+
+    let bytes = opcode_text.as_bytes();
+    let mut sectors = BTreeSet::new();
+    let mut cursor = 0usize;
+    while cursor + 3 < bytes.len() {
+        let is_constant = bytes[cursor] == b'c'
+            && (bytes[cursor + 1] == b'['
+                || (bytes[cursor + 1] == b'x'
+                    && cursor + 2 < bytes.len()
+                    && bytes[cursor + 2] == b'['));
+        if !is_constant {
+            cursor += 1;
+            continue;
+        }
+        let first_open = if bytes[cursor + 1] == b'[' {
+            cursor + 1
+        } else {
+            cursor + 2
+        };
+        let Some(first_close) = bytes[first_open + 1..]
+            .iter()
+            .position(|&value| value == b']')
+            .map(|offset| first_open + 1 + offset)
+        else {
+            cursor += 1;
+            continue;
+        };
+        let second_open = first_close + 1;
+        if second_open >= bytes.len() || bytes[second_open] != b'[' {
+            cursor = first_close + 1;
+            continue;
+        }
+        let Some(second_close) = bytes[second_open + 1..]
+            .iter()
+            .position(|&value| value == b']')
+            .map(|offset| second_open + 1 + offset)
+        else {
+            cursor = second_open + 1;
+            continue;
+        };
+        if let (Some(bank), Some(offset)) = (
+            literal(&bytes[first_open + 1..first_close]),
+            literal(&bytes[second_open + 1..second_close]),
+        ) {
+            if let Some(address) = bank
+                .checked_mul(65_536)
+                .and_then(|base| base.checked_add(offset))
+            {
+                sectors.insert(address / 32);
+            }
+        }
+        cursor = second_close + 1;
+    }
+    sectors.into_iter().collect()
+}
+
 /// Decode one launch into per-SM block replays on the traced placement.
 /// `decode_sectors` selects the L1-mode classification (lane decode +
 /// unique-sector expansion) over the flat-mode class check.
@@ -3632,6 +3711,7 @@ fn extract_per_sm_blocks(
     let mut traced_sm_by_launch_index: BTreeMap<i64, i32> = BTreeMap::new();
     let mut records_seen: u64 = 0;
     let mut instruction_sectors = BTreeSet::new();
+    let mut constant_sectors = BTreeSet::new();
     let mut instruction_sectors_by_sm: BTreeMap<i32, BTreeSet<(i32, u32)>> = BTreeMap::new();
     let launch_resources = (loc.kernel().number_of_registers > 0
         || loc.kernel().size_shared_memory > 0
@@ -3838,6 +3918,9 @@ fn extract_per_sm_blocks(
                     });
                 }
                 instruction_sectors.insert((inst.function_unique_id(), inst.pc() / 32));
+                if let Some(slot) = schedule.issue_slot(u64::from(inst.pc())) {
+                    constant_sectors.extend(static_constant_sectors(slot.opcode_text()));
+                }
                 let is_tma_opcode = schedule.arch == ArchId::Sm120
                     && schedule
                         .issue_slot(u64::from(inst.pc()))
@@ -4335,6 +4418,11 @@ fn extract_per_sm_blocks(
             compulsory_instruction_read_sectors: u64::try_from(instruction_sectors.len()).map_err(
                 |_| IssueError::CounterOverflow {
                     counter: "compulsory instruction-read sector cardinality",
+                },
+            )?,
+            compulsory_constant_read_sectors: u64::try_from(constant_sectors.len()).map_err(
+                |_| IssueError::CounterOverflow {
+                    counter: "compulsory constant-read sector cardinality",
                 },
             )?,
         },

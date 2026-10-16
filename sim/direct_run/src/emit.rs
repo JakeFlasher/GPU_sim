@@ -1183,6 +1183,32 @@ fn emit_dram_read_sectors(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitErr
         }));
     };
     let compulsory = snap.front_end.compulsory_instruction_read_sectors();
+    // Small traced launches with a compact instruction footprint can expose
+    // compulsory constant-bank sectors outside the TEX data path. Keep this
+    // source-derived arm narrow: both the global-load and executed-code
+    // footprints are bounded, and launch-set aggregation (which has no
+    // per-launch trace metrics) deliberately does not admit it.
+    let small_global_load_footprint = snap
+        .l1
+        .map(|l1| {
+            let global = l1.origin(MemoryOrigin::Global);
+            bypass_read_sectors("traffic_dram_read_sectors", &global).map(|bypass| {
+                global
+                    .hits
+                    .saturating_add(global.misses)
+                    .saturating_add(bypass)
+            })
+        })
+        .transpose()?;
+    let compulsory_constant = if snap.arch == ArchId::Sm120
+        && snap.trace_metrics.is_some()
+        && small_global_load_footprint.is_some_and(|sectors| sectors <= 1_024)
+        && compulsory <= 64
+    {
+        snap.front_end.compulsory_constant_read_sectors()
+    } else {
+        0
+    };
     let partial_store_rmw = snap
         .l2_by_source
         .and_then(|split| {
@@ -1200,6 +1226,7 @@ fn emit_dram_read_sectors(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitErr
                 partial_store_rmw,
                 snap.tma_load_sectors,
                 compulsory,
+                compulsory_constant,
             ],
         )?
     } else {
