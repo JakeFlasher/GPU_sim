@@ -28,6 +28,8 @@ The latest post-cleanup verification is retained at
 contains successful full and fast streams for every root and launch.
 The current shared-memory refinement result is at
 `/root/sm120_rtx_5090_capture/replay_results/current_full_replay_20261016_shared_memory/`.
+The current shared-memory and atomic-observer result is at
+`/root/sm120_rtx_5090_capture/replay_results/current_full_replay_20261016_shared_memory_atomic_alias/`.
 Representative full-lane mean APEs are:
 
 | Metric | Mean APE |
@@ -45,6 +47,9 @@ complete-corpus means are **0.1049%** for shared-load SASS instructions,
 **16.3564%** for shared-load wavefronts, **3.7771%** for shared-store
 wavefronts, **49.2552%** for shared-load bank conflicts, and **30.8590%** for
 shared-store bank conflicts; no other scored metric changed.
+
+The scoped global-atomic observer arm reduces shared-atomic wavefront mean APE
+from **64.4022%** to **1.6116%** without changing other scored metrics.
 
 These scores are effective metric projections. Aggregate L1 client scope,
 DRAM/service and topology, and engine completion remain explicit residuals.

@@ -45,6 +45,8 @@ The latest post-cleanup verification is retained at
 completed the same full-before-fast 339-root run with twelve workers.
 The current shared-memory refinement result is retained at
 `/root/sm120_rtx_5090_capture/replay_results/current_full_replay_20261016_shared_memory/`.
+The current shared-memory and atomic-observer result is retained at
+`/root/sm120_rtx_5090_capture/replay_results/current_full_replay_20261016_shared_memory_atomic_alias/`.
 
 Current full-lane mean APEs include:
 
@@ -61,6 +63,9 @@ corresponding full-lane means are 0.1049% (shared-load SASS instructions),
 16.3564% (shared-load wavefronts), 3.7771% (shared-store wavefronts),
 49.2552% (shared-load bank conflicts), and 30.8590% (shared-store bank
 conflicts), with no regression in other scored metrics.
+
+The scoped global-atomic observer arm reduces shared-atomic wavefront mean APE
+from 64.4022% to 1.6116%; global atomic opcode classification remains separate.
 
 Aggregate L1 scope, unqualified DRAM/service and physical topology, and the
 internal TMA completion clock remain typed residuals. A boundary-clipped TMA
