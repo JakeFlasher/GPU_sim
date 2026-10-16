@@ -2155,30 +2155,68 @@ fn cache_lookup_prediction_reports(
                         )
                     })?;
                     // The sidecar shadow is a separate, address-derived
-                    // observer for TMA traffic.  Only merge it into the
-                    // source-specific TEX projection when every observed TMA
-                    // record has a usable source/destination sector set;
-                    // partial address coverage would silently undercount the
-                    // denominator.  It never changes replay state or timing.
-                    let shadow = trace.filter(|metrics| {
-                        metrics.tma_shadow_l2_requests != 0
-                            && metrics.tma_shadow_l2_address_unavailable == 0
-                    });
-                    let (shadow_hits, shadow_misses, shadow_requests, role) = shadow
-                        .map(|metrics| {
+                    // observer for TMA traffic.  Complete address coverage
+                    // permits the ordinary complete-shadow projection.  With
+                    // partial coverage, however, the mixed shadow can contain
+                    // aliased UTMASTG destination addresses and must not be
+                    // used: those aliases fabricate store self-hits.  Keep
+                    // the source-TEX observer conserving by projecting the
+                    // validated load contribution (when its own coverage is
+                    // complete) and treating payload-bearing TMA stores as
+                    // cold/write misses.  This is an observation-side
+                    // projection only; replay state, timing, and DRAM demand
+                    // are unchanged.
+                    let (shadow_hits, shadow_misses, shadow_requests, role) =
+                        if let Some(metrics) = trace.filter(|metrics| {
+                            metrics.tma_shadow_l2_requests != 0
+                                && metrics.tma_shadow_l2_address_unavailable == 0
+                        }) {
                             (
                                 metrics.tma_shadow_l2_hits,
                                 metrics.tma_shadow_l2_misses,
                                 metrics.tma_shadow_l2_requests,
                                 "conserving_source_sector_observer_plus_complete_tma_address_shadow; generic_hit_rate_alias_unjoined",
                             )
-                        })
-                        .unwrap_or((
-                            0,
-                            0,
-                            0,
-                            "conserving_source_sector_observer; generic_hit_rate_alias_unjoined",
-                        ));
+                        } else if let Some(metrics) = trace.filter(|metrics| {
+                            metrics.tma_sidecar_payload_bytes_observed != 0
+                                && metrics.tma_sidecar_payload_bytes_missing == 0
+                                && metrics.tma_sidecar_records_missing == 0
+                                && metrics.tma_sidecar_load_payload_bytes % 32 == 0
+                                && metrics.tma_sidecar_store_payload_bytes % 32 == 0
+                        }) {
+                            let load_sectors = metrics.tma_sidecar_load_payload_bytes / 32;
+                            let store_sectors = metrics.tma_sidecar_store_payload_bytes / 32;
+                            // A complete load-address shadow is the same
+                            // validated load contribution used by the
+                            // operation-class read observer.  Admit its hits
+                            // only when its sector cardinality exactly matches
+                            // the payload-derived demand; otherwise preserve
+                            // the demand as cold misses.  Store addresses stay
+                            // out of this arm, so aliased partial-store shadow
+                            // hits can never be injected.
+                            let load_shadow_complete =
+                                metrics.tma_shadow_l2_load_address_unavailable == 0
+                                    && metrics.tma_shadow_l2_load_requests == load_sectors;
+                            let load_hits = if load_shadow_complete {
+                                metrics.tma_shadow_l2_load_hits.min(load_sectors)
+                            } else {
+                                0
+                            };
+                            let load_misses = load_sectors.saturating_sub(load_hits);
+                            (
+                                load_hits,
+                                load_misses.saturating_add(store_sectors),
+                                load_sectors.saturating_add(store_sectors),
+                                "conserving_source_sector_observer_plus_partial_tma_payload; load-address-complete-only; store-payload-cold-miss; generic_hit_rate_alias_unjoined",
+                            )
+                        } else {
+                            (
+                                0,
+                                0,
+                                0,
+                                "conserving_source_sector_observer; generic_hit_rate_alias_unjoined",
+                            )
+                        };
                     let hits = ordinary_hits.checked_add(shadow_hits).ok_or_else(|| {
                         RunError::new("cache lookup projection", "TMA shadow hit counter overflow")
                     })?;
