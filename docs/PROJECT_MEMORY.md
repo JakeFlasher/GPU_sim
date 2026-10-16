@@ -1086,3 +1086,12 @@ never become demand, timing, or hit inputs.
 A pre-probe sign check rejected the proposed shared-memory-carveout L1 arm:
 816/830 positive-target nonzero-SMEM global-load rows already underpredict or
 match NCU hits, so capacity reduction would worsen them. No L1 replay was run.
+
+## Q83 — reuse and clock diagnostics (2026-10-16)
+
+`408381b1` adds diagnostic-only launch-level TMA sector/line reuse decomposition
+and hardware-clock sandwich summaries. The Q83 five-capture probe passed with
+bit-identical scored outputs. Quant_005 launch 1 shows 2,560 per-record/launch
+unique sectors, 640 lines, zero inter-record reuse/shared lines, 54,784
+intra-record duplicate references, and no usable paired clocks. No completion
+clock or timing input is synthesized.

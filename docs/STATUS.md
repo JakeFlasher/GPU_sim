@@ -82,3 +82,14 @@ replay: in the existing Q79 artifact, 816 of 830 positive-target global-load
 L1 rows with nonzero launch shared memory already have simulator hits at or
 below NCU hits, so reducing effective capacity cannot satisfy the tail-safe
 sign condition.
+
+## Q83 — TMA reuse decomposition and clock-sandwich diagnostics (2026-10-16)
+
+Commit `408381b1` adds launch-level decomposition of per-record unique sectors
+and lines into inter-record reuse/shared-line packing versus intra-record
+address fanout, plus read-only hardware-clock sandwich span sums when paired
+producer/query clocks exist. A five-capture, 246-launch/mode probe passed with
+all scored estimates bit-for-bit identical to Q82. Quant_005 launch 1 has zero
+inter-record duplicate sectors and shared lines, 54,784 intra-record duplicate
+references, and zero usable clock pairs; these are evidence-coverage facts, not
+cache hits, timing constants, or completion timestamps.
