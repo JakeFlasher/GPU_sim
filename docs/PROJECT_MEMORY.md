@@ -113,3 +113,8 @@ Use real traces and sidecars for evidence. Keep temporary files in
 `/dev/shm/sm120_alpha_tmp_20261013`, retain only compact results under the
 canonical corpus, and do not add fixture, approval, hashing, or admission
 workflows.
+
+Independent NCU acquisition is available on the live RTX 5090 through the
+absolute executable `/usr/local/cuda-13.2/bin/ncu`; use that path explicitly
+because it is not currently on the default `PATH`. NCU remains a post-replay
+comparison source, never a simulator input.
