@@ -1,0 +1,10 @@
+platform,phase,workloads,total_seconds,measurement_boundary
+RTX3090Ti,real_gpu_no_ncu,286,242.530,sequential process wall
+RTX3090Ti,simulator_full_external,356,509.050,runner external wall
+RTX3090Ti,simulator_driver_success,286,344.819,simulator driver sum
+RTX3090Ti,NVBit_capture_estimate,286,2640.820,artifact timestamp interval
+RTX3090Ti,NCU_profile_command_estimate,286,902.797,artifact timestamp interval
+RTX5090,simulator_full_dram_disabled,339,511.800,runner external wall
+RTX5090,simulator_full_dram_enabled,339,512.990,runner external wall
+RTX5090,NVBit_capture_estimate,339,13689.000,artifact timestamp interval
+RTX5090,NCU_profile_command_estimate,339,33159.000,artifact timestamp interval

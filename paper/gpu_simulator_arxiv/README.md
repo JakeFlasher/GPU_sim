@@ -1,0 +1,19 @@
+# Evidence-bounded GPU replay (arXiv draft)
+
+Build the manuscript with:
+
+```sh
+cd paper/gpu_simulator_arxiv
+pdflatex -interaction=nonstopmode -halt-on-error main.tex
+bibtex main
+pdflatex -interaction=nonstopmode -halt-on-error main.tex
+pdflatex -interaction=nonstopmode -halt-on-error main.tex
+```
+
+The headline table contains only metrics at or below the field's 15% error
+bar.  Higher-error metric families are named as future work, not omitted from
+the machine-readable replay reports.  Runtime rows distinguish bare workload
+wall time, simulator wall/driver time, and NVBit/NCU campaign-tool estimates.
+NCU values are post-replay observations and never configure replay.  The SM120
+metric values use the correct 339-directory profile corpus at
+`/home/jakeshea/sm120_rtx_5090_capture/profiles` and cover all 11,558 launches.
