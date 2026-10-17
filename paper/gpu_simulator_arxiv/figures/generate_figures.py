@@ -241,6 +241,38 @@ def causal_timeline():
     return "".join(parts) + finish("A single traced instruction exercises the simulator's core promise: event time jumps from issue to lookup, service, and wake-up, but the report preserves which frontier each event belongs to.", "Source: sim-engine event ordering, sim-sm readiness, sim-mem sector state, and the frontier ledger.")
 
 
+def simt_interleaving():
+    parts = [svg_start("How SIMT is modeled without pretending lanes are CPU threads", "CPU thread interleaving, SIMT warp lockstep, and warp-level scheduling are separated; the replay uses the third model."), header("How SIMT is modeled without pretending lanes are CPU threads", "Lane masks stay inside a warp; scheduling interleaves resident warps across SMSP issue partitions.")]
+    panels = [(65, 145, 510, "CPU-style thread interleaving", PALE_BLUE, BLUE), (645, 145, 510, "SIMT warp lockstep", PALE_TEAL, TEAL), (1225, 145, 510, "Our native replay", PALE_GOLD, GOLD)]
+    for x, y, w, title, fill, col in panels:
+        parts += [rect(x, y, w, 610, fill, col, 2.5, 20), text(x + 28, y + 45, title, 21, col, 700)]
+    # CPU rows
+    parts += [text(95, 225, "host threads own independent PCs", 15, MUTED, italic=True)]
+    for i in range(4):
+        y = 280 + i * 68
+        parts += [text(95, y + 18, f"T{i}", 16, INK, 700), rect(145, y, 100, 35, BLUE, BLUE, 1, 6), text(195, y + 23, "op", 15, "white", 700, "middle"), rect(265, y, 100, 35, SKY, SKY, 1, 6), text(315, y + 23, "op", 15, "white", 700, "middle"), rect(385, y, 100, 35, BLUE, BLUE, 1, 6), text(435, y + 23, "op", 15, "white", 700, "middle")]
+    parts += [rect(95, 595, 420, 92, "white", BLUE, 1.5, 10), text(115, 625, "Tradeoff", 16, BLUE, 700), text(115, 652, "accurate per-thread control; high host/event cost", 15, INK)]
+    # lockstep
+    parts += [text(675, 225, "one warp instruction, many lanes", 15, MUTED, italic=True)]
+    for row in range(4):
+        y = 280 + row * 68
+        parts += [text(675, y + 18, f"warp {row}", 16, INK, 700)]
+        for j in range(8):
+            col = TEAL if (j + row) % 3 else PURPLE
+            parts += [rect(755 + j * 34, y, 27, 35, col, col, 1, 4)]
+    parts += [rect(675, 595, 420, 92, "white", TEAL, 1.5, 10), text(695, 625, "Tradeoff", 16, TEAL, 700), text(695, 652, "excellent lane efficiency; divergence and masks matter", 15, INK)]
+    # Our replay
+    parts += [text(1255, 225, "recorded warp streams + masks", 15, MUTED, italic=True)]
+    # scheduler lanes
+    for i, col in enumerate([BLUE, PURPLE, CORAL, GOLD]):
+        y = 282 + i * 65
+        parts += [rect(1255, y, 100, 35, col, col, 1, 6), text(1305, y + 23, f"SMSP {i}", 15, "white", 700, "middle"), line(1365, y + 18, 1410, y + 18, col, 3, marker="arrowBlue"), rect(1415, y, 105, 35, col, col, 1, 6), text(1467, y + 23, "warp", 15, "white", 700, "middle"), rect(1535, y, 115, 35, "white", col, 1.5, 6), text(1592, y + 23, "mask + sectors", 13, col, 700, "middle")]
+    parts += [rect(1255, 595, 420, 92, "white", GOLD, 1.5, 10), text(1275, 625, "Our tradeoff", 16, GOLD, 700), text(1275, 652, "one host actor per SM; lanes stay compact and auditable", 15, INK)]
+    # bottom comparison
+    parts += [rect(65, 785, 1670, 84, PALE_CORAL, CORAL, 1.5, 12), text(95, 818, "Key distinction", 17, CORAL, 700), text(245, 818, "we do not spawn 32 host threads per warp", 17, INK, 700), text(245, 846, "the trace supplies lane masks/addresses; sim-sm interleaves resident warps, and sim-mem aggregates sectors at cache acceptance", 15, INK)]
+    return "".join(parts) + finish("SIMT modeling is a hierarchy: lanes execute one warp instruction together, while resident warps interleave at SMSP issue boundaries. The replay preserves the lane evidence without paying CPU-style per-thread event cost.", "Source: sim/sm/src/issue.rs, sim/sm/src/replay.rs, static SASS masks, placement metadata, and custom SIMT differential evidence.")
+
+
 def write(name, content):
     (OUT / name).write_text(content, encoding="utf-8")
 
@@ -251,3 +283,4 @@ if __name__ == "__main__":
     write("results_dashboard.svg", results_dashboard())
     write("architecture_pipeline.svg", architecture_pipeline())
     write("causal_timeline.svg", causal_timeline())
+    write("simt_interleaving.svg", simt_interleaving())

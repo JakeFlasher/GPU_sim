@@ -241,6 +241,61 @@ We expose four frontiers:
 This separation prevents a terminal dirty line or an unobserved asynchronous
 engine acknowledgement from silently becoming a kernel-cycle claim.
 
+\section{SIMT execution and multi-threading strategy}
+\label{sec:simt}
+
+CPU simulation commonly represents each software thread as an independently
+scheduled instruction stream.  Applying that strategy literally to a GPU would
+create up to 32 host actors per warp, multiply event traffic, and still fail to
+represent the GPU's lockstep lane semantics.  GPU SIMT is hierarchical:
+threads are grouped into warps, a warp issues one instruction for its active
+lanes, and multiple resident warps interleave when one warp is stalled on a
+dependency, barrier, cache miss, or asynchronous operation.
+
+There are three useful modeling choices:
+\begin{enumerate}[leftmargin=1.35em,itemsep=2pt]
+  \item \textbf{Functional per-thread execution} re-executes lane control flow
+    and values.  It can respond to counterfactual timing, but has high host
+    cost and requires a complete functional ISA, memory model, and race
+    semantics.
+  \item \textbf{Warp-level trace replay} stores one dynamic stream per warp,
+    retains active/predicate masks and lane addresses, and schedules warps as
+    the hardware does.  It is much cheaper and preserves observed coalescing,
+    divergence, and placement, but cannot regenerate a path that a target
+    intervention would change.
+  \item \textbf{Tile/analytical or learned models} compress many instructions
+    into tile actions or statistical features.  They are attractive for
+    throughput and broad design sweeps, but can lose per-lane sector, barrier,
+    and source-qualified cache detail.
+\end{enumerate}
+
+Our native SM86/SM120 path uses the second choice.  `sim-sm' is one resumable
+host actor per SM.  Each physical warp slot maps to an SMSP by
+`warp\_slot mod 4`; each SMSP selects at most one ready warp per issue cycle.
+The scheduler keeps the held warp while it remains ready, drops the hold on a
+compiler yield, and otherwise switches to the youngest ready warp.  A traced
+instruction advances exactly one warp stream; its lane mask and sector arena
+drive memory coalescing, while barriers, dependency waits, residency, and
+responses determine when that warp can issue again.  CTA admission models
+resident-warp/shared-memory limits and frees resources when a block finishes.
+
+This is not a claim that the host runtime is a proprietary SM scheduler.  It is
+an explicit effective model whose tradeoff is auditable: lane evidence remains
+available to L1/L2, but the simulator does not pay for 32 independent host
+threads per warp.  The contribution is the identity-preserving connection
+between SIMT masks, SMSP interleaving, sector state, and named frontiers; the
+individual ingredients have substantial prior art.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figures/simt_interleaving.pdf}
+  \caption{SIMT execution strategy and tradeoffs.  CPU-style thread
+  interleaving, warp lockstep, and the replay's one-host-actor-per-SM model are
+  separated.  Lane masks stay inside a warp; resident warps interleave at SMSP
+  issue boundaries.}
+  \label{fig:simt-interleaving}
+\end{figure}
+
 \begin{figure}[t]
   \centering
   \includegraphics[width=\linewidth]{figures/architecture_pipeline.pdf}

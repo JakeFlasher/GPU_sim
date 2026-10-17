@@ -8,6 +8,8 @@
   `sim-mem`/`sim-run` architecture and one-way NCU dataflow;
 * `causal_timeline.svg`: issue→L1→L2→service→wake-up event ownership and
   separated frontiers;
+* `simt_interleaving.svg`: CPU-style threads, SIMT lockstep, and the replay's
+  one-host-actor-per-SM interleaving strategy with explicit tradeoffs;
 * `sota_matrix.svg`: scope-aware comparison against modern simulator and
   analytical-model families; and
 * `results_dashboard.svg`: thresholded architecture metrics plus campaign cost

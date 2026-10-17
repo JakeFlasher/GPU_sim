@@ -301,3 +301,38 @@ frontiers, directory-scoped NCU joining, and complete 286/339-root evidence.
 The matrix intentionally avoids a radar-score or “SOTA” scalar because such a
 score would erase the differences between sampling, analytical prediction,
 tile modeling, and native trace replay.
+
+## 8. SIMT execution model and CPU-simulation gap
+
+The central explanatory gap for non-experts is that a GPU thread is not modeled
+like a CPU thread.  A CPU simulator may assign one dynamic instruction stream
+to each modeled core/thread and interleave those streams.  A GPU groups up to
+32 lanes into a warp: one warp instruction is issued for the active lanes, while
+other resident warps hide latency.  Lane divergence changes the active mask;
+coalescing changes the sector request; and barriers/atomics create cross-warp
+constraints.
+
+There are three broad choices:
+
+| Method | What it preserves | Cost / limitation |
+|---|---|---|
+| Functional lane execution | Values, branches, races, target-dependent paths | Highest host cost; requires complete functional ISA and memory semantics |
+| Warp-level trace replay | Observed masks, addresses, warp order, placement, cache sectors | Cannot regenerate a path that a target intervention changes |
+| Tile/analytical/learned model | Broad throughput and design-space coverage | Can lose lane, barrier, sector, and source-qualified cache detail |
+
+The native path uses warp-level replay.  `sim-sm` is a resumable host actor per
+SM; physical warp slots map to four SMSP partitions by `warp_slot mod 4`; each
+SMSP selects at most one ready warp per issue cycle.  It holds a ready warp
+unless compiler yield drops the hold, otherwise selects the youngest ready warp,
+and parks a warp on dependency, barrier, memory, or asynchronous waits.  Lane
+masks and per-lane sectors remain compact data attached to the warp instruction;
+the simulator does **not** spawn 32 host threads per warp.  This is the key
+tradeoff: the model retains the evidence needed for coalescing and cache state
+without paying CPU-style per-thread event cost, while clearly refusing to claim
+counterfactual control-flow regeneration.
+
+The custom `simt_u32_v1` path is separate: it executes a declarative fixed-width
+SIMT program with functional per-lane state and a resource/dependency pipeline.
+Its differential artifacts establish functional/model-relative behavior, not
+silicon timing.  This separation prevents a custom functional example from
+being mistaken for native SASS timing evidence.

@@ -21,6 +21,12 @@
       "source": "sim-engine, sim-sm, sim-mem frontier semantics"
     },
     {
+      "file": "simt_interleaving.svg",
+      "title": "SIMT execution and interleaving strategy",
+      "question": "How does warp lockstep differ from CPU-style thread simulation, and what does the replay interleave?",
+      "source": "sim/sm/src/issue.rs, sim/sm/src/replay.rs, custom SIMT differential evidence"
+    },
+    {
       "file": "sota_matrix.svg",
       "title": "Scope-aware modern SOTA matrix",
       "question": "Which capability intersection distinguishes this replay stack?",
