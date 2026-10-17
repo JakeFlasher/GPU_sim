@@ -1,0 +1,1 @@
+{"axes": {"batch_size": 1, "seq_length": 8, "past_key_values_length": 0, "num_attention_heads": 64, "swa_num_attention_heads": 64, "sliding_window": 128, "total_length": 8}, "inputs": {"batch_size_scalar": {"type": "scalar", "value": 1}, "seq_length_scalar": {"type": "scalar", "value": 8}, "past_key_values_length_scalar": {"type": "scalar", "value": 0}}}

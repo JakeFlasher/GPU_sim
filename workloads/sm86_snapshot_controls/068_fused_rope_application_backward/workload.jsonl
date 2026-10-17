@@ -1,0 +1,1 @@
+{"axes": {"batch_size": 1, "num_heads": 4, "num_kv_heads": 2, "seq_len": 16, "head_dim": 128, "half_head_dim": 64}, "inputs": {"grad_q_embed": {"type": "random"}, "grad_k_embed": {"type": "random"}, "q": {"type": "random"}, "k": {"type": "random"}, "cos": {"type": "random"}, "sin": {"type": "random"}}}

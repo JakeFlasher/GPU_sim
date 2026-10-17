@@ -1,0 +1,162 @@
+{
+  "binaries": [
+    {
+      "binary_path": "workloads/portable_lcd/conv2d_implicit_gemm_bf16_sm80/conv2d_implicit_gemm_bf16_sm80_run",
+      "binary_sha256": "9883fbaf8d08dee40cc5af25bf14b5afdddf17b7d0a6c1f254a91606683a4558",
+      "cells": [
+        "conv2d_implicit_gemm_bf16_sm80"
+      ],
+      "diverged_sources": [
+        "workloads/portable_lcd/conv2d_implicit_gemm_bf16_sm80/main.cu",
+        "workloads/portable_lcd/runner_common.h"
+      ]
+    },
+    {
+      "binary_path": "workloads/portable_lcd/cross_entropy_fwd_fp32_sm80/cross_entropy_fwd_fp32_sm80_run",
+      "binary_sha256": "1ee5a2ea3e35f5b30e13f9e08c7aaa9595d7f22b8a4f0538edbe7db47618fe01",
+      "cells": [
+        "cross_entropy_fwd_fp32_sm80"
+      ],
+      "diverged_sources": [
+        "workloads/portable_lcd/runner_common.h"
+      ]
+    },
+    {
+      "binary_path": "workloads/portable_lcd/embedding_gather_int32_sm80/embedding_gather_int32_sm80_run",
+      "binary_sha256": "55fb08b61852bee89d102852da8a3ddf55115b38611dce0c201517112c7a2372",
+      "cells": [
+        "embedding_gather_int32_sm80"
+      ],
+      "diverged_sources": [
+        "workloads/portable_lcd/runner_common.h"
+      ]
+    },
+    {
+      "binary_path": "workloads/portable_lcd/flash_attn_bwd_bf16_sm80/flash_attn_bwd_bf16_sm80_run",
+      "binary_sha256": "419a658fbc47da8e4b360c4de6619329c9de84b00885818c12ca60550865acd1",
+      "cells": [
+        "flash_attn_bwd_bf16_sm80"
+      ],
+      "diverged_sources": [
+        "workloads/portable_lcd/runner_common.h"
+      ]
+    },
+    {
+      "binary_path": "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80_run",
+      "binary_sha256": "acaae23ed7a6705c887bbff159e0a664b941ba6df42f6bdc25b60d6c77009ce1",
+      "cells": [
+        "flash_attn_fwd_bf16_sm80"
+      ],
+      "diverged_sources": [
+        "workloads/portable_lcd/runner_common.h"
+      ]
+    },
+    {
+      "binary_path": "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run",
+      "binary_sha256": "bcf504cd975df9588e75c6726d68888a5a975950a6358b1486b60c0900627acb",
+      "cells": [
+        "gemm_hmma_bf16_sm80"
+      ],
+      "diverged_sources": [
+        "workloads/portable_lcd/gemm_hmma_bf16_sm80/main.cu",
+        "workloads/portable_lcd/runner_common.h"
+      ]
+    },
+    {
+      "binary_path": "workloads/portable_lcd/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80_run",
+      "binary_sha256": "829927c7f57d7c46f0a8e51c7de6bb8c7eb7d8de1e963a33e5e9afee7839a750",
+      "cells": [
+        "gemm_hmma_fp16_sm80"
+      ],
+      "diverged_sources": [
+        "workloads/portable_lcd/runner_common.h"
+      ]
+    },
+    {
+      "binary_path": "workloads/portable_lcd/gemm_imma_int8_sm80/gemm_imma_int8_sm80_run",
+      "binary_sha256": "44b362cf4d503e1eb4b2791046d2084288b12fc1fc7fde9674a6d538a4b16e4a",
+      "cells": [
+        "gemm_imma_int8_sm80"
+      ],
+      "diverged_sources": [
+        "workloads/portable_lcd/runner_common.h"
+      ]
+    },
+    {
+      "binary_path": "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80_run",
+      "binary_sha256": "abf792ec7d7e7042ca4a4c21ae611577b50b94fad5c1a6ee534b45b13a22e254",
+      "cells": [
+        "gemm_sparse_2to4_bf16_sm80"
+      ],
+      "diverged_sources": [
+        "workloads/portable_lcd/runner_common.h"
+      ]
+    },
+    {
+      "binary_path": "workloads/portable_lcd/layernorm_fwd_bf16_sm80/layernorm_fwd_bf16_sm80_run",
+      "binary_sha256": "edfee9f9588d72a00caf401b2d667ba3dbbb90965fe11acf4d906f7ebc1b33dc",
+      "cells": [
+        "layernorm_fwd_bf16_sm80"
+      ],
+      "diverged_sources": [
+        "workloads/portable_lcd/runner_common.h"
+      ]
+    },
+    {
+      "binary_path": "workloads/portable_lcd/rmsnorm_bwd_bf16_sm80/rmsnorm_bwd_bf16_sm80_run",
+      "binary_sha256": "229b653219e8186632fee1e784ff85dd4b729d59f0881f7a7e484412e2113cba",
+      "cells": [
+        "rmsnorm_bwd_bf16_sm80"
+      ],
+      "diverged_sources": [
+        "workloads/portable_lcd/runner_common.h"
+      ]
+    },
+    {
+      "binary_path": "workloads/portable_lcd/rmsnorm_fwd_bf16_sm80/rmsnorm_fwd_bf16_sm80_run",
+      "binary_sha256": "2897b18afbd4eafdb517abe9764376697535b2251f69cc4d2fea34461849c4d4",
+      "cells": [
+        "rmsnorm_fwd_bf16_sm80"
+      ],
+      "diverged_sources": [
+        "workloads/portable_lcd/runner_common.h"
+      ]
+    },
+    {
+      "binary_path": "workloads/portable_lcd/silu_fwd_bf16_sm80/silu_fwd_bf16_sm80_run",
+      "binary_sha256": "48d65e6fda1322f0a6a2f4d4ca67a5ef74c587cf373b52d6acc676288eacd4df",
+      "cells": [
+        "silu_fwd_bf16_sm80"
+      ],
+      "diverged_sources": [
+        "workloads/portable_lcd/runner_common.h"
+      ]
+    },
+    {
+      "binary_path": "workloads/portable_lcd/softmax_safe_bf16_sm80/softmax_safe_bf16_sm80_run",
+      "binary_sha256": "e798f2cb4720b46a32c19158c9ce7fc64ae670ee63787cd4fe3bb1b86f8e1782",
+      "cells": [
+        "softmax_safe_bf16_sm80"
+      ],
+      "diverged_sources": [
+        "workloads/portable_lcd/runner_common.h"
+      ]
+    },
+    {
+      "binary_path": "workloads/portable_lcd/swiglu_fwd_bf16_sm80/swiglu_fwd_bf16_sm80_run",
+      "binary_sha256": "a9deef77dc5c117e904770ac2f815ba5b87d9273071184a0490301797e4128d8",
+      "cells": [
+        "swiglu_fwd_bf16_sm80"
+      ],
+      "diverged_sources": [
+        "workloads/portable_lcd/runner_common.h"
+      ]
+    }
+  ],
+  "schema_version": 1,
+  "source_authority": {
+    "path": "data/local_labels/campaign/capture_roster_authority_sm86.json",
+    "sha256": "d02c817091b0a9f06c2106c0987c59a481910afcc3b78ab1de7a7d5bd5a6b4b4"
+  },
+  "source_baseline_commit": "c4b76c0ae3b49378f6e3d4cabf7830dbe3eaa432"
+}

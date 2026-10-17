@@ -1,0 +1,1 @@
+{"axes": {"batch_size": 1, "seq_len": 128, "head_dim": 128, "half_dim": 64}, "inputs": {"grad_cos": {"type": "random"}, "grad_sin": {"type": "random"}, "emb": {"type": "random"}, "inv_freq_expanded": {"type": "random"}, "attention_scaling": {"type": "scalar", "value": 0.0883883}}}

@@ -1,0 +1,1 @@
+{"axes": {"num_elements": 1024}, "inputs": {"grad_output": {"type": "random"}, "x": {"type": "random"}, "sigmoid_x": {"type": "random"}}}

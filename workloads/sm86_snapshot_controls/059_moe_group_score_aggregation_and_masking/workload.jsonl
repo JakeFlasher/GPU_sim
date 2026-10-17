@@ -1,0 +1,1 @@
+{"axes": {"num_tokens": 128, "num_experts": 256, "n_group": 8, "topk_group": 4, "experts_per_group": 32}, "inputs": {"scores": {"type": "random"}}}

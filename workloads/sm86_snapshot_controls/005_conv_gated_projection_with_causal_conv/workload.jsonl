@@ -1,0 +1,1 @@
+{"axes": {"batch_size": 1, "seq_len": 8, "hidden_size": 128, "conv_kernel_size": 4, "triple_hidden": 384}, "inputs": {"x": {"type": "random"}, "in_proj_weight": {"type": "random"}, "in_proj_bias": {"type": "random"}, "conv_weight": {"type": "random"}, "conv_bias": {"type": "random"}, "out_proj_weight": {"type": "random"}, "out_proj_bias": {"type": "random"}}}

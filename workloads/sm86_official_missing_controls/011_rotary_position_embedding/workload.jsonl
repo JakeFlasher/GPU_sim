@@ -1,0 +1,1 @@
+{"uuid": "3eea88be-9272-5067-9df3-3b20962a63d7", "axes": {"batch_size": 1, "seq_len": 8}, "inputs": {"position_ids": {"type": "custom"}, "inv_freq": {"type": "custom"}, "attention_scaling": {"type": "custom"}}, "tolerance": {"max_atol": 1e-05, "max_rtol": 0.05}}

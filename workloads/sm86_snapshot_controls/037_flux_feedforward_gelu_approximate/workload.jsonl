@@ -1,0 +1,1 @@
+{"axes": {"batch_size": 1, "seq_len": 8, "hidden_dim": 128, "mlp_hidden_dim": 512}, "inputs": {"hidden_states": {"type": "random"}, "fc1_weight": {"type": "random"}, "fc1_bias": {"type": "random"}, "fc2_weight": {"type": "random"}, "fc2_bias": {"type": "random"}}}

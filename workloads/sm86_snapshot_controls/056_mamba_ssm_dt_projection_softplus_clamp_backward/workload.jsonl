@@ -1,0 +1,1 @@
+{"axes": {"batch_size": 1, "seq_len": 128, "num_heads": 40}, "inputs": {"grad_output": {"type": "random"}, "dt_with_bias": {"type": "random"}, "dt_activated": {"type": "random"}, "time_step_min": {"type": "scalar", "value": 0.001}, "time_step_max": {"type": "scalar", "value": 0.1}}}

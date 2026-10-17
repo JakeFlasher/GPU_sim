@@ -1,0 +1,1 @@
+{"axes": {"batch_size": 1, "num_channels": 32, "height": 4, "width": 4, "num_groups": 32}, "inputs": {"x": {"type": "random"}, "weight": {"type": "random"}, "bias": {"type": "random"}, "eps": {"type": "scalar", "value": 1e-05}}}

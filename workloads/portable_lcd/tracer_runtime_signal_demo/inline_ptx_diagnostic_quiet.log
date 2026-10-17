@@ -1,0 +1,48 @@
+------------- NVBit (NVidia Binary Instrumentation Tool v1.8) Loaded --------------
+NVBit core environment variables (mostly for nvbit-devs):
+ACK_CTX_INIT_LIMITATION = 0 - if set, no warning will be printed for nvbit_at_ctx_init()
+            NVDISASM = nvdisasm - override default nvdisasm found in PATH
+            NOBANNER = 0 - if set, does not print this banner
+       NO_EAGER_LOAD = 1 - lazy module loading is now turned on by default. If you see deadlocks in your tool, set NO_EAGER_LOAD to 0
+---------------------------------------------------------------------------------
+         INSTR_BEGIN = 0 - Beginning of the instruction interval where to apply instrumentation
+           INSTR_END = 4294967295 - End of the instruction interval where to apply instrumentation
+    EXCLUDE_PRED_OFF = 1 - Exclude predicated off instruction from count
+DYNAMIC_KERNEL_LIMIT_END = 0 - Limit of the number kernel to be printed, 0 means no limit
+DYNAMIC_KERNEL_LIMIT_START = 0 - start to report kernel from this kernel id, 0 means starts from the beginning, i.e. first kernel
+   ACTIVE_FROM_START = 1 - Start instruction tracing from start or wait for cuProfilerStart and cuProfilerStop. If set to 0, DYNAMIC_KERNEL_LIMIT options have no effect
+        TOOL_VERBOSE = 0 - Enable verbosity inside the tool
+INTERMEDIATE_EXTRA_FILES_PERSISTANCE = 0 - Enable to not delete intermediate files from the extra trace generation
+SKIP_ENHANCED_TRACER = 0 - Skip the post-execution enhanced_tracer pass (cubin extraction + parse_sass + parse_rfu). Primary trace artifacts (dynamic_trace.pb, per-CTA pb files, stats.csv) are unaffected.
+ENHANCED_TRACER_PER_CUBIN_TIMEOUT_S = 30 - Per-subprocess deadline (seconds) for the cuobjdump/nvdisasm shell-outs inside enhanced_tracer. On timeout the child process group is SIGTERM'd then SIGKILL'd; the parent always returns normally. Set to 0 to wait indefinitely (legacy behavior).
+ENHANCED_TRACER_MAX_PARSER_INPUT_KB = 64 - Maximum size (KB) of the .sass / .rfu files passed to parse_sass / parse_rfu. Cubins whose generated parser inputs exceed the threshold (or whose subprocess timed out) are skipped with a typed enhanced_tracer_cubin_parse_timeout diagnostic. Set to 0 to disable the size pre-skip.
+     TOOL_TRACE_CORE = 0 - write the core id in the traces
+TERMINATE_UPON_LIMIT = 0 - Stop the process once the current kernel > DYNAMIC_KERNEL_LIMIT_END
+USER_DEFINED_FOLDERS = 0 - Uses the user defined folder TRACES_FOLDER path environment
+THRESHOLD_UNIQUE_KERNEL_CHECKING = 10 - Number of instructions used to check if kernels with the same name are different
+    GATHER_REGISTERS = 0 - Enable gathering of GPU register values. Not available in this version.
+WARNING: Do not call CUDA memory allocation in nvbit_at_ctx_init(). It will cause deadlocks. Do them in nvbit_tool_init(). If you encounter deadlocks, remove CUDA API calls to debug.
+INFO: tracer binary_version initialised per-context from device compute capability at tool-init: binary_version=86 (ctx=0x5630bd1cf900)
+INFO: cuFuncGetAttribute(BINARY_VERSION) returned attr_bv=0 (CUresult=400); falling back to device compute capability 8.6 -> binary_version=86
+----------------------------------------------------------------------------------------------------
+{
+  "slug": "silu_fwd_bf16_sm80",
+  "mode": "correctness",
+  "shape_point": "correctness_00",
+  "n": 1024,
+  "reps": 1, "warmup": 0,
+  "mean_ms": 159.955994, "cv_pct": 0.000000,
+  "max_abs_err": 0.00744653, "correctness_ok": true,
+  "manifest": "/tmp/ac5_demo_inline/silu_fwd_bf16_sm80/manifest.json"
+}
+Serialized protocol buffer written to traces/dynamic_trace.pb
+Starting the enhanced tracer
+Generating extra information for the enhanced traces of benchmark: silu_fwd_bf16_sm80_run
+Extracting ELF file    1: silu_fwd_bf16_sm80-main.sm_86.cubin
+Extracting ELF file    2: silu_fwd_bf16_sm80.sm_86.cubin
+Extracting ELF file    3: main.sm_86.cubin
+Parsing cubin: silu_fwd_bf16_sm80-main.sm_86.cubin
+Parsing cubin: silu_fwd_bf16_sm80.sm_86.cubin
+Parsing cubin: main.sm_86.cubin
+Enhanced tracer has parsed 1/1 kernels
+Terminated the enhanced tracer

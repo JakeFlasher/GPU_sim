@@ -1,0 +1,1 @@
+{"axes": {"batch_size": 1, "seq_len": 4, "attention_hidden_size": 128}, "inputs": {"time_decay": {"type": "random"}, "key": {"type": "random"}, "time_first": {"type": "random"}, "value": {"type": "random"}, "max_state": {"type": "random"}, "num_state": {"type": "random"}, "den_state": {"type": "random"}}}

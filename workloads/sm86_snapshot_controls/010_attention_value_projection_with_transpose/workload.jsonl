@@ -1,0 +1,1 @@
+{"axes": {"batch_size": 1, "seq_len": 8, "hidden_size": 128, "num_kv_heads": 2, "head_dim": 64, "kv_projection_size": 128}, "inputs": {"hidden_states": {"type": "random"}, "v_proj_weight": {"type": "random"}}}

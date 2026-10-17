@@ -1,0 +1,1 @@
+{"axes": {"batch_size": 1, "seq_len": 8, "head_dim": 64, "half_head_dim": 32}, "inputs": {"freqs": {"type": "random"}, "attention_scaling": {"type": "scalar", "value": 1.0}}}
