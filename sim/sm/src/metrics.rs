@@ -1,5 +1,5 @@
 //! Timing-neutral native-replay observations. Counts are not profiler samples.
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
 use sim_mem::{
@@ -544,6 +544,16 @@ pub struct TraceMetrics {
     pub l1_constant_global_requests: u64,
     pub l1_global_resident_hits: u64,
     pub l1_global_lookup_sectors: u64,
+    /// Adjacent full-warp global-store records that touch a sector already
+    /// emitted by the immediately preceding global-store record.  SM120's
+    /// write-combining observer can absorb these duplicate packets before a
+    /// new operation-qualified L2 lookup; this is a trace-only projection and
+    /// never changes physical cache state or DRAM service.
+    pub global_store_adjacent_duplicate_sectors: u64,
+    #[serde(skip)]
+    pub(crate) global_store_previous_sectors: BTreeSet<i64>,
+    #[serde(skip)]
+    pub(crate) global_store_previous_effective_lanes: u8,
     /// Fixed-size per-request four-sector mask/client audit. This is
     /// diagnostic-only and does not feed cache state, timing, or scored
     /// endpoints.
@@ -792,6 +802,11 @@ fn decoded_sector_stats(kind: AccessKind, sector_arena: &[i64]) -> Option<(u64, 
 }
 
 impl TraceMetrics {
+    pub(crate) fn begin_warp_memory_stream(&mut self) {
+        self.global_store_previous_sectors.clear();
+        self.global_store_previous_effective_lanes = 0;
+    }
+
     pub(crate) fn observe_local_interleaved(
         &mut self,
         kind: AccessKind,
@@ -1951,6 +1966,33 @@ impl TraceMetrics {
         }
         if effective == 0 {
             return Ok(());
+        }
+        if let AccessKind::GlobalStore { off, len } = kind {
+            let end = off
+                .checked_add(usize::from(len))
+                .ok_or(crate::IssueError::CounterOverflow {
+                    counter: "global-store sector span",
+                })?;
+            if let Some(span) = _sector_arena.get(off..end) {
+                let current = span.iter().copied().collect::<BTreeSet<_>>();
+                if effective >= 8 && self.global_store_previous_effective_lanes >= 8 {
+                    let duplicate = current
+                        .intersection(&self.global_store_previous_sectors)
+                        .count() as u64;
+                    add(
+                        &mut self.global_store_adjacent_duplicate_sectors,
+                        duplicate,
+                    )?;
+                }
+                self.global_store_previous_sectors = current;
+                self.global_store_previous_effective_lanes = effective;
+            } else {
+                self.global_store_previous_sectors.clear();
+                self.global_store_previous_effective_lanes = 0;
+            }
+        } else {
+            self.global_store_previous_sectors.clear();
+            self.global_store_previous_effective_lanes = 0;
         }
         let (key, sectors, bank_wavefronts) = match kind {
             AccessKind::NonMemory | AccessKind::PredicatedOffMemory => return Ok(()),

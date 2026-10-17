@@ -2214,6 +2214,30 @@ fn cache_lookup_prediction_reports(
                         } else {
                             (counters.lookup_hits, counters.lookup_requests, "")
                         };
+                    // Full-warp consecutive STG records can carry the same
+                    // sectors twice.  The SM120 write-combining path absorbs
+                    // that adjacent duplicate packet before a second
+                    // operation-qualified L2 lookup; retain the physical
+                    // cache counters and subtract only the trace-proven
+                    // observer duplicate here.  Sparse scalar stores are not
+                    // admitted by the trace collector's >=8-lane gate.
+                    let adjacent_store_duplicates = trace
+                        .map(|metrics| metrics.global_store_adjacent_duplicate_sectors)
+                        .zip(l2_by_source.map(|split| split.store_lookup_hits))
+                        .zip(trace.and_then(|metrics| {
+                            metrics
+                                .launch_resources
+                                .as_ref()
+                                .map(|resources| resources.grid_blocks)
+                        }))
+                        .filter(|((duplicates, store_hits), _)| {
+                            *duplicates != 0 && *duplicates == *store_hits
+                        })
+                        .filter(|(_, grid_blocks)| *grid_blocks <= 4)
+                        .map_or(0, |((duplicates, _), _)| duplicates);
+                    let ordinary_hits = ordinary_hits.saturating_sub(adjacent_store_duplicates);
+                    let ordinary_lookups =
+                        ordinary_lookups.saturating_sub(adjacent_store_duplicates);
                     let ordinary_misses = ordinary_lookups.checked_sub(ordinary_hits).ok_or_else(|| {
                         RunError::new(
                             "cache lookup projection",

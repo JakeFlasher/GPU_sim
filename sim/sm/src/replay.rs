@@ -3888,6 +3888,7 @@ fn extract_per_sm_blocks(
             let mut async_copy_cohorts = AsyncCopyCohortReplay::default();
             let mut branch_successors = crate::metrics::BranchSuccessors::default();
             let mut previous_control_flow: Option<(i32, u32, u32)> = None;
+            trace_metrics.begin_warp_memory_stream();
             for (record_ix, inst) in warp.instructions().enumerate() {
                 let record_warp_id = inst.warpid_tb();
                 if record_warp_id != warp_id {
