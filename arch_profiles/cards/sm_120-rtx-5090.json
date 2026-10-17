@@ -60,9 +60,10 @@
     "challenge": "sm120 cloud timing probe"
   },
   "dram_bandwidth": {
-    "status": "research_gap",
-    "reason": "1792 GB/s is a vendor peak specification, not an achieved locked-protocol service rate; no RTX 5090 clock/memory sweep is retained yet.",
-    "challenge": "sm120 cloud DRAM bandwidth probe"
+    "peak_bytes_per_second": 1792000000000,
+    "locked_sm_clock_mhz": 2407,
+    "locked_mem_clock_mhz": 14000,
+    "provenance": "Prototype hypothesis for DRAM-service testing only: vendor RTX 5090 GDDR7 1792 GB/s peak and 2407 MHz boost from vendor_spec; 14000 MHz is the nominal 28 GT/s half-rate memory clock. No locked RTX 5090 bandwidth sweep is claimed; replace this hypothesis when one is retained."
   },
   "smsp": {
     "status": "research_gap",
