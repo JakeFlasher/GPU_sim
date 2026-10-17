@@ -14,6 +14,7 @@ use sim_semantics::ServiceStageRole;
 const USAGE: &str = "Usage: sim-run --trace DIR --control FILE --arch-card FILE \
 [--pchase-card FILE] [--mode flat|l1|l1-l2] \
 [--cache-scope launch|stream-l2] [--carded-dram] [--kernel-id ID] \
+[--dram-service-rate-bytes-per-sec N] \
 [--dirty-writeback-capacity-sectors N] \
 [--coherence-service-cycles N --coherence-capacity-sectors N] \
 [--l1-visibility-protocol] \
@@ -165,6 +166,7 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
     let mut memory_mode = None;
     let mut cache_scope = CacheScope::Launch;
     let mut carded_dram_bandwidth = false;
+    let mut dram_service_rate_bytes_per_sec = None;
     let mut dirty_writeback_capacity_sectors = None;
     let mut coherence_service_cycles = None;
     let mut coherence_capacity_sectors = None;
@@ -223,6 +225,25 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
             }
             value if value == OsStr::new("--carded-dram") => {
                 carded_dram_bandwidth = true;
+            }
+            value if value == OsStr::new("--dram-service-rate-bytes-per-sec") => {
+                let raw = take_value(&mut args, "--dram-service-rate-bytes-per-sec")?;
+                let raw = raw.to_str().ok_or_else(|| {
+                    RunError::new("arguments", "--dram-service-rate-bytes-per-sec must be UTF-8")
+                })?;
+                let rate = raw.parse::<u64>().map_err(|error| {
+                    RunError::new(
+                        "arguments",
+                        format!("invalid --dram-service-rate-bytes-per-sec {raw:?}: {error}"),
+                    )
+                })?;
+                if rate == 0 {
+                    return Err(RunError::new(
+                        "arguments",
+                        "--dram-service-rate-bytes-per-sec must be positive",
+                    ));
+                }
+                dram_service_rate_bytes_per_sec = Some(rate);
             }
             value if value == OsStr::new("--dirty-writeback-capacity-sectors") => {
                 let raw = take_value(&mut args, "--dirty-writeback-capacity-sectors")?;
@@ -454,6 +475,7 @@ fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Option<RunConf
         memory_mode,
         cache_scope,
         carded_dram_bandwidth,
+        dram_service_rate_bytes_per_sec,
         dirty_writeback_capacity_sectors,
         coherence_service_cycles,
         coherence_capacity_sectors,

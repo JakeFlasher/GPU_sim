@@ -69,6 +69,8 @@ pub struct ReadinessCauseCycles {
     pub register_raw: u64,
     pub register_predicate: u64,
     pub register_waw: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub register_read_port: u64,
     pub dependence_counter_read: u64,
     #[serde(skip_serializing_if = "is_zero_u64")]
     pub dependence_counter_global_load_operand_read: u64,
@@ -121,6 +123,7 @@ impl ReadinessCauseCycles {
         add!(register_raw);
         add!(register_predicate);
         add!(register_waw);
+        add!(register_read_port);
         add!(dependence_counter_read);
         add!(dependence_counter_global_load_operand_read);
         add!(dependence_counter_global_store_operand_read);

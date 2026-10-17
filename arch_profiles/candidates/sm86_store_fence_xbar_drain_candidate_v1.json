@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "candidates": [
+    {
+      "candidate_id": 87,
+      "scope": "smsp",
+      "operation": "store",
+      "queue_capacity_instructions": 5,
+      "admission_latency_cycles": 8,
+      "l2_hit_sector_units": 16,
+      "l2_hit_sector_cycles": 1,
+      "l2_miss_sector_units": 8,
+      "l2_miss_sector_cycles": 1,
+      "l2_miss_service_width_sectors": 16,
+      "membar_waits_for_service_completion": true,
+      "exit_waits_for_service_completion": false,
+      "exit_waits_for_admission_drain": true,
+      "write_completion_latency_cycles": 0,
+      "write_completion_request_cycles": 0,
+      "write_completion_region_cycles": 0,
+      "write_completion_parallel_lanes": 0
+    }
+  ]
+}

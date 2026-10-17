@@ -951,6 +951,15 @@ struct FoldedKernelReplay {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct FrontEndCounters {
     compulsory_instruction_read_sectors: u64,
+    /// Number of 32-byte sectors in the unique 128-byte instruction-line
+    /// envelope.  GCC/ICC fetches an aligned 128-byte line even when the
+    /// traced control flow executes only one sector of that line.  This is a
+    /// source-qualified traffic observer; it does not alter issue timing.
+    compulsory_instruction_line_read_sectors: u64,
+    /// Static SASS instruction footprint rounded to aligned 128-byte GCC
+    /// fetch lines. This remains separate from the executed-path ledger above
+    /// so consumers can retain a bounded cold/static envelope explicitly.
+    static_instruction_line_read_sectors: u64,
 }
 
 impl FrontEndCounters {
@@ -958,11 +967,25 @@ impl FrontEndCounters {
         self.compulsory_instruction_read_sectors
     }
 
+    pub const fn compulsory_instruction_line_read_sectors(self) -> u64 {
+        self.compulsory_instruction_line_read_sectors
+    }
+
+    pub const fn static_instruction_line_read_sectors(self) -> u64 {
+        self.static_instruction_line_read_sectors
+    }
+
     fn add_checked(self, other: Self) -> Option<Self> {
         Some(Self {
             compulsory_instruction_read_sectors: self
                 .compulsory_instruction_read_sectors
                 .checked_add(other.compulsory_instruction_read_sectors)?,
+            compulsory_instruction_line_read_sectors: self
+                .compulsory_instruction_line_read_sectors
+                .checked_add(other.compulsory_instruction_line_read_sectors)?,
+            static_instruction_line_read_sectors: self
+                .static_instruction_line_read_sectors
+                .checked_add(other.static_instruction_line_read_sectors)?,
         })
     }
 }
@@ -3384,6 +3407,12 @@ fn extract_per_sm_blocks(
     let mut traced_sm_by_launch_index: BTreeMap<i64, i32> = BTreeMap::new();
     let mut records_seen: u64 = 0;
     let mut instruction_sectors = BTreeSet::new();
+    let mut instruction_lines = BTreeSet::new();
+    let static_instruction_lines = schedule
+        .by_pc
+        .keys()
+        .map(|pc| pc / 128)
+        .collect::<BTreeSet<_>>();
     let mut instruction_sectors_by_sm: BTreeMap<i32, BTreeSet<(i32, u32)>> = BTreeMap::new();
     let launch_resources = (loc.kernel().number_of_registers > 0
         || loc.kernel().size_shared_memory > 0
@@ -3518,6 +3547,16 @@ fn extract_per_sm_blocks(
                     });
                 }
                 records_seen = checked_record_count(records_seen, &path, warp_id, record_ix)?;
+                let constant_addresses = inst.constant_memory_addresses();
+                // Only active-lane address vectors contribute to the demand
+                // interval. Bank/offset metadata without addresses can be a
+                // predicated-off or incomplete record and is retained as
+                // typed metadata, never fabricated into traffic.
+                let constant_bank = inst.constant_memory_bank_offset().map(|(bank, _)| bank);
+                trace_metrics.observe_constant_memory(constant_addresses, constant_bank)?;
+                if constant_addresses.is_empty() && inst.constant_memory_metadata_present() {
+                    trace_metrics.observe_constant_metadata_only()?;
+                }
                 let preflight = preflight_compact_memory(
                     inst.memory(),
                     warp,
@@ -3537,6 +3576,7 @@ fn extract_per_sm_blocks(
                     });
                 }
                 instruction_sectors.insert((inst.function_unique_id(), inst.pc() / 32));
+                instruction_lines.insert((inst.function_unique_id(), inst.pc() / 128));
                 let is_tma_opcode = schedule.arch == ArchId::Sm120
                     && schedule
                         .issue_slot(u64::from(inst.pc()))
@@ -3634,6 +3674,71 @@ fn extract_per_sm_blocks(
                         tma_observations,
                     )?
                 };
+                if schedule.arch == ArchId::Sm86
+                    && schedule
+                        .issue_slot(u64::from(inst.pc()))
+                        .is_some_and(|slot| is_static_constant_global_load(slot.opcode_text()))
+                {
+                    let span = match kind {
+                        AccessKind::GlobalEligible { off, len, .. }
+                        | AccessKind::GlobalBypass { off, len, .. }
+                        | AccessKind::GlobalUntagged { off, len, .. } => Some((off, len)),
+                        _ => None,
+                    };
+                    if let Some((off, len)) = span {
+                        trace_metrics.observe_constant_global_load(
+                            block_id,
+                            warp_id,
+                            &sectors,
+                            off,
+                            usize::from(len),
+                            schedule
+                                .issue_slot(u64::from(inst.pc()))
+                                .map(|slot| slot.opcode_text())
+                                .unwrap_or(""),
+                            preflight
+                                .as_ref()
+                                .is_some_and(|memory| memory.memory.warp_uniform_address()),
+                        )?;
+                    }
+                }
+                if let Some((off, len)) = match kind {
+                    AccessKind::GlobalBypass {
+                        token: CacheOpToken::Atom,
+                        off,
+                        len,
+                        ..
+                    }
+                    | AccessKind::GlobalEligible {
+                        token: CacheOpToken::Atom,
+                        off,
+                        len,
+                        ..
+                    } => Some((off, len)),
+                    _ => None,
+                } {
+                    trace_metrics.observe_atomic_conflict(&sectors, off, usize::from(len))?;
+                }
+                if matches!(kind, AccessKind::LocalLoad { .. } | AccessKind::LocalStore { .. }) {
+                    trace_metrics.observe_local_width(inst.data_width(), inst.predicate_on_lanes())?;
+                    trace_metrics.observe_local_payload_sectors(
+                        kind,
+                        inst.data_width(),
+                        inst.predicate_on_lanes(),
+                    )?;
+                    if schedule.arch == ArchId::Sm86 {
+                        if let Some(memory) = inst.memory() {
+                            trace_metrics.observe_local_canonical_sectors(
+                                kind,
+                                memory.local_canonical_sectors(),
+                            )?;
+                            trace_metrics.observe_local_frame256_sectors(
+                                kind,
+                                memory.local_frame256_sectors(),
+                            )?;
+                        }
+                    }
+                }
                 let active_mask_present = inst.active_mask_present();
                 let predicate_mask_present = inst.predicate_mask_present();
                 let (opcode, pipeline) = schedule
@@ -3736,6 +3841,7 @@ fn extract_per_sm_blocks(
                 return Err(ReplayError::DuplicateWarpSlot { path, warp_slot });
             }
             warps.push(WarpReplay {
+                warp_id,
                 warp_slot,
                 insts,
                 sectors,
@@ -3910,6 +4016,22 @@ fn extract_per_sm_blocks(
                     counter: "compulsory instruction-read sector cardinality",
                 },
             )?,
+            compulsory_instruction_line_read_sectors: u64::try_from(instruction_lines.len())
+                .map_err(|_| IssueError::CounterOverflow {
+                    counter: "compulsory instruction-read line cardinality",
+                })?
+                .checked_mul(4)
+                .ok_or(IssueError::CounterOverflow {
+                    counter: "compulsory instruction-read line sector cardinality",
+                })?,
+            static_instruction_line_read_sectors: u64::try_from(static_instruction_lines.len())
+                .map_err(|_| IssueError::CounterOverflow {
+                    counter: "static instruction-read line cardinality",
+                })?
+                .checked_mul(4)
+                .ok_or(IssueError::CounterOverflow {
+                    counter: "static instruction-read line sector cardinality",
+                })?,
         },
         trace_metrics,
     })
@@ -4938,10 +5060,23 @@ fn replay_kernel_with_schedule_and_l2_and_candidates_with_payload_events(
             trace_metrics.observe_l1_merge_audit(
                 audit.same_request_merges,
                 audit.older_pending_merges,
+                audit.ordinary_same_request_merges,
                 audit.ordinary_older_pending_merges,
+                audit.async_same_request_merges,
                 audit.async_older_pending_merges,
                 audit.ordinary_global_older_pending_merges,
                 audit.constant_global_older_pending_merges,
+                audit.ordinary_global_same_request_merges,
+                audit.constant_global_same_request_merges,
+                audit.async_global_same_request_merges,
+                audit.ordinary_global_hits,
+                audit.async_global_hits,
+                audit.ordinary_global_older_sector_pending_merges,
+                audit.constant_global_older_sector_pending_merges,
+                audit.async_global_older_sector_pending_merges,
+                audit.unrequested_subline_miss_sectors,
+                audit.wavefront_mask_lookup_hits,
+                audit.wavefront_mask_lookup_misses,
                 audit.constant_global_hits,
                 audit.constant_global_requests,
                 global_hits,
@@ -5273,6 +5408,12 @@ fn require_known_global_role(
         });
     }
     Ok(slot.mem_role)
+}
+
+fn is_static_constant_global_load(opcode_text: &str) -> bool {
+    let opcode = opcode_text.split_ascii_whitespace().next().unwrap_or("");
+    opcode.split('.').any(|modifier| modifier == "CONSTANT")
+        && matches!(opcode_head(opcode_text), "LDG" | "LD" | "LDC" | "LDL")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

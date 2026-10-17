@@ -27,7 +27,7 @@ use sim_arch::card::{ArchCard, CalibError};
 use sim_arch::spec::{ArchitectureSpec, ResourceKind};
 use sim_mem::{
     coalesce_payloads, enrich_native_payload_records, join_native_payload_records,
-    load_native_payload_sidecar_records, CoherenceConfig, L1Config, L1Counters, L2Config,
+    load_native_payload_sidecar_records, CoherenceConfig, L1Config, L1Counters, L1SetIndex, L2Config,
     L2Counters, L2Replacement, L2Source, MemoryOrigin, NativePayloadRecordV1,
     PayloadForwardingLedgerV1, PchaseCard, SectorPayloadV1, SliceHash, L2_WRITE_ALLOCATE_POLICY,
 };
@@ -159,6 +159,10 @@ pub struct RunConfig {
     pub memory_mode: MemoryMode,
     pub cache_scope: CacheScope,
     pub carded_dram_bandwidth: bool,
+    /// Optional explicit effective DRAM service-rate scenario. This is a
+    /// hypothesis input, not a physical bandwidth claim; when absent the
+    /// architecture-card vendor peak remains active.
+    pub dram_service_rate_bytes_per_sec: Option<u64>,
     /// Optional opt-in dirty-L2-eviction writeback queue capacity in 32-byte
     /// sectors. This requires carded DRAM, launch-scoped L1-L2 replay, and
     /// never changes the default read-only carded path.
@@ -1826,6 +1830,8 @@ pub struct CounterReport {
 #[derive(Debug, Serialize)]
 pub struct FrontEndCounterReport {
     pub compulsory_instruction_read_sectors: u64,
+    pub compulsory_instruction_line_read_sectors: u64,
+    pub static_instruction_line_read_sectors: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -1835,6 +1841,8 @@ pub struct L1CounterReport {
     pub merges: u64,
     pub pending_lookup_hits: u64,
     pub stall_events: u64,
+    pub mshr_stall_occupancy_samples: u64,
+    pub mshr_stall_occupancy_sum: u64,
     pub line_fills: u64,
     pub bypass_sectors: u64,
     pub store_sectors: u64,
@@ -1853,6 +1861,8 @@ pub struct L2CounterReport {
     pub line_misses: u64,
     pub sector_fill_misses: u64,
     pub write_tag_hits: u64,
+    pub pending_merge_sectors: u64,
+    pub new_fill_sectors: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -1861,24 +1871,34 @@ pub struct L2SourceCounterReport {
     pub bypass: L2SourceLaneReport,
     pub untagged: L2SourceLaneReport,
     pub store: L2SourceLaneReport,
+    pub store_packet_candidate_sectors: u64,
 }
 
 #[derive(Debug, Serialize)]
 pub struct L2SourceLaneReport {
     pub sectors: u64,
     pub hits: u64,
+    pub pending_pressure_samples: u64,
+    pub pending_pressure_sum: u64,
 }
 
 fn l2_source_counter_report(value: &L2SourceSplit) -> L2SourceCounterReport {
     let lane = |source| {
         let (sectors, hits) = value.source(source);
-        L2SourceLaneReport { sectors, hits }
+        let index = source as usize;
+        L2SourceLaneReport {
+            sectors,
+            hits,
+            pending_pressure_samples: value.pending_pressure_samples[index],
+            pending_pressure_sum: value.pending_pressure_sum[index],
+        }
     };
     L2SourceCounterReport {
         l1_fill: lane(L2Source::L1Fill),
         bypass: lane(L2Source::Bypass),
         untagged: lane(L2Source::Untagged),
         store: lane(L2Source::Store),
+        store_packet_candidate_sectors: value.store_packet_candidate_sectors,
     }
 }
 
@@ -1891,12 +1911,33 @@ fn l2_counter_report(value: &L2Counters) -> L2CounterReport {
         line_misses: value.line_misses,
         sector_fill_misses: value.sector_fill_misses,
         write_tag_hits: value.write_tag_hits,
+        pending_merge_sectors: value.pending_merge_sectors,
+        new_fill_sectors: value.new_fill_sectors,
     }
 }
 
 #[derive(Debug, Serialize)]
 pub struct DramCounterReport {
     pub read_sectors: u64,
+    /// Configured aggregate carded rate for this launch. The corpus runner's
+    /// 825 GB/s effective hypothesis and direct-run card-peak fallback are
+    /// both represented as configured rates, not physical controller truth.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service_rate_bytes_per_sec: Option<u64>,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub l2_frontier_samples: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub l2_issue_to_fill_cycles_sum: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub l2_issue_to_fill_cycles_max: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub l2_issue_to_response_cycles_sum: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub l2_issue_to_response_cycles_max: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub l2_service_delay_cycles_sum: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub l2_service_delay_cycles_max: u64,
     #[serde(skip_serializing_if = "is_zero_u64")]
     pub atomic_rmw_read_sectors: u64,
     #[serde(skip_serializing_if = "is_zero_u64")]
@@ -2030,6 +2071,9 @@ fn counters(
         records_seen,
         front_end: FrontEndCounterReport {
             compulsory_instruction_read_sectors: front_end.compulsory_instruction_read_sectors(),
+            compulsory_instruction_line_read_sectors: front_end
+                .compulsory_instruction_line_read_sectors(),
+            static_instruction_line_read_sectors: front_end.static_instruction_line_read_sectors(),
         },
         l1: l1.map(|value| L1CounterReport {
             hits: value.hits,
@@ -2037,6 +2081,8 @@ fn counters(
             merges: value.merges,
             pending_lookup_hits: value.pending_lookup_hits,
             stall_events: value.stall_events,
+        mshr_stall_occupancy_samples: value.mshr_stall_occupancy_samples,
+        mshr_stall_occupancy_sum: value.mshr_stall_occupancy_sum,
             line_fills: value.line_fills,
             bypass_sectors: value.bypass_sectors,
             store_sectors: value.store_sectors,
@@ -2049,6 +2095,14 @@ fn counters(
         l2_by_source: l2_by_source.map(l2_source_counter_report),
         dram: dram.map(|value| DramCounterReport {
             read_sectors: value.read_sectors,
+            service_rate_bytes_per_sec: value.service_rate_bytes_per_sec,
+            l2_frontier_samples: value.l2_frontier_samples,
+            l2_issue_to_fill_cycles_sum: value.l2_issue_to_fill_cycles_sum,
+            l2_issue_to_fill_cycles_max: value.l2_issue_to_fill_cycles_max,
+            l2_issue_to_response_cycles_sum: value.l2_issue_to_response_cycles_sum,
+            l2_issue_to_response_cycles_max: value.l2_issue_to_response_cycles_max,
+            l2_service_delay_cycles_sum: value.l2_service_delay_cycles_sum,
+            l2_service_delay_cycles_max: value.l2_service_delay_cycles_max,
             atomic_rmw_read_sectors: value.atomic_rmw_read_sectors,
             reduction_rmw_read_sectors: value.reduction_rmw_read_sectors,
             bandwidth_delayed_responses: value.bw_delayed_responses,
@@ -2648,7 +2702,7 @@ fn resolve_mode(
         return Ok(ReplayMemMode::Flat);
     }
 
-    let l1 = if let Some(effective) = config.sm120_effective_l1 {
+    let mut l1 = if let Some(effective) = config.sm120_effective_l1 {
         effective.as_l1_config()
     } else {
         let pchase_path = config.pchase_card.as_ref().ok_or_else(|| {
@@ -2663,6 +2717,19 @@ fn resolve_mode(
             .map_err(at("L1 geometry"))?;
         issue.l1_config(geometry.capacity.line_capacity, geometry.mshr.count)
     };
+    if issue.arch() == sim_arch::ArchId::Sm86 && config.sm120_effective_l1.is_none() {
+        let geometry = arch_card
+            .require_l1_geometry()
+            .map_err(at("SM86 L1 set geometry"))?;
+        // The card documents the set/way domain, while the p-chase resolver
+        // retains the active carveout capacity.  Keep both sources explicit:
+        // the pressure-bounded modulo/folded candidate is an effective
+        // scenario and the proprietary hash remains unknown; global capacity
+        // still follows the p-chase point.
+        l1.set_count = Some(geometry.sets);
+        l1.ways = Some(geometry.ways);
+        l1.set_index = L1SetIndex::ModuloXorFallback;
+    }
     if config.memory_mode == MemoryMode::L1 {
         if config.carded_dram_bandwidth {
             return Err(RunError::new(
@@ -2710,7 +2777,14 @@ fn resolve_mode(
         let card = arch_card
             .require_dram_bandwidth()
             .map_err(at("DRAM bandwidth"))?;
-        let bytes_per_sec = card
+        let bytes_per_sec = config
+            .dram_service_rate_bytes_per_sec
+            .or_else(|| card.validated_peak_bytes_per_second().ok())
+            .ok_or_else(|| RunError::new("DRAM bandwidth", "no validated service rate"))?;
+        if bytes_per_sec == 0 {
+            return Err(RunError::new("DRAM bandwidth", "service rate must be positive"));
+        }
+        let _card_peak = card
             .validated_peak_bytes_per_second()
             .map_err(at("DRAM bandwidth"))?;
         let sm_clock_hz = card.locked_sm_clock_hz().map_err(at("DRAM clock"))?;

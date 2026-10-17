@@ -3,8 +3,9 @@
 
 Outputs are zstd-compressed native simulator reports (`*.jsonl.zst`), one row
 per recursive trace directory, including failures. Static sidecars are derived
-from the captured metadata by the same transport adapter used by
-sm120_replay_bench.
+from the captured metadata by the architecture-neutral transport adapter used
+by ``sm120_replay_bench`` (the historical module name is retained for old
+SM120 report tooling).
 """
 
 from __future__ import annotations
@@ -22,16 +23,29 @@ import tempfile
 import time
 
 from sm120_replay_bench import (
-    DEFAULT_CARD,
     DEFAULT_SIM,
+    REPO_ROOT,
+    card_architecture,
     discover_captures,
     load_static_metadata,
+    metadata_architecture,
+    metadata_architectures,
     synthesize_static_sidecar,
 )
 from jsonl_io import jsonl_compression_description, open_jsonl_writer
 
 
 _CONTAMINATING_ENV_PREFIXES = ("NVBIT_", "INJECTION_", "CUDA_INJECTION")
+
+# This checkout is the dedicated SM86/RTX 3090 Ti lane.  Keep the historical
+# SM120 constants imported above for old callers, but make the runner's
+# parameterized defaults target the active corpus and architecture card.
+DEFAULT_SM86_WORK_ROOT = REPO_ROOT.parent / "sm86_rtx_3090_capture"
+DEFAULT_SM86_CARD = REPO_ROOT / "arch_profiles/cards/sm_86.json"
+DEFAULT_SM86_PCHASE_CARD = REPO_ROOT / "data/pchase/sm_86_static_card.json"
+DEFAULT_SM86_MEMORY_ADMISSION_FEEDBACK = (
+    REPO_ROOT / "arch_profiles/candidates/sm86_store_fence_candidate_v1.json"
+)
 
 
 def _clean_replay_environment() -> tuple[dict[str, str], list[str]]:
@@ -156,17 +170,25 @@ def replay(capture: Path, relative: str, control: Path, args, mode: str, logs: P
     memory_mode = args.memory_mode if mode == "full" else args.fast_memory_mode
     cache_scope = scope_override or args.cache_scope
     command = [str(args.sim_bin), "--trace", str(capture), "--control", str(control),
-               "--arch-card", str(args.arch_card), "--sm120-alpha", "--mode",
-               str(memory_mode)]
-    if args.sm120_effective_l1 and memory_mode != "flat":
+               "--arch-card", str(args.arch_card)]
+    if args.target_arch == "sm_86" and args.pchase_card and memory_mode != "flat":
+        command.extend(("--pchase-card", str(args.pchase_card)))
+    command.extend(("--mode", str(memory_mode)))
+    if args.target_arch == "sm_120":
+        command.append("--sm120-alpha")
+    if args.sm120_effective_l1 and args.target_arch == "sm_120" and memory_mode != "flat":
         command.extend(("--sm120-effective-l1", args.sm120_effective_l1))
-    if args.sm120_effective_l2 and memory_mode == "l1-l2":
+    if args.sm120_effective_l2 and args.target_arch == "sm_120" and memory_mode == "l1-l2":
         command.extend(("--sm120-effective-l2", args.sm120_effective_l2))
-    if args.carded_dram and mode == "full":
+    if args.carded_dram_enabled and mode == "full":
         command.append("--carded-dram")
+        if args.dram_service_rate_bytes_per_sec is not None:
+            command.extend(("--dram-service-rate-bytes-per-sec", str(args.dram_service_rate_bytes_per_sec)))
     if mode == "full":
         command.extend(("--cache-scope", cache_scope))
         command.append("--ncu-shaped-metrics")
+        if args.memory_admission_feedback:
+            command.extend(("--memory-admission-feedback", str(args.memory_admission_feedback)))
     if mode == "fast":
         command.append("--fast-frontier-only")
     suffix = ".fallback-launch" if scope_override else ""
@@ -244,17 +266,22 @@ def replay(capture: Path, relative: str, control: Path, args, mode: str, logs: P
     return row
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--capture-root", type=Path, default=Path("/root/sm120_rtx_5090_capture"))
+    parser.add_argument("--capture-root", type=Path, default=DEFAULT_SM86_WORK_ROOT,
+                        help="capture corpus root (recursive captures/ tree)")
     parser.add_argument("--capture", action="append", default=[],
                         help="select a real capture by relative path or name; repeat for a prototype batch")
     parser.add_argument("--output", type=Path, required=True, help="new output directory outside the corpus")
     parser.add_argument("--sim-bin", type=Path, default=DEFAULT_SIM)
-    parser.add_argument("--arch-card", type=Path, default=DEFAULT_CARD)
+    parser.add_argument("--arch-card", type=Path, default=DEFAULT_SM86_CARD)
+    parser.add_argument("--pchase-card", type=Path, default=DEFAULT_SM86_PCHASE_CARD,
+                        help="SM86 P-chase geometry card used by full L1/L2 replay")
+    parser.add_argument("--target-arch", choices=("auto", "sm_86", "sm_120"), default="auto",
+                        help="architecture deployment token; auto resolves from --arch-card")
     parser.add_argument("--mode", choices=("both", "full", "fast"), default="both")
-    parser.add_argument("--memory-mode", choices=("l1-l2",), default="l1-l2",
-                        help="full replay always models L1 and L2 together; flat/L1-only full replay is forbidden")
+    parser.add_argument("--memory-mode", choices=("l1-l2", "l1", "flat"), default="l1-l2",
+                        help="full replay memory path (full defaults to integrated L1+L2)")
     parser.add_argument("--cache-scope", choices=("launch", "stream-l2"), default="launch",
                         help="full replay L2 lifetime: launch-cold or persistent ordered stream")
     parser.add_argument("--fast-memory-mode", choices=("flat",), default="flat",
@@ -263,8 +290,14 @@ def main() -> int:
                         help="override the default effective L1 parameters: CAPACITY:MSHR|none:HIT:MISS")
     parser.add_argument("--sm120-effective-l2",
                         help="override the default effective L2 parameters: CAPACITY_BYTES:SLICES:ASSOCIATIVITY")
-    parser.add_argument("--carded-dram", action="store_true",
-                        help="enable the architecture-card DRAM path (for l1-l2 mode)")
+    parser.add_argument("--carded-dram", action=argparse.BooleanOptionalAction, default=None,
+                        help="enable/disable the architecture-card DRAM path (full SM86 defaults enabled)")
+    parser.add_argument("--dram-service-rate-bytes-per-sec", type=int, default=None,
+                        help="explicit effective DRAM service-rate scenario; SM86 full defaults to the independently measured 825 GB/s hypothesis and records the override")
+    parser.add_argument("--memory-admission-feedback", type=Path, default=None,
+                        help="override the default launch-scoped SM86 store/fence admission+completion candidate; stream-l2 suppresses this arm; static gate remains enforced in sim-sm")
+    parser.add_argument("--no-memory-admission-feedback", action="store_true",
+                        help="explicit SM86 ablation: do not auto-select the launch-scoped store/fence candidate")
     # Accepted for old command lines; full replay always emits these projections.
     parser.add_argument("--ncu-shaped-metrics", action="store_true", default=True,
                         help=argparse.SUPPRESS)
@@ -273,11 +306,68 @@ def main() -> int:
                         help="bounded simulator stdout retained by the driver")
     parser.add_argument("--workers", type=int, default=12,
                         help="concurrent simulator processes (must be exactly 12)")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     args.capture_root = args.capture_root.resolve()
     args.output = args.output.resolve()
     args.sim_bin = args.sim_bin.resolve()
     args.arch_card = args.arch_card.resolve()
+    args.pchase_card = args.pchase_card.resolve() if args.pchase_card else None
+    try:
+        card_arch = card_architecture(args.arch_card)
+    except ValueError as error:
+        parser.error(str(error))
+    if args.target_arch != "auto" and args.target_arch != card_arch:
+        parser.error(f"--target-arch {args.target_arch} conflicts with architecture card {card_arch}")
+    args.target_arch = card_arch
+    args.memory_admission_feedback_defaulted = False
+    args.memory_admission_feedback_scope_suppressed = False
+    args.memory_admission_feedback_disabled = bool(args.no_memory_admission_feedback)
+    # Full replay is the comprehensive path.  The separate fast stage is the
+    # only flat-memory ablation; do not let a forgotten flag silently turn a
+    # full SM86 run into the old flat baseline.
+    if args.mode in ("both", "full") and args.memory_mode != "l1-l2":
+        parser.error("full replay requires --memory-mode l1-l2; flat/l1 are fast-stage-only ablations")
+    args.carded_dram_enabled = args.carded_dram if args.carded_dram is not None else args.target_arch == "sm_86"
+    args.dram_service_rate_requested = args.dram_service_rate_bytes_per_sec
+    args.dram_service_rate_defaulted = False
+    # Independent repeated RTX 3090 Ti memtest runs support an effective
+    # forced-DRAM warm-rate scenario near 825 GB/s (roughly [810,850] under
+    # the unlocked protocol). Promote the absolute-rate midpoint only for the
+    # SM86 full path; the simulator maps it onto the locked-card SM clock for
+    # cycle pricing. Retain the vendor 1008 GB/s card value as reference and
+    # record that the scenario was defaulted rather than supplied by the caller.
+    if (
+        args.dram_service_rate_bytes_per_sec is None
+        and args.target_arch == "sm_86"
+        and args.carded_dram_enabled
+        and args.mode in ("both", "full")
+    ):
+        args.dram_service_rate_bytes_per_sec = 825_000_000_000
+        args.dram_service_rate_defaulted = True
+    if args.no_memory_admission_feedback and args.memory_admission_feedback is not None:
+        parser.error("--no-memory-admission-feedback cannot be combined with --memory-admission-feedback")
+    if args.memory_admission_feedback is not None and args.cache_scope == "stream-l2":
+        parser.error(
+            "--memory-admission-feedback currently requires --cache-scope launch; "
+            "stream-l2 has no launch-scoped store/fence feedback arm"
+        )
+    if (
+        args.memory_admission_feedback is None
+        and not args.no_memory_admission_feedback
+        and args.target_arch == "sm_86"
+        and args.mode in ("both", "full")
+    ):
+        if args.cache_scope == "launch":
+            args.memory_admission_feedback = DEFAULT_SM86_MEMORY_ADMISSION_FEEDBACK
+            args.memory_admission_feedback_defaulted = True
+        else:
+            # The direct runner deliberately rejects this timing-active arm
+            # for persistent stream-L2 scope.  Keep stream-L2 usable as an
+            # explicit cache-lifetime ablation and record the scoped gap
+            # instead of emitting replay_error rows for every launch.
+            args.memory_admission_feedback_scope_suppressed = True
+    if args.memory_admission_feedback is not None and not args.memory_admission_feedback.is_file():
+        parser.error(f"memory-admission feedback does not exist: {args.memory_admission_feedback}")
     if not 0 < args.timeout < float("inf"):
         parser.error("--timeout must be positive and finite")
     if args.max_sim_output_bytes <= 0:
@@ -288,12 +378,23 @@ def main() -> int:
         parser.error("--sm120-effective-l2 applies only to the full l1-l2 stage")
     if args.sm120_effective_l2 and args.memory_mode != "l1-l2":
         parser.error("--sm120-effective-l2 requires --memory-mode l1-l2")
+    if args.target_arch != "sm_120" and (args.sm120_effective_l1 or args.sm120_effective_l2):
+        parser.error("--sm120-effective-l1/--sm120-effective-l2 require an sm_120 architecture card")
     if args.cache_scope == "stream-l2" and args.mode == "fast":
         parser.error("--cache-scope stream-l2 applies only to the full replay stage")
-    if args.carded_dram and args.mode == "fast":
+    if args.carded_dram is True and args.mode == "fast":
         parser.error("--carded-dram applies only to the full l1-l2 stage")
-    if args.carded_dram and args.memory_mode != "l1-l2":
+    if args.carded_dram_enabled and args.memory_mode != "l1-l2":
         parser.error("--carded-dram requires --memory-mode l1-l2")
+    if args.dram_service_rate_bytes_per_sec is not None:
+        if args.dram_service_rate_bytes_per_sec <= 0:
+            parser.error("--dram-service-rate-bytes-per-sec must be positive")
+        if not args.carded_dram_enabled or args.memory_mode != "l1-l2":
+            parser.error("--dram-service-rate-bytes-per-sec requires full carded l1-l2 replay")
+    if args.target_arch == "sm_86" and args.mode in ("both", "full") and not args.pchase_card:
+        parser.error("SM86 full replay requires --pchase-card")
+    if args.target_arch == "sm_86" and args.pchase_card and not args.pchase_card.is_file():
+        parser.error(f"SM86 P-chase card does not exist: {args.pchase_card}")
     if args.output.is_relative_to(args.capture_root):
         parser.error("outputs must be outside the raw capture corpus")
     captures = discover_captures(args.capture_root, args.capture)
@@ -310,14 +411,23 @@ def main() -> int:
             metadata = load_static_metadata(capture)
             if metadata is None:
                 raise ValueError("native static metadata missing")
+            metadata_arches = metadata_architectures(metadata)
+            if metadata_arches != {args.target_arch}:
+                raise ValueError(
+                    f"capture metadata source architectures {sorted(metadata_arches)} require an explicit mixed-code disposition; expected homogeneous {args.target_arch}"
+                )
             control.parent.mkdir(parents=True, exist_ok=True)
-            synthesize_static_sidecar(capture, metadata, control)
+            synthesize_static_sidecar(
+                capture, metadata, control, expected_arch=args.target_arch
+            )
         except Exception as failure:
             error = str(failure)
         prepared.append((capture, relative, control, error))
     modes = ("full", "fast") if args.mode == "both" else (args.mode,)
     summary = {"capture_root": str(args.capture_root), "sim_bin": str(args.sim_bin),
                "arch_card": str(args.arch_card), "captures_discovered": len(captures),
+               "pchase_card": str(args.pchase_card) if args.pchase_card else None,
+               "target_arch": args.target_arch,
                "scope": ("explicitly selected real-capture prototype batch" if args.capture else
                          "all recursively discovered traces; none selected by replay outcome"),
                "selected_captures": args.capture,
@@ -329,7 +439,15 @@ def main() -> int:
                "sm120_effective_l2": None,
                "sm120_effective_l1_override": args.sm120_effective_l1,
                "sm120_effective_l2_override": args.sm120_effective_l2,
-               "carded_dram": bool(args.carded_dram),
+               "carded_dram": bool(args.carded_dram_enabled),
+               "carded_dram_requested": args.carded_dram,
+               "dram_service_rate_bytes_per_sec": args.dram_service_rate_bytes_per_sec,
+               "dram_service_rate_requested": args.dram_service_rate_requested,
+               "dram_service_rate_defaulted": args.dram_service_rate_defaulted,
+               "memory_admission_feedback": str(args.memory_admission_feedback) if args.memory_admission_feedback else None,
+               "memory_admission_feedback_defaulted": args.memory_admission_feedback_defaulted,
+               "memory_admission_feedback_scope_suppressed": args.memory_admission_feedback_scope_suppressed,
+               "memory_admission_feedback_disabled": args.memory_admission_feedback_disabled,
                "ncu_shaped_metrics": bool(args.ncu_shaped_metrics and "full" in modes),
                "ncu_shaped_metrics_requested": bool(args.ncu_shaped_metrics),
                "workers": args.workers,

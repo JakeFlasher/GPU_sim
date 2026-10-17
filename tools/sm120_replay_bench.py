@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
-"""Small real-corpus adapters shared by the full replay and NCU join tools.
+"""Small real-corpus adapters shared by replay and NCU join tools.
 
-This module discovers capture roots, translates native SM120 static metadata
-into the control shape consumed by sim-run, and joins independent NCU rows
-after replay. NCU observations remain outside the replay input path.
+The module name is retained for compatibility with historical SM120 reports,
+but the adapter is architecture-neutral.  In particular, the SM86 capture
+producer reused the ``native_static_sm120_v3`` exporter schema while recording
+``architecture_version: 86``.  The target architecture is therefore inferred
+from each kernel's explicit architecture field rather than from the stale
+producer label.  NCU observations remain outside the replay input path.
 """
 from __future__ import annotations
 
@@ -22,6 +25,72 @@ DEFAULT_SIM = REPO_ROOT / "sim/target/release/sim-run"
 DEFAULT_CARD = REPO_ROOT / "arch_profiles/cards/sm_120-rtx-5090.json"
 
 
+def architecture_token(value: Any) -> str:
+    """Return the canonical deploy token for an exporter architecture value.
+
+    NVBit metadata uses integer SM versions while cards/sidecars use the
+    canonical ``sm_XX`` spelling.  Do not accept arbitrary strings here: a
+    mixed or unknown architecture must fail closed during sidecar preparation
+    instead of accidentally receiving another architecture's control model.
+    """
+    if isinstance(value, bool) or isinstance(value, float) and not value.is_integer():
+        raise ValueError("architecture_version must be an integer")
+    try:
+        version = int(value)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError(f"unsupported architecture_version: {value!r}") from None
+    if version == 80:
+        return "sm_80"
+    if version == 86:
+        return "sm_86"
+    if version == 120:
+        return "sm_120"
+    raise ValueError(f"unsupported architecture_version: {version}")
+
+
+def metadata_architecture(metadata: dict[str, Any]) -> str:
+    """Resolve one metadata document's architecture, rejecting mixed kernels."""
+    kernels = metadata.get("kernels")
+    if not isinstance(kernels, list) or not kernels:
+        raise ValueError("native static metadata has no kernels")
+    tokens: set[str] = set()
+    for kernel in kernels:
+        if not isinstance(kernel, dict):
+            raise ValueError("native static kernel entry is not an object")
+        tokens.add(architecture_token(kernel.get("architecture_version")))
+    if len(tokens) != 1:
+        raise ValueError(f"native static metadata mixes architectures: {sorted(tokens)}")
+    return next(iter(tokens))
+
+
+def metadata_architectures(metadata: dict[str, Any]) -> set[str]:
+    """Return all source code architectures represented by one root."""
+    kernels = metadata.get("kernels")
+    if not isinstance(kernels, list) or not kernels:
+        raise ValueError("native static metadata has no kernels")
+    return {
+        architecture_token(kernel.get("architecture_version"))
+        for kernel in kernels
+        if isinstance(kernel, dict)
+    }
+
+
+def card_architecture(card: Path) -> str:
+    """Read and validate the canonical architecture token from an arch card."""
+    try:
+        value = json.loads(card.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError(f"could not read architecture card {card}: {error}") from error
+    if not isinstance(value, dict):
+        raise ValueError(f"architecture card {card} is not an object")
+    token = value.get("arch_id")
+    if not isinstance(token, str):
+        raise ValueError(f"architecture card {card} has no arch_id")
+    if token not in {"sm_86", "sm_120"}:
+        raise ValueError(f"unsupported architecture card token: {token!r}")
+    return token
+
+
 def discover_captures(work_root: Path, selected: Iterable[str] | None) -> list[Path]:
     captures = work_root / "captures"
     if not captures.is_dir():
@@ -29,6 +98,14 @@ def discover_captures(work_root: Path, selected: Iterable[str] | None) -> list[P
     wanted = set(selected or ())
     found: list[Path] = []
     for directory, subdirs, files in os.walk(captures):
+        # `_diagnostics` contains failed/retired attempts and is not part of
+        # the canonical SM86 acceptance corpus. Keep it available for an
+        # explicitly selected diagnostic path, but never include it in an
+        # unfiltered complete-corpus discovery.
+        relative_dir = Path(directory).relative_to(captures)
+        if relative_dir.parts and relative_dir.parts[0] == "_diagnostics" and not wanted:
+            subdirs[:] = []
+            continue
         if "dynamic_trace.pb" not in files:
             continue
         subdirs[:] = []
@@ -40,12 +117,24 @@ def discover_captures(work_root: Path, selected: Iterable[str] | None) -> list[P
 
 
 def load_static_metadata(capture: Path) -> dict[str, Any] | None:
-    path = capture / "extra_info/native_static_metadata.json"
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-        return None
-    return value if isinstance(value, dict) else None
+    # Native v3 captures carry the sidecar under the historical filename.
+    # Enhanced-execution-info captures (including the repaired SM86 NVBit
+    # transport) intentionally omit that file and publish the same kernel
+    # instruction/control records under the producer-owned filename.  Keep
+    # the fallback narrow: only try the enhanced document when the native
+    # sidecar is absent/unreadable, and still require a JSON object here so
+    # the caller's strict schema/architecture checks remain authoritative.
+    for path in (
+        capture / "extra_info/native_static_metadata.json",
+        capture / "extra_info/enhanced_execution_info.json",
+    ):
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if isinstance(value, dict):
+            return value
+    return None
 
 
 def _wire_control(high_word: int) -> dict[str, int]:
@@ -85,28 +174,60 @@ def _parse_hex_word(value: Any, field: str, *, bits: int = 64) -> tuple[int, str
 
 
 def synthesize_static_sidecar(
-    capture: Path, metadata: dict[str, Any], output: Path
+    capture: Path, metadata: dict[str, Any], output: Path,
+    expected_arch: str | None = None,
 ) -> dict[str, Any]:
     command_path = capture / "command.txt"
     command = command_path.read_text(encoding="utf-8").strip() if command_path.is_file() else ""
-    binary = shlex.split(command)[0] if command else metadata.get("benchmark_name", "sm120_capture")
-    if metadata.get("metadata_kind") != "native_static_sm120_v3":
-        raise ValueError("unsupported native static metadata kind")
-    if metadata.get("static_exporter_version") != 3:
+    binary = shlex.split(command)[0] if command else metadata.get("benchmark_name", "capture")
+    metadata_kind = metadata.get("metadata_kind")
+    enhanced_execution_info = not isinstance(metadata_kind, str) and all(
+        isinstance(kernel, dict)
+        and isinstance(kernel.get("instructions"), list)
+        and all(
+            isinstance(inst, dict) and isinstance(inst.get("control_bits"), dict)
+            for inst in kernel.get("instructions", [])
+        )
+        for kernel in metadata.get("kernels", [])
+    )
+    # The SM86 capture lane intentionally retained the producer's old
+    # ``native_static_sm120_v3`` label.  Version 3 describes the wire schema,
+    # not the captured GPU.  Accept the known v3 labels and derive target arch
+    # from every kernel's explicit architecture_version below.
+    if enhanced_execution_info:
+        metadata_kind = "enhanced_execution_info_sm86"
+    elif not isinstance(metadata_kind, str) or not re.fullmatch(
+        r"native_static_(?:sm86|sm120)_v3", metadata_kind
+    ):
+        raise ValueError(f"unsupported native static metadata kind: {metadata_kind!r}")
+    if not enhanced_execution_info and metadata.get("static_exporter_version") != 3:
         raise ValueError("unsupported native static exporter version")
+    source_arches = metadata_architectures(metadata)
+    if expected_arch is not None:
+        if expected_arch == "sm_86" and source_arches <= {"sm_80", "sm_86"}:
+            arch = expected_arch
+        elif source_arches == {expected_arch}:
+            arch = expected_arch
+        else:
+            raise ValueError(
+                f"capture metadata targets {sorted(source_arches)}, expected {expected_arch}"
+            )
+    elif len(source_arches) == 1:
+        arch = next(iter(source_arches))
+    else:
+        raise ValueError(f"capture metadata mixes architectures: {sorted(source_arches)}")
     functions: dict[str, list[dict[str, Any]]] = {}
     summaries: dict[str, dict[str, int]] = {}
-    kernels = metadata.get("kernels")
-    if not isinstance(kernels, list) or not kernels:
-        raise ValueError("native static metadata has no kernels")
+    kernels = metadata["kernels"]
     for kernel in kernels:
         if not isinstance(kernel, dict):
             raise ValueError("native static kernel entry is not an object")
         raw_name = str(kernel.get("kernel_name", ""))
         if not raw_name:
             raise ValueError("native static kernel name is missing")
-        if kernel.get("architecture_version") != 120:
-            raise ValueError(f"unsupported kernel architecture for {raw_name}")
+        code_arch = architecture_token(kernel.get("architecture_version"))
+        if code_arch not in source_arches:
+            raise ValueError(f"mixed kernel architecture for {raw_name}")
         name = re.sub(r"___[0-9]+$", "", raw_name)
         if not name:
             raise ValueError(f"kernel name normalizes to empty: {raw_name!r}")
@@ -117,24 +238,45 @@ def synthesize_static_sidecar(
         for inst in instructions:
             if not isinstance(inst, dict):
                 raise ValueError(f"instruction entry is not an object for {raw_name}")
-            if inst.get("control_fields_available") is not True:
-                raise ValueError(f"control fields unavailable for {raw_name}")
-            if inst.get("control_word_shift") != 41:
-                raise ValueError(f"unsupported control shift for {raw_name}")
-            decode_source = inst.get("control_decode_source")
-            if not isinstance(decode_source, str) or not decode_source:
-                raise ValueError(f"control decode provenance missing for {raw_name}")
-            high_value = inst.get("control_word_hex")
-            if high_value is None:
-                high_value = inst.get("word1_hex")
-            high_word, high_text = _parse_hex_word(high_value, "control_word_hex")
-            low_value = inst.get("word0_hex")
-            _, low_text = _parse_hex_word(low_value, "word0_hex")
+            if enhanced_execution_info:
+                bits = inst.get("control_bits")
+                if not isinstance(bits, dict):
+                    raise ValueError(f"control bits unavailable for {raw_name}")
+                stall = int(bits.get("stall_count", 0))
+                yield_flag = int(bool(bits.get("is_yield", False)))
+                write_barrier = int(bits.get("id_new_write_barrier", 7))
+                read_barrier = int(bits.get("id_new_read_barrier", 7))
+                wait_mask = int(bits.get("wait_barrier_bits", 0))
+                if not (0 <= stall <= 15 and 0 <= write_barrier <= 7
+                        and 0 <= read_barrier <= 7 and 0 <= wait_mask <= 63):
+                    raise ValueError(f"enhanced control bits out of range for {raw_name}")
+                wire = (stall | (yield_flag << 4) | (write_barrier << 5)
+                        | (read_barrier << 8) | (wait_mask << 11))
+                high_word = wire << 41
+                high_text = f"0x{high_word:016x}"
+                low_text = "0x0000000000000000"
+                decode_source = "enhanced_execution_info.control_bits"
+            else:
+                if inst.get("control_fields_available") is not True:
+                    raise ValueError(f"control fields unavailable for {raw_name}")
+                if inst.get("control_word_shift") != 41:
+                    raise ValueError(f"unsupported control shift for {raw_name}")
+                decode_source = inst.get("control_decode_source")
+                if not isinstance(decode_source, str) or not decode_source:
+                    raise ValueError(f"control decode provenance missing for {raw_name}")
+                high_value = inst.get("control_word_hex")
+                if high_value is None:
+                    high_value = inst.get("word1_hex")
+                high_word, high_text = _parse_hex_word(high_value, "control_word_hex")
+                low_value = inst.get("word0_hex")
+                _, low_text = _parse_hex_word(low_value, "word0_hex")
             pc_value = inst.get("pc_num_dec")
             if isinstance(pc_value, bool) or not isinstance(pc_value, int) or pc_value < 0:
                 raise ValueError(f"invalid pc_num_dec for {raw_name}")
             pc = pc_value
-            sass = str(inst.get("sass") or inst.get("opcode") or "UNKNOWN").strip().rstrip(";").strip()
+            sass = str(
+                inst.get("sass") or inst.get("opcode") or inst.get("op_code") or "UNKNOWN"
+            ).strip().rstrip(";").strip()
             predicate = None
             if sass.startswith("@"):
                 predicate, _, sass = sass.partition(" ")
@@ -165,12 +307,15 @@ def synthesize_static_sidecar(
             "stall_cycles_static_sum": sum(int(x["control"]["stall"]) for x in records),
         }
     document = {
-        "arch": "sm_120",
+        "arch": arch,
         "binary": binary,
         "functions": functions,
-        "parser_contract": {
-            "supported_toolkit_versions": ["NVBit-native-sm120-static-v3"],
-            "supported_arches": ["sm_120"],
+            "parser_contract": {
+            "supported_toolkit_versions": [
+                "NVBit-native-static-v3",
+                "NVBit-enhanced-execution-info-v1" if enhanced_execution_info else "NVBit-native-static-v3",
+            ],
+            "supported_arches": [arch],
             "control_layout": {
                 "source": "high_word >> 41 (23 bits)",
                 "stall": "bits 0:3",
@@ -182,13 +327,25 @@ def synthesize_static_sidecar(
                 "reserved_must_be_zero": "bits 21:22",
             },
         },
-        "toolkit_version": "NVBit-native-sm120-static-v3",
+        "toolkit_version": (
+            f"NVBit-enhanced-{arch.replace('_', '')}-execution-info-v1"
+            if enhanced_execution_info
+            else f"NVBit-native-{arch.replace('_', '')}-static-v3"
+        ),
         "binary_source": "extra_info/native_static_metadata.json",
         "metadata_provenance": {
-            "metadata_kind": metadata.get("metadata_kind"),
+            "metadata_kind": metadata.get("metadata_kind", metadata_kind),
             "static_exporter_version": metadata.get("static_exporter_version"),
             "static_source": metadata.get("static_source"),
             "control_latency_claims": metadata.get("control_latency_claims"),
+            "runtime_architecture": arch,
+            "source_architectures": sorted(source_arches),
+            "function_source_architectures": {
+                re.sub(r"___[0-9]+$", "", str(kernel.get("kernel_name"))):
+                architecture_token(kernel.get("architecture_version"))
+                for kernel in kernels
+                if isinstance(kernel, dict)
+            },
         },
         "summary": {
             "functions": summaries,

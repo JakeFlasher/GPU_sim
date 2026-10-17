@@ -272,7 +272,10 @@ pub(crate) fn is_clocklo_opcode_text(text: &str) -> bool {
 }
 
 pub(crate) fn is_gpu_membar_opcode_text(text: &str) -> bool {
-    text.split_ascii_whitespace().next() == Some("MEMBAR.SC.GPU")
+    matches!(
+        text.split_ascii_whitespace().next(),
+        Some("MEMBAR.GL") | Some("MEMBAR.GPU") | Some("MEMBAR.SC.GPU")
+    )
 }
 
 impl IssueSlot {
@@ -326,6 +329,28 @@ impl IssueSlot {
 
     pub(crate) const fn is_gpu_membar(&self) -> bool {
         self.gpu_membar
+    }
+
+    /// Source-qualified dependent SFU form used by the SM86 effective timing
+    /// arm. The narrow same-register shape (`MUFU.* Rn, Rn`) is visible in the
+    /// static SASS text; all other SFU forms retain the initiation-only model.
+    pub(crate) fn is_sfu_dependent_chain(&self) -> bool {
+        if !matches!(self.opcode_text.split_ascii_whitespace().next(), Some(opcode) if
+            opcode.starts_with("MUFU") || matches!(opcode, "RCP" | "RSQ" | "EX2" | "LG2" | "SIN" | "COS"))
+        {
+            return false;
+        }
+        let Some((_, operands)) = self.opcode_text.split_once(char::is_whitespace) else {
+            return false;
+        };
+        let mut fields = operands.trim().trim_end_matches(';').split(',');
+        let Some(destination) = fields.next().map(str::trim) else {
+            return false;
+        };
+        let Some(source) = fields.next().map(str::trim) else {
+            return false;
+        };
+        destination == source && destination.strip_prefix('R').is_some()
     }
 
     pub(crate) fn is_cctl_invalidate_all(&self) -> bool {

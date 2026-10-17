@@ -35,11 +35,11 @@
 //! write-through no-allocate for hierarchy writes in this v0 hypothesis), and
 //! bypass/untagged sector counting for the unified-denominator emission. RED
 //! uses a distinct observer lane and never enters ordinary STG attribution.
-//! L1TEX lookup accounting remains separate from physical hit state: cache-all
+//! L1TEX lookup accounting remains separate from modeled cache hit state: cache-all
 //! LDGSTS merges into allocations from older warp instructions are observed as
 //! lookup hits, while same-instruction sector coalescing remains a miss.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::num::NonZeroU32;
 
 use sim_arch::{ArchId, L1WriteLookupWindow};
@@ -81,6 +81,31 @@ pub struct L1Config {
     pub mshr_count: Option<u32>,
     pub hit_latency: u64,
     pub miss_latency: u64,
+    /// Optional card-backed set count for the effective SM86 state arm. `None`
+    /// retains the historical fully-associative sensitivity model.
+    pub set_count: Option<u32>,
+    /// Optional per-set way bound. The physical hash is intentionally not
+    /// guessed; the current effective scenario uses a documented modulo index.
+    pub ways: Option<u32>,
+    pub set_index: L1SetIndex,
+}
+
+/// Effective L1 set-index scenario. `Modulo` is a transparent address-domain
+/// sensitivity arm; it is not a claim that the proprietary GA102 hash is known.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum L1SetIndex {
+    #[default]
+    FullyAssociative,
+    Modulo,
+    /// Bounded unknown-hash sensitivity: fold the next set-index bit group
+    /// into the low set bits. This is a candidate address-domain transform,
+    /// not a recovered GA102 physical hash.
+    XorFold,
+    /// Pressure-bounded unknown-hash envelope. Use the card modulo candidate
+    /// until its set is full, then use the folded candidate only when it has
+    /// strictly more room. This is a deterministic effective scenario, not a
+    /// workload/NCU-fitted physical hash selector.
+    ModuloXorFallback,
 }
 
 impl L1Config {
@@ -99,6 +124,9 @@ impl L1Config {
             mshr_count,
             hit_latency,
             miss_latency,
+            set_count: None,
+            ways: None,
+            set_index: L1SetIndex::FullyAssociative,
         }
     }
 }
@@ -113,6 +141,8 @@ pub enum L1ConfigError {
     MshrZero,
     #[error("hit latency {hit} must be strictly below miss latency {miss}")]
     LatencyOrderInverted { hit: u64, miss: u64 },
+    #[error("L1 set geometry must provide both positive set_count and ways")]
+    SetGeometryInvalid,
     #[error("L1 write-lookup window capability is unavailable: {0}")]
     WriteLookupWindowCapability(#[from] sim_arch::CapabilityError),
 }
@@ -323,6 +353,29 @@ pub struct L1MergeAudit {
     pub async_older_pending_merges: [u64; 2],
     pub ordinary_global_older_pending_merges: u64,
     pub constant_global_older_pending_merges: u64,
+    /// Same-request ordinary-global merges partitioned by static client.
+    /// These observer fields let the post-replay endpoint selector handle
+    /// mixed constant/plain launches without changing cache state or timing.
+    pub ordinary_global_same_request_merges: u64,
+    pub constant_global_same_request_merges: u64,
+    pub async_global_same_request_merges: u64,
+    /// Resident-sector lookup hits partitioned by the static lookup client.
+    /// These are observer-only provenance counters; cache state and timing
+    /// remain unified.  Constant hits are retained in the legacy field below
+    /// for compatibility with the existing SM86 endpoint.
+    pub ordinary_global_hits: u64,
+    pub async_global_hits: u64,
+    /// Older pending merges into a partial-line sector fill.  Nsight's
+    /// sector lookup endpoint keeps these as misses even when the 128-byte
+    /// tag is already resident; retaining the owner kind prevents the
+    /// aggregate merge formula from fabricating a tag hit for U16 half-line
+    /// accesses.
+    pub ordinary_global_older_sector_pending_merges: u64,
+    pub constant_global_older_sector_pending_merges: u64,
+    pub async_global_older_sector_pending_merges: u64,
+    pub unrequested_subline_miss_sectors: u64,
+    pub wavefront_mask_lookup_hits: u64,
+    pub wavefront_mask_lookup_misses: u64,
     pub constant_global_hits: u64,
     pub constant_global_requests: u64,
 }
@@ -367,24 +420,21 @@ pub struct L1OriginCounters {
 }
 
 impl L1OriginCounters {
-    /// Effective L1TEX lookup-hit projection for sector metrics.
+    /// Effective L1TEX tag-lookup-hit projection for sector metrics.
     ///
-    /// The timing cache keeps same-request sectors as `merges` because they
+    /// The timing cache keeps all pending sectors as `merges` because they
     /// share one in-flight fill and must not become independent timing hits.
-    /// Nsight's sector lookup surface counts the sectors covered by a newly
-    /// allocated line as four misses for a 128-byte/32-byte-sector line.  At
-    /// this observation boundary, convert the raw merge lane without changing
-    /// tags, fills, MSHRs, or replay timing.
+    /// The profiler lookup surface is a bounded tag observation: a fresh line
+    /// allocation contributes one tag miss, while the remaining sectors that
+    /// merge onto that allocation are projected as lookup hits. This remains
+    /// an explicit effective observer and does not alter tags, fills, MSHRs,
+    /// replacement, or replay timing.
     pub const fn effective_lookup_hits(&self) -> u64 {
-        let fresh_line_merge_adjustment = self
-            .line_alloc_misses
-            .saturating_mul(SECTORS_PER_LINE.saturating_sub(1) as u64);
         let projected = self
             .hits
-            .saturating_add(self.pending_lookup_hits)
             .saturating_add(self.merges)
-            .saturating_sub(fresh_line_merge_adjustment);
-        // The observer is a projection over the physical sector domain.  A
+            .saturating_sub(self.line_alloc_misses);
+        // The observer is a projection over the modeled sector domain.  A
         // partially decoded/coalesced trace can expose more merge labels than
         // the retained sector denominator; keep the projection typed and
         // bounded rather than aborting an otherwise valid real launch.
@@ -414,6 +464,12 @@ pub struct L1Counters {
     pub merges: u64,
     pub pending_lookup_hits: u64,
     pub stall_events: u64,
+    /// Number of miss attempts observed while the finite L1 MSHR set was
+    /// full. These pressure fields are unified cache observers and are not
+    /// partitioned into global/local traffic lanes.
+    pub mshr_stall_occupancy_samples: u64,
+    /// Sum of MSHR entries in use at those full-set stall observations.
+    pub mshr_stall_occupancy_sum: u64,
     pub line_fills: u64,
     pub line_alloc_misses: u64,
     pub sector_resident_misses: u64,
@@ -441,7 +497,7 @@ pub struct L1Counters {
     pub reduction_sectors: u64,
     pub reduction_hits: u64,
     /// Accounting provenance only. Cache tags, fills, MSHRs, recency, and
-    /// replacement remain unified physical state.
+    /// replacement remain unified modeled cache state.
     by_origin: [L1OriginCounters; 2],
 }
 
@@ -516,6 +572,8 @@ pub enum L1CounterError {
         global: u64,
         local: u64,
     },
+    #[error("L1 pressure observer '{field}' overflows u64")]
+    PressureOverflow { field: &'static str },
 }
 
 fn checked_counter_add(
@@ -720,7 +778,7 @@ impl L1Counters {
     }
 
     /// Verify that every unified observer equals the checked sum of its two
-    /// accounting lanes. This never examines or partitions physical cache state.
+    /// accounting lanes. This never examines or partitions modeled cache state.
     pub fn validate_origin_partition(&self) -> Result<(), L1CounterError> {
         let global = self.origin(MemoryOrigin::Global);
         let local = self.origin(MemoryOrigin::Local);
@@ -855,6 +913,18 @@ impl L1Counters {
             self.stall_events,
             other.stall_events,
         )?;
+        let mshr_stall_occupancy_samples = self
+            .mshr_stall_occupancy_samples
+            .checked_add(other.mshr_stall_occupancy_samples)
+            .ok_or(L1CounterError::PressureOverflow {
+                field: "mshr_stall_occupancy_samples",
+            })?;
+        let mshr_stall_occupancy_sum = self
+            .mshr_stall_occupancy_sum
+            .checked_add(other.mshr_stall_occupancy_sum)
+            .ok_or(L1CounterError::PressureOverflow {
+                field: "mshr_stall_occupancy_sum",
+            })?;
         let line_fills =
             checked_counter_add(L1CounterField::LineFills, self.line_fills, other.line_fills)?;
         let line_alloc_misses = checked_counter_add(
@@ -925,6 +995,8 @@ impl L1Counters {
             merges,
             pending_lookup_hits,
             stall_events,
+            mshr_stall_occupancy_samples,
+            mshr_stall_occupancy_sum,
             line_fills,
             line_alloc_misses,
             sector_resident_misses,
@@ -1177,7 +1249,7 @@ pub enum EvAccessUnobserved {
 }
 
 /// Observer-only tag window for Ampere L1TEX write lookups.  It is separate
-/// from the physical read-state cache: the latter remains the validated
+/// from the modeled read-state cache: the latter remains the validated
 /// fully-associative replay approximation, while this state models the
 /// write-allocate request stream used by the NCU `op_st_lookup_*` counters.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1343,6 +1415,13 @@ pub struct L1Cache {
     /// Lazily allocated observer-only write tag window.  Keeping it boxed and
     /// optional leaves cold/read-only replays on the compact hot path.
     write_lookup_observer: Option<Box<L1WriteLookupObserver>>,
+    /// Optional effective set-local LRU state. The global recency maps remain
+    /// the canonical typed boundary; this index is an executable projection
+    /// used only by the card-backed modulo scenario.
+    set_lru: Option<Vec<VecDeque<i64>>>,
+    /// Actual set chosen by the pressure-bounded unknown-hash scenario.
+    /// Fully associative and fixed-index modes leave this empty.
+    set_locations: HashMap<i64, usize>,
     pub counters: L1Counters,
 }
 
@@ -1363,6 +1442,20 @@ impl L1Cache {
                 miss: cfg.miss_latency,
             });
         }
+        if matches!(
+            cfg.set_index,
+            L1SetIndex::Modulo | L1SetIndex::XorFold | L1SetIndex::ModuloXorFallback
+        )
+            && (cfg.set_count.is_none_or(|count| count == 0)
+                || cfg.ways.is_none_or(|ways| ways == 0))
+        {
+            return Err(L1ConfigError::SetGeometryInvalid);
+        }
+        if cfg.set_index == L1SetIndex::FullyAssociative
+            && (cfg.set_count.is_some() || cfg.ways.is_some())
+        {
+            return Err(L1ConfigError::SetGeometryInvalid);
+        }
         let arch = cfg.arch;
         Ok(Self {
             cfg,
@@ -1382,6 +1475,15 @@ impl L1Cache {
             min_fill_due: None,
             fill_timing: None,
             write_lookup_observer: None,
+            set_lru: match (cfg.set_index, cfg.set_count) {
+                (L1SetIndex::Modulo | L1SetIndex::XorFold | L1SetIndex::ModuloXorFallback, Some(count)) => Some(
+                    (0..count)
+                        .map(|_| VecDeque::new())
+                        .collect::<Vec<_>>(),
+                ),
+                _ => None,
+            },
+            set_locations: HashMap::new(),
             counters: L1Counters::for_arch(arch),
         })
     }
@@ -1413,18 +1515,36 @@ impl L1Cache {
             &mut self.merge_audit.ordinary_same_request_merges
         };
         route_lane[origin.index()] = route_lane[origin.index()].saturating_add(1);
-        if sequence < batch.first_fill_sequence && origin == MemoryOrigin::Global {
+        if origin == MemoryOrigin::Global {
             match batch.client {
-                L1LookupClient::OrdinaryGlobal => {
+                L1LookupClient::OrdinaryGlobal if sequence < batch.first_fill_sequence => {
                     self.merge_audit.ordinary_global_older_pending_merges = self
                         .merge_audit
                         .ordinary_global_older_pending_merges
                         .saturating_add(1);
                 }
-                L1LookupClient::Constant => {
+                L1LookupClient::Constant if sequence < batch.first_fill_sequence => {
                     self.merge_audit.constant_global_older_pending_merges = self
                         .merge_audit
                         .constant_global_older_pending_merges
+                        .saturating_add(1);
+                }
+                L1LookupClient::OrdinaryGlobal => {
+                    self.merge_audit.ordinary_global_same_request_merges = self
+                        .merge_audit
+                        .ordinary_global_same_request_merges
+                        .saturating_add(1);
+                }
+                L1LookupClient::Constant => {
+                    self.merge_audit.constant_global_same_request_merges = self
+                        .merge_audit
+                        .constant_global_same_request_merges
+                        .saturating_add(1);
+                }
+                L1LookupClient::AsyncCopy => {
+                    self.merge_audit.async_global_same_request_merges = self
+                        .merge_audit
+                        .async_global_same_request_merges
                         .saturating_add(1);
                 }
                 _ => {}
@@ -1432,15 +1552,135 @@ impl L1Cache {
         }
     }
 
-    fn record_constant_hit(&mut self, origin: MemoryOrigin) {
-        if self
-            .active_lookup_batch
-            .is_some_and(|batch| batch.client == L1LookupClient::Constant)
+    fn record_client_hit(&mut self, origin: MemoryOrigin) {
+        if origin != MemoryOrigin::Global {
+            return;
+        }
+        let Some(client) = self.active_lookup_batch.map(|batch| batch.client) else {
+            return;
+        };
+        match client {
+            L1LookupClient::OrdinaryGlobal => {
+                self.merge_audit.ordinary_global_hits = self
+                    .merge_audit
+                    .ordinary_global_hits
+                    .saturating_add(1);
+            }
+            L1LookupClient::Constant => {
+                self.merge_audit.constant_global_hits = self
+                    .merge_audit
+                    .constant_global_hits
+                    .saturating_add(1);
+            }
+            L1LookupClient::AsyncCopy => {
+                self.merge_audit.async_global_hits = self
+                    .merge_audit
+                    .async_global_hits
+                    .saturating_add(1);
+            }
+            L1LookupClient::Unknown | L1LookupClient::Local => {}
+        }
+    }
+
+    fn record_older_sector_pending_merge(&mut self, origin: MemoryOrigin, sequence: u64) {
+        if origin != MemoryOrigin::Global {
+            return;
+        }
+        let Some(batch) = self.active_lookup_batch else {
+            return;
+        };
+        if sequence >= batch.first_fill_sequence {
+            return;
+        }
+        match batch.client {
+            L1LookupClient::OrdinaryGlobal => {
+                self.merge_audit.ordinary_global_older_sector_pending_merges = self
+                    .merge_audit
+                    .ordinary_global_older_sector_pending_merges
+                    .saturating_add(1);
+            }
+            L1LookupClient::Constant => {
+                self.merge_audit.constant_global_older_sector_pending_merges = self
+                    .merge_audit
+                    .constant_global_older_sector_pending_merges
+                    .saturating_add(1);
+            }
+            L1LookupClient::AsyncCopy => {
+                self.merge_audit.async_global_older_sector_pending_merges = self
+                    .merge_audit
+                    .async_global_older_sector_pending_merges
+                    .saturating_add(1);
+            }
+            L1LookupClient::Unknown | L1LookupClient::Local => {}
+        }
+    }
+
+    fn record_unrequested_subline_miss(&mut self, origin: MemoryOrigin, line: i64, sector: u8) {
+        if origin != MemoryOrigin::Global || sector >= 4 {
+            return;
+        }
+        let bit = 1_u8 << sector;
+        let line_mask = self.sectors.get(&line).copied().unwrap_or(0);
+        let sector_pending = self
+            .sector_fills
+            .keys()
+            .filter(|(candidate, _, _)| *candidate == line)
+            .fold(0_u8, |mask, (_, pending_sector, _)| {
+                mask | (1_u8 << pending_sector)
+            });
+        // A first touch of a cold line is an ordinary line-allocation miss,
+        // not the disjoint-subline phenomenon. Only audit a sector when the
+        // line is already resident or has an in-flight parent/child fill.
+        if line_mask == 0
+            && sector_pending == 0
+            && !self.line_fills.contains_key(&line)
+            && !self.line_resident(line)
         {
-            self.merge_audit.constant_global_hits = self
+            return;
+        }
+        // A parent line fill owns every sector currently admitted into its
+        // line mask.  Once the parent is complete, only explicit child sector
+        // fills remain pending; all other bits are resident data.
+        let known = line_mask | sector_pending;
+        if known & bit == 0 {
+            self.merge_audit.unrequested_subline_miss_sectors = self
                 .merge_audit
-                .constant_global_hits
-                .saturating_add(u64::from(origin == MemoryOrigin::Global));
+                .unrequested_subline_miss_sectors
+                .saturating_add(1);
+        }
+    }
+
+    fn record_wavefront_mask_lookup(&mut self, origin: MemoryOrigin, line: i64, sector: u8) {
+        if origin != MemoryOrigin::Global || sector >= 4 {
+            return;
+        }
+        let bit = 1_u8 << sector;
+        let resident_mask = self.sectors.get(&line).copied().unwrap_or(0);
+        let pending_mask = self
+            .sector_fills
+            .keys()
+            .filter(|(candidate, _, _)| *candidate == line)
+            .fold(0_u8, |mask, (_, pending_sector, _)| {
+                mask | (1_u8 << pending_sector)
+            });
+        // A parent line fill has not produced resident data yet. The sector
+        // mask in `sectors` is allocation/request provenance until its line
+        // fill retires, so do not classify it as a lookup hit.
+        let resident = if self.line_fills.contains_key(&line) {
+            0
+        } else {
+            resident_mask & !pending_mask
+        };
+        if resident & bit != 0 {
+            self.merge_audit.wavefront_mask_lookup_hits = self
+                .merge_audit
+                .wavefront_mask_lookup_hits
+                .saturating_add(1);
+        } else {
+            self.merge_audit.wavefront_mask_lookup_misses = self
+                .merge_audit
+                .wavefront_mask_lookup_misses
+                .saturating_add(1);
         }
     }
 
@@ -1547,7 +1787,7 @@ impl L1Cache {
         )
     }
 
-    /// Deterministic typed projection of the physical read-state L1. The
+    /// Deterministic typed projection of the modeled read-state L1. The
     /// projection carries fill generations and pending maps directly; no
     /// debug formatting participates in the state contract.
     pub fn typed_boundary_state(&self) -> L1BoundaryState {
@@ -2127,6 +2367,61 @@ impl L1Cache {
             .is_some()
     }
 
+    fn set_index(&self, line: i64) -> Option<usize> {
+        if let Some(&index) = self.set_locations.get(&line) {
+            return Some(index);
+        }
+        let count = self.cfg.set_count?;
+        let modulo = usize::try_from(line.rem_euclid(i64::from(count))).ok()?;
+        let folded = usize::try_from(
+            (line ^ line.div_euclid(i64::from(count))).rem_euclid(i64::from(count)),
+        )
+        .ok()?;
+        match self.cfg.set_index {
+            L1SetIndex::Modulo => Some(modulo),
+            L1SetIndex::XorFold => Some(folded),
+            L1SetIndex::ModuloXorFallback => {
+                let ways = usize::try_from(self.cfg.ways?).ok()?;
+                let sets = self.set_lru.as_ref()?;
+                let modulo_len = sets.get(modulo).map_or(0, VecDeque::len);
+                let folded_len = sets.get(folded).map_or(0, VecDeque::len);
+                if modulo_len >= ways && folded_len < modulo_len {
+                    Some(folded)
+                } else {
+                    Some(modulo)
+                }
+            }
+            L1SetIndex::FullyAssociative => None,
+        }
+    }
+
+    fn remove_from_set_lru(&mut self, line: i64) {
+        let Some(index) = self
+            .set_locations
+            .get(&line)
+            .copied()
+            .or_else(|| self.set_index(line))
+        else {
+            return;
+        };
+        if let Some(sets) = self.set_lru.as_mut()
+            && let Some(set) = sets.get_mut(index)
+            && let Some(position) = set.iter().position(|candidate| *candidate == line)
+        {
+            set.remove(position);
+        }
+        self.set_locations.remove(&line);
+    }
+
+    fn remove_resident_line(&mut self, line: i64) {
+        if let Some(stamp) = self.stamp_of.remove(&line) {
+            self.by_stamp.remove(&stamp);
+        }
+        self.remove_from_set_lru(line);
+        self.sectors.remove(&line);
+        self.line_generations.remove(&line);
+    }
+
     fn touch_mru(&mut self, line: i64) -> Result<(), L1AccessError> {
         let (stamp, next_stamp) = self.next_stamp.allocate("recency")?;
         if let Some(old) = self.stamp_of.remove(&line) {
@@ -2135,6 +2430,16 @@ impl L1Cache {
         self.next_stamp = next_stamp;
         self.by_stamp.insert(stamp, line);
         self.stamp_of.insert(line, stamp);
+        if let Some(index) = self.set_index(line)
+            && let Some(sets) = self.set_lru.as_mut()
+            && let Some(set) = sets.get_mut(index)
+        {
+            if let Some(position) = set.iter().position(|candidate| *candidate == line) {
+                set.remove(position);
+            }
+            set.push_back(line);
+            self.set_locations.insert(line, index);
+        }
         Ok(())
     }
 
@@ -2153,24 +2458,53 @@ impl L1Cache {
                 return Err(L1AccessError::DirtyResidencyBlocksEviction { line, dirty_mask });
             }
         }
+        if let (Some(ways), Some(sets)) = (self.cfg.ways, self.set_lru.as_ref()) {
+            let incoming = additional_line.filter(|line| !self.line_resident(*line));
+            let limit = usize::try_from(ways).unwrap_or(usize::MAX);
+            for (index, set) in sets.iter().enumerate() {
+                let extra = incoming
+                    .and_then(|line| self.set_index(line).filter(|candidate| *candidate == index))
+                    .map_or(0, |_| 1);
+                let overflow = set
+                    .len()
+                    .saturating_add(extra)
+                    .saturating_sub(limit);
+                for &line in set.iter().take(overflow) {
+                    if let Some(&dirty_mask) = self.dirty.get(&line) {
+                        return Err(L1AccessError::DirtyResidencyBlocksEviction {
+                            line,
+                            dirty_mask,
+                        });
+                    }
+                }
+            }
+        }
         Ok(())
     }
 
     fn evict_beyond_capacity(&mut self) -> Result<(), L1AccessError> {
         self.preflight_dirty_eviction(None)?;
+        if let Some(ways) = self.cfg.ways {
+            let limit = usize::try_from(ways).unwrap_or(usize::MAX);
+            let victims = self
+                .set_lru
+                .as_ref()
+                .map(|sets| {
+                    sets.iter()
+                        .flat_map(|set| set.iter().take(set.len().saturating_sub(limit)).copied())
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            for line in victims {
+                self.remove_resident_line(line);
+            }
+        }
         while self.by_stamp.len() as u64 > self.cfg.line_capacity {
             let Some((&stamp, &line)) = self.by_stamp.first_key_value() else {
                 break;
             };
-            self.by_stamp.remove(&stamp);
-            self.stamp_of.remove(&line);
-            // Partial-line eviction: sector residency dies with the line.
-            self.sectors.remove(&line);
-            // Any later sector-fill response belongs to this old allocation;
-            // removing the current witness makes same-tag reallocation an
-            // explicit generation mismatch instead of allowing stale data to
-            // resurrect into the new line.
-            self.line_generations.remove(&line);
+            debug_assert_eq!(self.stamp_of.get(&line), Some(&stamp));
+            self.remove_resident_line(line);
         }
         Ok(())
     }
@@ -2530,6 +2864,7 @@ impl L1Cache {
             let next = resident_mask & !invalidated_mask;
             if next == 0 {
                 self.sectors.remove(&line);
+                self.remove_from_set_lru(line);
                 if let Some(stamp) = self.stamp_of.remove(&line) {
                     self.by_stamp.remove(&stamp);
                 }
@@ -2566,6 +2901,12 @@ impl L1Cache {
         let sectors = self.preflight_invalidate_all()?;
         self.by_stamp.clear();
         self.stamp_of.clear();
+        if let Some(sets) = self.set_lru.as_mut() {
+            for set in sets {
+                set.clear();
+            }
+        }
+        self.set_locations.clear();
         self.sectors.clear();
         Ok(sectors)
     }
@@ -2676,6 +3017,8 @@ impl L1Cache {
         let line = sector_id >> 2;
         let sector = (sector_id & 3) as u8;
         self.record_constant_request(origin);
+        self.record_wavefront_mask_lookup(origin, line, sector);
+        self.record_unrequested_subline_miss(origin, line, sector);
         // A late child of an in-flight line allocation has its own sector
         // completion token. Check it before the parent line MSHR so later
         // accesses to that sector wait for the child response instead of
@@ -2685,6 +3028,7 @@ impl L1Cache {
         {
             Self::preflight_fill_timing(pending, fill_request.timing())?;
             self.record_merge_audit(origin, sequence);
+            self.record_older_sector_pending_merge(origin, sequence);
             let counters = if self.active_lookup_batch.is_some_and(|batch| {
                 batch.pending_merges_are_hits && sequence < batch.first_fill_sequence
             }) {
@@ -2743,7 +3087,7 @@ impl L1Cache {
                 .get(&line)
                 .is_some_and(|mask| mask & (1 << sector) != 0);
         if sector_present {
-            self.record_constant_hit(origin);
+            self.record_client_hit(origin);
             let ready = fill_request.hit_ready(self.cfg.hit_latency)?;
             self.next_stamp.preflight("recency", 1)?;
             let counters = self
@@ -2760,6 +3104,7 @@ impl L1Cache {
         {
             Self::preflight_fill_timing(pending, fill_request.timing())?;
             self.record_merge_audit(origin, sequence);
+            self.record_older_sector_pending_merge(origin, sequence);
             let counters = if self.active_lookup_batch.is_some_and(|batch| {
                 batch.pending_merges_are_hits && sequence < batch.first_fill_sequence
             }) {
@@ -2787,7 +3132,27 @@ impl L1Cache {
         if let Some(cap) = self.effective_mshr_count(mshr_floor)
             && self.mshr_in_use() >= cap
         {
-            self.apply_counter_deltas(origin, &[(L1CounterField::StallEvents, 1)])?;
+            let occupancy = u64::try_from(self.mshr_in_use()).map_err(|_| {
+                L1AccessError::Counter(L1CounterError::PressureOverflow {
+                    field: "mshr_stall_occupancy_sum",
+                })
+            })?;
+            let mut counters = self
+                .counters
+                .add_fields_checked(origin, &[(L1CounterField::StallEvents, 1)])?;
+            counters.mshr_stall_occupancy_samples = counters
+                .mshr_stall_occupancy_samples
+                .checked_add(1)
+                .ok_or(L1AccessError::Counter(L1CounterError::PressureOverflow {
+                    field: "mshr_stall_occupancy_samples",
+                }))?;
+            counters.mshr_stall_occupancy_sum = counters
+                .mshr_stall_occupancy_sum
+                .checked_add(occupancy)
+                .ok_or(L1AccessError::Counter(L1CounterError::PressureOverflow {
+                    field: "mshr_stall_occupancy_sum",
+                }))?;
+            self.counters = counters;
             return Ok(CoreAccess::Stalled);
         }
         let fill_due = fill_request.fill_due(self.cfg.miss_latency)?;
@@ -3475,7 +3840,7 @@ impl L1Cache {
 
     /// Record write-class lookup hits derived from the exact instruction's
     /// sector/wavefront topology. This is emission accounting only: the
-    /// physical write-through/no-allocate L1 trajectory remains unchanged.
+    /// modeled write-through/no-allocate L1 trajectory remains unchanged.
     pub fn count_write_lookup_hits(
         &mut self,
         origin: MemoryOrigin,

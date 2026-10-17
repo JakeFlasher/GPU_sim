@@ -1408,6 +1408,9 @@ impl IssueModelParams {
             mshr_count: Some(mshr_count),
             hit_latency: self.l1_hit_latency,
             miss_latency: self.l1_miss_latency,
+            set_count: None,
+            ways: None,
+            set_index: sim_mem::L1SetIndex::FullyAssociative,
         }
     }
 

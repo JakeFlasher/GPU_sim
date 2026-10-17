@@ -994,10 +994,11 @@ fn emit_gmem_st_sectors(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitError
 }
 
 /// `l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct` — the op_ld sector
-/// lookup-hit rate. NCU counts resident-data hits plus accesses that merge into
-/// a fill allocated by an earlier logical request. Same-request line-sector
-/// coalescing remains a miss. The denominator also folds in READ-class bypass
-/// (LDGSTS `.BYPASS`) sectors, which cannot hit L1.
+/// tag-lookup-hit rate. The bounded observer counts resident hits and merge
+/// observations, then removes one tag miss for each fresh line allocation.
+/// This is deliberately separate from modeled data readiness. The denominator
+/// also folds in READ-class bypass (LDGSTS `.BYPASS`) sectors, which cannot hit
+/// L1.
 fn emit_l1tex_read_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitError> {
     let key = "cache_hit_rate_l1tex_read_sector";
     let Some(l1) = snap.l1 else {
@@ -1029,9 +1030,9 @@ pub(crate) fn l1_write_hit_terms(arch: ArchId, l1: &L1Counters) -> [u64; 2] {
     }
 }
 
-/// `l1tex__t_sector_hit_rate.pct` — the unified L1TEX sector hit rate over all
-/// modeled op classes. Loads use resident-data hits plus prior-request pending-
-/// fill merges; write-hit accounting is architecture-specific (see above).
+/// `l1tex__t_sector_hit_rate.pct` — the unified L1TEX sector lookup-hit rate
+/// over all modeled op classes. Loads use the bounded tag-lookup projection;
+/// write-hit accounting is architecture-specific (see above).
 /// The full bypass stream (atom included) is in the denominator —
 /// `bypass_atom_sectors` must NOT be added on top because it is already a subset
 /// of `bypass_sectors`.
@@ -1108,17 +1109,23 @@ fn emit_l2_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitError> {
     )?))
 }
 
-/// `dram__sectors_op_read.sum` — data demand plus compulsory executed SASS
-/// sectors. Effective SM120 runs additionally include observed global-to-shared
-/// TMA load payload sectors when the sidecar supplies them; this is a
-/// conditional demand model, not a recovered engine path.
+/// `dram__sectors_op_read.sum` — data demand plus source-qualified front-end
+/// fetch demand.  SM86 GCC/ICC fetches whole aligned 128-byte instruction
+/// lines, so its term uses the unique-line sector ledger rather than the
+/// smaller set of executed 32-byte sectors.  Effective SM120 runs retain the
+/// historical executed-sector/TMA demand arm.  None of these terms changes
+/// cache state or DRAM service timing.
 fn emit_dram_read_sectors(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitError> {
     let Some(dram) = snap.dram else {
         return Ok(EmitOutcome::Unavailable(Unavailable::MemModeLacksUnit {
             needs: MemUnit::Dram,
         }));
     };
-    let compulsory = snap.front_end.compulsory_instruction_read_sectors();
+    let compulsory = if snap.arch == ArchId::Sm86 {
+        snap.front_end.static_instruction_line_read_sectors()
+    } else {
+        snap.front_end.compulsory_instruction_read_sectors()
+    };
     let total = if snap.arch == ArchId::Sm120 {
         checked_sum(
             "traffic_dram_read_sectors",
@@ -1128,7 +1135,7 @@ fn emit_dram_read_sectors(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitErr
     } else {
         checked_sum(
             "traffic_dram_read_sectors",
-            "data and compulsory instruction DRAM-read sectors",
+            "data and aligned 128-byte GCC instruction-line DRAM-read sectors",
             &[dram.read_sectors, compulsory],
         )?
     };
