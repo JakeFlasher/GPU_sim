@@ -224,7 +224,9 @@ silicon issue-width measurement.
   \includegraphics[width=\linewidth]{figures/trace_frontier.pdf}
   \caption{A worked trace-to-frontier path.  Dynamic lane sectors and static
   control produce ordered L1/L2/memory events, while issue, completion,
-  hardware-observation, and typed-tail frontiers remain distinct.}
+  hardware-observation, and typed-tail frontiers remain distinct.  The numeric
+  frontier annotations are illustrative campaign values, not an accuracy
+  claim for this paper's aggregate table.}
   \label{fig:trace-frontier}
 \end{figure}
 
@@ -254,6 +256,15 @@ within the same capture/profile directory and launch order after exact identity;
 the enabled full artifact yields 98 exact rows and 11,460 ordered-fallback rows,
 covering all 11,558 replay launches.  This is a directory-scoped
 correspondence, not a string-match assumption.
+
+The two profile campaigns intentionally have different launch scopes.  The
+SM86 NCU wrapper used `--launch-count 1`, so each of its 356 profile directories
+contains one profiled launch; the 104--107-row metric counts therefore describe
+all finite target rows present in that one-launch-per-directory campaign, not
+all 12,392 replay launches.  The SM120 wrapper profiles all matching launches,
+and the corrected 339-directory reduction covers every 11,558 replay launches.
+This distinction is retained in the denominator rather than hidden by pooling
+capture counts and launch counts.
 
 For a target $y$ and prediction $\hat y$, the row error is
 \[
