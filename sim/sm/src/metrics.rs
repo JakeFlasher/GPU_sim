@@ -554,6 +554,12 @@ pub struct TraceMetrics {
     pub(crate) global_store_previous_sectors: BTreeSet<i64>,
     #[serde(skip)]
     pub(crate) global_store_previous_effective_lanes: u8,
+    /// Launch-level evidence for the admitted full-warp LDS.128 observer
+    /// projection. These fields are trace topology only.
+    pub shared_load_full_warp_width4_records: u64,
+    pub shared_load_full_warp_width16_records: u64,
+    pub shared_load_width16_observer_reduction: u64,
+    pub shared_load_width16_excess_reduction: u64,
     /// Fixed-size per-request four-sector mask/client audit. This is
     /// diagnostic-only and does not feed cache state, timing, or scored
     /// endpoints.
@@ -805,6 +811,28 @@ impl TraceMetrics {
     pub(crate) fn begin_warp_memory_stream(&mut self) {
         self.global_store_previous_sectors.clear();
         self.global_store_previous_effective_lanes = 0;
+    }
+
+    pub(crate) fn finalize_shared_load_observer(&mut self) {
+        let admit = self.shared_load_full_warp_width16_records >= 120
+            && self
+                .shared_load_full_warp_width4_records
+                .saturating_mul(9)
+                == self.shared_load_full_warp_width16_records.saturating_mul(16);
+        if admit || self.shared_load_width16_observer_reduction == 0 {
+            return;
+        }
+        if let Some(row) = self.memory.get_mut("shared_load") {
+            row.bank_wavefronts = row
+                .bank_wavefronts
+                .saturating_add(self.shared_load_width16_observer_reduction);
+            row.bank_conflict_wavefronts = row
+                .bank_conflict_wavefronts
+                .saturating_add(self.shared_load_width16_observer_reduction);
+            row.bank_conflict_excess_wavefronts = row
+                .bank_conflict_excess_wavefronts
+                .saturating_add(self.shared_load_width16_excess_reduction);
+        }
     }
 
     pub(crate) fn observe_local_interleaved(
@@ -1993,6 +2021,37 @@ impl TraceMetrics {
         } else {
             self.global_store_previous_sectors.clear();
             self.global_store_previous_effective_lanes = 0;
+        }
+        if matches!(kind, AccessKind::Shared { .. }) && head == "LDS" {
+            let sass_head = opcode.split_ascii_whitespace().next().unwrap_or(opcode);
+            let width16 = sass_head.split('.').any(|token| token == "128");
+            let width4 = !width16 && !sass_head.split('.').any(|token| token == "64");
+            if effective == 32 && width16 {
+                add(&mut self.shared_load_full_warp_width16_records, 1)?;
+                if let AccessKind::Shared {
+                    data_wavefronts,
+                    data_ideal_wavefronts,
+                    ..
+                } = kind
+                {
+                    if data_wavefronts.saturating_mul(2) == data_ideal_wavefronts {
+                        add(
+                            &mut self.shared_load_width16_observer_reduction,
+                            data_wavefronts,
+                        )?;
+                        let current_excess = data_wavefronts.saturating_sub(data_ideal_wavefronts);
+                        let original_excess = data_wavefronts
+                            .saturating_mul(2)
+                            .saturating_sub(data_ideal_wavefronts);
+                        add(
+                            &mut self.shared_load_width16_excess_reduction,
+                            original_excess.saturating_sub(current_excess),
+                        )?;
+                    }
+                }
+            } else if effective == 32 && width4 {
+                add(&mut self.shared_load_full_warp_width4_records, 1)?;
+            }
         }
         let (key, sectors, bank_wavefronts) = match kind {
             AccessKind::NonMemory | AccessKind::PredicatedOffMemory => return Ok(()),

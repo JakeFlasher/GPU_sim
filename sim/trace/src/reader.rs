@@ -7427,7 +7427,21 @@ pub fn project_shared_bank_wavefronts_32x4(
                         .checked_add(bank_words.into_iter().max().unwrap_or(0))
                         .ok_or(SharedBankProjectionError::CountOverflow { bank: 0 })?;
                 }
-                return u32::try_from(total_wavefronts)
+                // On SM120, a conflict-free full-warp `LDS.128` packet is
+                // observed as two shared-data wavefronts rather than the
+                // four quarter-warp scheduler phases implied by the byte
+                // width.  Keep this correction on the decoupled observer
+                // only; scheduler timing retains the legacy projection.
+                let observed_wavefronts = if max_data_width_bytes == 16
+                    && preflight.meta().access_kind == Some(pb::MemoryOpAccessKind::Load)
+                    && active_lanes.len() == lanes::LANES_PER_WARP
+                    && total_wavefronts == 4
+                {
+                    total_wavefronts / 2
+                } else {
+                    total_wavefronts
+                };
+                return u32::try_from(observed_wavefronts)
                     .map_err(|_| SharedBankProjectionError::CountOverflow { bank: 0 });
             }
         }

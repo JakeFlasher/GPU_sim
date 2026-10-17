@@ -5466,6 +5466,7 @@ fn replay_kernel_with_schedule_and_l2_and_candidates_with_payload_events(
             )?;
         }
     }
+    trace_metrics.finalize_shared_load_observer();
     replay.front_end = front_end;
     replay.trace_metrics = trace_metrics;
     // A drained hypothetical service queue is not a completion relation for
