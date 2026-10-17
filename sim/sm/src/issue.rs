@@ -1501,6 +1501,11 @@ pub struct MemRequest {
     /// and DRAM-fetch requirement from this value and rejects incoherent
     /// `(source, operation, reply)` combinations before hierarchy mutation.
     pub operation: MemoryOperation,
+    /// Optional operation-class observer tag. This never changes the
+    /// physical hierarchy operation, response timing, or DRAM fetch policy;
+    /// it only lets static generic-store forms use the operation-qualified
+    /// lookup counters without changing their established read route.
+    pub(crate) observer_operation: Option<MemoryOperation>,
     /// Static SASS marker for a regular-register constant load.  Constant
     /// loads still use the normal global allocation/cache state, but their
     /// response may cross a distinct SM-side return path on SM86.
@@ -1671,6 +1676,7 @@ impl MemRequest {
             local_sector_mask: Self::local_mask(origin, sector_bit),
             source: L2Source::L1Fill,
             operation: MemoryOperation::Read,
+            observer_operation: None,
             constant_load,
             constant_deep,
             reply: ReplyTo::L1Fill { fill, response_id },
@@ -1700,6 +1706,7 @@ impl MemRequest {
             local_sector_mask: Self::local_mask(origin, sector_bit),
             source: L2Source::L1Fill,
             operation: MemoryOperation::Read,
+            observer_operation: None,
             constant_load,
             constant_deep,
             reply: ReplyTo::L1Fill { fill, response_id },
@@ -1741,6 +1748,7 @@ impl MemRequest {
             local_sector_mask: Self::local_mask(origin, sector_bit),
             source: L2Source::Store,
             operation,
+            observer_operation: None,
             constant_load: false,
             constant_deep: false,
             reply: ReplyTo::None,
@@ -8359,6 +8367,7 @@ impl<'a> SmCore<'a> {
         kind: AccessKind,
         constant_load: bool,
         constant_deep: bool,
+        observer_store: bool,
         sectors: &'a [i64],
         write_barrier: Option<DepBarrier>,
         destination_wavefronts: u64,
@@ -8631,6 +8640,11 @@ impl<'a> SmCore<'a> {
                     }
                     _ => unreachable!("match arm admits only bypass, async-copy, or untagged"),
                 };
+                let observer_operation = if observer_store {
+                    Some(MemoryOperation::Store)
+                } else {
+                    None
+                };
                 if operation == MemoryOperation::Atomic && st.l1_visibility_requester.is_some() {
                     return Err(IssueError::VisibilityAtomicUnsupported);
                 }
@@ -8729,6 +8743,7 @@ impl<'a> SmCore<'a> {
                         local_sector_mask: 0,
                         source,
                         operation,
+                        observer_operation,
                         constant_load: false,
                         constant_deep: false,
                         reply,
@@ -13053,6 +13068,16 @@ impl<'a> SmCore<'a> {
                     inst.kind,
                     constant_load,
                     constant_deep,
+                    self.schedule
+                        .issue_slot(u64::from(inst.pc))
+                        .is_some_and(|slot| {
+                            matches!(inst.kind, AccessKind::GlobalUntagged { .. })
+                                && opcode_head(slot.opcode_text()) == "ST"
+                                && self
+                                    .block_states
+                                    .get(self.warps[wix].block)
+                                    .is_some_and(|state| state.admitted_warps <= 8)
+                        }),
                     warp_sectors,
                     write_barrier,
                     async_destination_wavefronts[sc],

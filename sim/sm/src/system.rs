@@ -3937,9 +3937,10 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                             pending_l2_ready.preflight_register(preview)?;
                             let requested_sectors = u64::from(lookup.sectors);
                             let counted_hits = u64::from(lookup.counted_hits);
-                            let (lookup_observer_requests, lookup_observer_hits) = match req
-                                .operation
-                            {
+                            let observer_operation =
+                                req.observer_operation.unwrap_or(req.operation);
+                            let lookup_for_operation = |operation| -> Result<(u64, u64), SystemError> {
+                                Ok(match operation {
                                 MemoryOperation::Read => (
                                     requested_sectors,
                                     counted_hits
@@ -3968,7 +3969,16 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                                     requested_sectors,
                                     u64::from(lookup.present_sectors),
                                 ),
+                                })
                             };
+                            // Physical lookup totals remain tied to the
+                            // actual hierarchy operation. The optional
+                            // observer tag only partitions operation-qualified
+                            // counters (generic ST.E is the current user).
+                            let (lookup_observer_requests, lookup_observer_hits) =
+                                lookup_for_operation(req.operation)?;
+                            let (operation_observer_requests, operation_observer_hits) =
+                                lookup_for_operation(observer_operation)?;
                             let source_ix = req.source as usize;
                             let origin_masks = [
                                 req.sector_mask & !req.local_sector_mask,
@@ -4303,48 +4313,48 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                                 observed_hits: counted_hits,
                                 lookup_observer_requests,
                                 lookup_observer_hits,
-                                read_lookup_requests: if matches!(req.operation, MemoryOperation::Read) {
-                                    lookup_observer_requests
+                                read_lookup_requests: if matches!(observer_operation, MemoryOperation::Read) {
+                                    operation_observer_requests
                                 } else {
                                     0
                                 },
-                                read_lookup_hits: if matches!(req.operation, MemoryOperation::Read) {
-                                    lookup_observer_hits
+                                read_lookup_hits: if matches!(observer_operation, MemoryOperation::Read) {
+                                    operation_observer_hits
                                 } else {
                                     0
                                 },
-                                read_pending_merge_hits: if matches!(req.operation, MemoryOperation::Read) {
+                                read_pending_merge_hits: if matches!(observer_operation, MemoryOperation::Read) {
                                     u64::from(preview.pending_merge_mask().count_ones())
                                 } else {
                                     0
                                 },
-                                store_lookup_requests: if matches!(req.operation, MemoryOperation::Store) {
-                                    lookup_observer_requests
+                                store_lookup_requests: if matches!(observer_operation, MemoryOperation::Store) {
+                                    operation_observer_requests
                                 } else {
                                     0
                                 },
-                                store_lookup_hits: if matches!(req.operation, MemoryOperation::Store) {
-                                    lookup_observer_hits
+                                store_lookup_hits: if matches!(observer_operation, MemoryOperation::Store) {
+                                    operation_observer_hits
                                 } else {
                                     0
                                 },
-                                atomic_lookup_requests: if matches!(req.operation, MemoryOperation::Atomic) {
-                                    lookup_observer_requests
+                                atomic_lookup_requests: if matches!(observer_operation, MemoryOperation::Atomic) {
+                                    operation_observer_requests
                                 } else {
                                     0
                                 },
-                                atomic_lookup_hits: if matches!(req.operation, MemoryOperation::Atomic) {
-                                    lookup_observer_hits
+                                atomic_lookup_hits: if matches!(observer_operation, MemoryOperation::Atomic) {
+                                    operation_observer_hits
                                 } else {
                                     0
                                 },
-                                reduction_lookup_requests: if matches!(req.operation, MemoryOperation::Reduction) {
-                                    lookup_observer_requests
+                                reduction_lookup_requests: if matches!(observer_operation, MemoryOperation::Reduction) {
+                                    operation_observer_requests
                                 } else {
                                     0
                                 },
-                                reduction_lookup_hits: if matches!(req.operation, MemoryOperation::Reduction) {
-                                    lookup_observer_hits
+                                reduction_lookup_hits: if matches!(observer_operation, MemoryOperation::Reduction) {
+                                    operation_observer_hits
                                 } else {
                                     0
                                 },
