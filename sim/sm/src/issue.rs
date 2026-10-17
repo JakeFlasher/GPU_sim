@@ -8659,6 +8659,14 @@ impl<'a> SmCore<'a> {
                     )?;
                 } else {
                     st.l1.count_untagged(origin, u64::from(len))?;
+                    if observer_store {
+                        let hits = projected_l1_write_lookup_hits(
+                            AccessKind::GlobalStore { off, len },
+                            sectors,
+                        )
+                        .unwrap_or(0);
+                        st.l1.count_write_lookup_hits(origin, hits)?;
+                    }
                 }
                 let async_group = if async_copy {
                     let delivery_work = async_copy_completion_work(kind).unwrap_or(0);

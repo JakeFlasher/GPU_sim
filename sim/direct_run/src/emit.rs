@@ -1101,9 +1101,28 @@ fn emit_l1tex_read_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitE
 /// specific lookup observer. SM120 has no supported write-lookup window and
 /// instead reports resident-sector hits in the explicitly effective L1 model.
 /// These terms do not change cache state, write routing, or replay timing.
-pub(crate) fn l1_write_hit_terms(arch: ArchId, l1: &L1Counters) -> [u64; 2] {
+pub(crate) fn l1_write_hit_terms(
+    arch: ArchId,
+    l1: &L1Counters,
+    trace: Option<&TraceMetrics>,
+) -> [u64; 2] {
     match arch {
         ArchId::Sm86 => [l1.write_lookup_hits, 0],
+        ArchId::Sm120 if trace.is_some_and(|metrics| {
+            metrics
+                .launch_resources
+                .as_ref()
+                .is_some_and(|resources| resources.block_threads <= 256)
+                &&
+            metrics
+                .memory
+                .get("global_store")
+                .is_none_or(|traffic| traffic.sectors == 0)
+                && metrics
+                    .memory
+                    .get("unclassified_global")
+                    .is_some_and(|traffic| traffic.sectors != 0)
+        }) => [l1.write_lookup_hits, l1.reduction_hits],
         ArchId::Sm120 => [l1.store_hits, l1.reduction_hits],
     }
 }
@@ -1159,7 +1178,8 @@ fn emit_l1tex_unified_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, Em
             key,
             operation: "unified L1 effective lookup-hit numerator",
         })?;
-    let [default_store_hits, reduction_hits] = l1_write_hit_terms(snap.arch, l1);
+    let [default_store_hits, reduction_hits] =
+        l1_write_hit_terms(snap.arch, l1, snap.trace_metrics);
     let store_hits = if use_local_observer {
         global
             .store_hits

@@ -3051,7 +3051,8 @@ pub(super) fn project(
                 "modeled unified L1TEX observer counter; cache state and lookup packetization are explicit",
             );
         }
-        let [store_hits, reduction_hits] = crate::emit::l1_write_hit_terms(result.arch(), l1);
+        let [store_hits, reduction_hits] =
+            crate::emit::l1_write_hit_terms(result.arch(), l1, Some(result.trace_metrics()));
         let unified_hit_num = u128::from(l1.hits)
             + u128::from(l1.pending_lookup_hits)
             + u128::from(store_hits)
