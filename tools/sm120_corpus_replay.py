@@ -262,8 +262,8 @@ def main() -> int:
                         help="override the default effective L1 parameters: CAPACITY:MSHR|none:HIT:MISS")
     parser.add_argument("--sm120-effective-l2",
                         help="override the default effective L2 parameters: CAPACITY_BYTES:SLICES:ASSOCIATIVITY")
-    parser.add_argument("--carded-dram", action="store_true",
-                        help="enable the architecture-card DRAM path when the card provides validated bandwidth")
+    parser.add_argument("--carded-dram", action=argparse.BooleanOptionalAction, default=True,
+                        help="enable the prototype architecture-card DRAM path (default: enabled; use --no-carded-dram for baseline)")
     parser.add_argument("--timeout", type=float, default=1200, help="seconds per complete capture replay")
     parser.add_argument("--max-sim-output-bytes", type=int, default=512 * 1024 * 1024,
                         help="bounded simulator stdout retained by the driver")
