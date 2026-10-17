@@ -372,8 +372,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--timeout must be positive and finite")
     if args.max_sim_output_bytes <= 0:
         parser.error("--max-sim-output-bytes must be positive")
-    if args.workers != 12:
-        parser.error("--workers must be exactly 12 for every corpus replay")
+    if args.workers not in (1, 12):
+        parser.error("--workers must be 1 (sequential timing) or 12 (standard corpus replay)")
     if args.sm120_effective_l2 and args.mode == "fast":
         parser.error("--sm120-effective-l2 applies only to the full l1-l2 stage")
     if args.sm120_effective_l2 and args.memory_mode != "l1-l2":
