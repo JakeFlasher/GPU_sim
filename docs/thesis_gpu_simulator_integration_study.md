@@ -274,3 +274,28 @@ The current paper should state these plainly:
 These are future-work statements, not exclusions used to manufacture a claim.
 The raw compressed replays, profile directories, joins, and unavailable metric
 inventory remain the authoritative audit trail.
+
+## 7. SOTA comparison used by the new figures
+
+The figure matrix and paper table use the following local-audit evidence.  The
+reported numbers are reproduced only as context because the systems use
+different devices, workloads, abstraction levels, and denominators.
+
+| System/family | Abstraction and scope | Reported result in the local audit | Comparison to this replay stack |
+|---|---|---|---|
+| Accel-Sim | Native NVIDIA SASS plus detailed model | Validated public framework | Closest workflow baseline; our claim is not “first SASS replay” |
+| MGPUSim/Akita | Event/protocol GPU components | ISCA validation and active AMD ecosystem | Event-driven precedent; different vendor/trace contract |
+| NVArchSim | Industrial event-driven NVIDIA model | Trustworthy variable-fidelity lessons | Event-driven precedent; not a public same-corpus baseline |
+| Modern GPU core (MICRO 2025) | SASS/core reconstruction | 13.45% mean MAPE | Modern core-fidelity bar; different cohort and projections |
+| Sim-FA | Hopper asynchronous pipeline | 5.7% MAPE on H800 FA3 | Specialized TMA/WGMMA scope |
+| GPU-Tile-Sim/GTSim | Warp-level tile graph | 1.22–8.71% on A100/H100 | Coarser tile abstraction and different workload set |
+| PipeWeave | Analytical plus learned interactions | 6.1% kernel; 8.5% end-to-end | Prediction model, not causal per-sector replay |
+| TileSight | First-principles tile/core/cache/network | 12.35% single-GPU; 13.52% serving | Tile/network abstraction and serving scope |
+| LPGSim | Compressed SASS/local clocks | 21.4–23.3% cycle error; 9.97× single-thread Accel-Sim speedup | Relaxed/local-clock policy; no same-host comparison here |
+
+The project is strongest when it makes the integration boundary explicit: the
+dynamic/SASS identity join, sector-qualified L1/L2 state, four separately named
+frontiers, directory-scoped NCU joining, and complete 286/339-root evidence.
+The matrix intentionally avoids a radar-score or “SOTA” scalar because such a
+score would erase the differences between sampling, analytical prediction,
+tile modeling, and native trace replay.
