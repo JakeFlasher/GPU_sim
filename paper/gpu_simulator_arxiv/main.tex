@@ -238,7 +238,14 @@ We expose four frontiers:
     and engine completion that the trace does not establish.
 \end{enumerate}
 
-This separation prevents a terminal dirty line or an unobserved asynchronous
+For a non-expert, a frontier is the furthest timestamp reached by one named
+class of work, like the front edge of a moving wave.  It is not a second GPU
+clock and the four frontiers are not added blindly.  The issue frontier says
+when the last modeled instruction was admitted; the completion frontier says
+when declared responses/barriers were satisfied; the observation frontier is
+the explicitly documented projection used for an NCU-shaped metric; and typed
+tails say that the trace does not establish a required endpoint.  Keeping these
+edges separate prevents a terminal dirty line or an unobserved asynchronous
 engine acknowledgement from silently becoming a kernel-cycle claim.
 
 \section{SIMT execution and multi-threading strategy}
@@ -364,9 +371,11 @@ and 10501 MHz memory.  The SM120 corpus contains 339 successful roots and
 the integrated effective L1/L2 lane; DRAM-disabled and prototype-carded runs
 are both retained.
 
-All generated replay JSONL artifacts are compressed.  Full replay precedes any
-fast complementary lane.  NCU values are never consumed by the simulator or
-used to select a card parameter.
+All architectural metrics and accuracy claims in this paper come from the
+full replay lane only.  No fast-replay output is used in a table, figure,
+denominator, or conclusion.  Generated replay JSONL artifacts are compressed,
+and NCU values are never consumed by the simulator or used to select a card
+parameter.
 
 \subsection{Join and scoring rules}
 
