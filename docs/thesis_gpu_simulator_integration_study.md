@@ -228,7 +228,9 @@ the same rules:
 
 The paper reuses the mechanism-first vocabulary from
 `gpu_simulator_presentation/publication_figures/` but regenerates its result
-figure from the current H116 and SM120 full-corpus summaries.  The older
+figures from current architecture and metric data: contribution stack,
+concrete sim-trace/sim-sm/sim-engine/sim-mem/sim-run pipeline, causal timeline,
+SOTA matrix, and results dashboard.  The older
 15-workload figure is retained as historical evidence only and is not used as
 the current accuracy headline.
 

@@ -241,6 +241,26 @@ We expose four frontiers:
 This separation prevents a terminal dirty line or an unobserved asynchronous
 engine acknowledgement from silently becoming a kernel-cycle claim.
 
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figures/architecture_pipeline.pdf}
+  \caption{Native replay architecture and dataflow.  Concrete workload,
+  trace, sidecar, and card artifacts flow through `sim-trace', `sim-sm',
+  `sim-engine', and `sim-mem' before `sim-run' emits JSONL counters and
+  frontiers.  NCU is a one-way post-replay comparator.}
+  \label{fig:architecture-pipeline}
+\end{figure}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figures/causal_timeline.pdf}
+  \caption{One instruction through the causal replay pipeline.  The worked
+  slice separates issue, L1 lookup, shared-L2 miss, service, fill/wake-up, and
+  the three report frontiers; the MSHR merge is explicit rather than hidden in
+  a scalar latency.}
+  \label{fig:causal-timeline}
+\end{figure}
+
 \section{Implementation}
 \label{sec:implementation}
 

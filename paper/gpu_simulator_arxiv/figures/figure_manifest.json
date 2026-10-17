@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "style": "mechanism_first_architecture_v3",
+  "figures": [
+    {
+      "file": "novelty_stack.svg",
+      "title": "Trace-to-frontier contribution boundary",
+      "question": "What is observed, what is replayed, and what is independently measured?",
+      "source": "generate_figures.py; corrected full-corpus joins"
+    },
+    {
+      "file": "architecture_pipeline.svg",
+      "title": "Native replay architecture and dataflow",
+      "question": "How do dynamic trace, SASS sidecar, architecture card, and simulator crates connect?",
+      "source": "docs/ARCHITECTURE.md; docs/COMPONENTS.md"
+    },
+    {
+      "file": "causal_timeline.svg",
+      "title": "Instruction-to-frontier causal timeline",
+      "question": "Which events own issue, completion, wake-up, and observation frontiers?",
+      "source": "sim-engine, sim-sm, sim-mem frontier semantics"
+    },
+    {
+      "file": "sota_matrix.svg",
+      "title": "Scope-aware modern SOTA matrix",
+      "question": "Which capability intersection distinguishes this replay stack?",
+      "source": "GPU_sims_notes SOTA audit"
+    },
+    {
+      "file": "results_dashboard.svg",
+      "title": "Complete-corpus results dashboard",
+      "question": "Which metrics meet 10/15 percent thresholds and how do campaign boundaries compare?",
+      "source": "H116 SM86; corrected 339-directory SM120 reduction; runtime notes"
+    }
+  ]
+}

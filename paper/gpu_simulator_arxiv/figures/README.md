@@ -4,6 +4,10 @@
 
 * `novelty_stack.svg`: observed evidence → causal replay → independent NCU
   authority, with inherited mechanisms and the integration boundary explicit;
+* `architecture_pipeline.svg`: concrete `sim-trace`/`sim-sm`/`sim-engine`/
+  `sim-mem`/`sim-run` architecture and one-way NCU dataflow;
+* `causal_timeline.svg`: issue→L1→L2→service→wake-up event ownership and
+  separated frontiers;
 * `sota_matrix.svg`: scope-aware comparison against modern simulator and
   analytical-model families; and
 * `results_dashboard.svg`: thresholded architecture metrics plus campaign cost
