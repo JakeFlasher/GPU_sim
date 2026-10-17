@@ -936,10 +936,15 @@ pub(crate) fn global_read_resident_hit_adjustment(
         .and_then(|metrics| metrics.memory.get("global_store"))
         .map(|traffic| traffic.sectors)
         .unwrap_or(l1.origin(MemoryOrigin::Global).store_sectors);
+    let global_load_sectors = trace
+        .and_then(|metrics| metrics.memory.get("global_load"))
+        .map(|traffic| traffic.sectors)
+        .unwrap_or(0);
     let small_store_scope = store_sectors <= 64
         || trace.is_none_or(|metrics| {
             metrics.launch_resources.as_ref().is_none_or(|resources| {
                 resources.block_threads != 128
+                    || (resources.grid_blocks > 1 && global_load_sectors > 256)
             })
         });
     if arch != ArchId::Sm120 || !small_store_scope {
