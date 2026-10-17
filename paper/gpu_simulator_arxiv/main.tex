@@ -4,6 +4,7 @@
 \usepackage{microtype}
 \usepackage{amsmath,amssymb}
 \usepackage{booktabs}
+\usepackage{tabularx}
 \usepackage{graphicx}
 \usepackage{enumitem}
 \usepackage{xcolor}
@@ -131,6 +132,60 @@ contract with explicit scope and full-corpus evidence.  We do not claim
 proprietary cache hashes, MSHR counts, scheduler RTL, universal architecture
 support, or a new general theory of trace sufficiency.
 
+Figure~\ref{fig:sota-matrix} makes the comparison concrete.  Accel-Sim owns
+the public native-SASS validation workflow; MGPUSim/Akita and NVArchSim own
+event/protocol and industrial variable-fidelity precedents; Huerta et al. set a
+modern NVIDIA core-fidelity reference; and Sim-FA, GPU-Tile-Sim/GTSim,
+PipeWeave, and TileSight occupy asynchronous, tile, analytical, and learned
+abstraction points.  Our differentiator is the intersection of native trace
+identity, sector-aware causal replay, separated frontier semantics,
+post-replay NCU joins, and complete 286/339-root evidence.  The matrix is
+qualitative and deliberately does not sum heterogeneous capabilities into a
+single score.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figures/sota_matrix.pdf}
+  \caption{Scope-aware positioning against modern GPU simulation.  A checkmark
+  denotes in-scope evidence, a tilde denotes partial or different abstraction,
+  and a dash denotes a capability not claimed.  This is a capability
+  intersection, not a scalar ranking of unrelated papers.}
+  \label{fig:sota-matrix}
+\end{figure}
+
+The contemporary reported numbers sharpen the comparison but are not a pooled
+leaderboard: the MICRO 2025 modern-core model reports 13.45\% mean MAPE;
+Sim-FA reports 5.7\% MAPE for its H800 FlashAttention-3 study;
+GPU-Tile-Sim reports 1.22--8.71\% on its A100/H100 tile workloads;
+PipeWeave reports 6.1\% average kernel error and 8.5\% end-to-end inference
+error; and TileSight reports 12.35\% pooled single-GPU MAPE and 13.52\%
+serving weighted MAPE.  LPGSim reports 21.4--23.3\% cycle error across its
+V100/A100/RTX3090 study and a 9.97$\times$ single-thread Accel-Sim speedup.
+These values use different devices, workloads, abstractions, and denominators;
+our paper therefore compares capability and scope, then reports our own
+launch-level MAPE separately.
+
+\begin{table}[t]
+  \centering
+  \caption{Reported contemporary SOTA results from the local literature audit.
+  The values are context, not a cross-paper leaderboard; our launch-level
+  metrics are reported separately in Table~\ref{tab:accuracy}.}
+  \label{tab:sota-reported}
+  \small
+  \begin{tabularx}{\linewidth}{@{}p{2.2cm}p{3.0cm}p{3.0cm}X@{}}
+    \toprule
+    System & Abstraction / target & Reported result & Why it is not pooled here\\
+    \midrule
+    Modern GPU core & SASS/core, modern NVIDIA & 13.45\% mean MAPE & Different core model and cohort\\
+    Sim-FA & Hopper async pipeline & 5.7\% MAPE & H800 FA3/TMA scope\\
+    GPU-Tile-Sim & Warp-level tiles & 1.22--8.71\% MAPE & A100/H100 tile workloads\\
+    PipeWeave & Analytical + learned & 6.1\% kernel; 8.5\% end-to-end & Prediction, not causal replay\\
+    TileSight & First-principles tiles & 12.35\% single-GPU; 13.52\% serving & Tile/network abstraction\\
+    LPGSim & Compressed SASS replay & 21.4--23.3\% cycle error; 9.97$\times$ Accel-Sim & Relaxed/local-clock policy\\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
 \section{Replay contract}
 \label{sec:contract}
 
@@ -155,11 +210,13 @@ are also reported in the secondary like-for-like view.
 
 \begin{figure}[t]
   \centering
-  \includegraphics[width=\linewidth]{figures/workflow.pdf}
-  \caption{Six transformations in the replay contract.  Concrete trace and
-    sidecar artifacts become a scheduled hierarchy replay and named frontiers.
-    The dashed NCU branch is observation-only and cannot alter replay state.}
-  \label{fig:workflow}
+  \includegraphics[width=\linewidth]{figures/novelty_stack.pdf}
+  \caption{The contribution is a trace-to-frontier evidence contract.  The
+    left panel shows what the recorder knows, the middle panel shows the causal
+    replay integration, and the right panel shows the independent NCU authority
+    and launch-scope decision.  The bottom boundary states what is inherited
+    rather than claimed as new.}
+  \label{fig:novelty-stack}
 \end{figure}
 
 \subsection{State and frontiers}
@@ -218,17 +275,6 @@ Each prediction carries its source and semantics.  For example, a TMA payload
 sector count is labeled conditional demand rather than an achieved DRAM
 acknowledgement, and an IPC projection is labeled model-relative rather than a
 silicon issue-width measurement.
-
-\begin{figure}[t]
-  \centering
-  \includegraphics[width=\linewidth]{figures/trace_frontier.pdf}
-  \caption{A worked trace-to-frontier path.  Dynamic lane sectors and static
-  control produce ordered L1/L2/memory events, while issue, completion,
-  hardware-observation, and typed-tail frontiers remain distinct.  The numeric
-  frontier annotations are illustrative campaign values, not an accuracy
-  claim for this paper's aggregate table.}
-  \label{fig:trace-frontier}
-\end{figure}
 
 \section{Experimental method}
 \label{sec:method}
@@ -319,6 +365,17 @@ We intentionally do not headline DRAM-read traffic, aggregate L2 lookup hits,
 unified hit rates, or GPC/SM completion families whose current residuals or
 scope contracts do not meet the declared bar.  They remain in the compressed
 metric reports and in the future-work section.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\linewidth]{figures/results_dashboard.pdf}
+  \caption{Complete-corpus results and campaign boundaries.  Panel (a) shows
+  only architecture-facing metrics at or below the 15\% bar, with 10\% and
+  15\% thresholds explicit.  Panel (b) distinguishes bare GPU, simulator,
+  NCU, and NVBit campaign time; unresolved DRAM and completion families remain
+  future work.}
+  \label{fig:results-dashboard}
+\end{figure}
 
 \subsection{Replay and measurement cost}
 
