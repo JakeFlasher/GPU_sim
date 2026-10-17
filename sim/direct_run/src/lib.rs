@@ -286,6 +286,10 @@ impl RunConfig {
                 config.sm120_effective_l1.get_or_insert_with(Default::default);
                 config.sm120_effective_l2.get_or_insert_with(Default::default);
                 config.ncu_shaped_metrics = true;
+                // The latent envelope is observer-only. Carded DRAM remains
+                // explicit because the SM120 card marks bandwidth as a
+                // research gap and the runner must fail closed, not guess.
+                config.latent_envelope = true;
             }
         }
         Ok(config)

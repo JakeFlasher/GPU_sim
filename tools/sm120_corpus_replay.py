@@ -263,12 +263,12 @@ def main() -> int:
     parser.add_argument("--sm120-effective-l2",
                         help="override the default effective L2 parameters: CAPACITY_BYTES:SLICES:ASSOCIATIVITY")
     parser.add_argument("--carded-dram", action="store_true",
-                        help="enable the architecture-card DRAM path (for l1-l2 mode)")
+                        help="enable the architecture-card DRAM path when the card provides validated bandwidth")
     parser.add_argument("--timeout", type=float, default=1200, help="seconds per complete capture replay")
     parser.add_argument("--max-sim-output-bytes", type=int, default=512 * 1024 * 1024,
                         help="bounded simulator stdout retained by the driver")
     parser.add_argument("--workers", type=int, default=12,
-                        help="concurrent simulator processes (must be exactly 12)")
+                        help="concurrent simulator processes (1 for sequential timing, 12 by default)")
     args = parser.parse_args()
     args.capture_root = args.capture_root.resolve()
     args.output = args.output.resolve()
@@ -278,8 +278,8 @@ def main() -> int:
         parser.error("--timeout must be positive and finite")
     if args.max_sim_output_bytes <= 0:
         parser.error("--max-sim-output-bytes must be positive")
-    if args.workers != 12:
-        parser.error("--workers must be exactly 12 for every corpus replay")
+    if args.workers not in (1, 12):
+        parser.error("--workers must be 1 (sequential timing) or 12 (standard replay)")
     if args.sm120_effective_l2 and args.mode == "fast":
         parser.error("--sm120-effective-l2 applies only to the full l1-l2 stage")
     if args.sm120_effective_l2 and args.memory_mode != "l1-l2":
