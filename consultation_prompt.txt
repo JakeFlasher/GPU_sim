@@ -382,3 +382,25 @@ Fenwick structure and a true issue/L2 arrival stream. Required go/no-go
 invariants include reference conservation, coalescing idempotence,
 `Delta t - 1 >= RD` for sampled witnesses, line/sector cardinality bounds,
 and bit-identical timing when the observer is disabled.
+
+FINAL NEXT-PHASE GATE — GEMINI FOLLOW-UP
+=======================================
+The complete follow-up memo is `/tmp/gemini_next_phase.txt`. It compares the
+three possible seams. The current extraction observer is safe only for
+intra-warp locality. `sim/sm/src/issue.rs::SmCore::issue_cycle` after
+preflight/async service is the defensible per-SM L1 commit seam, but its
+inter-SMSP tie-break order is model-conditional. The committed callback around
+`sim/sm/src/system.rs::access_mask_event_coalesced_transactional` is the
+defensible L2 event stream, but TMA payloads are absent from timed events.
+
+Gemini recommends **not** promoting the current RI observer or any sampled
+fully-associative RD curve into active L1/L2 scoring or timing: the live
+simulator already has explicit cycle-interleaved L1 and event-driven L2 models
+that are more faithful than a fully-associative MRC. A SHARDS/Fenwick observer
+is defensible only as a capacity-bound shadow diagnostic after measuring its
+sampling/table budget, RSS, tie-break sensitivity, TMA coverage, and sampled
+`d <= Delta-t - 1` witnesses. Promotion needs frozen held-out/full improvement
+with zero endpoint regressions and no NCU fitting. Missing carveout, SM120
+geometry/hash/replacement, TMA chronology, and client-scope metadata are hard
+ceilings. The recommended action is to stop locality-model promotion and
+report those limitations unless new metadata resolves them.

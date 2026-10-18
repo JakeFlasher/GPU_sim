@@ -204,6 +204,32 @@ conservation, coalescing idempotence, `Δt - 1 >= RD` for sampled witnesses,
 line/sector cardinality bounds, and bit-identical timing with the observer
 disabled.
 
+## Final next-phase gate (Gemini follow-up)
+
+The complete follow-up memo is `/tmp/gemini_next_phase.txt`. It compared the
+three available seams:
+
+1. The current extraction seam is safe only for intra-warp locality.
+2. `sim/sm/src/issue.rs::SmCore::issue_cycle` after preflight/async service is
+   the defensible per-SM L1 commit seam, but its inter-SMSP tie-break order is
+   model-conditional.
+3. The committed callback around
+   `sim/sm/src/system.rs::access_mask_event_coalesced_transactional` is the
+   defensible L2 event stream, but it excludes TMA payloads from timed events.
+
+Gemini recommends **not** promoting either the current RI observer or a
+sampled fully-associative RD curve into active L1/L2 scoring or timing. The
+live simulator already has explicit cycle-interleaved L1 and event-driven L2
+models that are more faithful than a fully-associative MRC. A SHARDS/Fenwick
+observer is defensible only as a capacity-bound shadow diagnostic after
+measuring its sampling rate, table cap, RSS, tie-break sensitivity, TMA
+coverage, and sampled `d <= Δτ - 1` witnesses. Promotion would additionally
+require frozen held-out/full improvement with zero endpoint regressions and no
+NCU fitting. The current missing carveout, SM120 geometry/hash/replacement,
+TMA chronology, and client-scope metadata are hard ceilings; the recommended
+action is to stop locality-model promotion and report those limitations unless
+new metadata resolves them.
+
 ## Raw consultation artifacts
 
 - `/tmp/gemini_mrc_consultation_retry.txt` — concise successful memo.

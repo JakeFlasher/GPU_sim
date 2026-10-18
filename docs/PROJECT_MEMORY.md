@@ -65,3 +65,9 @@ pending/partial-sector states). It did **not** authorize coding or promotion:
 SM120 geometry/hash/replacement, MSHR horizons, and store/TMA policy remain
 unverified research gaps, and NCU values must not fit the model. The complete
 record is `REUSE_MRC_CONSULTATION.md` and `../consultation_prompt.txt`.
+
+The final Gemini gate rejected promotion of the per-warp interval proxy (or a
+sampled fully-associative RD curve) into scored L1/L2 predictions or timing:
+the live cycle-interleaved L1 and event-driven L2 models are more faithful.
+Future SHARDS/Fenwick work is capacity-bound diagnostic only until cross-warp
+chronology, TMA timing, carveout, and set/hash/replacement metadata are proven.

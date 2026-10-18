@@ -106,3 +106,11 @@ The recorded driver wall time was 59.21 s for the shadow SM120 lane versus
 44.44 s (about 1.6%). Compressed output grew by about 3% in each lane. These
 measurements remain below the consultation's provisional 5% replay-overhead
 budget, while no resident cache/timing state was changed.
+
+The final Gemini gate rejected promotion of the interval proxy (and any
+unvalidated sampled fully-associative RD curve) into scored L1/L2 predictions:
+the live cycle-interleaved L1 and event-driven L2 models are more faithful,
+while cross-warp chronology, TMA timing, carveout metadata, and SM120
+set/hash/replacement behavior remain unresolved. Thus this locality phase is
+complete as a validated diagnostic, but it does not claim to close the global
+<10% APE objective or alter existing NCU accuracy projections.

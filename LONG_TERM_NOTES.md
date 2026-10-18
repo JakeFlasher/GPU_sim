@@ -36,3 +36,8 @@ This file is deliberately a current-state note rather than a duplicate.
   store/TMA policy; validate them against cards/traces and keep NCU out of
   fitting. See `docs/REUSE_MRC_CONSULTATION.md` and the appended
   `consultation_prompt.txt` for the full record and literature links.
+* Follow-up Gemini gate: do not promote the per-warp RI proxy or a sampled
+  fully-associative RD curve into active L1/L2 scoring/timing. The live
+  cycle-interleaved L1 and event-driven L2 models are more faithful; a future
+  SHARDS/Fenwick observer is capacity-bound diagnostic only until chronology,
+  TMA timing, carveout, and set/hash/replacement metadata are proven.
