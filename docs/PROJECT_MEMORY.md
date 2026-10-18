@@ -93,4 +93,7 @@ fill-buffer/TMA/carveout, or endpoint-scope evidence; no NCU fitting or count
 balancing is permitted. A subsequent pure-LTC resident+older-pending L1
 candidate remains shadow-only after a zero-target audit found two false
 positives and sector-unit conservation is not yet proven; TMA-shadow DRAM
-subtraction was empirically rejected. See `docs/L2_SCOPE_SHADOW.md`.
+subtraction was empirically rejected. Gemini's definitive gate freezes all
+active IPC/L1/L2 projection changes until TMA descriptor/coordinate and launch
+cache metadata, disaggregated hardware PMU counters, or isolated LTC128B/TMA
+microbenchmarks arrive. See `docs/L2_SCOPE_SHADOW.md`.

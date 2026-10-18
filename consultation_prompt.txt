@@ -627,3 +627,32 @@ APE from 39.56% to 67.62% (all-row 49.28% to 49.37%). Shadow hits do not prove
 NCU DRAM-sector semantics because descriptor policy, cross-CTA chronology,
 fill-buffer horizons, evictions, and payload-volume accounting are unknown.
 Keep TMA shadow fields diagnostic and retain the raw payload demand arm.
+
+DEFINITIVE NO-PROJECTION REVIEW — 2026-10-18
+=============================================
+Gemini's final adversarial review finds **zero remaining trace-grounded active
+projections** for SM120/SM86 IPC, L1, or L2 under the current inputs. The
+validated active set (SM86 global opcode scoping and SM120 async older-pending
+L1 exclusion, plus prior trace-semantic store/TMA observers) is frozen.
+
+Rejected mechanisms are cache-hint opcode subtraction, LTC128B promotion or
+pending-hit projection, constant/uniform re-scoping, fixed coalescing windows,
+TMA volume/DRAM projections, and post-hoc IPC/stall scaling. They respectively
+require advisory-hint behavior, unknown silicon promotion/partition semantics,
+an uncaptured c-cache pipeline, unknown MSHR/tag arbitration, missing TMA
+descriptor/coordinate/chronology state, or banned workload-shape regression.
+
+Minimum external evidence needed to resume active accuracy work:
+
+1. NVBit sidecars for 128-byte CUtensorMap descriptors, runtime TMA
+   coordinates/byte counts, swizzle/L2 promotion policy, and launch L2
+   persistence/warm-state attributes.
+2. Disaggregated PMU counters separating LSU/TMA/TEX tag lookups,
+   MSHR misses/fills, L2 lookup/fill/promotion, and warp stall causes.
+3. Isolated LTC128B/cache-hint and TMA swizzle/promotion microbenchmarks after
+   explicit L2 flush.
+
+Until these arrive, do not tune cache geometry, scheduler weights, latencies,
+or scored projections against NCU. Preserve the complete twelve-worker
+339/339 SM120 and 286/356 SM86 artifacts and report all residuals and the 70
+SM86 non-convergent rows separately.

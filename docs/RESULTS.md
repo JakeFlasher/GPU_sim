@@ -177,3 +177,10 @@ pending merges improved 62 nonzero-target rows (54.4% to 4.38%), but the full
 pure-LTC audit contains 300 zero-target rows and two false positives. Because
 the older-pending counter's sector-unit partition is not yet proven, this
 candidate remains shadow-only; no scored L1 correction was promoted.
+
+Gemini's definitive stop gate freezes further active IPC/L1/L2 projection or
+model changes. Resuming accuracy work requires TMA descriptor/coordinate and
+launch-cache metadata, disaggregated tag/MSHR/fill/stall PMU counters, or
+isolated LTC128B/TMA microbenchmarks; cache-hint subtraction, fixed coalescing
+windows, constant-pipeline re-scoping, IPC scaling, and further TMA/LTC
+projections are not defensible under the current trace contract.

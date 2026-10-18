@@ -72,3 +72,9 @@ This file is deliberately a current-state note rather than a duplicate.
   older-pending L1 numerator is mechanistically plausible but remains
   shadow-only: 300 zero-target rows and two false positives, plus unproven
   sector-unit conservation, fail the promotion gate.
+* Gemini definitive stop gate: no remaining active trace-only IPC/L1/L2
+  projection is defensible. Resume only after TMA descriptor/coordinate and
+  launch-cache metadata, disaggregated tag/MSHR/fill/stall counters, or
+  isolated LTC128B/TMA microbenchmarks are obtained. Preserve complete
+  twelve-worker replay artifacts and report residuals/SM86 coverage boundaries
+  without tuning against NCU.
