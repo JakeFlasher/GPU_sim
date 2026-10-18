@@ -134,3 +134,19 @@ The full SM120 evaluation shows a small improvement in unified/global L1 hit
 APE (approximately 58.40%→58.01% and 39.36%→39.32%); L2, DRAM, and IPC are
 unchanged. LTC128B and L2 additive hit-volume residuals remain observer-only
 research gaps; Gemini rejected active sibling-sector promotion.
+
+## Typed L2 client-scope shadow
+
+The committed L2 event seam now emits passive client-scope accounting for
+ordinary LDG, constant LDG, LTC128B, LDGSTS cache/bypass, local, store,
+atomic, reduction, and unknown requests. Each request is partitioned into
+resident, pending-merge, and fill-miss masks. LTC128B potential sibling
+promotion is reported only as diagnostic volume; no sibling sector is inserted
+into physical cache or DRAM state.
+
+Full-only validation with twelve workers passed for both lanes (SM120 339/339
+`ok`, 11,558 launches; SM86 286/62/8, 12,392 launches), and the reuse
+invariant checker passed. `FULL_NUMERIC_COMPARISON_L2_SHADOW.json` shows no
+physical-cache/timing regressions; the only SM120 numeric differences are the
+already-promoted async L1 scope projection. The client-scope arrays are
+diagnostic only and do not claim a new <10% L2 prediction.

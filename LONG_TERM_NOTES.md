@@ -54,3 +54,7 @@ This file is deliberately a current-state note rather than a duplicate.
   leaving L2/DRAM/IPC unchanged; physical state/timing and SM86 were untouched.
   Do not broaden it to ordinary pending merges or promote LTC128B/LDGSTS L2
   sibling/volume corrections without a new Gemini-reviewed crosswalk.
+* 2026-10-18 typed L2 shadow: the committed event path now reports static
+  client-scope request/resident/pending/fill partitions and a non-promoted
+  LTC128B potential-sibling volume. It leaves physical L2/DRAM/timing intact
+  and passed both twelve-worker full lanes; see `docs/L2_SCOPE_SHADOW.md`.

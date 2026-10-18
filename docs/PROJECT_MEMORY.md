@@ -78,3 +78,9 @@ projections. It passed complete full replays at twelve workers for both lanes,
 slightly improving SM120 L1 hit APE without changing physical state, timing,
 L2, DRAM, IPC, or SM86. LTC128B/LDGSTS L2 hit-volume gaps remain observer-only
 scope limitations pending a crosswalk.
+
+The typed L2 client-scope shadow is now implemented at the transactional event
+seam. It reports conserved resident/pending/fill masks by static client class
+and potential LTC128B sibling volume only; it does not alter scored L2/DRAM or
+timing outputs. See `docs/L2_SCOPE_SHADOW.md` and
+`FULL_NUMERIC_COMPARISON_L2_SHADOW.json`.
