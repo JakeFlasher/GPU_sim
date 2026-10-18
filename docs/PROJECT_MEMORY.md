@@ -57,3 +57,11 @@ fast-mode artifacts; use the complete integrated `l1-l2` path with all
 supported features enabled by default and twelve workers.
 The SM120 DRAM-disabled full-replay variant is also out of scope; use the
 DRAM-enabled/card-feature SM120 full lane and the SM86 full lane.
+
+On 2026-10-18 Gemini's read-only reuse-distance/reuse-interval consultation
+recommended a trace-derived, shadow-only MRC observer (128-byte lines plus
+four 32-byte sector masks, separate per-SM/L2 streams, and explicit cold/
+pending/partial-sector states). It did **not** authorize coding or promotion:
+SM120 geometry/hash/replacement, MSHR horizons, and store/TMA policy remain
+unverified research gaps, and NCU values must not fit the model. The complete
+record is `REUSE_MRC_CONSULTATION.md` and `../consultation_prompt.txt`.

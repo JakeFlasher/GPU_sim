@@ -8,8 +8,10 @@ This file is deliberately a current-state note rather than a duplicate.
   all builds, tests, and edits happen in this workspace.
 * Supported lanes: SM86 / RTX 3090 Ti and SM120 / RTX 5090, selected by card
   and capture metadata.
-* Full replay: SM120 339 captures in each DRAM mode; SM86 356 attempted with
-  286 successful rows. Complete runs use twelve workers and compressed JSONL.
+* Full replay: the required SM120 lane is the 339-capture DRAM-enabled/card
+  configuration; SM120 DRAM-disabled replay is out of scope. SM86 has 356
+  attempted captures with 286 successful rows. Complete runs use twelve
+  workers and compressed JSONL.
 * Latest audit: `FULL_NUMERIC_COMPARISON.json` reports zero missing/extra rows,
   required-metadata differences, and common numeric differences in all three
   campaigns.
@@ -25,3 +27,12 @@ This file is deliberately a current-state note rather than a duplicate.
 * Latest full-enabled progress: trace-semantic SM120 store-packet and TMA-store-cold-miss observers completed 339-capture and 286-successful-SM86 full replays with 12 workers. Generic SM120 L2 hit APE improved from ~57% to ~24.3%; operation-read, unified-L1, DRAM, and IPC residuals remain above 10%.
 * Replay scope directive: do not run fast replay. Accuracy and correctness work uses only complete full replay with all supported features enabled by default (integrated `l1-l2`, card-selected architecture behavior, and twelve workers); fast-mode artifacts are not required.
 * SM120 replay scope refinement: do not run the SM120 DRAM-disabled full replay. The required SM120 accuracy lane is the full DRAM-enabled/card-feature configuration; continue SM86 full replay as required.
+* 2026-10-18 reuse-model consultation: Gemini advised a shadow-only,
+  trace-derived reuse-distance/reuse-interval observer using 128-byte line
+  identities plus four 32-byte sector masks, with separate per-SM and L2
+  reference streams, explicit cold/pending/partial-sector states, and
+  report-only MRCs before any promotion. This is design advice, not hardware
+  truth: do not hard-code SM120 geometry/hash/replacement, MSHR windows, or
+  store/TMA policy; validate them against cards/traces and keep NCU out of
+  fitting. See `docs/REUSE_MRC_CONSULTATION.md` and the appended
+  `consultation_prompt.txt` for the full record and literature links.
