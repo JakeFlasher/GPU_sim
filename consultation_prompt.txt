@@ -115,3 +115,14 @@ generic client endpoint and ordered joins may be scope-limited. Any proposed
 change must preserve operation-read sector conservation, full replay status
 profiles, and all timing/state frontiers, and must be rejected if it is a
 per-workload rule or count-balancing heuristic.
+
+Rejected pending-read promotion
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A trace-semantic attempt to remove pending-merge sectors from the SM120
+operation-read observer was run through the complete enabled SM120 corpus and
+SM86 corpus with twelve workers. It regressed SM120 operation-read hit APE
+from 14.9% to 96.4% (and worsened generic hit APE), while SM86 was unchanged.
+The change was reverted and the required full replays were rerun successfully.
+Pending merges therefore remain part of the operation-read observer; the
+earlier L2 classifier gate is not promoted into that endpoint.
