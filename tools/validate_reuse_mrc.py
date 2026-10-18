@@ -63,12 +63,19 @@ def _check_launch(launch: dict[str, Any], context: str, errors: list[str]) -> bo
     if not isinstance(line_hist, list) or not isinstance(sector_hist, list):
         errors.append(f"{context}: missing reuse histograms")
         return False
+    histogram_valid = True
+    for name, histogram in (("line", line_hist), ("sector", sector_hist)):
+        for index, value in enumerate(histogram):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                errors.append(f"{context}: {name} histogram[{index}] is invalid")
+                histogram_valid = False
     line_overflow = _int(reuse, "line_reuse_interval_overflow", errors, context)
     sector_overflow = _int(reuse, "sector_reuse_interval_overflow", errors, context)
-    if sum(line_hist) + line_overflow != line_reused:
-        errors.append(f"{context}: line histogram mass failed")
-    if sum(sector_hist) + sector_overflow != sector_reused:
-        errors.append(f"{context}: sector histogram mass failed")
+    if histogram_valid:
+        if sum(line_hist) + line_overflow != line_reused:
+            errors.append(f"{context}: line histogram mass failed")
+        if sum(sector_hist) + sector_overflow != sector_reused:
+            errors.append(f"{context}: sector histogram mass failed")
 
     for field, refs in (
         ("line_proxy_miss_references", line_refs),
@@ -109,9 +116,16 @@ def validate(path: Path, expected_statuses: dict[str, int] | None) -> dict[str, 
             except json.JSONDecodeError as exc:
                 errors.append(f"capture[{index}]: invalid JSON: {exc}")
                 continue
+            if not isinstance(capture, dict):
+                errors.append(f"capture[{index}]: root must be an object")
+                continue
             status = str(capture.get("status", "missing"))
             statuses[status] = statuses.get(status, 0) + 1
-            for launch_index, launch in enumerate(capture.get("launches") or []):
+            launch_rows = capture.get("launches", [])
+            if not isinstance(launch_rows, list):
+                errors.append(f"capture[{index}]: launches must be a list")
+                continue
+            for launch_index, launch in enumerate(launch_rows):
                 launches += 1
                 if isinstance(launch, dict) and _check_launch(
                     launch, f"capture[{index}].launch[{launch_index}]", errors

@@ -188,6 +188,22 @@ not alter existing predictions. Full enabled-SM120 and SM86 replay validation
 with twelve workers is required before considering any later, separately
 consulted cycle-interleaved design.
 
+## Follow-up correction to the locality equations
+
+The focused correction memo `/tmp/gemini_reuse_correction.txt` supersedes any
+tempting stronger interpretation of the earlier design sketch. A timestamp
+gap `Δt` is reuse interval/time; exact LRU reuse distance is the number of
+**distinct** intervening items. Sector intervals likewise do not prove sector
+residency after tag eviction. Therefore this implementation emits only the
+bounded interval histogram and survival sensitivity proxy; it does not emit
+MRC hit rates or feed those values into the simulator. A future exact sampled
+RD observer would need deterministic SHARDS-style sampling plus an
+order-statistics/Fenwick structure, and would still require true issue/L2
+arrival streams. The correction's go/no-go invariants include reference
+conservation, coalescing idempotence, `Δt - 1 >= RD` for sampled witnesses,
+line/sector cardinality bounds, and bit-identical timing with the observer
+disabled.
+
 ## Raw consultation artifacts
 
 - `/tmp/gemini_mrc_consultation_retry.txt` — concise successful memo.

@@ -367,3 +367,18 @@ explicit diagnostics. The executioner is authorized only to implement this
 shadow phase, add invariant tests, validate it on full enabled-SM120 and SM86
 replays with twelve workers, and stop before any active cache/timing change
 unless a new Gemini consultation and evidence support promotion.
+
+FOCUSED CORRECTION — RI IS NOT RD / MRC
+=======================================
+Gemini's complete correction memo is `/tmp/gemini_reuse_correction.txt`.
+It supersedes any stronger interpretation of the earlier sketch: a timestamp
+gap `Delta t` is reuse interval/time, while exact LRU reuse distance counts
+distinct intervening items. Sector intervals do not prove sector residency
+after tag eviction. The safe phase-1 output is therefore only a bounded RI
+histogram and survival sensitivity proxy; it must not emit MRC hit rates or
+feed them into cache/timing projections. A future exact sampled RD observer
+would require deterministic SHARDS-style sampling plus an order-statistics or
+Fenwick structure and a true issue/L2 arrival stream. Required go/no-go
+invariants include reference conservation, coalescing idempotence,
+`Delta t - 1 >= RD` for sampled witnesses, line/sector cardinality bounds,
+and bit-identical timing when the observer is disabled.
