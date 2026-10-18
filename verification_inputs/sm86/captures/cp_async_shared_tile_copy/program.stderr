@@ -1,0 +1,3 @@
+WARNING: Do not call CUDA memory allocation in nvbit_at_ctx_init(). It will cause deadlocks. Do them in nvbit_tool_init(). If you encounter deadlocks, remove CUDA API calls to debug.
+INFO: tracer binary_version initialised per-context from device compute capability at tool-init: binary_version=86 (ctx=0x564a52468250)
+INFO: cuFuncGetAttribute(BINARY_VERSION) returned attr_bv=0 (CUresult=400); falling back to device compute capability 8.6 -> binary_version=86

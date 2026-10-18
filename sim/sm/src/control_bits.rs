@@ -794,4 +794,3 @@ impl ControlSidecar {
 fn parse_hex_word(s: &str) -> Option<u64> {
     u64::from_str_radix(s.strip_prefix("0x")?, 16).ok()
 }
-

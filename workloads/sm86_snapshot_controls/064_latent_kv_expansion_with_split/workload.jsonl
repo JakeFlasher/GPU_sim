@@ -1,0 +1,1 @@
+{"axes": {"batch_size": 1, "seq_len": 8, "kv_lora_rank": 32, "num_heads": 8, "qk_nope_head_dim": 16, "v_head_dim": 16, "kv_expanded_dim": 256}, "inputs": {"compressed_kv": {"type": "random"}, "kv_a_layernorm_weight": {"type": "random"}, "kv_b_proj_weight": {"type": "random"}, "eps": {"type": "scalar", "value": 1e-06}}}

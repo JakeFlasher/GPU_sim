@@ -1,0 +1,1 @@
+/home/jakeshea/5090_branch/GPU_simulator_rebase/workloads/simbench_bw/l1/global_scalar_32b_copy/global_scalar_32b_copy_run 

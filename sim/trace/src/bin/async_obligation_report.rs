@@ -4,8 +4,8 @@
 //! synthesize a wait schedule, or provide a completion timestamp.
 
 use serde::Serialize;
-use sim_trace::obligations::ObligationFrontier;
 use sim_trace::TraceDir;
+use sim_trace::obligations::ObligationFrontier;
 use std::path::PathBuf;
 
 #[derive(Debug, Serialize)]

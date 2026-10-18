@@ -80,8 +80,6 @@ fn l2_config_json(config: sim_mem::L2Config) -> serde_json::Value {
     })
 }
 
-
-
 #[test]
 #[ignore = "requires SIM_TRACE_SMOKE_DIR and SIM_CONTROL_BITS_DIR"]
 fn real_trace_replays_under_issue_model() {

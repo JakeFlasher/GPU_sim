@@ -1,0 +1,1 @@
+/home/jakeshea/5090_branch/GPU_simulator_rebase/workloads/simbench_bw/l1/cp_async_shared_tile_copy/cp_async_shared_tile_copy_run --rows 32 --cols 32 

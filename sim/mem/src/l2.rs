@@ -428,12 +428,12 @@ impl L2Config {
             });
         }
         let sets_per_slice = bytes_per_slice / bytes_per_set;
-        let total_sets = sets_per_slice
-            .checked_mul(u64::from(num_slices))
-            .ok_or(L2ConfigError::EffectiveSetCountTooLarge {
+        let total_sets = sets_per_slice.checked_mul(u64::from(num_slices)).ok_or(
+            L2ConfigError::EffectiveSetCountTooLarge {
                 sets: u64::MAX,
                 maximum: MAX_EFFECTIVE_TOTAL_SETS,
-            })?;
+            },
+        )?;
         if total_sets > MAX_EFFECTIVE_TOTAL_SETS {
             return Err(L2ConfigError::EffectiveSetCountTooLarge {
                 sets: total_sets,
@@ -518,10 +518,13 @@ impl L2Config {
                     slices: self.num_slices,
                     associativity: self.associativity,
                 })?;
-            let bytes_per_slice = self.capacity_bytes
+            let bytes_per_slice = self
+                .capacity_bytes
                 .checked_div(u64::from(self.num_slices))
                 .ok_or(L2ConfigError::SlicesZero)?;
-            if !self.capacity_bytes.is_multiple_of(u64::from(self.num_slices))
+            if !self
+                .capacity_bytes
+                .is_multiple_of(u64::from(self.num_slices))
                 || !bytes_per_slice.is_multiple_of(bytes_per_set)
             {
                 return Err(L2ConfigError::NonIntegralSetCount {
@@ -968,6 +971,8 @@ pub enum L2AccessError {
     ClockOverflow { clock: i64 },
     #[error("L2 BIP insertion counter overflows u64 at {counter}")]
     BipCounterOverflow { counter: u64 },
+    #[error("L2 observer counter {field} overflows u64")]
+    CounterOverflow { field: L2CounterField },
     #[error("L2 BIP recency underflows below minimum {minimum} in set {set_key}")]
     BipRecencyUnderflow { set_key: usize, minimum: i64 },
     #[error("L2 associativity {associativity} does not fit usize")]
@@ -1027,8 +1032,8 @@ pub struct L2Counters {
     /// use `hits`/`misses`; this is an observer-only classification.
     pub lookup_hits: u64,
     /// NCU-style lookup denominator.  It is deliberately separate from the
-    /// physical `hits + misses` stream because L2 write packetization can
-    /// collapse several physical sector mutations into one lookup observer
+    /// modeled cache-state `hits + misses` stream because L2 write packetization
+    /// can collapse several modeled sector-state mutations into one lookup observer
     /// unit.  Legacy/direct cache accesses populate it one sector at a time;
     /// the shared-system replay replaces the observer totals with its
     /// request/coalescing accounting after the event stream drains.
@@ -1040,6 +1045,18 @@ pub struct L2Counters {
     /// the sector's valid bit was still clear (the §6.4 rule's whole
     /// contribution — zero when every access is `Read`-class).
     pub write_tag_hits: u64,
+    /// Read sectors that joined an already-pending fill owned by the same
+    /// event-mode allocation. This is an observer of the bounded
+    /// coalescing policy; it does not replace cache-state miss accounting.
+    pub pending_merge_sectors: u64,
+    /// Read sectors that acquired a new event-mode fill capability. Together
+    /// with `pending_merge_sectors` this exposes the sectored fill-ownership
+    /// split used by the shared-L2 replay.
+    pub new_fill_sectors: u64,
+    /// Trace-order request counts by the active effective slice hash. The
+    /// fixed array is an observer surface; it does not assert a proprietary
+    /// GA102 crossbar hash or add queue timing.
+    pub slice_accesses: [u64; 16],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1051,6 +1068,9 @@ pub enum L2CounterField {
     LineMisses,
     SectorFillMisses,
     WriteTagHits,
+    PendingMergeSectors,
+    NewFillSectors,
+    SliceAccesses,
 }
 
 impl std::fmt::Display for L2CounterField {
@@ -1063,6 +1083,9 @@ impl std::fmt::Display for L2CounterField {
             Self::LineMisses => "line_misses",
             Self::SectorFillMisses => "sector_fill_misses",
             Self::WriteTagHits => "write_tag_hits",
+            Self::PendingMergeSectors => "pending_merge_sectors",
+            Self::NewFillSectors => "new_fill_sectors",
+            Self::SliceAccesses => "slice_accesses",
         })
     }
 }
@@ -1169,6 +1192,25 @@ impl L2Counters {
             self.write_tag_hits,
             other.write_tag_hits,
         )?;
+        let pending_merge_sectors = checked_counter_add(
+            L2CounterField::PendingMergeSectors,
+            self.pending_merge_sectors,
+            other.pending_merge_sectors,
+        )?;
+        let new_fill_sectors = checked_counter_add(
+            L2CounterField::NewFillSectors,
+            self.new_fill_sectors,
+            other.new_fill_sectors,
+        )?;
+        let mut slice_accesses = self.slice_accesses;
+        for (index, value) in slice_accesses.iter_mut().enumerate() {
+            *value =
+                value
+                    .checked_add(other.slice_accesses[index])
+                    .ok_or(L2CounterError::Overflow {
+                        field: L2CounterField::SliceAccesses,
+                    })?;
+        }
 
         self.hits = hits;
         self.misses = misses;
@@ -1177,6 +1219,9 @@ impl L2Counters {
         self.line_misses = line_misses;
         self.sector_fill_misses = sector_fill_misses;
         self.write_tag_hits = write_tag_hits;
+        self.pending_merge_sectors = pending_merge_sectors;
+        self.new_fill_sectors = new_fill_sectors;
+        self.slice_accesses = slice_accesses;
         Ok(())
     }
 
@@ -1219,6 +1264,27 @@ impl L2Counters {
                 self.write_tag_hits,
                 baseline.write_tag_hits,
             )?,
+            pending_merge_sectors: checked_counter_sub(
+                L2CounterField::PendingMergeSectors,
+                self.pending_merge_sectors,
+                baseline.pending_merge_sectors,
+            )?,
+            new_fill_sectors: checked_counter_sub(
+                L2CounterField::NewFillSectors,
+                self.new_fill_sectors,
+                baseline.new_fill_sectors,
+            )?,
+            slice_accesses: {
+                let mut values = [0_u64; 16];
+                for index in 0..values.len() {
+                    values[index] = checked_counter_sub(
+                        L2CounterField::SliceAccesses,
+                        self.slice_accesses[index],
+                        baseline.slice_accesses[index],
+                    )?;
+                }
+                values
+            },
         })
     }
 
@@ -1231,8 +1297,8 @@ impl L2Counters {
             })
     }
 
-    /// Validate the observer-only lookup pair.  The physical cache stream is
-    /// intentionally not required to equal this pair: packetization and
+    /// Validate the observer-only lookup pair.  The modeled cache-state stream
+    /// is intentionally not required to equal this pair: packetization and
     /// source-side coalescing can make their denominators different.
     pub fn validate_lookup_observer(&self) -> Result<(), L2CounterError> {
         if self.lookup_hits > self.lookup_requests {
@@ -1542,7 +1608,7 @@ impl L2Model {
     }
 
     /// Replace the observer-only lookup totals after a shared-system replay has
-    /// applied its source/request coalescing rule.  Physical cache state,
+    /// applied its source/request coalescing rule.  Modeled cache state,
     /// replacement metadata, and the `hits`/`misses` response-pricing counters
     /// are untouched.  The caller supplies cumulative totals so retained
     /// stream sessions remain monotonic across launch boundaries.
@@ -1583,6 +1649,38 @@ impl L2Model {
         self.counters.lookup_requests = lookup_requests;
         self.observer_lookup_hits = lookup_hits;
         self.observer_lookup_requests = lookup_requests;
+        Ok(())
+    }
+
+    /// Record the source-side sectored fill-ownership split for one committed
+    /// event access.  This is intentionally separate from the cache state's
+    /// physical `hits`/`misses`: a pending merge remains a lookup miss while
+    /// reusing an existing lower-level fetch, whereas a new fill owns a new
+    /// lower-level fetch capability.  The caller supplies only counts from a
+    /// post-commit [`L2EventMaskPreview`], so callback failure cannot publish
+    /// a partial observer update.
+    pub fn record_fill_ownership_observer(
+        &mut self,
+        pending_merge_sectors: u64,
+        new_fill_sectors: u64,
+    ) -> Result<(), L2AccessError> {
+        self.validate_counter_architecture()?;
+        let pending_merge_total = self
+            .counters
+            .pending_merge_sectors
+            .checked_add(pending_merge_sectors)
+            .ok_or(L2AccessError::CounterOverflow {
+                field: L2CounterField::PendingMergeSectors,
+            })?;
+        let new_fill_total = self
+            .counters
+            .new_fill_sectors
+            .checked_add(new_fill_sectors)
+            .ok_or(L2AccessError::CounterOverflow {
+                field: L2CounterField::NewFillSectors,
+            })?;
+        self.counters.pending_merge_sectors = pending_merge_total;
+        self.counters.new_fill_sectors = new_fill_total;
         Ok(())
     }
 
@@ -1800,6 +1898,17 @@ impl L2Model {
         let mut clock = self.clock;
         let mut bip_counter = self.bip_counter;
         let mut counters = self.counters;
+        let slice = usize::try_from(self.cfg.slice_hash.slice_of(line_id, self.cfg.num_slices)?)
+            .map_err(|_| L2AccessError::CounterOverflow {
+                field: L2CounterField::SliceAccesses,
+            })?;
+        if slice < counters.slice_accesses.len() {
+            counters.slice_accesses[slice] = counters.slice_accesses[slice]
+                .checked_add(u64::from(sector_mask.count_ones()))
+                .ok_or(L2AccessError::CounterOverflow {
+                    field: L2CounterField::SliceAccesses,
+                })?;
+        }
         let mut counted_mask = 0u8;
         let mut present_mask = 0u8;
 
@@ -1974,6 +2083,17 @@ impl L2Model {
         let mut clock = self.clock;
         let mut bip_counter = self.bip_counter;
         let mut counters = self.counters;
+        let slice = usize::try_from(self.cfg.slice_hash.slice_of(line_id, self.cfg.num_slices)?)
+            .map_err(|_| L2AccessError::CounterOverflow {
+                field: L2CounterField::SliceAccesses,
+            })?;
+        if slice < counters.slice_accesses.len() {
+            counters.slice_accesses[slice] = counters.slice_accesses[slice]
+                .checked_add(u64::from(sector_mask.count_ones()))
+                .ok_or(L2AccessError::CounterOverflow {
+                    field: L2CounterField::SliceAccesses,
+                })?;
+        }
         let mut counted_mask = 0u8;
         let mut present_mask = 0u8;
         let mut fill_mask = 0u8;

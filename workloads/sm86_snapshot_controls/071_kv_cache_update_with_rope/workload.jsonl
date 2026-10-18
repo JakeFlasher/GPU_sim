@@ -1,0 +1,1 @@
+{"axes": {"batch_size": 1, "new_seq_len": 16, "current_seq_len": 0, "num_kv_heads": 10, "head_dim": 128, "updated_seq_len": 16}, "inputs": {"key_states": {"type": "random"}, "value_states": {"type": "random"}, "cos": {"type": "random"}, "sin": {"type": "random"}, "key_cache": {"type": "random"}, "value_cache": {"type": "random"}}}

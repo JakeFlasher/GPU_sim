@@ -1,0 +1,26 @@
+[
+  {
+    "label": "sm120_disabled",
+    "rows": 339,
+    "common_rows": 339,
+    "rows_with_numeric_diffs": 0,
+    "numeric_diff_count": 0,
+    "top_numeric_diffs": []
+  },
+  {
+    "label": "sm120_enabled",
+    "rows": 339,
+    "common_rows": 339,
+    "rows_with_numeric_diffs": 0,
+    "numeric_diff_count": 0,
+    "top_numeric_diffs": []
+  },
+  {
+    "label": "sm86",
+    "rows": 356,
+    "common_rows": 356,
+    "rows_with_numeric_diffs": 0,
+    "numeric_diff_count": 0,
+    "top_numeric_diffs": []
+  }
+]

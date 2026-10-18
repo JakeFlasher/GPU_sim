@@ -35,7 +35,6 @@ impl SharedMemoryResidency {
     pub(crate) const fn bytes_per_cta(self) -> u64 {
         self.bytes_per_cta
     }
-
 }
 
 /// Source of scheduler-resource values. Carded SM86 resources are executable
@@ -217,7 +216,6 @@ impl Sm120AlphaConfig {
             ldgsts_cache_all_destination_service_cycles: 1,
         }
     }
-
 }
 
 impl IssueResourceSource {
@@ -1440,6 +1438,9 @@ impl IssueModelParams {
             mshr_count: Some(mshr_count),
             hit_latency: self.l1_hit_latency,
             miss_latency: self.l1_miss_latency,
+            set_count: None,
+            ways: None,
+            set_index: sim_mem::L1SetIndex::FullyAssociative,
         }
     }
 

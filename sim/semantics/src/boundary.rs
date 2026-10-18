@@ -63,8 +63,9 @@ pub struct BoundarySnapshot {
     pub hold: [Option<u64>; 4],
     pub subcore_warps: Vec<Vec<i32>>,
     pub outstanding_responses: u64,
-    /// Canonical physical L1 state for the owning SM, when a cache is
-    /// attached. `None` is the flat-memory mode.
+    /// Canonical modeled L1 state for the owning SM, when a cache is attached.
+    /// `None` is the flat-memory mode; this is simulator state, not a claim of
+    /// proprietary silicon tags.
     pub l1_state: Option<String>,
     pub instruction_front_end_state: Option<String>,
     pub memory_issue_pipeline_state: Option<String>,

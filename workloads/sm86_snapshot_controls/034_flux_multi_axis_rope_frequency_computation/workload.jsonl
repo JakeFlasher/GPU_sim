@@ -1,0 +1,1 @@
+{"axes": {"seq_len": 128, "n_axes": 3, "axis0_dim": 16, "axis1_dim": 56, "axis2_dim": 56, "total_dim": 128}, "inputs": {"ids": {"type": "random"}, "theta": {"type": "scalar", "value": 10000.0}}}

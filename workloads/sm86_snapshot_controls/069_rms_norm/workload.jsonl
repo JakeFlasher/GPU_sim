@@ -1,0 +1,1 @@
+{"axes": {"batch_size": 1, "seq_len": 8, "hidden_size": 128}, "inputs": {"hidden_states": {"type": "random"}, "residual": {"type": "random"}, "weight": {"type": "random"}, "eps": {"type": "scalar", "value": 1e-05}}}

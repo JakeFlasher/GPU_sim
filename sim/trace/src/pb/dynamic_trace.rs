@@ -76,9 +76,7 @@ pub struct Address {
     /// active lanes span multiple allocation identities. These are typed payload
     /// states, not silent omissions.
     #[prost(string, optional, tag = "10")]
-    pub allocation_identity_status: ::core::option::Option<
-        ::prost::alloc::string::String,
-    >,
+    pub allocation_identity_status: ::core::option::Option<::prost::alloc::string::String>,
     /// Physical/runtime transfer width.  This is distinct from data_width for
     /// collective matrix operations: PTX ldmatrix documents 16-bit elements and
     /// group-of-four 16-byte row transfers, so collapsing the two loses the

@@ -1,0 +1,1 @@
+{"axes": {"batch_size": 1, "seq_len": 8, "hidden_size": 128}, "inputs": {"grad_output": {"type": "random"}, "x": {"type": "random"}, "normalized": {"type": "random"}, "rstd": {"type": "random"}, "weight": {"type": "random"}}}

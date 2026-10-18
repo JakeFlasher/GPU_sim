@@ -2,9 +2,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::Serialize;
-use sim_mem::{
-    opcode_head, AccessKind, CacheOpToken, L1RequestMaskAudit, LdgstsL1Policy,
-};
+use sim_mem::{AccessKind, CacheOpToken, L1RequestMaskAudit, LdgstsL1Policy, opcode_head};
 use sim_semantics::{
     CandidateDomain, EvidenceKind, LatentFactors, LatentModelError, ResourceDemandEnvelope,
     ResourceDemandInterval,
@@ -385,6 +383,17 @@ pub struct TraceMetrics {
     /// read-modify-write demand bound and never enters DRAM accounting alone.
     pub partial_store_sectors: u64,
     pub by_pipeline: BTreeMap<String, InstructionActivity>,
+    /// Static-SASS scope partitions for post-replay opcode crosswalks. The
+    /// ordinary `memory` map intentionally retains the broad logical traffic
+    /// classes used by L1/L2 sector accounting; this map keeps LDG modifier
+    /// forms and LDGSTS separate so a narrow NCU opcode endpoint is never
+    /// compared against a mixed logical class.
+    pub memory_scope: BTreeMap<String, MemoryTraffic>,
+    /// Dynamic static-SASS constant-client instruction populations. These are
+    /// kept separate from address-domain constant sectors because the native
+    /// trace contract may omit CBANK addresses.
+    pub constant_client_ldc_instructions: u64,
+    pub constant_client_uldc_instructions: u64,
     /// NCU-style logical pipe projections. These are deliberately separate
     /// from the issue scheduler's resource classes above.
     pub by_ncu_pipeline: BTreeMap<String, InstructionActivity>,
@@ -532,6 +541,13 @@ pub struct TraceMetrics {
     /// diagnostic; they do not change cache state or lookup projections.
     pub l1_same_request_merges_global: u64,
     pub l1_same_request_merges_local: u64,
+    /// Ordinary (non-LDGSTS) request-boundary merges. Keeping this subset
+    /// separate prevents the LDGSTS client from contaminating the ordinary
+    /// global-LDG packet-aware lookup candidate.
+    pub l1_ordinary_same_request_merges_global: u64,
+    pub l1_ordinary_same_request_merges_local: u64,
+    pub l1_async_same_request_merges_global: u64,
+    pub l1_async_same_request_merges_local: u64,
     pub l1_older_pending_merges_global: u64,
     pub l1_older_pending_merges_local: u64,
     pub l1_ordinary_older_pending_merges_global: u64,
@@ -540,6 +556,17 @@ pub struct TraceMetrics {
     pub l1_async_older_pending_merges_local: u64,
     pub l1_ordinary_global_older_pending_merges: u64,
     pub l1_constant_global_older_pending_merges: u64,
+    pub l1_ordinary_global_same_request_merges: u64,
+    pub l1_constant_global_same_request_merges: u64,
+    pub l1_async_global_same_request_merges: u64,
+    pub l1_ordinary_global_hits: u64,
+    pub l1_async_global_hits: u64,
+    pub l1_ordinary_global_older_sector_pending_merges: u64,
+    pub l1_constant_global_older_sector_pending_merges: u64,
+    pub l1_async_global_older_sector_pending_merges: u64,
+    pub l1_unrequested_subline_miss_sectors: u64,
+    pub l1_wavefront_mask_lookup_hits: u64,
+    pub l1_wavefront_mask_lookup_misses: u64,
     pub l1_constant_global_hits: u64,
     pub l1_constant_global_requests: u64,
     pub l1_global_resident_hits: u64,
@@ -564,6 +591,68 @@ pub struct TraceMetrics {
     /// diagnostic-only and does not feed cache state, timing, or scored
     /// endpoints.
     pub l1_request_mask_audit: L1RequestMaskAudit,
+    /// Dynamic constant-bank demand observations. Addresses are producer
+    /// offsets, not device allocations; these counters are demand bounds only
+    /// and never feed cache state, timing, or NCU-shaped predictions.
+    pub constant_memory_address_count: u64,
+    pub constant_memory_reference_count: u64,
+    pub constant_memory_sector_requests: u64,
+    pub constant_memory_unique_sectors: u64,
+    /// Launch-wide distinct 64-B constant-bank candidate lines.  This is a
+    /// source-domain cardinality only; no line-fill or DRAM event is implied.
+    pub constant_memory_unique_lines: u64,
+    /// Constant records that carried bank/offset metadata but no active,
+    /// predicate-on lane offsets.  These are retained as an explicit
+    /// unavailable-demand observation; field 17 is one scalar metadata value,
+    /// not a substitute for the lane vector.
+    pub constant_memory_metadata_only_records: u64,
+    #[serde(skip)]
+    pub(crate) constant_memory_sector_set: BTreeSet<(Option<u32>, u64)>,
+    #[serde(skip)]
+    pub(crate) constant_memory_line_set: BTreeSet<(Option<u32>, u64)>,
+    /// Static `LDG.*.CONSTANT` source-qualified demand candidates. These are
+    /// kept separate from CBANK field-15 observations and from L1/L2 state.
+    pub constant_global_load_instructions: u64,
+    pub constant_global_load_sectors: u64,
+    /// Static modifier/client form for LDG.*.CONSTANT observers. Index order
+    /// is LTC128B, U16, other/plain; this does not relocate traffic or claim
+    /// that any form uses Huerta's L0C path.
+    pub constant_global_load_form_instructions: [u64; 3],
+    pub constant_global_load_form_sectors: [u64; 3],
+    pub constant_global_load_request_candidates: u64,
+    pub constant_global_load_unique_lines: u64,
+    pub constant_global_load_cta_unique_lines: u64,
+    /// Static LDG.CONSTANT records whose active lanes present one identical
+    /// byte address/width. This is a source-class witness for a possible
+    /// uniform GCC path; it is not itself a GCC request or DRAM transaction.
+    pub constant_global_load_uniform_instructions: u64,
+    pub constant_global_load_uniform_sectors: u64,
+    pub constant_global_load_divergent_instructions: u64,
+    pub constant_global_load_divergent_sectors: u64,
+    #[serde(skip)]
+    pub(crate) constant_global_line_set: BTreeSet<([u32; 3], i32, u64)>,
+    #[serde(skip)]
+    pub(crate) constant_global_cta_line_set: BTreeSet<([u32; 3], u64)>,
+    /// Atomic same-sector conflict exposure. These are exact trace-sector
+    /// alias observations and do not impose a latency or serialization rule.
+    pub atomic_conflict_instructions: u64,
+    pub atomic_distinct_instructions: u64,
+    pub atomic_conflict_alias_sectors: u64,
+    pub local_width_records: u64,
+    pub local_width_unknown_records: u64,
+    pub local_width_bytes: u64,
+    pub local_width_candidate_sectors: u64,
+    /// Observer-only local sector domains after applying the effective SM86
+    /// lane-private frame expansion. The ordinary local memory map remains
+    /// the replay/timing source; these candidates are selected only for the
+    /// like-for-like local L1 endpoint when present.
+    pub local_canonical_load_sectors: u64,
+    pub local_canonical_store_sectors: u64,
+    pub local_frame256_load_sectors: u64,
+    pub local_frame256_store_sectors: u64,
+    pub local_payload_load_sectors: u64,
+    pub local_payload_store_sectors: u64,
+
     /// Sidecar-to-dynamic identity coverage for source-order reasoning. A
     /// matched key establishes same-instruction identity, not cross-warp time.
     pub tma_shadow_dynamic_records_matched: u64,
@@ -807,6 +896,55 @@ fn decoded_sector_stats(kind: AccessKind, sector_arena: &[i64]) -> Option<(u64, 
     Some((sorted.len() as u64, unique_lines))
 }
 
+/// Return the bounded static-SASS scope bucket for one dynamic memory record.
+/// These are attribution domains, not hardware route selections. In
+/// particular, LTC128B and CONSTANT forms remain visible as separate
+/// observers while their existing hierarchy traffic stays in the broad
+/// `memory` class.
+fn memory_scope_key(opcode: &str, kind: AccessKind) -> Option<&'static str> {
+    let token = opcode.split_ascii_whitespace().next().unwrap_or("");
+    let head = opcode_head(opcode);
+    if matches!(kind, AccessKind::GlobalAsyncCopy { .. }) || head == "LDGSTS" {
+        return Some("ldgsts_async_copy");
+    }
+    if !matches!(
+        kind,
+        AccessKind::GlobalEligible { .. }
+            | AccessKind::GlobalBypass { .. }
+            | AccessKind::GlobalUntagged { .. }
+    ) || head != "LDG"
+    {
+        return None;
+    }
+    let modifiers = token.split('.').collect::<Vec<_>>();
+    if modifiers.iter().any(|modifier| *modifier == "LTC128B") {
+        Some("global_load_ltc128b")
+    } else if modifiers.iter().any(|modifier| *modifier == "CONSTANT") {
+        Some("global_load_constant")
+    } else if modifiers
+        .windows(2)
+        .any(|window| window == ["STRONG", "GPU"])
+    {
+        Some("global_load_strong_gpu")
+    } else {
+        // Plain LDG.E/width forms are the closest trace-side scope to
+        // smsp__sass_inst_executed_op_global_ld.sum. The exact NCU modifier
+        // policy remains a post-replay crosswalk question.
+        Some("global_load_ldg")
+    }
+}
+
+fn constant_global_load_form_index(opcode_text: &str) -> usize {
+    let opcode = opcode_text.split_ascii_whitespace().next().unwrap_or("");
+    if opcode.split('.').any(|modifier| modifier == "LTC128B") {
+        0
+    } else if opcode.split('.').any(|modifier| modifier == "U16") {
+        1
+    } else {
+        2
+    }
+}
+
 impl TraceMetrics {
     pub(crate) fn begin_warp_memory_stream(&mut self) {
         self.global_store_previous_sectors.clear();
@@ -815,10 +953,10 @@ impl TraceMetrics {
 
     pub(crate) fn finalize_shared_load_observer(&mut self) {
         let admit = self.shared_load_full_warp_width16_records >= 120
-            && self
-                .shared_load_full_warp_width4_records
-                .saturating_mul(9)
-                == self.shared_load_full_warp_width16_records.saturating_mul(16);
+            && self.shared_load_full_warp_width4_records.saturating_mul(9)
+                == self
+                    .shared_load_full_warp_width16_records
+                    .saturating_mul(16);
         if admit || self.shared_load_width16_observer_reduction == 0 {
             return;
         }
@@ -871,9 +1009,11 @@ impl TraceMetrics {
             ),
             _ => return Ok(()),
         };
-        *requests = requests.checked_add(1).ok_or(crate::IssueError::CounterOverflow {
-            counter: "local interleaved requests",
-        })?;
+        *requests = requests
+            .checked_add(1)
+            .ok_or(crate::IssueError::CounterOverflow {
+                counter: "local interleaved requests",
+            })?;
         *total = total
             .checked_add(u64::try_from(sectors.len()).unwrap_or(u64::MAX))
             .ok_or(crate::IssueError::CounterOverflow {
@@ -953,17 +1093,12 @@ impl TraceMetrics {
         Ok(())
     }
 
-    fn local_interleaved_touch_l1(
-        &mut self,
-        line: i64,
-        bit: u8,
-    ) -> Result<(), crate::IssueError> {
-        self.local_interleaved_l1_stamp = self
-            .local_interleaved_l1_stamp
-            .checked_add(1)
-            .ok_or(crate::IssueError::CounterOverflow {
+    fn local_interleaved_touch_l1(&mut self, line: i64, bit: u8) -> Result<(), crate::IssueError> {
+        self.local_interleaved_l1_stamp = self.local_interleaved_l1_stamp.checked_add(1).ok_or(
+            crate::IssueError::CounterOverflow {
                 counter: "local interleaved L1 stamp",
-            })?;
+            },
+        )?;
         if let Some((mask, stamp)) = self.local_interleaved_l1_lines.get_mut(&line) {
             *mask |= bit;
             *stamp = self.local_interleaved_l1_stamp;
@@ -1128,8 +1263,14 @@ impl TraceMetrics {
     ) -> Result<(), crate::IssueError> {
         add(&mut self.async_clock_sandwich_pairs_observed, pairs)?;
         add(&mut self.async_clock_sandwich_invalid_pairs, invalid_pairs)?;
-        add(&mut self.async_clock_sandwich_lower_span_sum, lower_span_sum)?;
-        add(&mut self.async_clock_sandwich_upper_span_sum, upper_span_sum)?;
+        add(
+            &mut self.async_clock_sandwich_lower_span_sum,
+            lower_span_sum,
+        )?;
+        add(
+            &mut self.async_clock_sandwich_upper_span_sum,
+            upper_span_sum,
+        )?;
         Ok(())
     }
 
@@ -1144,10 +1285,22 @@ impl TraceMetrics {
         cross_direction_sectors: u64,
         cross_direction_lines: u64,
     ) -> Result<(), crate::IssueError> {
-        add(&mut self.tma_sidecar_load_sum_record_unique_sectors, load_sum_sectors)?;
-        add(&mut self.tma_sidecar_store_sum_record_unique_sectors, store_sum_sectors)?;
-        add(&mut self.tma_sidecar_load_sum_record_unique_lines, load_sum_lines)?;
-        add(&mut self.tma_sidecar_store_sum_record_unique_lines, store_sum_lines)?;
+        add(
+            &mut self.tma_sidecar_load_sum_record_unique_sectors,
+            load_sum_sectors,
+        )?;
+        add(
+            &mut self.tma_sidecar_store_sum_record_unique_sectors,
+            store_sum_sectors,
+        )?;
+        add(
+            &mut self.tma_sidecar_load_sum_record_unique_lines,
+            load_sum_lines,
+        )?;
+        add(
+            &mut self.tma_sidecar_store_sum_record_unique_lines,
+            store_sum_lines,
+        )?;
         add(
             &mut self.tma_sidecar_load_inter_record_duplicate_sectors,
             load_sum_sectors.saturating_sub(load_unique_sectors),
@@ -1216,9 +1369,15 @@ impl TraceMetrics {
         add(&mut self.tma_joint_l2_tma_load_requests, tma_load[0])?;
         add(&mut self.tma_joint_l2_tma_load_hits, tma_load[1])?;
         add(&mut self.tma_joint_l2_tma_load_misses, tma_load[2])?;
-        add(&mut self.tma_joint_l2_ordinary_read_requests, ordinary_read[0])?;
+        add(
+            &mut self.tma_joint_l2_ordinary_read_requests,
+            ordinary_read[0],
+        )?;
         add(&mut self.tma_joint_l2_ordinary_read_hits, ordinary_read[1])?;
-        add(&mut self.tma_joint_l2_ordinary_read_misses, ordinary_read[2])?;
+        add(
+            &mut self.tma_joint_l2_ordinary_read_misses,
+            ordinary_read[2],
+        )?;
         add(&mut self.tma_joint_l2_order_unavailable, order_unavailable)?;
         add(&mut self.tma_joint_l2_events_dropped, events_dropped)?;
         Ok(())
@@ -1228,10 +1387,23 @@ impl TraceMetrics {
         &mut self,
         same_request: [u64; 2],
         older_pending: [u64; 2],
+        ordinary_same_request: [u64; 2],
         ordinary_older_pending: [u64; 2],
+        async_same_request: [u64; 2],
         async_older_pending: [u64; 2],
         ordinary_global_older_pending: u64,
         constant_global_older_pending: u64,
+        ordinary_global_same_request: u64,
+        constant_global_same_request: u64,
+        async_global_same_request: u64,
+        ordinary_global_hits: u64,
+        async_global_hits: u64,
+        ordinary_global_older_sector_pending_merges: u64,
+        constant_global_older_sector_pending_merges: u64,
+        async_global_older_sector_pending_merges: u64,
+        unrequested_subline_miss_sectors: u64,
+        wavefront_mask_lookup_hits: u64,
+        wavefront_mask_lookup_misses: u64,
         constant_global_hits: u64,
         constant_global_requests: u64,
         global_resident_hits: u64,
@@ -1240,6 +1412,14 @@ impl TraceMetrics {
     ) -> Result<(), crate::IssueError> {
         add(&mut self.l1_same_request_merges_global, same_request[0])?;
         add(&mut self.l1_same_request_merges_local, same_request[1])?;
+        add(
+            &mut self.l1_ordinary_same_request_merges_global,
+            ordinary_same_request[0],
+        )?;
+        add(
+            &mut self.l1_ordinary_same_request_merges_local,
+            ordinary_same_request[1],
+        )?;
         add(&mut self.l1_older_pending_merges_global, older_pending[0])?;
         add(&mut self.l1_older_pending_merges_local, older_pending[1])?;
         add(
@@ -1249,6 +1429,14 @@ impl TraceMetrics {
         add(
             &mut self.l1_ordinary_older_pending_merges_local,
             ordinary_older_pending[1],
+        )?;
+        add(
+            &mut self.l1_async_same_request_merges_global,
+            async_same_request[0],
+        )?;
+        add(
+            &mut self.l1_async_same_request_merges_local,
+            async_same_request[1],
         )?;
         add(
             &mut self.l1_async_older_pending_merges_global,
@@ -1265,6 +1453,44 @@ impl TraceMetrics {
         add(
             &mut self.l1_constant_global_older_pending_merges,
             constant_global_older_pending,
+        )?;
+        add(
+            &mut self.l1_ordinary_global_same_request_merges,
+            ordinary_global_same_request,
+        )?;
+        add(
+            &mut self.l1_constant_global_same_request_merges,
+            constant_global_same_request,
+        )?;
+        add(
+            &mut self.l1_async_global_same_request_merges,
+            async_global_same_request,
+        )?;
+        add(&mut self.l1_ordinary_global_hits, ordinary_global_hits)?;
+        add(&mut self.l1_async_global_hits, async_global_hits)?;
+        add(
+            &mut self.l1_ordinary_global_older_sector_pending_merges,
+            ordinary_global_older_sector_pending_merges,
+        )?;
+        add(
+            &mut self.l1_constant_global_older_sector_pending_merges,
+            constant_global_older_sector_pending_merges,
+        )?;
+        add(
+            &mut self.l1_async_global_older_sector_pending_merges,
+            async_global_older_sector_pending_merges,
+        )?;
+        add(
+            &mut self.l1_unrequested_subline_miss_sectors,
+            unrequested_subline_miss_sectors,
+        )?;
+        add(
+            &mut self.l1_wavefront_mask_lookup_hits,
+            wavefront_mask_lookup_hits,
+        )?;
+        add(
+            &mut self.l1_wavefront_mask_lookup_misses,
+            wavefront_mask_lookup_misses,
         )?;
         add(&mut self.l1_constant_global_hits, constant_global_hits)?;
         add(
@@ -1302,6 +1528,246 @@ impl TraceMetrics {
             }
         }
         Ok(())
+    }
+
+    /// Record one dynamic constant-bank instruction as a source-domain
+    /// observer. Each instruction contributes distinct 32-byte offset packets
+    /// and the launch-wide sets retain address-domain cardinalities. These are
+    /// not mathematical DRAM bounds and never change cache/service state.
+    pub(crate) fn observe_constant_memory(
+        &mut self,
+        addresses: &[u64],
+        bank: Option<u32>,
+    ) -> Result<(), crate::IssueError> {
+        if addresses.is_empty() {
+            return Ok(());
+        }
+        add(&mut self.constant_memory_reference_count, 1)?;
+        let address_count =
+            u64::try_from(addresses.len()).map_err(|_| crate::IssueError::CounterOverflow {
+                counter: "constant memory address count",
+            })?;
+        add(&mut self.constant_memory_address_count, address_count)?;
+        let mut sectors = BTreeSet::new();
+        for &address in addresses {
+            // Field 15 is a bank-local effective offset, not a device
+            // allocation address. Keep an absent bank distinct instead of
+            // silently merging it with bank zero or another bank.
+            sectors.insert((bank, address / 32));
+        }
+        let request_count =
+            u64::try_from(sectors.len()).map_err(|_| crate::IssueError::CounterOverflow {
+                counter: "constant memory sector request count",
+            })?;
+        add(&mut self.constant_memory_sector_requests, request_count)?;
+        self.constant_memory_sector_set.extend(sectors);
+        self.constant_memory_unique_sectors = u64::try_from(self.constant_memory_sector_set.len())
+            .map_err(|_| crate::IssueError::CounterOverflow {
+                counter: "constant memory unique sector count",
+            })?;
+        self.constant_memory_line_set
+            .extend(addresses.iter().map(|&address| (bank, address / 64)));
+        self.constant_memory_unique_lines = u64::try_from(self.constant_memory_line_set.len())
+            .map_err(|_| crate::IssueError::CounterOverflow {
+                counter: "constant memory unique line count",
+            })?;
+        Ok(())
+    }
+
+    pub(crate) fn observe_constant_metadata_only(&mut self) -> Result<(), crate::IssueError> {
+        add(&mut self.constant_memory_metadata_only_records, 1)
+    }
+
+    /// Observe one statically classified `LDG.*.CONSTANT` global load. The
+    /// address span is a source-qualified candidate only: its line domains
+    /// are not equated with GCC requests, L2 sectors, or DRAM service.
+    pub(crate) fn observe_constant_global_load(
+        &mut self,
+        block_id: [u32; 3],
+        warp_id: i32,
+        sectors: &[i64],
+        off: usize,
+        len: usize,
+        opcode_text: &str,
+        warp_uniform_address: bool,
+    ) -> Result<(), crate::IssueError> {
+        add(&mut self.constant_global_load_instructions, 1)?;
+        add(
+            &mut self.constant_global_load_sectors,
+            u64::try_from(len).map_err(|_| crate::IssueError::CounterOverflow {
+                counter: "constant global load sectors",
+            })?,
+        )?;
+        let form = constant_global_load_form_index(opcode_text);
+        add(&mut self.constant_global_load_form_instructions[form], 1)?;
+        add(
+            &mut self.constant_global_load_form_sectors[form],
+            u64::try_from(len).map_err(|_| crate::IssueError::CounterOverflow {
+                counter: "constant global load form sectors",
+            })?,
+        )?;
+        if warp_uniform_address {
+            add(&mut self.constant_global_load_uniform_instructions, 1)?;
+            add(
+                &mut self.constant_global_load_uniform_sectors,
+                u64::try_from(len).map_err(|_| crate::IssueError::CounterOverflow {
+                    counter: "constant global uniform load sectors",
+                })?,
+            )?;
+        } else {
+            add(&mut self.constant_global_load_divergent_instructions, 1)?;
+            add(
+                &mut self.constant_global_load_divergent_sectors,
+                u64::try_from(len).map_err(|_| crate::IssueError::CounterOverflow {
+                    counter: "constant global divergent load sectors",
+                })?,
+            )?;
+        }
+        let end = off
+            .checked_add(len)
+            .ok_or(crate::IssueError::CounterOverflow {
+                counter: "constant global load sector span",
+            })?;
+        let span = sectors
+            .get(off..end)
+            .ok_or(crate::IssueError::CounterOverflow {
+                counter: "constant global load sector span",
+            })?;
+        let lines: BTreeSet<u64> = span
+            .iter()
+            .map(|&sector| u64::try_from(sector).unwrap_or_default() / 4)
+            .collect();
+        add(
+            &mut self.constant_global_load_request_candidates,
+            u64::try_from(lines.len()).map_err(|_| crate::IssueError::CounterOverflow {
+                counter: "constant global load request candidates",
+            })?,
+        )?;
+        self.constant_global_line_set
+            .extend(lines.into_iter().map(|line| (block_id, warp_id, line)));
+        self.constant_global_load_unique_lines = u64::try_from(self.constant_global_line_set.len())
+            .map_err(|_| crate::IssueError::CounterOverflow {
+                counter: "constant global load unique lines",
+            })?;
+        self.constant_global_cta_line_set.extend(
+            span.iter()
+                .map(|&sector| (block_id, u64::try_from(sector).unwrap_or_default() / 4)),
+        );
+        self.constant_global_load_cta_unique_lines =
+            u64::try_from(self.constant_global_cta_line_set.len()).map_err(|_| {
+                crate::IssueError::CounterOverflow {
+                    counter: "constant global load CTA unique lines",
+                }
+            })?;
+        Ok(())
+    }
+
+    pub(crate) fn observe_atomic_conflict(
+        &mut self,
+        sectors: &[i64],
+        off: usize,
+        len: usize,
+    ) -> Result<(), crate::IssueError> {
+        let end = off
+            .checked_add(len)
+            .ok_or(crate::IssueError::CounterOverflow {
+                counter: "atomic conflict sector span",
+            })?;
+        let span = sectors
+            .get(off..end)
+            .ok_or(crate::IssueError::CounterOverflow {
+                counter: "atomic conflict sector span",
+            })?;
+        let distinct = span.iter().copied().collect::<BTreeSet<_>>().len();
+        let aliases = len.saturating_sub(distinct);
+        if aliases == 0 {
+            add(&mut self.atomic_distinct_instructions, 1)?;
+        } else {
+            add(&mut self.atomic_conflict_instructions, 1)?;
+            add(
+                &mut self.atomic_conflict_alias_sectors,
+                u64::try_from(aliases).map_err(|_| crate::IssueError::CounterOverflow {
+                    counter: "atomic conflict alias sectors",
+                })?,
+            )?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn observe_local_width(
+        &mut self,
+        width: Option<i32>,
+        predicate_lanes: u8,
+    ) -> Result<(), crate::IssueError> {
+        let Some(width) = width else {
+            add(&mut self.local_width_unknown_records, 1)?;
+            return Ok(());
+        };
+        if width <= 0 {
+            add(&mut self.local_width_unknown_records, 1)?;
+            return Ok(());
+        }
+        let width = u64::try_from(width).map_err(|_| crate::IssueError::CounterOverflow {
+            counter: "local memory width",
+        })?;
+        add(&mut self.local_width_records, 1)?;
+        add(&mut self.local_width_bytes, width)?;
+        let bytes = width.checked_mul(u64::from(predicate_lanes)).ok_or(
+            crate::IssueError::CounterOverflow {
+                counter: "local width candidate bytes",
+            },
+        )?;
+        add(&mut self.local_width_candidate_sectors, bytes.div_ceil(32))?;
+        Ok(())
+    }
+
+    pub(crate) fn observe_local_canonical_sectors(
+        &mut self,
+        kind: AccessKind,
+        sectors: u16,
+    ) -> Result<(), crate::IssueError> {
+        let value = u64::from(sectors);
+        match kind {
+            AccessKind::LocalLoad { .. } => add(&mut self.local_canonical_load_sectors, value),
+            AccessKind::LocalStore { .. } => add(&mut self.local_canonical_store_sectors, value),
+            _ => Ok(()),
+        }
+    }
+
+    pub(crate) fn observe_local_frame256_sectors(
+        &mut self,
+        kind: AccessKind,
+        sectors: u16,
+    ) -> Result<(), crate::IssueError> {
+        let value = u64::from(sectors);
+        match kind {
+            AccessKind::LocalLoad { .. } => add(&mut self.local_frame256_load_sectors, value),
+            AccessKind::LocalStore { .. } => add(&mut self.local_frame256_store_sectors, value),
+            _ => Ok(()),
+        }
+    }
+
+    pub(crate) fn observe_local_payload_sectors(
+        &mut self,
+        kind: AccessKind,
+        width: Option<i32>,
+        predicate_lanes: u8,
+    ) -> Result<(), crate::IssueError> {
+        let Some(width) = width.filter(|width| *width > 0) else {
+            return Ok(());
+        };
+        let bytes = u64::try_from(width)
+            .ok()
+            .and_then(|width| width.checked_mul(u64::from(predicate_lanes)))
+            .ok_or(crate::IssueError::CounterOverflow {
+                counter: "local payload sector candidate",
+            })?;
+        let sectors = bytes.div_ceil(32);
+        match kind {
+            AccessKind::LocalLoad { .. } => add(&mut self.local_payload_load_sectors, sectors),
+            AccessKind::LocalStore { .. } => add(&mut self.local_payload_store_sectors, sectors),
+            _ => Ok(()),
+        }
     }
 
     pub(crate) fn observe_tma_shadow_dynamic_identity(
@@ -1847,7 +2313,32 @@ impl TraceMetrics {
         predicate_mask_present: bool,
         kind: AccessKind,
         pipeline: crate::PipelineClass,
+        sector_arena: &[i64],
+    ) -> Result<(), crate::IssueError> {
+        self.observe_with_mask_presence_arch(
+            opcode,
+            active,
+            effective,
+            active_mask_present,
+            predicate_mask_present,
+            kind,
+            pipeline,
+            sector_arena,
+            sim_arch::ArchId::Sm86,
+        )
+    }
+
+    pub(crate) fn observe_with_mask_presence_arch(
+        &mut self,
+        opcode: &str,
+        active: u8,
+        effective: u8,
+        active_mask_present: bool,
+        predicate_mask_present: bool,
+        kind: AccessKind,
+        pipeline: crate::PipelineClass,
         _sector_arena: &[i64],
+        arch: sim_arch::ArchId,
     ) -> Result<(), crate::IssueError> {
         self.instructions.observe(
             active,
@@ -1856,6 +2347,11 @@ impl TraceMetrics {
             predicate_mask_present,
         )?;
         let head = opcode_head(opcode);
+        match head {
+            "LDC" => add(&mut self.constant_client_ldc_instructions, 1)?,
+            "ULDC" => add(&mut self.constant_client_uldc_instructions, 1)?,
+            _ => {}
+        }
         self.by_opcode.entry(head.to_owned()).or_default().observe(
             active,
             effective,
@@ -1964,23 +2460,28 @@ impl TraceMetrics {
         // family) and from the branch-target observer below: this is a
         // warp-instruction cardinality, so predicated-off records still count
         // once when the warp executed the instruction.
-        if matches!(
-            head,
-            "BRA"
-                | "BRX"
-                | "BRXU"
-                | "JMP"
-                | "JMX"
-                | "JMXU"
-                | "CALL"
-                | "RET"
-                | "EXIT"
-                | "BSYNC"
-                | "WARPSYNC"
-                | "YIELD"
-                | "BREAK"
-                | "CONT"
-        ) {
+        let branch_counter = if arch == sim_arch::ArchId::Sm120 {
+            matches!(
+                head,
+                "BRA"
+                    | "BRX"
+                    | "BRXU"
+                    | "JMP"
+                    | "JMX"
+                    | "JMXU"
+                    | "CALL"
+                    | "RET"
+                    | "EXIT"
+                    | "BSYNC"
+                    | "WARPSYNC"
+                    | "YIELD"
+                    | "BREAK"
+                    | "CONT"
+            )
+        } else {
+            matches!(head, "BRA" | "BRX" | "BRXU" | "JMP" | "JMX" | "JMXU")
+        };
+        if branch_counter {
             add(&mut self.branch_warp_instructions, 1)?;
             add(
                 &mut self.branch_mixed_predicate_warp_instructions,
@@ -1996,21 +2497,18 @@ impl TraceMetrics {
             return Ok(());
         }
         if let AccessKind::GlobalStore { off, len } = kind {
-            let end = off
-                .checked_add(usize::from(len))
-                .ok_or(crate::IssueError::CounterOverflow {
-                    counter: "global-store sector span",
-                })?;
+            let end =
+                off.checked_add(usize::from(len))
+                    .ok_or(crate::IssueError::CounterOverflow {
+                        counter: "global-store sector span",
+                    })?;
             if let Some(span) = _sector_arena.get(off..end) {
                 let current = span.iter().copied().collect::<BTreeSet<_>>();
                 if effective >= 8 && self.global_store_previous_effective_lanes >= 8 {
                     let duplicate = current
                         .intersection(&self.global_store_previous_sectors)
                         .count() as u64;
-                    add(
-                        &mut self.global_store_adjacent_duplicate_sectors,
-                        duplicate,
-                    )?;
+                    add(&mut self.global_store_adjacent_duplicate_sectors, duplicate)?;
                 }
                 self.global_store_previous_sectors = current;
                 self.global_store_previous_effective_lanes = effective;
@@ -2022,7 +2520,10 @@ impl TraceMetrics {
             self.global_store_previous_sectors.clear();
             self.global_store_previous_effective_lanes = 0;
         }
-        if matches!(kind, AccessKind::Shared { .. }) && head == "LDS" {
+        if arch == sim_arch::ArchId::Sm120
+            && matches!(kind, AccessKind::Shared { .. })
+            && head == "LDS"
+        {
             let sass_head = opcode.split_ascii_whitespace().next().unwrap_or(opcode);
             let width16 = sass_head.split('.').any(|token| token == "128");
             let width4 = !width16 && !sass_head.split('.').any(|token| token == "64");
@@ -2055,7 +2556,9 @@ impl TraceMetrics {
         }
         let (key, sectors, bank_wavefronts) = match kind {
             AccessKind::NonMemory | AccessKind::PredicatedOffMemory => return Ok(()),
-            AccessKind::Shared { data_wavefronts, .. } => (
+            AccessKind::Shared {
+                data_wavefronts, ..
+            } => (
                 // Collective matrix stores are the store-side counterpart
                 // of LDSM.  Keeping STSM in the load bucket makes the
                 // operation-qualified opcode counters report matrix stores
@@ -2142,6 +2645,21 @@ impl TraceMetrics {
                     data_wavefronts.saturating_sub(data_ideal_wavefronts),
                 )?;
             }
+        }
+        if let Some(scope) = memory_scope_key(opcode, kind) {
+            let row = self.memory_scope.entry(scope.to_owned()).or_default();
+            add(&mut row.requests, 1)?;
+            add(&mut row.sectors, sectors)?;
+            if let Some((unique_sectors, unique_lines)) = decoded_sector_stats(kind, _sector_arena)
+            {
+                add(&mut row.unique_sectors, unique_sectors)?;
+                add(&mut row.unique_lines, unique_lines)?;
+                add(
+                    &mut row.sector_aliases,
+                    sectors.saturating_sub(unique_sectors),
+                )?;
+            }
+            add(&mut row.bank_wavefronts, bank_wavefronts)?;
         }
         Ok(())
     }

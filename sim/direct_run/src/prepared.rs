@@ -4,14 +4,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use serde::Serialize;
 use sim_arch::card::ArchCard;
 use sim_sm::{
-    build_schedules, build_schedules_sm120_alpha, replay_trace_kernel, IssueModelParams,
-    ReplayMemMode, Sm120AlphaConfig,
+    IssueModelParams, ReplayMemMode, Sm120AlphaConfig, build_schedules,
+    build_schedules_sm120_alpha, replay_trace_kernel,
 };
-use sim_trace::{kernel_grid, pb, AnchoredDir, TraceDir};
+use sim_trace::{AnchoredDir, TraceDir, kernel_grid, pb};
 
 use super::{
-    at, launch_report, load_arch_card, load_control_sidecar, resolve_mode, CacheScope,
-    LaunchReport, RunConfig, RunError, RunReport,
+    CacheScope, LaunchReport, RunConfig, RunError, RunReport, at, launch_report, load_arch_card,
+    load_control_sidecar, resolve_mode,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -292,7 +292,14 @@ impl PreparedReplay {
                 "prepared timing replay requires full launch coverage",
             )
         })?;
-        launch_report(result, &self.arch_card, None, None, None, self.ncu_shaped_metrics)
+        launch_report(
+            result,
+            &self.arch_card,
+            None,
+            None,
+            None,
+            self.ncu_shaped_metrics,
+        )
     }
 
     /// Replay one launch and wrap it in the same configuration-bearing report

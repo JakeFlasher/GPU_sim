@@ -33,9 +33,10 @@ struct ObservationReport {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args_os().skip(1);
-    let root = PathBuf::from(args.next().ok_or(
-        "usage: tma_notification_report CAPTURE RELAXED_WARP ACQUIRE_WARP",
-    )?);
+    let root = PathBuf::from(
+        args.next()
+            .ok_or("usage: tma_notification_report CAPTURE RELAXED_WARP ACQUIRE_WARP")?,
+    );
     let relaxed_warp: i32 = args
         .next()
         .ok_or("missing relaxed observer warp")?

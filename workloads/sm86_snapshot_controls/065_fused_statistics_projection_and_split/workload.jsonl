@@ -1,0 +1,1 @@
+{"axes": {"batch_size": 1, "time": 128, "in_channels": 192, "out_channels": 192, "kernel_size": 1, "out_channels_2": 384}, "inputs": {"x": {"type": "random"}, "weight": {"type": "random"}, "bias": {"type": "random"}}}

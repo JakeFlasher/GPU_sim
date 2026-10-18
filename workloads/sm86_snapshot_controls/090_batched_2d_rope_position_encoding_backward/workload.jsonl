@@ -1,0 +1,1 @@
+{"axes": {"batch_size": 1, "seq_len": 8, "head_dim": 128}, "inputs": {"grad_cos": {"type": "random"}, "grad_sin": {"type": "random"}, "idx_theta": {"type": "random"}}}

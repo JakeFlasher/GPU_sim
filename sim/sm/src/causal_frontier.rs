@@ -121,10 +121,8 @@ impl CausalFrontierInstruction {
             initiation_interval_cycles,
             in_flight_capacity,
             completion_units,
-            control_clean: (schedule.arch() == ArchId::Sm120
-                || slot.control().stall() == 0)
-                && (schedule.arch() == ArchId::Sm120
-                    || !slot.control().yield_flag())
+            control_clean: (schedule.arch() == ArchId::Sm120 || slot.control().stall() == 0)
+                && (schedule.arch() == ArchId::Sm120 || !slot.control().yield_flag())
                 && slot.control().write_barrier().is_none()
                 && slot.control().read_barrier().is_none()
                 && slot.control().wait_mask().bits() == 0
@@ -1275,4 +1273,3 @@ pub fn summarize_with_residency(
         planner_time_ns: planner_start.elapsed().as_nanos(),
     })
 }
-

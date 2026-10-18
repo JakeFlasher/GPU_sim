@@ -430,6 +430,16 @@ pub struct MemoryAdmissionCandidate {
     /// admission still releases at service start.
     #[serde(default, skip_serializing_if = "is_false")]
     pub membar_waits_for_service_completion: bool,
+    /// Opt-in terminal drain lane: a terminal `EXIT` waits for the issuing
+    /// warp's modeled STORE/RED acknowledgement events even without an
+    /// explicit MEMBAR. This reuses the typed acknowledgement stream and is
+    /// deliberately separate from the MEMBAR stall domain.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub exit_waits_for_service_completion: bool,
+    /// Opt-in SMSP/L1TEX admission-drain lane. A terminal EXIT waits only for
+    /// the local store-admission/XBAR drain horizon, not L2 visibility.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub exit_waits_for_admission_drain: bool,
     /// Non-occupying visibility/RMW tail after service done. It changes only
     /// the per-warp MEMBAR completion frontier, never admission service.
     #[serde(default, skip_serializing_if = "is_zero_u32")]
@@ -478,6 +488,11 @@ impl MemoryAdmissionCandidate {
                     latency: self.write_completion_latency_cycles,
                 },
             );
+        }
+        if self.exit_waits_for_service_completion && !self.membar_waits_for_service_completion {
+            return Err(MemoryAdmissionCandidateError::ExitCompletionWithoutAck {
+                candidate_id: self.candidate_id,
+            });
         }
         for (dimension, units, cycles) in [
             (
@@ -623,6 +638,10 @@ pub enum MemoryAdmissionCandidateError {
         "memory-admission candidate {candidate_id} declares {lanes} write-completion lanes without completion work"
     )]
     CompletionLanesWithoutWork { candidate_id: u8, lanes: u16 },
+    #[error(
+        "memory-admission candidate {candidate_id} enables EXIT completion without the typed acknowledgement lane"
+    )]
+    ExitCompletionWithoutAck { candidate_id: u8 },
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
@@ -1092,6 +1111,7 @@ pub(crate) struct MemoryAdmissionFeedbackState {
     queues: [VecDeque<MemoryAdmissionFeedbackEntry>; SUB_CORES],
     server_ready: u64,
     warp_completion_ready: Vec<u64>,
+    warp_admission_drain_ready: Vec<u64>,
     warp_pending_write_acks: Vec<u32>,
     pending_write_acks: HashMap<(u32, u32), MemoryWriteAck>,
     completion_lane_ready: Vec<u64>,
@@ -1111,6 +1131,7 @@ impl MemoryAdmissionFeedbackState {
             queues: std::array::from_fn(|_| VecDeque::new()),
             server_ready: 0,
             warp_completion_ready: Vec::new(),
+            warp_admission_drain_ready: Vec::new(),
             warp_pending_write_acks: Vec::new(),
             pending_write_acks: HashMap::new(),
             completion_lane_ready: vec![0; usize::from(candidate.write_completion_parallel_lanes)],
@@ -1177,6 +1198,50 @@ impl MemoryAdmissionFeedbackState {
             return None;
         }
         Some(self.warp_completion_ready.get(warp).copied().unwrap_or(0))
+    }
+
+    /// Earliest timestamp at which a terminal EXIT may issue. `None` means
+    /// that this warp still owns an unpriced store admission or a pending
+    /// acknowledgement; the shared event loop will wake the SM when the
+    /// typed acknowledgement is processed. No DRAM, dirty-writeback, or
+    /// coherence frontier is invented by this arm.
+    pub(super) fn exit_ready_at(
+        &self,
+        warp: usize,
+        slot: &IssueSlot,
+        terminal: bool,
+    ) -> Option<u64> {
+        if !self.candidate.exit_waits_for_service_completion
+            && !self.candidate.exit_waits_for_admission_drain
+            || !terminal
+            || !slot.opcode_text().trim_start().starts_with("EXIT")
+        {
+            return Some(0);
+        }
+        if self.has_unpriced_for_warp(warp) {
+            return None;
+        }
+        if self.candidate.exit_waits_for_service_completion
+            && self.warp_pending_write_acks.get(warp).copied().unwrap_or(0) != 0
+        {
+            return None;
+        }
+        let completion = self
+            .candidate
+            .exit_waits_for_service_completion
+            .then(|| self.warp_completion_ready.get(warp).copied().unwrap_or(0))
+            .unwrap_or(0);
+        let drain = self
+            .candidate
+            .exit_waits_for_admission_drain
+            .then(|| {
+                self.warp_admission_drain_ready
+                    .get(warp)
+                    .copied()
+                    .unwrap_or(0)
+            })
+            .unwrap_or(0);
+        Some(completion.max(drain))
     }
 
     pub(super) fn second_clock_issue(&self, warp: usize) -> Option<u64> {
@@ -1312,6 +1377,7 @@ impl MemoryAdmissionFeedbackState {
         l2_requests: u64,
         unique_regions: u64,
         issue_time: u64,
+        now: u64,
     ) -> Result<Option<MemoryWriteAck>, IssueError> {
         if !self.candidate.matches_operation(operation) {
             return Ok(None);
@@ -1344,7 +1410,12 @@ impl MemoryAdmissionFeedbackState {
             self.candidate.l2_miss_service_width_sectors,
         )?;
         let busy = checked_cycle_add("feedback admission service work", hit_cycles, miss_cycles)?;
-        let service_start = issue_time.max(self.server_ready);
+        // The L2 request is the first externally observable completion point
+        // for this feedback arm. A queued acknowledgement must never be
+        // scheduled before the event that priced its request; doing so would
+        // insert time travel into the shared event queue when delayed L1/L2
+        // requests are processed after the candidate's local service clock.
+        let service_start = issue_time.max(self.server_ready).max(now);
         let service_done =
             checked_cycle_add("feedback admission service completion", service_start, busy)?;
         let l2_hit_sectors_observed = checked_u64_counter_add(
@@ -1419,6 +1490,28 @@ impl MemoryAdmissionFeedbackState {
         } else {
             self.diagnostics.terminal_write_completion_time
         };
+        let drain_sectors =
+            hit_sectors
+                .checked_add(miss_sectors)
+                .ok_or(IssueError::CounterOverflow {
+                    counter: "store admission drain sectors",
+                })?;
+        let queue_capacity = usize::from(self.candidate.queue_capacity_instructions);
+        let queue_was_full = self.queues[queue_index].len() >= queue_capacity;
+        let packet_cycles = drain_sectors.div_ceil(2);
+        let drain_busy = if queue_was_full {
+            u64::from(self.candidate.admission_latency_cycles)
+                .checked_add(packet_cycles)
+                .ok_or(IssueError::TimeMultiplicationOverflow {
+                    operation: "store admission drain cycles",
+                    lhs: u64::from(self.candidate.admission_latency_cycles),
+                    rhs: packet_cycles,
+                })?
+        } else {
+            0
+        };
+        let admission_drain_done =
+            checked_cycle_add("store admission drain horizon", service_start, drain_busy)?;
         let completion_requests_observed = checked_u64_counter_add(
             "feedback write-completion requests",
             self.diagnostics.write_completion_requests_observed,
@@ -1505,6 +1598,15 @@ impl MemoryAdmissionFeedbackState {
 
         self.queues[queue_index][entry_index].release_at = Some(service_start);
         self.server_ready = service_done;
+        let drain_warp =
+            usize::try_from(witness.warp()).map_err(|_| IssueError::CounterOverflow {
+                counter: "admission drain warp index",
+            })?;
+        if self.warp_admission_drain_ready.len() <= drain_warp {
+            self.warp_admission_drain_ready.resize(drain_warp + 1, 0);
+        }
+        self.warp_admission_drain_ready[drain_warp] =
+            self.warp_admission_drain_ready[drain_warp].max(admission_drain_done);
         if let Some((lane, _)) = completion_lane {
             self.completion_lane_ready[lane] = write_service_done;
         }

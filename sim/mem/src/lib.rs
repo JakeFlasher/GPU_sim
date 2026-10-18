@@ -71,10 +71,10 @@ pub use l1::{
     AccessOutcome, EvAccess, EvAccessUnobserved, FillKey, L1AccessError, L1Cache, L1Config,
     L1ConfigError, L1CounterError, L1CounterField, L1Counters, L1DirtyFlushPlan, L1DirtyLine,
     L1DirtyPayloadAdmissionPlan, L1DirtyResidency, L1InvalidationResult, L1LookupBatch,
-    L1LookupClient, L1MergeAudit, L1MutationBudget, L1OriginCounters, L1RequestMaskAudit,
-    L1PayloadResidencyWitness, L1StorePolicy,
-    L1WriteLookupObserver, L1WriteLookupObserverPlan, LINE_BYTES, PreparedSectorExpansion,
-    SECTOR_BYTES, SECTORS_PER_LINE, SectorExpansionError, SectorExpansionPlan,
+    L1LookupClient, L1MergeAudit, L1MutationBudget, L1OriginCounters, L1PayloadResidencyWitness,
+    L1RequestMaskAudit, L1SetIndex, L1StorePolicy, L1WriteLookupObserver,
+    L1WriteLookupObserverPlan, LINE_BYTES, PreparedSectorExpansion, SECTOR_BYTES, SECTORS_PER_LINE,
+    SectorExpansionError, SectorExpansionPlan,
 };
 pub use l1_visibility::{
     L1AccessObservation, L1FenceObservation, L1FillVisibleObservation, L1InvalidateAllObservation,
@@ -82,12 +82,11 @@ pub use l1_visibility::{
     L1VisibilityEvent, L1VisibilityPlan, L1VisibilityQueue, VisibilityOrder, VisibilityScope,
 };
 pub use l2::{
-    L2AccessError, L2BuildError, L2Config, L2ConfigError, L2CounterError, L2CounterField,
-    L2Counters, L2DirtyFlushPlan, L2DirtyLine, L2DirtyResidency, L2EventMaskAccess,
+    L2_WRITE_ALLOCATE_POLICY, L2AccessError, L2BuildError, L2Config, L2ConfigError, L2CounterError,
+    L2CounterField, L2Counters, L2DirtyFlushPlan, L2DirtyLine, L2DirtyResidency, L2EventMaskAccess,
     L2EventMaskPreview, L2Eviction, L2FillCompletion, L2FillToken, L2MaskPreview, L2Model,
     L2OpClass, L2Outcome, L2PendingSectorIdentity, L2PendingSectorKey, L2ProjectionError,
     L2Replacement, L2SetIndexError, L2SnapshotError, L2Source, SliceHash,
-    L2_WRITE_ALLOCATE_POLICY,
 };
 pub use memory_order::{
     MemoryOrder, MemoryOrderError, MemoryOrderLedgerV1, MemoryOrderScope, MemoryRead,

@@ -19,19 +19,19 @@ use std::str::FromStr;
 use std::time::Instant;
 
 use crate::emit::{
+    EmitOutcome, EmittedMetricKey, FullLaunchPredictions, MetricValue, Unavailable, Unit,
     emit_launch, global_read_resident_hit_adjustment, global_resident_hit_adjustment,
-    EmitOutcome, EmittedMetricKey,
-    FullLaunchPredictions, MetricValue, Unavailable, Unit,
 };
 use serde::{Deserialize, Serialize};
-use sim_arch::card::{ArchCard, CalibError};
 use sim_arch::ArchId;
+use sim_arch::card::{ArchCard, CalibError};
 use sim_arch::spec::{ArchitectureSpec, ResourceKind};
 use sim_mem::{
-    coalesce_payloads, enrich_native_payload_records, join_native_payload_records,
-    load_native_payload_sidecar_records, CoherenceConfig, L1Config, L1Counters, L2Config,
+    CoherenceConfig, L1Config, L1Counters, L1SetIndex, L2_WRITE_ALLOCATE_POLICY, L2Config,
     L2Counters, L2Replacement, L2Source, MemoryOrigin, NativePayloadRecordV1,
-    PayloadForwardingLedgerV1, PchaseCard, SectorPayloadV1, SliceHash, L2_WRITE_ALLOCATE_POLICY,
+    PayloadForwardingLedgerV1, PchaseCard, SectorPayloadV1, SliceHash, coalesce_payloads,
+    enrich_native_payload_records, join_native_payload_records,
+    load_native_payload_sidecar_records,
 };
 use sim_semantics::{
     CacheCandidateSummary, CacheWitnessDomains, ClockDomain, CompletionRequirement,
@@ -40,17 +40,17 @@ use sim_semantics::{
     ServiceQueueProjection, ServiceRateProfile, ServiceStageRole,
 };
 use sim_sm::{
+    ControlSidecar, DramBw, DramStats, FastFrontierSummary, FullKernelReplayResult,
+    GpcObservationFrontier, IssueModelParams, L1PayloadAdmissionEvent, L2SourceSplit,
+    MAX_MEMORY_ADMISSION_CANDIDATES, MAX_MEMORY_SERVICE_CANDIDATES, MemoryAdmissionCandidate,
+    MemoryServiceCandidate, ModeledCompletionFrontier, ReadinessDiagnostics, ReplayMemMode,
+    Sm120AlphaConfig, SmActiveObservationFrontier, StreamL2ReplaySession, TailFlags, TraceMetrics,
     build_schedules, replay_trace_kernel, replay_trace_kernel_with_l1_payload_events,
     replay_trace_kernel_with_memory_admission_candidates,
     replay_trace_kernel_with_memory_admission_feedback,
-    replay_trace_kernel_with_memory_service_candidates, ControlSidecar, DramBw, DramStats,
-    FastFrontierSummary, FullKernelReplayResult, GpcObservationFrontier, IssueModelParams,
-    L1PayloadAdmissionEvent, L2SourceSplit, MemoryAdmissionCandidate, MemoryServiceCandidate,
-    ModeledCompletionFrontier, ReadinessDiagnostics, ReplayMemMode, Sm120AlphaConfig,
-    SmActiveObservationFrontier, StreamL2ReplaySession, TailFlags, TraceMetrics,
-    MAX_MEMORY_ADMISSION_CANDIDATES, MAX_MEMORY_SERVICE_CANDIDATES,
+    replay_trace_kernel_with_memory_service_candidates,
 };
-use sim_trace::{kernel_grid, strict_json_from_slice, AnchoredDir, ExecInfo, TraceDir};
+use sim_trace::{AnchoredDir, ExecInfo, TraceDir, kernel_grid, strict_json_from_slice};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryMode {
@@ -161,6 +161,10 @@ pub struct RunConfig {
     pub memory_mode: MemoryMode,
     pub cache_scope: CacheScope,
     pub carded_dram_bandwidth: bool,
+    /// Optional explicit effective DRAM service-rate scenario. This is a
+    /// hypothesis input, not a physical bandwidth claim; when absent the
+    /// architecture-card vendor peak remains active.
+    pub dram_service_rate_bytes_per_sec: Option<u64>,
     /// Optional opt-in dirty-L2-eviction writeback queue capacity in 32-byte
     /// sectors. This requires carded DRAM, launch-scoped L1-L2 replay, and
     /// never changes the default read-only carded path.
@@ -274,6 +278,11 @@ impl RunConfig {
     /// never silently stand in for full SM120 replay.
     fn with_architecture_defaults(&self, arch: sim_arch::ArchId) -> Result<Self, RunError> {
         let mut config = self.clone();
+        if !config.fast_frontier_only {
+            // Full replay projections are part of the unified baseline for both
+            // architecture lanes. Fast frontier mode remains trace-only.
+            config.ncu_shaped_metrics = true;
+        }
         if arch == sim_arch::ArchId::Sm120 {
             config.sm120_alpha = true;
             if !config.fast_frontier_only {
@@ -283,8 +292,12 @@ impl RunConfig {
                         "SM120 full replay requires --mode l1-l2; flat and l1-only full replay are forbidden (flat is fast-frontier-only)",
                     ));
                 }
-                config.sm120_effective_l1.get_or_insert_with(Default::default);
-                config.sm120_effective_l2.get_or_insert_with(Default::default);
+                config
+                    .sm120_effective_l1
+                    .get_or_insert_with(Default::default);
+                config
+                    .sm120_effective_l2
+                    .get_or_insert_with(Default::default);
                 config.ncu_shaped_metrics = true;
                 // The latent envelope is observer-only. Carded DRAM remains
                 // explicit because the SM120 card marks bandwidth as a
@@ -1422,7 +1435,11 @@ pub struct NcuMetricProjectionReport {
     pub outcome: EmitOutcome,
 }
 
-fn ncu_metric_name_for_arch(arch: sim_arch::ArchId, key: &str, default: &'static str) -> &'static str {
+fn ncu_metric_name_for_arch(
+    arch: sim_arch::ArchId,
+    key: &str,
+    default: &'static str,
+) -> &'static str {
     // Nsight's SM120 raw profiles expose the DRAM read demand under the
     // operation-qualified label. Keep the internal registry key stable while
     // emitting the architecture-qualified external name for post-replay joins.
@@ -1563,8 +1580,7 @@ impl Sm120IssueEnvelopeReport {
             max_resident_warps_configured: params.max_resident_warps_per_sm(),
             max_resident_blocks_configured: params.max_resident_blocks_per_sm(),
             configuration_source: "IssueModelParams consumed by executor",
-            non_claim:
-                "scenario inputs only; not a confidence interval or physical scheduler topology",
+            non_claim: "scenario inputs only; not a confidence interval or physical scheduler topology",
         }
     }
 }
@@ -1626,8 +1642,7 @@ impl Sm120CompletionLedgerReport {
             destination_visibility: "unobserved_without_consumer_payload_observation",
             payload_observation: "not_present_in_alpha_trace_contract",
             affected_async_records,
-            non_claim:
-                "ledger separates semantic edges but does not supply native completion timing",
+            non_claim: "ledger separates semantic edges but does not supply native completion timing",
         }
     }
 }
@@ -1832,7 +1847,12 @@ pub struct CounterReport {
 #[derive(Debug, Serialize)]
 pub struct FrontEndCounterReport {
     pub compulsory_instruction_read_sectors: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
     pub compulsory_constant_read_sectors: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub compulsory_instruction_line_read_sectors: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub static_instruction_line_read_sectors: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -1842,6 +1862,8 @@ pub struct L1CounterReport {
     pub merges: u64,
     pub pending_lookup_hits: u64,
     pub stall_events: u64,
+    pub mshr_stall_occupancy_samples: u64,
+    pub mshr_stall_occupancy_sum: u64,
     pub line_fills: u64,
     pub bypass_sectors: u64,
     pub store_sectors: u64,
@@ -1860,6 +1882,8 @@ pub struct L2CounterReport {
     pub line_misses: u64,
     pub sector_fill_misses: u64,
     pub write_tag_hits: u64,
+    pub pending_merge_sectors: u64,
+    pub new_fill_sectors: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -1868,23 +1892,30 @@ pub struct L2SourceCounterReport {
     pub bypass: L2SourceLaneReport,
     pub untagged: L2SourceLaneReport,
     pub store: L2SourceLaneReport,
-    /// Read-class lookup hits that did not arise solely from coalescing with
-    /// an already pending L2 fill.  This is diagnostic/conditional evidence;
-    /// the ordinary read endpoint retains the historical pending-merge count.
+    /// Read-class lookup hits not arising solely from a pending-fill merge.
     pub read_lookup_hits_without_pending_merges: u64,
     pub read_pending_merge_hits: u64,
+    pub store_packet_candidate_sectors: u64,
 }
 
 #[derive(Debug, Serialize)]
 pub struct L2SourceLaneReport {
     pub sectors: u64,
     pub hits: u64,
+    pub pending_pressure_samples: u64,
+    pub pending_pressure_sum: u64,
 }
 
 fn l2_source_counter_report(value: &L2SourceSplit) -> L2SourceCounterReport {
     let lane = |source| {
         let (sectors, hits) = value.source(source);
-        L2SourceLaneReport { sectors, hits }
+        let index = source as usize;
+        L2SourceLaneReport {
+            sectors,
+            hits,
+            pending_pressure_samples: value.pending_pressure_samples[index],
+            pending_pressure_sum: value.pending_pressure_sum[index],
+        }
     };
     L2SourceCounterReport {
         l1_fill: lane(L2Source::L1Fill),
@@ -1895,6 +1926,7 @@ fn l2_source_counter_report(value: &L2SourceSplit) -> L2SourceCounterReport {
             .read_lookup_hits
             .saturating_sub(value.read_pending_merge_hits),
         read_pending_merge_hits: value.read_pending_merge_hits,
+        store_packet_candidate_sectors: value.store_packet_candidate_sectors,
     }
 }
 
@@ -1907,12 +1939,33 @@ fn l2_counter_report(value: &L2Counters) -> L2CounterReport {
         line_misses: value.line_misses,
         sector_fill_misses: value.sector_fill_misses,
         write_tag_hits: value.write_tag_hits,
+        pending_merge_sectors: value.pending_merge_sectors,
+        new_fill_sectors: value.new_fill_sectors,
     }
 }
 
 #[derive(Debug, Serialize)]
 pub struct DramCounterReport {
     pub read_sectors: u64,
+    /// Configured aggregate carded rate for this launch. The corpus runner's
+    /// 825 GB/s effective hypothesis and direct-run card-peak fallback are
+    /// both represented as configured rates, not physical controller truth.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service_rate_bytes_per_sec: Option<u64>,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub l2_frontier_samples: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub l2_issue_to_fill_cycles_sum: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub l2_issue_to_fill_cycles_max: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub l2_issue_to_response_cycles_sum: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub l2_issue_to_response_cycles_max: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub l2_service_delay_cycles_sum: u64,
+    #[serde(skip_serializing_if = "is_zero_u64")]
+    pub l2_service_delay_cycles_max: u64,
     #[serde(skip_serializing_if = "is_zero_u64")]
     pub atomic_rmw_read_sectors: u64,
     #[serde(skip_serializing_if = "is_zero_u64")]
@@ -1987,9 +2040,7 @@ fn tail_report(tails: TailFlags) -> TailReport {
     }
 }
 
-pub(crate) fn sm120_front_end_envelope_cycles(
-    result: &FullKernelReplayResult,
-) -> Option<u64> {
+pub(crate) fn sm120_front_end_envelope_cycles(result: &FullKernelReplayResult) -> Option<u64> {
     if result.arch() != sim_arch::ArchId::Sm120 {
         return None;
     }
@@ -2017,9 +2068,9 @@ fn effective_gpc_completion_frontier_report(
         None => Ok(None),
     };
     Ok(match result.modeled_completion_frontier() {
-        ModeledCompletionFrontier::Complete { cycles } => {
-            CompletionFrontierReport::Complete { cycles: add(cycles)? }
-        }
+        ModeledCompletionFrontier::Complete { cycles } => CompletionFrontierReport::Complete {
+            cycles: add(cycles)?,
+        },
         ModeledCompletionFrontier::Incomplete {
             lower_bound_cycles,
             unmodeled_tails,
@@ -2041,12 +2092,30 @@ fn counters(
     dram: Option<&DramStats>,
     tails: TailFlags,
 ) -> CounterReport {
+    let counter_arch = l1
+        .and_then(|value| value.arch())
+        .or_else(|| l2.and_then(|value| value.arch()))
+        .unwrap_or(ArchId::Sm86);
     CounterReport {
         instructions_issued,
         records_seen,
         front_end: FrontEndCounterReport {
             compulsory_instruction_read_sectors: front_end.compulsory_instruction_read_sectors(),
-            compulsory_constant_read_sectors: front_end.compulsory_constant_read_sectors(),
+            compulsory_constant_read_sectors: if counter_arch == ArchId::Sm120 {
+                front_end.compulsory_constant_read_sectors()
+            } else {
+                0
+            },
+            compulsory_instruction_line_read_sectors: if counter_arch == ArchId::Sm86 {
+                front_end.compulsory_instruction_line_read_sectors()
+            } else {
+                0
+            },
+            static_instruction_line_read_sectors: if counter_arch == ArchId::Sm86 {
+                front_end.static_instruction_line_read_sectors()
+            } else {
+                0
+            },
         },
         l1: l1.map(|value| L1CounterReport {
             hits: value.hits,
@@ -2054,6 +2123,8 @@ fn counters(
             merges: value.merges,
             pending_lookup_hits: value.pending_lookup_hits,
             stall_events: value.stall_events,
+            mshr_stall_occupancy_samples: value.mshr_stall_occupancy_samples,
+            mshr_stall_occupancy_sum: value.mshr_stall_occupancy_sum,
             line_fills: value.line_fills,
             bypass_sectors: value.bypass_sectors,
             store_sectors: value.store_sectors,
@@ -2066,6 +2137,14 @@ fn counters(
         l2_by_source: l2_by_source.map(l2_source_counter_report),
         dram: dram.map(|value| DramCounterReport {
             read_sectors: value.read_sectors,
+            service_rate_bytes_per_sec: value.service_rate_bytes_per_sec,
+            l2_frontier_samples: value.l2_frontier_samples,
+            l2_issue_to_fill_cycles_sum: value.l2_issue_to_fill_cycles_sum,
+            l2_issue_to_fill_cycles_max: value.l2_issue_to_fill_cycles_max,
+            l2_issue_to_response_cycles_sum: value.l2_issue_to_response_cycles_sum,
+            l2_issue_to_response_cycles_max: value.l2_issue_to_response_cycles_max,
+            l2_service_delay_cycles_sum: value.l2_service_delay_cycles_sum,
+            l2_service_delay_cycles_max: value.l2_service_delay_cycles_max,
             atomic_rmw_read_sectors: value.atomic_rmw_read_sectors,
             reduction_rmw_read_sectors: value.reduction_rmw_read_sectors,
             bandwidth_delayed_responses: value.bw_delayed_responses,
@@ -2111,7 +2190,9 @@ fn cache_lookup_prediction_reports(
             "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum",
             "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_miss.sum",
             l1.map(|counters| {
-                counters.origin(MemoryOrigin::Global).effective_lookup_hits()
+                counters
+                    .origin(MemoryOrigin::Global)
+                    .effective_lookup_hits_for_arch(counters.arch().unwrap_or(ArchId::Sm86))
                     .saturating_add(global_read_resident_hit_adjustment(
                         counters.arch().unwrap_or(ArchId::Sm86),
                         counters,
@@ -2135,18 +2216,20 @@ fn cache_lookup_prediction_reports(
                     || {
                         counters
                             .origin(MemoryOrigin::Global)
-                            .effective_lookup_hits()
+                            .effective_lookup_hits_for_arch(counters.arch().unwrap_or(ArchId::Sm86))
                             .saturating_add(global_resident_hit_adjustment(
                                 counters.arch().unwrap_or(ArchId::Sm86),
                                 counters,
                                 trace,
                             ))
-                            .saturating_add(local.effective_lookup_hits())
+                            .saturating_add(local.effective_lookup_hits_for_arch(
+                                counters.arch().unwrap_or(ArchId::Sm86),
+                            ))
                     },
                     |metrics| {
                         counters
                             .origin(MemoryOrigin::Global)
-                            .effective_lookup_hits()
+                            .effective_lookup_hits_for_arch(counters.arch().unwrap_or(ArchId::Sm86))
                             .saturating_add(global_resident_hit_adjustment(
                                 counters.arch().unwrap_or(ArchId::Sm86),
                                 counters,
@@ -2480,28 +2563,38 @@ fn cache_lookup_prediction_reports(
             detail: None,
         }
     } else if let Some(split) = l2_by_source {
-        let (shadow_requests, shadow_hits, shadow_misses, _) =
-            load_shadow.unwrap_or((0, 0, 0, 0));
+        let (shadow_requests, shadow_hits, shadow_misses, _) = load_shadow.unwrap_or((0, 0, 0, 0));
         let ordinary_hits = split.read_lookup_hits;
         let ordinary_requests = split.read_lookup_requests;
-        let ordinary_misses = ordinary_requests.checked_sub(ordinary_hits).ok_or_else(|| {
-            RunError::new("cache lookup projection", "ordinary read hits exceed requests")
-        })?;
-        let hits = ordinary_hits.checked_add(shadow_hits).ok_or_else(|| {
-            RunError::new("cache lookup projection", "read lookup hit overflow")
-        })?;
-        let lookups = ordinary_requests.checked_add(shadow_requests).ok_or_else(|| {
-            RunError::new("cache lookup projection", "read lookup request overflow")
-        })?;
-        let misses = ordinary_misses.checked_add(shadow_misses).ok_or_else(|| {
-            RunError::new("cache lookup projection", "read lookup miss overflow")
-        })?;
+        let ordinary_misses = ordinary_requests
+            .checked_sub(ordinary_hits)
+            .ok_or_else(|| {
+                RunError::new(
+                    "cache lookup projection",
+                    "ordinary read hits exceed requests",
+                )
+            })?;
+        let hits = ordinary_hits
+            .checked_add(shadow_hits)
+            .ok_or_else(|| RunError::new("cache lookup projection", "read lookup hit overflow"))?;
+        let lookups = ordinary_requests
+            .checked_add(shadow_requests)
+            .ok_or_else(|| {
+                RunError::new("cache lookup projection", "read lookup request overflow")
+            })?;
+        let misses = ordinary_misses
+            .checked_add(shadow_misses)
+            .ok_or_else(|| RunError::new("cache lookup projection", "read lookup miss overflow"))?;
         CacheLookupPredictionReport {
             scope: read_scope,
             ncu_hit_metric: read_hit_metric,
             ncu_miss_metric: read_miss_metric,
             status: "predicted",
-            observer: Some(CacheLookupObserverReport { hits, misses, lookups }),
+            observer: Some(CacheLookupObserverReport {
+                hits,
+                misses,
+                lookups,
+            }),
             timing_state: Some(CacheLookupTimingStateReport {
                 resident_data_hits: hits,
                 observer_resident_hits: hits,
@@ -2601,14 +2694,13 @@ fn launch_report(
     let binding = result.coverage().launch().clone();
     let (metric_predictions, cache_lookup_predictions) = if include_metric_predictions {
         let bundle = emit_launch(&result).map_err(at("metric projection"))?;
-        let cache_lookup_predictions =
-            cache_lookup_prediction_reports(
-                &bundle,
-                result.l1(),
-                result.l2(),
-                result.l2_by_source(),
-                Some(result.trace_metrics()),
-            )?;
+        let cache_lookup_predictions = cache_lookup_prediction_reports(
+            &bundle,
+            result.l1(),
+            result.l2(),
+            result.l2_by_source(),
+            Some(result.trace_metrics()),
+        )?;
         let metric_predictions = bundle
             .metrics()
             .iter()
@@ -2671,8 +2763,7 @@ fn launch_report(
         terminal_modeled_event_time: result.terminal_modeled_event_time(),
         sm_active_terminal_frontier: Some(SmActiveTerminalFrontierReport {
             cycles: result.sm_active_terminal_event_time(),
-            role:
-                "causal_sm_active_terminal_lower_bound_excludes_write_ack_and_service_only_events",
+            role: "causal_sm_active_terminal_lower_bound_excludes_write_ack_and_service_only_events",
         }),
         sm_active_observation_frontier: result.sm_active_observation_frontier().map(Into::into),
         gpc_observation_frontier: result.gpc_observation_frontier().map(Into::into),
@@ -2793,7 +2884,7 @@ fn resolve_mode(
         return Ok(ReplayMemMode::Flat);
     }
 
-    let l1 = if let Some(effective) = config.sm120_effective_l1 {
+    let mut l1 = if let Some(effective) = config.sm120_effective_l1 {
         effective.as_l1_config()
     } else {
         let pchase_path = config.pchase_card.as_ref().ok_or_else(|| {
@@ -2808,6 +2899,19 @@ fn resolve_mode(
             .map_err(at("L1 geometry"))?;
         issue.l1_config(geometry.capacity.line_capacity, geometry.mshr.count)
     };
+    if issue.arch() == sim_arch::ArchId::Sm86 && config.sm120_effective_l1.is_none() {
+        let geometry = arch_card
+            .require_l1_geometry()
+            .map_err(at("SM86 L1 set geometry"))?;
+        // The card documents the set/way domain, while the p-chase resolver
+        // retains the active carveout capacity.  Keep both sources explicit:
+        // the pressure-bounded modulo/folded candidate is an effective
+        // scenario and the proprietary hash remains unknown; global capacity
+        // still follows the p-chase point.
+        l1.set_count = Some(geometry.sets);
+        l1.ways = Some(geometry.ways);
+        l1.set_index = L1SetIndex::ModuloXorFallback;
+    }
     if config.memory_mode == MemoryMode::L1 {
         if config.carded_dram_bandwidth {
             return Err(RunError::new(
@@ -2855,7 +2959,17 @@ fn resolve_mode(
         let card = arch_card
             .require_dram_bandwidth()
             .map_err(at("DRAM bandwidth"))?;
-        let bytes_per_sec = card
+        let bytes_per_sec = config
+            .dram_service_rate_bytes_per_sec
+            .or_else(|| card.validated_peak_bytes_per_second().ok())
+            .ok_or_else(|| RunError::new("DRAM bandwidth", "no validated service rate"))?;
+        if bytes_per_sec == 0 {
+            return Err(RunError::new(
+                "DRAM bandwidth",
+                "service rate must be positive",
+            ));
+        }
+        let _card_peak = card
             .validated_peak_bytes_per_second()
             .map_err(at("DRAM bandwidth"))?;
         let sm_clock_hz = card.locked_sm_clock_hz().map_err(at("DRAM clock"))?;

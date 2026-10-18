@@ -1,0 +1,52 @@
+------------- NVBit (NVidia Binary Instrumentation Tool v1.8.1) Loaded --------------
+NVBit core environment variables (mostly for nvbit-devs):
+ACK_CTX_INIT_LIMITATION = 0 - if set, no warning will be printed for nvbit_at_ctx_init()
+            NVDISASM = /usr/local/cuda-13.2/bin/nvdisasm - override default nvdisasm found in PATH
+            NOBANNER = 0 - if set, does not print this banner
+       NO_EAGER_LOAD = 1 - lazy module loading is now turned on by default. If you see deadlocks in your tool, set NO_EAGER_LOAD to 0
+---------------------------------------------------------------------------------
+         INSTR_BEGIN = 0 - Beginning of the instruction interval where to apply instrumentation
+           INSTR_END = 4294967295 - End of the instruction interval where to apply instrumentation
+    EXCLUDE_PRED_OFF = 1 - Exclude predicated off instruction from count
+DYNAMIC_KERNEL_LIMIT_END = 0 - Limit of the number kernel to be printed, 0 means no limit
+DYNAMIC_KERNEL_LIMIT_START = 0 - start to report kernel from this kernel id, 0 means starts from the beginning, i.e. first kernel
+   ACTIVE_FROM_START = 1 - Start instruction tracing from start or wait for cuProfilerStart and cuProfilerStop. If set to 0, DYNAMIC_KERNEL_LIMIT options have no effect
+        TOOL_VERBOSE = 0 - Enable verbosity inside the tool
+INTERMEDIATE_EXTRA_FILES_PERSISTANCE = 0 - Enable to not delete intermediate files from the extra trace generation
+SKIP_ENHANCED_TRACER = 0 - Skip the post-execution enhanced_tracer pass (cubin extraction + parse_sass + parse_rfu). Primary trace artifacts (dynamic_trace.pb, per-CTA pb files, stats.csv) are unaffected.
+ENHANCED_TRACER_PER_CUBIN_TIMEOUT_S = 30 - Per-subprocess deadline (seconds) for the cuobjdump/nvdisasm shell-outs inside enhanced_tracer. On timeout the child process group is SIGTERM'd then SIGKILL'd; the parent always returns normally. Set to 0 to wait indefinitely (legacy behavior).
+ENHANCED_TRACER_MAX_PARSER_INPUT_KB = 64 - Maximum size (KB) of the .sass / .rfu files passed to parse_sass / parse_rfu. Cubins whose generated parser inputs exceed the threshold (or whose subprocess timed out) are skipped with a typed enhanced_tracer_cubin_parse_timeout diagnostic. Set to 0 to disable the size pre-skip.
+     TOOL_TRACE_CORE = 0 - write the core id in the traces
+TERMINATE_UPON_LIMIT = 0 - Stop the process once the current kernel > DYNAMIC_KERNEL_LIMIT_END
+USER_DEFINED_FOLDERS = 1 - Uses the user defined folder TRACES_FOLDER path environment
+
+ Traces location is /home/jakeshea/sm86_rtx_3090_capture/captures/simbench_l1_global_scalar_32b_copy/ 
+Stats location is /home/jakeshea/sm86_rtx_3090_capture/captures/simbench_l1_global_scalar_32b_copy/stats.csv 
+ TRACE_SAMPLING_MODE = 0 - Trace-sampling capture mode: 0=off, 1=counting-only (per-block stats, no address payload), 2=selective-dump (write only the TRACE_SAMPLING_SELECTED_BLOCKS whole blocks; counting stays on)
+THRESHOLD_UNIQUE_KERNEL_CHECKING = 10 - Number of instructions used to check if kernels with the same name are different
+    GATHER_REGISTERS = 0 - Compatibility knob; protobuf register snapshots are not emitted by this tracer.
+----------------------------------------------------------------------------------------------------
+{
+  "schema_version": 1,
+  "slug": "global_scalar_32b_copy",
+  "shape_set": "correctness_shapes",
+  "shape_point": "correctness_00",
+  "samples": 32, "bins": 8, "seed": 42,
+  "correct": true, "mismatch_count": 0,
+  "output": [[-0.727853,0.289704,-0.717441,-0.977082,-0.552718,-0.298549,-0.48783,-0.64721],[0.100704,-0.760446,-0.649471,-0.990963,-0.119847,-0.340622,-0.967162,0.672691],[-0.790057,0.976042,-0.0444253,0.998594,-0.336601,0.872508,-0.28017,-0.348593],[-0.0494758,-0.831799,0.774251,-0.300957,0.864659,-0.183058,0.751348,-0.417729],[-0.968131,-0.597088,0.0909023,0.379241,0.806821,0.603425,0.0442436,-0.416314],[-0.841114,0.587243,-0.346871,0.115539,-0.107762,-0.182812,-0.203016,0.782724],[-0.956319,0.225799,-0.0977432,-0.0871239,0.801955,-0.767206,0.407622,-0.626282],[0.792286,-0.426936,-0.421193,-0.299124,-0.930084,0.403981,0.766763,0.551854],[0.666368,0.66074,-0.297038,0.204938,-0.967806,-0.871496,0.925536,-0.678234],[-0.780043,-0.799903,-0.0699616,-0.30767,-0.848798,-0.212016,-0.86144,0.181132],[0.811156,-0.640687,-0.719049,-0.406715,0.714915,-0.437257,-0.718086,-0.320735],[0.488865,0.415821,-0.752313,0.997095,-0.0889112,0.521657,0.646107,-0.149295],[0.254501,-0.716352,-0.726232,0.0232013,-0.723522,-0.413007,0.104045,0.523819],[0.698712,0.915762,0.609725,0.0672907,0.521056,0.374257,0.653999,0.504389],[0.0130992,0.581418,0.543563,0.922389,0.727231,0.907034,0.337577,-0.365792],[0.376933,0.0184942,-0.993767,0.774956,-0.075934,-0.793164,-0.467311,-0.275327],[-0.281124,-0.539156,-0.447901,-0.924025,0.0365007,0.757943,0.621518,0.365381],[0.853698,-0.459364,0.714404,0.287053,-0.790434,-0.152754,0.0334883,-0.392281],[-0.00600545,-0.934303,-0.264254,0.501507,-0.492397,0.779094,0.663235,-0.47654],[0.63691,0.671855,0.673538,0.940465,-0.0115137,0.965134,0.663569,0.638358],[0.82585,0.350289,0.880484,0.323953,-0.847163,-0.110843,0.613453,-0.759261],[-0.212793,0.849865,-0.139956,0.116997,0.768244,-0.053057,-0.939037,-0.434904],[-0.0579261,0.954484,0.496904,0.650706,-0.931516,-0.838899,0.44126,0.850683],[0.292964,0.635426,0.662443,0.118377,-0.672262,-0.229085,-0.63044,-0.724891],[-0.814469,0.0786907,-0.804796,0.446579,-0.190188,0.697188,-0.6909,0.76293],[0.445286,0.587345,0.256362,0.0412532,-0.907646,-0.117913,-0.385891,0.669246],[0.88932,-0.641136,0.0601918,-0.591195,0.766074,0.503982,0.947776,0.33829],[-0.786984,0.137477,-0.0204609,-0.347802,-0.491039,-0.932706,-0.92478,0.537026],[0.251775,-0.258492,0.0262862,-0.157956,0.535504,-0.632661,-0.968546,-0.236258],[0.617729,0.465723,0.706823,-0.737297,0.420911,0.330169,-0.335639,-0.568357],[-0.288535,0.358671,-0.747486,0.533373,-0.699676,-0.272584,0.552657,-0.0725585],[0.108736,-0.624969,0.225169,-0.395816,0.443042,-0.233862,-0.701139,-0.455041]]
+}
+Serialized protocol buffer written to /home/jakeshea/sm86_rtx_3090_capture/captures/simbench_l1_global_scalar_32b_copy/dynamic_trace.pb
+Serialized allocation registry to /home/jakeshea/sm86_rtx_3090_capture/captures/simbench_l1_global_scalar_32b_copy/extra_info/allocations.json (2 entries)
+Wrote accepted-launch module mapping to /home/jakeshea/sm86_rtx_3090_capture/captures/simbench_l1_global_scalar_32b_copy/extra_info/traced_kernel_modules.json (1 launch(es))
+Serialized exclusion sidecars to /home/jakeshea/sm86_rtx_3090_capture/captures/simbench_l1_global_scalar_32b_copy/extra_info (entries=0 distinct keys with total count=0; unsupported=0, unmapped=0, cross_allocation=0)
+Starting the enhanced tracer
+Generating extra information for the enhanced traces of benchmark: global_scalar_32b_copy_run
+Extracting ELF file    1: global_scalar_32b_copy-main.sm_86.cubin
+Extracting ELF file    2: global_scalar_32b_copy.sm_86.cubin
+Extracting ELF file    3: main.sm_86.cubin
+Parsing cubin: global_scalar_32b_copy-main.sm_86.cubin
+Parsing cubin: global_scalar_32b_copy.sm_86.cubin
+Parsing cubin: main.sm_86.cubin
+Enhanced tracer has parsed 1/1 kernels
+Terminated the enhanced tracer
+Serialized NVBit-native static metadata to /home/jakeshea/sm86_rtx_3090_capture/captures/simbench_l1_global_scalar_32b_copy/extra_info/native_static_metadata.json (functions=1)

@@ -1,0 +1,1 @@
+{"axes": {"batch_size": 1, "seq_len": 8, "hidden_size": 128, "intermediate_size": 512}, "inputs": {"grad_output": {"type": "random"}, "x": {"type": "random"}, "gate_output": {"type": "random"}, "up_output": {"type": "random"}, "activated_gate": {"type": "random"}, "gate_weight": {"type": "random"}, "up_weight": {"type": "random"}, "down_weight": {"type": "random"}}}

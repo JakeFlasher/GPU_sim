@@ -437,16 +437,17 @@ impl ArchId {
 
     /// CTA-barrier issue behavior identified independently on a one-CTA,
     /// memory-free sweep. Ampere admits barrier arrivals through one SM-shared
-    /// server at one warp every two cycles. The separate generation re-arm
-    /// remains zero until a SASS-adjacent consecutive-barrier construction
-    /// distinguishes it from intervening compiler-scheduled control work.
+    /// server at one warp every two cycles. A consecutive-BAR.SYNC clock64
+    /// probe on the RTX 3090 Ti adds a 28-cycle generation re-arm after the
+    /// latest arrival; this applies only to a later generation of the same
+    /// CTA, not to ordinary post-barrier instructions.
     pub const fn cta_barrier_issue(self) -> Capability<CtaBarrierIssue> {
         match self {
             Self::Sm86 => Capability::available(
                 Self::Sm86,
                 CtaBarrierIssue {
                     warp_initiation_interval_cycles: 2,
-                    generation_rearm_cycles: 0,
+                    generation_rearm_cycles: 28,
                 },
             ),
             Self::Sm120 => Capability::research_gap(

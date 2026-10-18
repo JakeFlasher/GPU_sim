@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "module_identity": {"stable_key": null, "path_semantics": "path_at_capture", "rebind_contract": "alpha_path_only"},
+  "selection": {"active_from_start": true, "max_accepted_active_launches": 0, "accepted_active_launches": 1, "active_launch_attempts": 1, "active_launches_skipped_after_limit": 0, "concurrent_limit_violations": 0, "exact_contract_satisfied": true, "module_mapping_count": 1, "inactive_channel_records_dropped": 0, "accepted_channel_records": 239},
+  "launches": [
+    {"accepted_launch_index": 0, "device_id": 0, "stream_id": 7, "trace_launch_id": 1, "kernel_name": "global_scalar_32b_copy_kernel", "resolution_source": "library_registry", "module": {"status": "no_stable_static_module", "reason": "alpha_path_only", "path_at_capture": "/root/GPU_simulator_rebase/workloads/simbench_bw/l1/global_scalar_32b_copy/global_scalar_32b_copy_run", "basename": "global_scalar_32b_copy_run"}}
+  ]
+}

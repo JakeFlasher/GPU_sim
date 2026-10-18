@@ -90,3 +90,8 @@ data/annex/
 
 # Optional local paper tree
 IEEE_conference_latex/
+
+# Full-corpus copied inputs and replay outputs (large local verification artifacts)
+full_corpus_inputs/
+full_replay_runs/
+verification_outputs/

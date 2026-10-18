@@ -55,17 +55,68 @@ def family(metric: str) -> str:
 
 def allowed_units(unit: str) -> set[str]:
     return {
-        "pct": {"%"},
-        "count": {"inst", "sector", "request", "line", "wavefront", "byte", "warp"},
+        # ``metric_predictions`` use the compact internal spellings while
+        # native launch/resource rows already carry NCU's presentation units.
+        # Keep both spellings here; dimensional aliases that need scaling are
+        # handled by ``target_scale_for_metric`` below.
+        "pct": {"%", "pct"},
+        "%": {"%", "pct"},
+        # ``byte`` is intentionally excluded from the generic count alias;
+        # byte-domain rows must use an explicitly named metric conversion.
+        "count": {"inst", "sector", "request", "line", "wavefront", "warp"},
         "cycles": {"cycle"},
         "inst/cycle": {"inst/cycle"},
         "warp": {"warp"},
         "inst": {"inst"},
         "sector": {"sector"},
         "byte": {"byte"},
-        "request": {"request"},
+        "request": {"request", ""},
         "wavefront": {"wavefront"},
+        "branches": {"branches"},
+        "thread/block": {"thread/block", ""},
+        "block": {"block"},
+        "block/SM": {"block/SM", "block"},
+        "register/thread": {"register/thread"},
     }.get(unit, set())
+
+
+def target_scale_for_metric(metric: str, model_unit: str, target_unit: str) -> float | None:
+    """Return a target-to-model scale for a name-qualified unit relation.
+
+    NCU CSV exports mix SI-looking ``Kbyte``/``Mbyte`` labels with the
+    simulator's byte-valued launch/resource rows.  Only the documented metric
+    families below are admitted.  In particular, this is not a general
+    unitless conversion and deliberately does not bridge GPU duration clocks.
+    """
+    if target_unit in allowed_units(model_unit):
+        return 1.0
+    if metric == "dram__bytes_read.sum" and model_unit == "byte":
+        return {"Kbyte": 1_000.0, "Mbyte": 1_000_000.0}.get(target_unit)
+    shared_bytes = {
+        "launch__shared_mem_per_block_static",
+        "launch__shared_mem_per_block_dynamic",
+        "launch__shared_mem_per_block_allocated",
+    }
+    if metric in shared_bytes and model_unit in {"byte", "byte/block"}:
+        # The model stores these launch quantities as bytes per block even
+        # where the native metric carries an explicit ``/block`` suffix.
+        if target_unit in {"byte", "byte/block"}:
+            return 1.0
+        if target_unit in {"Kbyte", "Kbyte/block"}:
+            return 1_000.0
+    if metric == "launch__shared_mem_config_size" and model_unit in {"byte", "byte/SM"}:
+        return {"Kbyte": 1_000.0, "byte": 1.0}.get(target_unit)
+    if metric == "launch__block_size" and model_unit == "thread/block":
+        return 1.0 if target_unit == "" else None
+    if metric == "launch__grid_size" and model_unit == "block":
+        return 1.0 if target_unit == "" else None
+    if metric.startswith("l1tex__t_requests_") and model_unit == "request":
+        return 1.0 if target_unit == "" else None
+    if metric == "smsp__branch_targets_threads_divergent" and model_unit == "branches":
+        return 1.0 if target_unit == "branches" else None
+    if metric.startswith("launch__occupancy_limit_") and model_unit == "block/SM":
+        return 1.0 if target_unit == "block" else None
+    return None
 
 
 def join_provenance_tier(join: dict[str, Any]) -> str:
@@ -81,7 +132,6 @@ def join_provenance_tier(join: dict[str, Any]) -> str:
 
 
 def client_scope_class(metric: str) -> str:
-    """Name the documented counter scope; do not imply cross-client equality."""
     if metric.startswith("lts__t_sectors_srcunit_tex_op_read_lookup_"):
         return "SourceAndOpQualified"
     if metric.startswith("lts__t_sectors_srcunit_tex_lookup_"):
@@ -184,8 +234,19 @@ def selected_entries(launch: dict[str, Any], mode: str) -> list[dict[str, Any]]:
         groups[entry["metric"]].append(entry)
     result = []
     for entries in groups.values():
-        chosen = next((entry for entry in entries
-                       if entry["status"] == "predicted" and entry["estimate"] is not None), entries[0])
+        def preference(entry: dict[str, Any]) -> tuple[int, int]:
+            source = str(entry.get("source_key", ""))
+            # Architecture-specific native metric projections carry the most
+            # explicit endpoint/unit contract. Generic metric_predictions and
+            # timing fallbacks remain alternatives, not reasons to suppress a
+            # scoped native row from NCU comparison.
+            rank = (0 if source.startswith("native_metrics.") else
+                    1 if source.startswith("cache_lookup_predictions.") else
+                    2 if source.startswith("metric_predictions.") else 3)
+            finite = int(entry.get("status") == "predicted" and entry.get("estimate") is not None)
+            return (rank, 0 if finite else 1)
+
+        chosen = min(entries, key=preference)
         row = dict(chosen)
         alternatives = [entry for entry in entries if entry is not chosen]
         if alternatives:
@@ -198,13 +259,253 @@ def selected_entries(launch: dict[str, Any], mode: str) -> list[dict[str, Any]]:
         if len(predicted) > 1:
             values = {float(entry["estimate"]) for entry in predicted}
             units = {entry.get("unit", "") for entry in predicted}
-            if len(values) > 1 or len(units) > 1:
+            # Older metric emitters used the generic unit ``count`` for exact
+            # sector/request rows.  If the numeric estimate agrees, prefer a
+            # source with the specific unit instead of manufacturing a
+            # prediction conflict that suppresses an otherwise like-for-like
+            # NCU comparison.
+            count_alias = "count" in units and len(units) == 2
+            compatible_alias = count_alias and len(values) == 1
+            native_selected = str(chosen.get("source_key", "")).startswith("native_metrics.")
+            if (len(values) > 1 or (len(units) > 1 and not compatible_alias)) and not native_selected:
                 row["status"] = "conflict"
                 row["estimate"] = None
                 row["reason"] = "incompatible_prediction_alternatives"
                 row["alternative_conflict"] = True
+            elif native_selected and (len(values) > 1 or len(units) > 1):
+                row["alternative_conflicts"] = True
+            elif compatible_alias:
+                specific = next(
+                    (entry for entry in predicted if entry.get("unit") != "count"),
+                    None,
+                )
+                if specific is not None:
+                    row.update(specific)
+                    row["alternative_predictions"] = alternatives
         result.append(row)
     return result
+
+
+def scope_warnings(launch: dict[str, Any], target_metrics: dict[str, Any]) -> list[dict[str, Any]]:
+    """Diagnose gross opcode-scope disagreements without changing scoring.
+
+    Some captured NCU rows expose only a narrow SASS/pipe scope while the
+    trace-side logical memory ledger counts every admitted record.  A large
+    disagreement is retained as a post-replay warning, never used to select a
+    prediction or tune replay.
+    """
+    trace = launch.get("trace_metrics", {})
+    memory = trace.get("memory", {}) if isinstance(trace, dict) else {}
+    memory_scope = trace.get("memory_scope", {}) if isinstance(trace, dict) else {}
+    warnings: list[dict[str, Any]] = []
+    for kind, ncu_metric in (
+        ("global_load", "smsp__sass_inst_executed_op_global_ld.sum"),
+        ("global_store", "smsp__sass_inst_executed_op_global_st.sum"),
+        ("local_load", "smsp__sass_inst_executed_op_local_ld.sum"),
+        ("local_store", "smsp__sass_inst_executed_op_local_st.sum"),
+    ):
+        if kind == "global_load" and isinstance(memory_scope, dict):
+            # The narrow SASS global-load endpoint excludes LDGSTS and
+            # modifier forms such as CONSTANT/LTC128B. Prefer the plain-LDG
+            # observer when the replay emitted the form crosswalk; retain the
+            # legacy broad row for older artifacts.
+            trace_row = (
+                memory_scope.get("global_load_ldg")
+                if memory_scope
+                else memory.get(kind)
+            )
+            warning_kind = "global_load_opcode"
+        else:
+            trace_row = memory.get(kind)
+            warning_kind = "opcode_scope_mismatch"
+        target_row = target_metrics.get(ncu_metric)
+        if not isinstance(trace_row, dict) or not isinstance(target_row, dict):
+            continue
+        trace_count = finite(trace_row.get("requests"))
+        target_count = finite(target_row.get("value"))
+        if trace_count is None or target_count is None or trace_count <= 0:
+            continue
+        ratio = None if target_count <= 0 else max(trace_count / target_count, target_count / trace_count)
+        if ratio is not None and ratio < 4.0:
+            continue
+        warnings.append({
+            "kind": warning_kind,
+            "trace_kind": kind,
+            "trace_requests": trace_count,
+            "ncu_metric": ncu_metric,
+            "ncu_value": target_count,
+            "ratio": ratio,
+            "detail": "post-replay scope diagnostic only; NCU target was not used as a replay input or prediction selector",
+        })
+    if isinstance(memory_scope, dict):
+        trace_row = memory_scope.get("ldgsts_async_copy")
+        target_row = target_metrics.get("smsp__inst_executed_op_ldgsts.sum")
+        trace_count = finite(trace_row.get("requests")) if isinstance(trace_row, dict) else None
+        target_count = finite(target_row.get("value")) if isinstance(target_row, dict) else None
+        if trace_count is not None and target_count is not None and trace_count > 0:
+            ratio = None if target_count <= 0 else max(trace_count / target_count, target_count / trace_count)
+            if ratio is not None and ratio >= 4.0:
+                warnings.append({
+                    "kind": "ldgsts_opcode_scope_mismatch",
+                    "trace_kind": "ldgsts_async_copy",
+                    "trace_requests": trace_count,
+                    "ncu_metric": "smsp__inst_executed_op_ldgsts.sum",
+                    "ncu_value": target_count,
+                    "ratio": ratio,
+                    "detail": "post-replay scope diagnostic only; LDGSTS target was not used as a replay input or prediction selector",
+                })
+        # LTC128B is a supported SASS form, but GA102's NCU scope can book
+        # LTC128B.CONSTANT traffic outside the ordinary TEX global-load
+        # endpoint on some kernels. Keep this as a post-replay diagnostic;
+        # never subtract the form from hierarchy traffic globally because
+        # vendor/SOTA controls show LTC128B also contributing to TEX loads.
+        trace_row = memory_scope.get("global_load_ltc128b")
+        target_row = target_metrics.get("smsp__sass_inst_executed_op_global_ld.sum")
+        trace_count = finite(trace_row.get("requests")) if isinstance(trace_row, dict) else None
+        target_count = finite(target_row.get("value")) if isinstance(target_row, dict) else None
+        if trace_count is not None and target_count is not None and trace_count > 0:
+            ratio = None if target_count <= 0 else max(trace_count / target_count, target_count / trace_count)
+            if ratio is not None and ratio >= 4.0:
+                warnings.append({
+                    "kind": "global_load_ltc128b_scope_mismatch",
+                    "trace_kind": "global_load_ltc128b",
+                    "trace_requests": trace_count,
+                    "ncu_metric": "smsp__sass_inst_executed_op_global_ld.sum",
+                    "ncu_value": target_count,
+                    "ratio": ratio,
+                    "detail": "post-replay LTC128B scope diagnostic only; broad hierarchy traffic remains unchanged",
+                })
+    counters = launch.get("counters", {})
+    l2_by_source = counters.get("l2_by_source", {}) if isinstance(counters, dict) else {}
+    l2_count = sum(
+        float(value.get("sectors", 0))
+        for value in l2_by_source.values()
+        if isinstance(value, dict)
+    )
+    dram = counters.get("dram", {}) if isinstance(counters, dict) else {}
+    dram_count = finite(dram.get("read_sectors")) if isinstance(dram, dict) else None
+    for kind, trace_count, ncu_metric in (
+        ("l2_source_sectors", l2_count, "lts__t_sectors_srcunit_tex.sum"),
+        ("dram_read_sectors", dram_count, "dram__sectors_read.sum"),
+    ):
+        target_row = target_metrics.get(ncu_metric)
+        if not isinstance(target_row, dict) or trace_count is None or trace_count <= 0:
+            continue
+        target_count = finite(target_row.get("value"))
+        if target_count is None:
+            continue
+        ratio = None if target_count <= 0 else max(trace_count / target_count, target_count / trace_count)
+        if ratio is not None and ratio < 4.0:
+            continue
+        warnings.append({
+            "kind": "operation_scope_mismatch",
+            "trace_kind": kind,
+            "trace_requests": trace_count,
+            "ncu_metric": ncu_metric,
+            "ncu_value": target_count,
+            "ratio": ratio,
+            "detail": "post-replay scope diagnostic only; simulator counters and NCU operation domain may not be like-for-like",
+        })
+    native_metrics = launch.get("native_metrics", {}).get("metrics", {})
+    if isinstance(native_metrics, dict):
+        # H66/H73 GCC candidates are source-domain observers, not predictions
+        # of a physical GCC request count. Retain a compact post-replay
+        # crosswalk warning when an independent NCU GCC endpoint is grossly
+        # different; never use the warning to alter DRAM scoring or timing.
+        for candidate, ncu_metric, trace_kind in (
+            (
+                "dram_gcc_instruction_sector_candidate",
+                "lts__t_sectors_srcunit_gcc.sum",
+                "gcc_instruction_sector_candidate",
+            ),
+            (
+                "dram_gcc_constant_sector_candidate",
+                "lts__t_sectors_srcunit_gcc.sum",
+                "gcc_constant_sector_candidate",
+            ),
+        ):
+            candidate_row = native_metrics.get(candidate)
+            target_row = target_metrics.get(ncu_metric)
+            candidate_value = finite(candidate_row.get("value")) if isinstance(candidate_row, dict) else None
+            target_value = finite(target_row.get("value")) if isinstance(target_row, dict) else None
+            if candidate_value is None or target_value is None or candidate_value <= 0:
+                continue
+            ratio = None if target_value <= 0 else max(candidate_value / target_value, target_value / candidate_value)
+            if ratio is None or ratio < 4.0:
+                continue
+            warnings.append({
+                "kind": "gcc_scope_candidate_mismatch",
+                "trace_kind": trace_kind,
+                "trace_requests": candidate_value,
+                "ncu_metric": ncu_metric,
+                "ncu_value": target_value,
+                "ratio": ratio,
+                "detail": "observer-only GCC/TEX source crosswalk; no DRAM score, replay input, or timing selection",
+            })
+    return warnings
+
+
+def scope_warning_metrics(warnings: list[dict[str, Any]]) -> set[str]:
+    """Expand a scope warning to the metric endpoints it invalidates."""
+    metrics: set[str] = set()
+    for warning in warnings:
+        kind = warning.get("trace_kind")
+        if kind == "global_load":
+            metrics.update({
+                "smsp__sass_inst_executed_op_global_ld.sum",
+            })
+        elif kind == "global_load_opcode":
+            # Opcode scope is independent of the L1TEX sector endpoint: the
+            # latter may include the LDGSTS source traffic on its documented
+            # op_ld/op_ldgsts surfaces.
+            metrics.update({
+                "smsp__sass_inst_executed_op_global_ld.sum",
+            })
+        elif kind == "ldgsts_opcode_scope_mismatch":
+            metrics.update({
+                "smsp__inst_executed_op_ldgsts.sum",
+            })
+        elif kind == "global_load_ltc128b":
+            metrics.update({
+                "smsp__sass_inst_executed_op_global_ld.sum",
+                "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum",
+                "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum",
+                "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_miss.sum",
+            })
+        elif kind == "global_load_legacy":
+            metrics.update({
+                "smsp__sass_inst_executed_op_global_ld.sum",
+                "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum",
+                "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum",
+                "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_miss.sum",
+            })
+        elif kind == "global_store":
+            metrics.update({
+                "smsp__sass_inst_executed_op_global_st.sum",
+                "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum",
+            })
+        elif kind == "local_load":
+            metrics.update({
+                "smsp__sass_inst_executed_op_local_ld.sum",
+                "l1tex__t_sectors_pipe_lsu_mem_local_op_ld.sum",
+            })
+        elif kind == "local_store":
+            metrics.update({
+                "smsp__sass_inst_executed_op_local_st.sum",
+                "l1tex__t_sectors_pipe_lsu_mem_local_op_st.sum",
+            })
+        elif kind == "l2_source_sectors":
+            metrics.update({
+                "lts__t_sectors_srcunit_tex.sum",
+                "lts__t_sectors_srcunit_tex_lookup_hit.sum",
+                "lts__t_sectors_srcunit_tex_lookup_miss.sum",
+                "lts__t_sectors_srcunit_tex_op_read.sum",
+                "lts__t_sectors_srcunit_tex_op_read_lookup_hit.sum",
+                "lts__t_sectors_srcunit_tex_op_read_lookup_miss.sum",
+            })
+        elif kind == "dram_read_sectors":
+            metrics.add("dram__sectors_read.sum")
+    return metrics
 
 
 def add_observation(
@@ -214,7 +515,9 @@ def add_observation(
     mode: str,
     capture: str,
     join_status: str,
-    join_tier: str,
+    join_tier: str | None = None,
+    scope_mismatch_metrics: set[str] | None = None,
+    allow_ordered_fallback: bool = False,
 ) -> dict[str, Any]:
     name = entry["metric"]
     workload_family = capture.split("_", 1)[0]
@@ -229,6 +532,7 @@ def add_observation(
         "predicted": 0,
         "compared": 0,
         "target_available": 0,
+        "scope_mismatch": 0,
         "unit_mismatch": 0,
         "target_missing": 0,
         "zero_opportunity": 0,
@@ -271,7 +575,7 @@ def add_observation(
         row["alternative_conflicts"] += 1
     result = {"metric": name, "source_key": entry["source_key"],
               "estimate": estimate, "model_status": status, "model_unit": entry["unit"],
-              "join_provenance_tier": join_tier,
+              "join_provenance_tier": join_tier or "Unmatched",
               "client_scope_class": client_scope_class(name)}
     if entry.get("semantics"):
         result["semantics"] = entry["semantics"]
@@ -279,6 +583,12 @@ def add_observation(
         result["alternative_predictions"] = alternatives
     if entry.get("alternative_conflict"):
         result["alternative_conflict"] = True
+    # A shape/order fallback is useful coverage metadata but is not an exact
+    # launch identity. Never score it as NCU accuracy: the existing SM86
+    # profiles contain one selected kernel row while many traces contain many
+    # launches, and profiler-off names are often ambiguous.
+    if join_status != "identity" and not (allow_ordered_fallback and join_status == "ordered_fallback"):
+        return {**result, "status": "join_not_exact", "join_status": join_status}
     target = target_metrics.get(name, {})
     truth = finite(target.get("value")) if isinstance(target, dict) else None
     if status != "predicted" or estimate is None:
@@ -291,6 +601,10 @@ def add_observation(
         return {**result, "status": "target_missing"}
     row["target_available"] += 1
     result.update(target=truth, target_unit=target.get("unit"))
+    if scope_mismatch_metrics and name in scope_mismatch_metrics:
+        row["scope_mismatch"] += 1
+        result["scope_mismatch_reason"] = "independent NCU/trace operation scope warning"
+        return {**result, "status": "scope_mismatch"}
     if truth == 0:
         row["zero_opportunity"] += 1
         if estimate == 0:
@@ -308,14 +622,22 @@ def add_observation(
         "l1tex__data_bank_conflicts_pipe_lsu_mem_shared_op_st.sum",
         "l1tex__data_bank_conflicts_pipe_lsu_mem_shared_op_atom.sum",
     } and entry["unit"] == "wavefront" and target.get("unit") == ""
-    if target.get("unit") not in allowed_units(entry["unit"]) and not shared_wavefront:
+    target_unit = str(target.get("unit", ""))
+    target_scale = target_scale_for_metric(name, entry["unit"], target_unit)
+    if target_scale is None and not shared_wavefront:
         row["unit_mismatch"] += 1
         return {**result, "status": "unit_mismatch"}
-    error = abs(estimate - truth)
+    # Preserve the raw NCU value/unit for auditability while comparing in the
+    # simulator row's declared unit.  This is a presentation crosswalk only;
+    # the converted value never enters replay or metric selection.
+    compared_truth = truth * (target_scale if target_scale is not None else 1.0)
+    result["comparison_target"] = compared_truth
+    result["comparison_target_unit"] = entry["unit"]
+    error = abs(estimate - compared_truth)
     row["compared"] += 1
     row["errors"].append(error)
     row["errors_by_capture"][capture].append(error)
-    relative = error / abs(truth) if truth != 0 else None
+    relative = error / abs(compared_truth) if compared_truth != 0 else None
     if relative is not None:
         row["relative_errors"].append(relative)
         row["relative_by_family"][workload_family].append(relative)
@@ -335,6 +657,7 @@ def reduce_mode(
     output,
     table: dict[str, dict[str, Any]],
     target_inventory: collections.Counter,
+    allow_ordered_fallback: bool = False,
 ) -> dict[str, int]:
     key = "launches" if mode == "full" else "fast_frontier"
     counts = collections.Counter()
@@ -353,24 +676,27 @@ def reduce_mode(
             counts["launches"] += len(launches)
             for join in join_ncu_rows(launches, ncu):
                 counts[f"join_{join['join_status']}"] += 1
-                join_tier = join_provenance_tier(join)
                 li, ni = join.get("launch_index"), join.get("ncu_row_index")
                 if li is None or ni is None:
-                    output.write(json.dumps({"capture": rel, "mode": mode,
-                                             "join_provenance_tier": join_tier,
-                                             **join}) + "\n")
+                    output.write(json.dumps({"capture": rel, "mode": mode, **join}) + "\n")
                     continue
                 launch = launches[li]
                 target_metrics = ncu[ni].get("metrics", {})
                 target_inventory.update(target_metrics.keys())
+                join_tier = join_provenance_tier(join)
+                warnings = scope_warnings(launch, target_metrics)
+                counts["scope_warnings"] += len(warnings)
+                warning_metrics = scope_warning_metrics(warnings)
                 results = []
                 for entry in selected_entries(launch, mode):
                     results.append(add_observation(
-                        table, entry, target_metrics, mode, rel, join["join_status"], join_tier
+                        table, entry, target_metrics, mode, rel, join["join_status"], join_tier,
+                        warning_metrics, allow_ordered_fallback=allow_ordered_fallback
                     ))
                 output.write(json.dumps({"capture": rel, "mode": mode,
                                          "join_provenance_tier": join_tier,
-                                         **join, "results": results}, separators=(",", ":"), allow_nan=False) + "\n")
+                                         **join, "scope_warnings": warnings, "results": results},
+                                        separators=(",", ":"), allow_nan=False) + "\n")
     return dict(counts)
 
 
@@ -392,6 +718,7 @@ def render_summary(table: dict[str, dict[str, Any]]) -> dict[str, Any]:
             "predicted": row["predicted"],
             "compared": compared,
             "target_available": row["target_available"],
+            "scope_mismatch": row["scope_mismatch"],
             "target_missing": row["target_missing"],
             "unit_mismatch": row["unit_mismatch"],
             "zero_opportunity": row["zero_opportunity"],
@@ -449,13 +776,24 @@ def main() -> int:
     parser.add_argument("--fast", required=True, type=Path)
     parser.add_argument("--profiles", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument(
+        "--include-ordered-fallback",
+        action="store_true",
+        help="score ordered-fallback launch joins in addition to exact identity joins; report this expanded pairing explicitly",
+    )
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     tables: dict[str, dict[str, Any]] = {"full": {}, "fast": {}}
     target_inventory: collections.Counter = collections.Counter()
     with open_jsonl_writer(args.output / "metric_comparisons.jsonl") as output:
-        full_counts = reduce_mode(args.full, "full", args.profiles, output, tables["full"], target_inventory)
-        fast_counts = reduce_mode(args.fast, "fast", args.profiles, output, tables["fast"], target_inventory)
+        full_counts = reduce_mode(args.full, "full", args.profiles, output, tables["full"], target_inventory, args.include_ordered_fallback)
+        fast_counts = reduce_mode(args.fast, "fast", args.profiles, output, tables["fast"], target_inventory, args.include_ordered_fallback)
+    full_counts["scope_mismatch_predictions"] = sum(
+        row["scope_mismatch"] for row in tables["full"].values()
+    )
+    fast_counts["scope_mismatch_predictions"] = sum(
+        row["scope_mismatch"] for row in tables["fast"].values()
+    )
     by_mode = {mode: render_summary(table) for mode, table in tables.items()}
     available = {name for table in tables.values() for name, row in table.items() if row["predicted"]}
     declared = {name for table in tables.values() for name in table}
@@ -465,7 +803,13 @@ def main() -> int:
     summary = {
         "schema_version": 4,
         "scope": "post-replay metric predictions; NCU values never replay/model inputs",
+        "comparison_view": "scope_compatible_with_ordered_fallback" if args.include_ordered_fallback else "scope_compatible_secondary",
+        "raw_all_row_ape_authoritative": True,
+        "raw_all_row_ape_included": False,
+        "scope_mismatch_policy": "retain_rows_exclude_from_raw_all_row_comparison_ape",
         "selection": "one prediction per metric/launch/mode; finite declared metric, cache observer, native metric, then timing fallback; alternatives retained but not scored; no NCU-based selection",
+        "ordered_fallback_scored": bool(args.include_ordered_fallback),
+        "join_pairing_policy": "exact identity plus user-authorized ordered fallback" if args.include_ordered_fallback else "exact identity only; ordered fallback retained as coverage metadata",
         "sources": {"full": str(args.full), "fast": str(args.fast), "profiles": str(args.profiles)},
         "jsonl_compression": jsonl_compression_description(),
         "full": full_counts,
@@ -480,11 +824,11 @@ def main() -> int:
     }
     (args.output / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     with (args.output / "summary.md").open("w") as report:
-        report.write("# SM120 metric coverage\n\n")
+        report.write("# SM86 metric coverage\n\n")
         report.write("Post-replay reduction of emitted predictions; NCU values were not replay inputs.\n\n")
-        report.write("Each launch contributes at most once per metric and mode. Full and fast errors are not pooled; aliases and differing alternatives are retained in compressed rows, not counted as extra observations. Relative errors exclude zero targets.\n\n")
+        report.write("Each selected launch contributes at most once per metric and mode. Full and fast errors are not pooled; aliases and differing alternatives are retained in compressed rows, not counted as extra observations. In expanded mode, ordered-fallback joins are included by explicit user authorization; they remain a lower-confidence pairing than exact identity joins. Relative errors exclude zero targets.\n\n")
         for mode, mode_summary in by_mode.items():
-            report.write(f"## {mode.capitalize()} compared metrics\n\n| metric | family | compared | median absolute error | P90 | mean APE | median APE | P90 APE | exact |\n|---|---|---:|---:|---:|---:|---:|---:|---:|\n")
+            report.write(f"## {mode.capitalize()} scope-compatible compared metrics\n\n| metric | family | compared | median absolute error | P90 | mean APE | median APE | P90 APE | exact |\n|---|---|---:|---:|---:|---:|---:|---:|---:|\n")
             for name, item in mode_summary["metrics"].items():
                 if item["compared"] == 0:
                     continue
@@ -499,6 +843,10 @@ def main() -> int:
                 f"`{entry['metric']}` ({entry['target_rows']} target rows)" for entry in entries
             )
             report.write(f"- **{family_name}:** {names}\n")
+        report.write("\n## Post-replay scope diagnostics\n\n")
+        report.write("Opcode-scope warnings flag gross disagreement between trace-side logical memory counts and an independent NCU opcode metric. They never alter replay or prediction selection. Explicit scope-mismatch rows remain in compressed `metric_comparisons.jsonl.zst` and are excluded from raw/all-row comparison APE; the resulting scope-compatible table is a secondary like-for-like view.\n\n")
+        report.write(f"- Full warnings: **{summary['full'].get('scope_warnings', 0)}**; fast warnings: **{summary['fast'].get('scope_warnings', 0)}**.\n")
+        report.write(f"- Full predictions excluded from raw/all-row comparison APE for explicit scope mismatch: **{summary['full'].get('scope_mismatch_predictions', 0)}**; fast: **{summary['fast'].get('scope_mismatch_predictions', 0)}**.\n")
         report.write("\n## Conflicting prediction alternatives\n\n")
         report.write("Metrics with incompatible finite alternatives are retained in compressed rows but excluded from scoring until endpoint/scope provenance selects one.\n\n")
         for mode, mode_summary in by_mode.items():

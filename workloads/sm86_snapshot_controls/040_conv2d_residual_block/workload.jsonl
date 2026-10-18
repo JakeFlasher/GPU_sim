@@ -1,0 +1,1 @@
+{"axes": {"batch_size": 1, "height": 8, "width": 8, "in_channels": 3, "hidden_channels": 32, "out_channels": 3, "kernel_size": 3, "padding": 1}, "inputs": {"x": {"type": "random"}, "conv_in_weight": {"type": "random"}, "conv_in_bias": {"type": "random"}, "conv_out_weight": {"type": "random"}, "conv_out_bias": {"type": "random"}}}

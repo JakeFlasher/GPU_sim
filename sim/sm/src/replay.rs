@@ -76,9 +76,9 @@ use crate::issue::Sm120AlphaConfig;
 use crate::issue::{
     AccessKind, AsyncCopyCohortDescriptor, AsyncCopyCohortReplay, AsyncCopyCohortSpan,
     AsyncInstrumentationOrderDiagnostics, BlockReplay, InstrumentationOrderAnchor, IssueError,
-    IssueModelParams, IssueResourceSource, MemoryAdmissionCandidate, MemoryServiceCandidate,
-    PayloadStoreSite, ReplayInst, SharedMemoryResidency, SmSimResult, TailFlags, WarpReplay,
-    MAX_ASYNC_DECISION_SNAPSHOTS, simulate_sm_with_residency, validate_memory_admission_candidates,
+    IssueModelParams, IssueResourceSource, MAX_ASYNC_DECISION_SNAPSHOTS, MemoryAdmissionCandidate,
+    MemoryServiceCandidate, PayloadStoreSite, ReplayInst, SharedMemoryResidency, SmSimResult,
+    TailFlags, WarpReplay, simulate_sm_with_residency, validate_memory_admission_candidates,
     validate_memory_service_candidates,
 };
 
@@ -93,8 +93,8 @@ fn append_bounded_async_decision_snapshots(
         .ok_or(IssueError::CounterOverflow {
             counter: "launch async decision snapshots dropped",
         })?;
-    let available = MAX_ASYNC_DECISION_SNAPSHOTS
-        .saturating_sub(metrics.async_decision_snapshots.len());
+    let available =
+        MAX_ASYNC_DECISION_SNAPSHOTS.saturating_sub(metrics.async_decision_snapshots.len());
     let kept = available.min(snapshots.len());
     metrics
         .async_decision_snapshots
@@ -171,24 +171,33 @@ fn observe_joint_l2_shadow(
     for event in events {
         let line_id = event.sector_id.div_euclid(4);
         let sector = u8::try_from(event.sector_id.rem_euclid(4)).map_err(|_| {
-            ReplayError::System(SystemError::L2(
-                sim_mem::L2AccessError::SectorOutOfRange { sector: u8::MAX },
-            ))
+            ReplayError::System(SystemError::L2(sim_mem::L2AccessError::SectorOutOfRange {
+                sector: u8::MAX,
+            }))
         })?;
         let outcome = shadow
             .access(line_id, sector, event.class)
             .map_err(|error| ReplayError::System(SystemError::L2(error)))?;
-        stats.requests = stats.requests.checked_add(1).ok_or(IssueError::CounterOverflow {
-            counter: "joint TMA/L2 shadow requests",
-        })?;
+        stats.requests = stats
+            .requests
+            .checked_add(1)
+            .ok_or(IssueError::CounterOverflow {
+                counter: "joint TMA/L2 shadow requests",
+            })?;
         let hit = u64::from(outcome.counted_hit);
         let miss = u64::from(!outcome.counted_hit);
-        stats.hits = stats.hits.checked_add(hit).ok_or(IssueError::CounterOverflow {
-            counter: "joint TMA/L2 shadow hits",
-        })?;
-        stats.misses = stats.misses.checked_add(miss).ok_or(IssueError::CounterOverflow {
-            counter: "joint TMA/L2 shadow misses",
-        })?;
+        stats.hits = stats
+            .hits
+            .checked_add(hit)
+            .ok_or(IssueError::CounterOverflow {
+                counter: "joint TMA/L2 shadow hits",
+            })?;
+        stats.misses = stats
+            .misses
+            .checked_add(miss)
+            .ok_or(IssueError::CounterOverflow {
+                counter: "joint TMA/L2 shadow misses",
+            })?;
         if event.tma_load {
             stats.tma_load[0] = stats.tma_load[0].saturating_add(1);
             stats.tma_load[1] = stats.tma_load[1].saturating_add(hit);
@@ -213,7 +222,9 @@ fn joint_l2_ordinary_span(kind: AccessKind) -> Option<(usize, usize, L2OpClass, 
             l1_policy: LdgstsL1Policy::CacheAtAllLevels,
             ..
         } => Some((off, usize::from(len), L2OpClass::Read, true)),
-        AccessKind::GlobalBypass { off, len, token, .. } => Some((
+        AccessKind::GlobalBypass {
+            off, len, token, ..
+        } => Some((
             off,
             usize::from(len),
             if token == CacheOpToken::Atom {
@@ -223,8 +234,7 @@ fn joint_l2_ordinary_span(kind: AccessKind) -> Option<(usize, usize, L2OpClass, 
             },
             token != CacheOpToken::Atom,
         )),
-        AccessKind::GlobalStore { off, len }
-        | AccessKind::GlobalReduction { off, len, .. } => {
+        AccessKind::GlobalStore { off, len } | AccessKind::GlobalReduction { off, len, .. } => {
             Some((off, usize::from(len), L2OpClass::WriteAtomic, false))
         }
         AccessKind::GlobalAsyncCopy { .. }
@@ -245,7 +255,21 @@ fn observe_tma_l2_shadow(
 
 fn tma_sidecar_reuse_summary(
     observations: &LaunchObservations,
-) -> (u64, u64, u64, u64, u64, u64, u64, u64, u64, u64, u64, u64, u64) {
+) -> (
+    u64,
+    u64,
+    u64,
+    u64,
+    u64,
+    u64,
+    u64,
+    u64,
+    u64,
+    u64,
+    u64,
+    u64,
+    u64,
+) {
     let mut all_sectors = BTreeSet::new();
     let mut all_lines = BTreeSet::new();
     let mut sum_record_unique_sectors = 0_u64;
@@ -267,22 +291,22 @@ fn tma_sidecar_reuse_summary(
         } else {
             continue;
         };
-        sum_record_unique_sectors = sum_record_unique_sectors
-            .saturating_add(observation.diagnostic.unique_sector_count);
-        sum_record_unique_lines = sum_record_unique_lines
-            .saturating_add(observation.diagnostic.unique_line_count);
+        sum_record_unique_sectors =
+            sum_record_unique_sectors.saturating_add(observation.diagnostic.unique_sector_count);
+        sum_record_unique_lines =
+            sum_record_unique_lines.saturating_add(observation.diagnostic.unique_line_count);
         intra_record_duplicate_refs = intra_record_duplicate_refs
             .saturating_add(observation.diagnostic.intra_record_duplicate_sector_refs);
         if observation.is_load {
-            load_sum_sectors = load_sum_sectors
-                .saturating_add(observation.diagnostic.unique_sector_count);
-            load_sum_lines = load_sum_lines
-                .saturating_add(observation.diagnostic.unique_line_count);
+            load_sum_sectors =
+                load_sum_sectors.saturating_add(observation.diagnostic.unique_sector_count);
+            load_sum_lines =
+                load_sum_lines.saturating_add(observation.diagnostic.unique_line_count);
         } else {
-            store_sum_sectors = store_sum_sectors
-                .saturating_add(observation.diagnostic.unique_sector_count);
-            store_sum_lines = store_sum_lines
-                .saturating_add(observation.diagnostic.unique_line_count);
+            store_sum_sectors =
+                store_sum_sectors.saturating_add(observation.diagnostic.unique_sector_count);
+            store_sum_lines =
+                store_sum_lines.saturating_add(observation.diagnostic.unique_line_count);
         }
         for &sector in ids.iter() {
             all_sectors.insert(sector);
@@ -386,10 +410,18 @@ fn observe_tma_l2_shadow_iter<'a>(
             continue;
         };
         if sector_ids.is_empty() {
-            stats.unavailable = stats.unavailable.checked_add(1).ok_or(IssueError::CounterOverflow {
-                counter: "TMA shadow L2 unavailable address records",
-            })?;
-            let lane = if observation.is_load { &mut stats.load } else { &mut stats.store };
+            stats.unavailable =
+                stats
+                    .unavailable
+                    .checked_add(1)
+                    .ok_or(IssueError::CounterOverflow {
+                        counter: "TMA shadow L2 unavailable address records",
+                    })?;
+            let lane = if observation.is_load {
+                &mut stats.load
+            } else {
+                &mut stats.store
+            };
             lane[3] = lane[3].checked_add(1).ok_or(IssueError::CounterOverflow {
                 counter: "TMA shadow operation-class unavailable records",
             })?;
@@ -398,31 +430,44 @@ fn observe_tma_l2_shadow_iter<'a>(
         for &sector_id in sector_ids.iter() {
             let line_id = sector_id.div_euclid(4);
             let sector = u8::try_from(sector_id.rem_euclid(4)).map_err(|_| {
-                ReplayError::System(SystemError::L2(
-                    sim_mem::L2AccessError::SectorOutOfRange { sector: u8::MAX },
-                ))
+                ReplayError::System(SystemError::L2(sim_mem::L2AccessError::SectorOutOfRange {
+                    sector: u8::MAX,
+                }))
             })?;
             let outcome = shadow
                 .access(line_id, sector, class)
                 .map_err(|error| ReplayError::System(SystemError::L2(error)))?;
-            stats.requests = stats.requests.checked_add(1).ok_or(IssueError::CounterOverflow {
-                counter: "TMA shadow L2 requests",
-            })?;
-            let lane = if observation.is_load { &mut stats.load } else { &mut stats.store };
+            stats.requests = stats
+                .requests
+                .checked_add(1)
+                .ok_or(IssueError::CounterOverflow {
+                    counter: "TMA shadow L2 requests",
+                })?;
+            let lane = if observation.is_load {
+                &mut stats.load
+            } else {
+                &mut stats.store
+            };
             lane[0] = lane[0].checked_add(1).ok_or(IssueError::CounterOverflow {
                 counter: "TMA shadow operation-class requests",
             })?;
             if outcome.counted_hit {
-                stats.hits = stats.hits.checked_add(1).ok_or(IssueError::CounterOverflow {
-                    counter: "TMA shadow L2 hits",
-                })?;
+                stats.hits = stats
+                    .hits
+                    .checked_add(1)
+                    .ok_or(IssueError::CounterOverflow {
+                        counter: "TMA shadow L2 hits",
+                    })?;
                 lane[1] = lane[1].checked_add(1).ok_or(IssueError::CounterOverflow {
                     counter: "TMA shadow operation-class hits",
                 })?;
             } else {
-                stats.misses = stats.misses.checked_add(1).ok_or(IssueError::CounterOverflow {
-                    counter: "TMA shadow L2 misses",
-                })?;
+                stats.misses = stats
+                    .misses
+                    .checked_add(1)
+                    .ok_or(IssueError::CounterOverflow {
+                        counter: "TMA shadow L2 misses",
+                    })?;
                 lane[2] = lane[2].checked_add(1).ok_or(IssueError::CounterOverflow {
                     counter: "TMA shadow operation-class misses",
                 })?;
@@ -1198,6 +1243,15 @@ pub struct FrontEndCounters {
     /// SASS instructions. This is an observation-only non-TEX demand term;
     /// it never changes instruction timing or cache state.
     compulsory_constant_read_sectors: u64,
+    /// Number of 32-byte sectors in the unique 128-byte instruction-line
+    /// envelope.  GCC/ICC fetches an aligned 128-byte line even when the
+    /// traced control flow executes only one sector of that line.  This is a
+    /// source-qualified traffic observer; it does not alter issue timing.
+    compulsory_instruction_line_read_sectors: u64,
+    /// Static SASS instruction footprint rounded to aligned 128-byte GCC
+    /// fetch lines. This remains separate from the executed-path ledger above
+    /// so consumers can retain a bounded cold/static envelope explicitly.
+    static_instruction_line_read_sectors: u64,
 }
 
 impl FrontEndCounters {
@@ -1209,6 +1263,14 @@ impl FrontEndCounters {
         self.compulsory_constant_read_sectors
     }
 
+    pub const fn compulsory_instruction_line_read_sectors(self) -> u64 {
+        self.compulsory_instruction_line_read_sectors
+    }
+
+    pub const fn static_instruction_line_read_sectors(self) -> u64 {
+        self.static_instruction_line_read_sectors
+    }
+
     fn add_checked(self, other: Self) -> Option<Self> {
         Some(Self {
             compulsory_instruction_read_sectors: self
@@ -1217,6 +1279,12 @@ impl FrontEndCounters {
             compulsory_constant_read_sectors: self
                 .compulsory_constant_read_sectors
                 .checked_add(other.compulsory_constant_read_sectors)?,
+            compulsory_instruction_line_read_sectors: self
+                .compulsory_instruction_line_read_sectors
+                .checked_add(other.compulsory_instruction_line_read_sectors)?,
+            static_instruction_line_read_sectors: self
+                .static_instruction_line_read_sectors
+                .checked_add(other.static_instruction_line_read_sectors)?,
         })
     }
 }
@@ -1677,8 +1745,18 @@ fn fast_dynamic_sm_frontier(
             dispatch[smsp] = issued_end;
             frontier = frontier.max(issued_end);
             let projection = slot.fixed_latency_operands().projected();
-            let observes_register = mask != 0 && projection.is_some_and(|p| p.destinations().iter().any(|d| !d.register().is_constant()));
-            let result_ready = crate::issue::data_ready_time(inst.kind, &[], now, params, None, None, observes_register)?;
+            let observes_register = mask != 0
+                && projection
+                    .is_some_and(|p| p.destinations().iter().any(|d| !d.register().is_constant()));
+            let result_ready = crate::issue::data_ready_time(
+                inst.kind,
+                &[],
+                now,
+                params,
+                None,
+                None,
+                observes_register,
+            )?;
             let done = if mask == 0 {
                 issued_end
             } else {
@@ -1702,7 +1780,11 @@ fn fast_dynamic_sm_frontier(
                 // predication overwrites only executing lanes, not the whole register.
                 warp.registers.retain(|&(_, _, ready)| ready > now);
                 if let Some(projection) = projection {
-                    for register in projection.destinations().iter().flat_map(|d| d.register().components()) {
+                    for register in projection
+                        .destinations()
+                        .iter()
+                        .flat_map(|d| d.register().components())
+                    {
                         let lanes = fast_register_mask(register, mask);
                         for (prior, prior_lanes, _) in &mut warp.registers {
                             if *prior == register {
@@ -2423,19 +2505,12 @@ pub fn sm120_fast_stage_for_trace(
             })?,
         )?;
         for block in blocks {
-            let warp_count = u64::try_from(block.warps.len()).map_err(|_| ReplayError::FastFrontier {
-                detail: "warp count exceeds u64".to_owned(),
-            })?;
-            add(
-                "warps_seen",
-                &mut summary.warps_seen,
-                warp_count,
-            )?;
-            add(
-                "eligible_warps",
-                &mut summary.eligible_warps,
-                warp_count,
-            )?;
+            let warp_count =
+                u64::try_from(block.warps.len()).map_err(|_| ReplayError::FastFrontier {
+                    detail: "warp count exceeds u64".to_owned(),
+                })?;
+            add("warps_seen", &mut summary.warps_seen, warp_count)?;
+            add("eligible_warps", &mut summary.eligible_warps, warp_count)?;
             add(
                 "candidate_regions",
                 &mut summary.candidate_regions,
@@ -2457,9 +2532,11 @@ pub fn sm120_fast_stage_for_trace(
                     let count = resource_class_counts
                         .entry(class_name.to_owned())
                         .or_default();
-                    *count = count.checked_add(1).ok_or_else(|| ReplayError::FastFrontier {
-                        detail: "resource-class observation count overflows u64".to_owned(),
-                    })?;
+                    *count = count
+                        .checked_add(1)
+                        .ok_or_else(|| ReplayError::FastFrontier {
+                            detail: "resource-class observation count overflows u64".to_owned(),
+                        })?;
                 }
             }
         }
@@ -2471,21 +2548,24 @@ pub fn sm120_fast_stage_for_trace(
             extracted.shared_memory_residency,
         )?;
         summary.maximum_exact_final_cycle = summary.maximum_exact_final_cycle.max(frontier);
-        memory_records = memory_records
-            .checked_add(memory)
-            .ok_or_else(|| ReplayError::FastFrontier {
-                detail: "memory-service observation count overflows u64".to_owned(),
-            })?;
-        async_records = async_records
-            .checked_add(async_count)
-            .ok_or_else(|| ReplayError::FastFrontier {
-                detail: "async-completion observation count overflows u64".to_owned(),
-            })?;
-        barrier_records = barrier_records
-            .checked_add(barriers)
-            .ok_or_else(|| ReplayError::FastFrontier {
-                detail: "barrier-visibility observation count overflows u64".to_owned(),
-            })?;
+        memory_records =
+            memory_records
+                .checked_add(memory)
+                .ok_or_else(|| ReplayError::FastFrontier {
+                    detail: "memory-service observation count overflows u64".to_owned(),
+                })?;
+        async_records =
+            async_records
+                .checked_add(async_count)
+                .ok_or_else(|| ReplayError::FastFrontier {
+                    detail: "async-completion observation count overflows u64".to_owned(),
+                })?;
+        barrier_records =
+            barrier_records
+                .checked_add(barriers)
+                .ok_or_else(|| ReplayError::FastFrontier {
+                    detail: "barrier-visibility observation count overflows u64".to_owned(),
+                })?;
     }
     // Charge the footprint actually fetched by this launch, not all cold
     // branches present in the static function table.
@@ -2516,16 +2596,15 @@ pub fn sm120_fast_stage_for_trace(
         .ok_or_else(|| ReplayError::FastFrontier {
             detail: "front-end-adjusted SM120 stage cycles overflow u64".to_owned(),
         })?;
-    let resource_class_total = resource_class_counts.values().try_fold(
-        0_u64,
-        |total, count| {
+    let resource_class_total = resource_class_counts
+        .values()
+        .try_fold(0_u64, |total, count| {
             total
                 .checked_add(*count)
                 .ok_or_else(|| ReplayError::FastFrontier {
                     detail: "resource-class total overflows u64".to_owned(),
                 })
-        },
-    )?;
+        })?;
     summary
         .refusal_reasons
         .insert("stage_resource_classes".to_owned(), resource_class_total);
@@ -3712,6 +3791,13 @@ fn extract_per_sm_blocks(
     let mut records_seen: u64 = 0;
     let mut instruction_sectors = BTreeSet::new();
     let mut constant_sectors = BTreeSet::new();
+    let mut instruction_lines = BTreeSet::new();
+    let static_instruction_lines = schedule
+        .by_pc
+        .keys()
+        .map(|pc| pc / 128)
+        .collect::<BTreeSet<_>>();
+
     let mut instruction_sectors_by_sm: BTreeMap<i32, BTreeSet<(i32, u32)>> = BTreeMap::new();
     let launch_resources = (loc.kernel().number_of_registers > 0
         || loc.kernel().size_shared_memory > 0
@@ -3806,12 +3892,7 @@ fn extract_per_sm_blocks(
         if let Some(relations) = trace_metrics.async_relations.as_ref() {
             let (pairs, invalid, lower_sum, upper_sum) =
                 async_clock_sandwich_summary(observations, relations);
-            trace_metrics.observe_async_clock_sandwich(
-                pairs,
-                invalid,
-                lower_sum,
-                upper_sum,
-            )?;
+            trace_metrics.observe_async_clock_sandwich(pairs, invalid, lower_sum, upper_sum)?;
         }
     }
     if let (Some(observations), Some(l2)) = (observations, tma_shadow_l2) {
@@ -3900,6 +3981,16 @@ fn extract_per_sm_blocks(
                     });
                 }
                 records_seen = checked_record_count(records_seen, &path, warp_id, record_ix)?;
+                let constant_addresses = inst.constant_memory_addresses();
+                // Only active-lane address vectors contribute to the demand
+                // interval. Bank/offset metadata without addresses can be a
+                // predicated-off or incomplete record and is retained as
+                // typed metadata, never fabricated into traffic.
+                let constant_bank = inst.constant_memory_bank_offset().map(|(bank, _)| bank);
+                trace_metrics.observe_constant_memory(constant_addresses, constant_bank)?;
+                if constant_addresses.is_empty() && inst.constant_memory_metadata_present() {
+                    trace_metrics.observe_constant_metadata_only()?;
+                }
                 let preflight = preflight_compact_memory(
                     inst.memory(),
                     warp,
@@ -3922,11 +4013,16 @@ fn extract_per_sm_blocks(
                 if let Some(slot) = schedule.issue_slot(u64::from(inst.pc())) {
                     constant_sectors.extend(static_constant_sectors(slot.opcode_text()));
                 }
+                instruction_lines.insert((inst.function_unique_id(), inst.pc() / 128));
+
                 let is_tma_opcode = schedule.arch == ArchId::Sm120
                     && schedule
                         .issue_slot(u64::from(inst.pc()))
                         .is_some_and(|slot| {
-                            matches!(opcode_head(slot.opcode_text()), "UTMALDG" | "UTMASTG" | "UBLKCP")
+                            matches!(
+                                opcode_head(slot.opcode_text()),
+                                "UTMALDG" | "UTMASTG" | "UBLKCP"
+                            )
                         });
                 if is_tma_opcode {
                     tma_dynamic_keys_seen.insert(TmaObservationKey {
@@ -4041,17 +4137,13 @@ fn extract_per_sm_blocks(
                 }
                 if collect_joint_l2 {
                     let order = inst.instrumentation_order();
-                    if let Some((off, len, class, ordinary_read)) =
-                        joint_l2_ordinary_span(kind)
-                    {
+                    if let Some((off, len, class, ordinary_read)) = joint_l2_ordinary_span(kind) {
                         if len != 0 {
                             let end = off.saturating_add(len);
                             if let Some(span) = sectors.get(off..end) {
                                 if let Some(order) = order {
                                     for &sector_id in span {
-                                        if joint_l2_events.len()
-                                            >= MAX_JOINT_L2_SHADOW_EVENTS
-                                        {
+                                        if joint_l2_events.len() >= MAX_JOINT_L2_SHADOW_EVENTS {
                                             joint_l2_events_dropped =
                                                 joint_l2_events_dropped.saturating_add(1);
                                             break;
@@ -4123,6 +4215,76 @@ fn extract_per_sm_blocks(
                         }
                     }
                 }
+                if schedule.arch == ArchId::Sm86
+                    && schedule
+                        .issue_slot(u64::from(inst.pc()))
+                        .is_some_and(|slot| is_static_constant_global_load(slot.opcode_text()))
+                {
+                    let span = match kind {
+                        AccessKind::GlobalEligible { off, len, .. }
+                        | AccessKind::GlobalBypass { off, len, .. }
+                        | AccessKind::GlobalUntagged { off, len, .. } => Some((off, len)),
+                        _ => None,
+                    };
+                    if let Some((off, len)) = span {
+                        trace_metrics.observe_constant_global_load(
+                            block_id,
+                            warp_id,
+                            &sectors,
+                            off,
+                            usize::from(len),
+                            schedule
+                                .issue_slot(u64::from(inst.pc()))
+                                .map(|slot| slot.opcode_text())
+                                .unwrap_or(""),
+                            preflight
+                                .as_ref()
+                                .is_some_and(|memory| memory.memory.warp_uniform_address()),
+                        )?;
+                    }
+                }
+                if let Some((off, len)) = match kind {
+                    AccessKind::GlobalBypass {
+                        token: CacheOpToken::Atom,
+                        off,
+                        len,
+                        ..
+                    }
+                    | AccessKind::GlobalEligible {
+                        token: CacheOpToken::Atom,
+                        off,
+                        len,
+                        ..
+                    } => Some((off, len)),
+                    _ => None,
+                } {
+                    trace_metrics.observe_atomic_conflict(&sectors, off, usize::from(len))?;
+                }
+                if matches!(
+                    kind,
+                    AccessKind::LocalLoad { .. } | AccessKind::LocalStore { .. }
+                ) {
+                    trace_metrics
+                        .observe_local_width(inst.data_width(), inst.predicate_on_lanes())?;
+                    trace_metrics.observe_local_payload_sectors(
+                        kind,
+                        inst.data_width(),
+                        inst.predicate_on_lanes(),
+                    )?;
+                    if schedule.arch == ArchId::Sm86 {
+                        if let Some(memory) = inst.memory() {
+                            trace_metrics.observe_local_canonical_sectors(
+                                kind,
+                                memory.local_canonical_sectors(),
+                            )?;
+                            trace_metrics.observe_local_frame256_sectors(
+                                kind,
+                                memory.local_frame256_sectors(),
+                            )?;
+                        }
+                    }
+                }
+
                 let active_mask_present = inst.active_mask_present();
                 let predicate_mask_present = inst.predicate_mask_present();
                 let (opcode, pipeline) = schedule
@@ -4130,7 +4292,7 @@ fn extract_per_sm_blocks(
                     .map_or(("UNKNOWN", PipelineClass::DispatchOnly), |slot| {
                         (slot.opcode_text(), slot.pipeline_class())
                     });
-                trace_metrics.observe_with_mask_presence(
+                trace_metrics.observe_with_mask_presence_arch(
                     opcode,
                     inst.active_lanes(),
                     inst.predicate_on_lanes(),
@@ -4139,6 +4301,7 @@ fn extract_per_sm_blocks(
                     kind,
                     pipeline,
                     &sectors,
+                    schedule.arch,
                 )?;
                 trace_metrics.observe_local_interleaved(
                     kind,
@@ -4230,6 +4393,7 @@ fn extract_per_sm_blocks(
                 return Err(ReplayError::DuplicateWarpSlot { path, warp_slot });
             }
             warps.push(WarpReplay {
+                warp_id,
                 warp_slot,
                 insts,
                 sectors,
@@ -4393,9 +4557,11 @@ fn extract_per_sm_blocks(
                     counter: "TMA shadow dynamic identity matches",
                 })?;
             } else {
-                unmatched = unmatched.checked_add(1).ok_or(IssueError::CounterOverflow {
-                    counter: "TMA shadow dynamic identity gaps",
-                })?;
+                unmatched = unmatched
+                    .checked_add(1)
+                    .ok_or(IssueError::CounterOverflow {
+                        counter: "TMA shadow dynamic identity gaps",
+                    })?;
             }
         }
         trace_metrics.observe_tma_shadow_dynamic_identity(matched, unmatched)?;
@@ -4405,11 +4571,11 @@ fn extract_per_sm_blocks(
         per_sm_instruction_read_sectors: instruction_sectors_by_sm
             .into_iter()
             .map(|(sm, sectors)| {
-                u64::try_from(sectors.len()).map(|count| (sm, count)).map_err(|_| {
-                    IssueError::CounterOverflow {
+                u64::try_from(sectors.len())
+                    .map(|count| (sm, count))
+                    .map_err(|_| IssueError::CounterOverflow {
                         counter: "per-SM compulsory instruction-read sector cardinality",
-                    }
-                })
+                    })
             })
             .collect::<Result<BTreeMap<_, _>, _>>()?,
         records_seen,
@@ -4426,6 +4592,22 @@ fn extract_per_sm_blocks(
                     counter: "compulsory constant-read sector cardinality",
                 },
             )?,
+            compulsory_instruction_line_read_sectors: u64::try_from(instruction_lines.len())
+                .map_err(|_| IssueError::CounterOverflow {
+                    counter: "compulsory instruction-read line cardinality",
+                })?
+                .checked_mul(4)
+                .ok_or(IssueError::CounterOverflow {
+                    counter: "compulsory instruction-read line sector cardinality",
+                })?,
+            static_instruction_line_read_sectors: u64::try_from(static_instruction_lines.len())
+                .map_err(|_| IssueError::CounterOverflow {
+                    counter: "static instruction-read line cardinality",
+                })?
+                .checked_mul(4)
+                .ok_or(IssueError::CounterOverflow {
+                    counter: "static instruction-read line sector cardinality",
+                })?,
         },
         trace_metrics,
     })
@@ -5223,7 +5405,10 @@ fn replay_kernel_with_schedule_and_l2_and_candidates_with_payload_events(
                     slot.op_class(),
                     OpClass::AsyncCopyCommit | OpClass::AsyncCopyWait
                 )
-                || matches!(opcode_head(slot.opcode_text()), "UTMALDG" | "UTMASTG" | "UBLKCP")
+                || matches!(
+                    opcode_head(slot.opcode_text()),
+                    "UTMALDG" | "UTMASTG" | "UBLKCP"
+                )
         });
     let decode_sectors = !matches!(mode, ReplayMemMode::Flat) || alpha_flat_sector_decode;
     let ExtractedKernel {
@@ -5311,10 +5496,11 @@ fn replay_kernel_with_schedule_and_l2_and_candidates_with_payload_events(
                     shared_memory_residency,
                     l1_config,
                 )?;
-                result.activity.front_end_instruction_read_sectors = per_sm_instruction_read_sectors
-                    .get(sm)
-                    .copied()
-                    .unwrap_or(0);
+                result.activity.front_end_instruction_read_sectors =
+                    per_sm_instruction_read_sectors
+                        .get(sm)
+                        .copied()
+                        .unwrap_or(0);
                 if async_copy_destination_fallback_sms.contains(sm) {
                     result.unmodeled_tails.ldgsts_dst_shared_timing = true;
                 }
@@ -5454,10 +5640,23 @@ fn replay_kernel_with_schedule_and_l2_and_candidates_with_payload_events(
             trace_metrics.observe_l1_merge_audit(
                 audit.same_request_merges,
                 audit.older_pending_merges,
+                audit.ordinary_same_request_merges,
                 audit.ordinary_older_pending_merges,
+                audit.async_same_request_merges,
                 audit.async_older_pending_merges,
                 audit.ordinary_global_older_pending_merges,
                 audit.constant_global_older_pending_merges,
+                audit.ordinary_global_same_request_merges,
+                audit.constant_global_same_request_merges,
+                audit.async_global_same_request_merges,
+                audit.ordinary_global_hits,
+                audit.async_global_hits,
+                audit.ordinary_global_older_sector_pending_merges,
+                audit.constant_global_older_sector_pending_merges,
+                audit.async_global_older_sector_pending_merges,
+                audit.unrequested_subline_miss_sectors,
+                audit.wavefront_mask_lookup_hits,
+                audit.wavefront_mask_lookup_misses,
                 audit.constant_global_hits,
                 audit.constant_global_requests,
                 global_hits,
@@ -5793,6 +5992,12 @@ fn require_known_global_role(
     Ok(slot.mem_role)
 }
 
+fn is_static_constant_global_load(opcode_text: &str) -> bool {
+    let opcode = opcode_text.split_ascii_whitespace().next().unwrap_or("");
+    opcode.split('.').any(|modifier| modifier == "CONSTANT")
+        && matches!(opcode_head(opcode_text), "LDG" | "LD" | "LDC" | "LDL")
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LocalDirection {
     Load,
@@ -5872,16 +6077,11 @@ fn opcode_has_qualifier(opcode_text: &str, qualifier: &str) -> bool {
 /// store-side trace path; it is not confused with the load-side direction
 /// check below.
 fn is_modeled_tma_load_opcode(opcode_text: &str) -> bool {
-    let token = opcode_text
-        .split_whitespace()
-        .next()
-        .unwrap_or("");
+    let token = opcode_text.split_whitespace().next().unwrap_or("");
     let mut fields = token.split('.');
     match fields.next().unwrap_or("") {
         "UTMALDG" | "UTMASTG" => true,
-        "UBLKCP" => {
-            matches!(fields.next(), Some("S")) && matches!(fields.next(), Some("G"))
-        }
+        "UBLKCP" => matches!(fields.next(), Some("S")) && matches!(fields.next(), Some("G")),
         _ => false,
     }
 }
@@ -5898,8 +6098,7 @@ fn validate_tma_load_direction(
     let Some(slot) = schedule.by_pc.get(&u64::from(pc)) else {
         return Ok(());
     };
-    if is_tma_submission_opcode(&slot.opcode_text)
-        && !is_modeled_tma_load_opcode(&slot.opcode_text)
+    if is_tma_submission_opcode(&slot.opcode_text) && !is_modeled_tma_load_opcode(&slot.opcode_text)
     {
         return Err(ReplayError::UnsupportedTmaDirection {
             arch,
@@ -6227,15 +6426,21 @@ struct CompactReplayMemory<'a> {
     pc: u32,
 }
 
-fn compact_shared_kind(memory: &ValidatedMemoryInstruction) -> AccessKind {
+fn compact_shared_kind(memory: &ValidatedMemoryInstruction, arch: ArchId) -> AccessKind {
+    let data_wavefronts = if arch == ArchId::Sm86 {
+        memory.shared_sm86_wavefronts_32x4()
+    } else {
+        memory.shared_bank_wavefronts_32x4()
+    };
+    let data_ideal_wavefronts = memory.shared_bank_ideal_wavefronts_32x4();
     AccessKind::Shared {
         // Keep scheduler timing on the established whole-warp projection.
         wavefronts: u64::from(memory.shared_bank_legacy_wavefronts_32x4()),
         ideal_wavefronts: u64::from(memory.shared_bank_legacy_ideal_wavefronts_32x4()),
-        // The phase-local projection is an L1TEX observer only. It must not
-        // alter issue, MIO occupancy, or cycle/IPC state.
-        data_wavefronts: u64::from(memory.shared_bank_wavefronts_32x4()),
-        data_ideal_wavefronts: u64::from(memory.shared_bank_ideal_wavefronts_32x4()),
+        // SM86 retains the validated legacy observer; SM120 uses the newer
+        // phase-local effective observer. Neither changes issue timing.
+        data_wavefronts: u64::from(data_wavefronts),
+        data_ideal_wavefronts: u64::from(data_ideal_wavefronts),
     }
 }
 
@@ -6390,7 +6595,7 @@ fn classify_compact_flat(
     }
     let meta = preflight.memory.replay_meta();
     match (preflight.route, meta.op_class) {
-        (ReplayMemoryRoute::Shared, _) => Ok(compact_shared_kind(preflight.memory)),
+        (ReplayMemoryRoute::Shared, _) => Ok(compact_shared_kind(preflight.memory, arch)),
         (ReplayMemoryRoute::Local, pb::MemoryOpClass::Local) => {
             let Some(direction) = require_known_local_direction(schedule, arch, preflight.pc)?
             else {
@@ -6404,7 +6609,12 @@ fn classify_compact_flat(
                     }
                 };
                 append_staged_local_sectors(
-                    direction, sector_arena, source_sectors, path, warp_id, record_ix,
+                    direction,
+                    sector_arena,
+                    source_sectors,
+                    path,
+                    warp_id,
+                    record_ix,
                 )
             } else {
                 Ok(match direction {
@@ -6638,7 +6848,7 @@ fn classify_compact_with_l1(
     }
     let staged_role = match (preflight.route, meta.op_class) {
         (ReplayMemoryRoute::Shared, _) => {
-            return Ok(compact_shared_kind(preflight.memory));
+            return Ok(compact_shared_kind(preflight.memory, arch));
         }
         (ReplayMemoryRoute::Unsupported, class) => {
             return Err(ReplayError::UnsupportedMemoryPath { arch, class });
@@ -6691,7 +6901,10 @@ fn classify_compact_with_l1(
                 && schedule
                     .issue_slot(u64::from(preflight.pc))
                     .is_some_and(|slot| {
-                        matches!(opcode_head(slot.opcode_text()), "UTMALDG" | "UTMASTG" | "UBLKCP")
+                        matches!(
+                            opcode_head(slot.opcode_text()),
+                            "UTMALDG" | "UTMASTG" | "UBLKCP"
+                        )
                     });
             let l1_policy = if tma {
                 LdgstsL1Policy::BypassL1
@@ -6729,14 +6942,11 @@ fn classify_compact_with_l1(
                             payload_bytes: 0,
                         })?
                 } else {
-                    warp.effective_data_bytes(preflight.memory).max(
-                        u64::try_from(staged.len())
-                            .unwrap_or(0)
-                            .saturating_mul(32),
-                    )
+                    warp.effective_data_bytes(preflight.memory)
+                        .max(u64::try_from(staged.len()).unwrap_or(0).saturating_mul(32))
                 };
-                Some(encode_async_copy_payload_work(
-                    u32::try_from(payload_bytes).map_err(|_| {
+                Some(
+                    encode_async_copy_payload_work(u32::try_from(payload_bytes).map_err(|_| {
                         ReplayError::AsyncCopyCompletionWorkOutOfRange {
                             path: path.to_path_buf(),
                             warp_id,
@@ -6744,14 +6954,17 @@ fn classify_compact_with_l1(
                             completion_work: payload_bytes,
                             max_completion_work: ASYNC_COPY_COMPLETION_VALUE_MASK,
                         }
-                    })?,
-                ).ok_or(ReplayError::AsyncCopyCompletionWorkOutOfRange {
-                    path: path.to_path_buf(),
-                    warp_id,
-                    record_ix,
-                    completion_work: payload_bytes,
-                    max_completion_work: ASYNC_COPY_COMPLETION_VALUE_MASK,
-                })?)
+                    })?)
+                    .ok_or(
+                        ReplayError::AsyncCopyCompletionWorkOutOfRange {
+                            path: path.to_path_buf(),
+                            warp_id,
+                            record_ix,
+                            completion_work: payload_bytes,
+                            max_completion_work: ASYNC_COPY_COMPLETION_VALUE_MASK,
+                        },
+                    )?,
+                )
             } else {
                 None
             };
@@ -6761,11 +6974,8 @@ fn classify_compact_with_l1(
                 if tma {
                     0
                 } else {
-                    warp.effective_data_bytes(preflight.memory).max(
-                        u64::try_from(staged.len())
-                            .unwrap_or(0)
-                            .saturating_mul(32),
-                    )
+                    warp.effective_data_bytes(preflight.memory)
+                        .max(u64::try_from(staged.len()).unwrap_or(0).saturating_mul(32))
                 },
                 warp.ldgsts_destination_topology_128b_32x4(preflight.memory),
                 warp.ldgsts_source_cohorts_128b_32x4(preflight.memory),

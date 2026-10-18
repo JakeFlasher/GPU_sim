@@ -2313,10 +2313,90 @@ pub struct ValidatedMemoryInstruction {
     shared_legacy_wavefronts: u32,
     /// Whole-warp width-only ideal retained for scheduler accounting.
     shared_legacy_ideal_wavefronts: u32,
+    /// Exact whole-warp A-branch observer retained for SM86 compatibility.
+    shared_sm86_wavefronts: u32,
+    /// Observer-only local-memory sector cardinality after applying the
+    /// effective SM86 lane-private frame stride. The regular `sectors` plan is
+    /// retained unchanged for replay state/timing; this field exists solely to
+    /// expose a source-derived local endpoint when compressed local offsets
+    /// would otherwise collapse lanes onto one stack frame.
+    local_canonical_sectors: u16,
+    /// Observer-only local endpoint using the 256-byte SM86 stack-frame
+    /// allocation visible in the captured SASS prologue.  It is kept beside
+    /// the transfer-width candidate so the emitter can form a bounded
+    /// coalescing correction for dynamic-index local accesses.
+    local_frame256_sectors: u16,
+    /// Observer-only witness that all active lanes use one byte address and
+    /// width for this memory instruction.
+    warp_uniform_address: bool,
+
     meta: CompactMemoryMeta,
     /// Zero means absent; otherwise this is wire enum value + 1. Keeping the
     /// tiny closed enum in one byte preserves the compact metadata bound.
     cache_op: u8,
+}
+
+fn local_canonical_sector_count(
+    preflight: PreflightedMemoryAccess<'_>,
+    fixed_lane_stride: Option<i64>,
+) -> u16 {
+    let mut sectors = std::collections::BTreeSet::new();
+    preflight.visit_addresses(|access| {
+        let width = i64::from(access.data_width_bytes);
+        // Characterized SM86 local records advance adjacent lane-private
+        // slots by the transfer width itself (4B scalar, 16B vector, ...).
+        // This endpoint candidate remains outside replay state/timing.
+        let lane_stride = fixed_lane_stride.unwrap_or_else(|| width.max(1));
+        for (lane, &base) in access.lane_vector.iter().enumerate() {
+            if base == lanes::LANE_INACTIVE_SENTINEL {
+                continue;
+            }
+            let Some(lane_offset) = i64::try_from(lane)
+                .ok()
+                .and_then(|lane| lane.checked_mul(lane_stride))
+            else {
+                return;
+            };
+            let Some(first_byte) = base.checked_add(lane_offset) else {
+                return;
+            };
+            let Some(last_byte) = first_byte.checked_add(width.saturating_sub(1)) else {
+                return;
+            };
+            let first_sector = first_byte >> 5;
+            let last_sector = last_byte >> 5;
+            for sector in first_sector..=last_sector {
+                sectors.insert(sector);
+            }
+        }
+    });
+    u16::try_from(sectors.len()).unwrap_or(u16::MAX)
+}
+
+fn warp_uniform_address(preflight: PreflightedMemoryAccess<'_>) -> bool {
+    let mut first: Option<(i64, i32)> = None;
+    let mut active = 0_u32;
+    let mut uniform = true;
+    preflight.visit_addresses(|access| {
+        for lane in 0..lanes::LANES_PER_WARP {
+            if (access.lane_mask >> lane) & 1 == 0 {
+                continue;
+            }
+            let address = access.lane_vector[lane];
+            if address == lanes::LANE_INACTIVE_SENTINEL {
+                continue;
+            }
+            active = active.saturating_add(1);
+            if let Some(expected) = first {
+                if expected != (address, access.data_width_bytes) {
+                    uniform = false;
+                }
+            } else {
+                first = Some((address, access.data_width_bytes));
+            }
+        }
+    });
+    active != 0 && uniform
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -2516,6 +2596,10 @@ impl ValidatedMemoryInstruction {
         self.shared_legacy_ideal_wavefronts
     }
 
+    pub const fn shared_sm86_wavefronts_32x4(&self) -> u32 {
+        self.shared_sm86_wavefronts
+    }
+
     /// Backing allocation identity for an address-carrying global atomic.
     ///
     /// The full reader has already required this id to resolve to the
@@ -2528,6 +2612,22 @@ impl ValidatedMemoryInstruction {
             && self.meta.route().0 == CompactMemoryRoute::GLOBAL
             && self.projection != 0)
             .then_some(self.projection)
+    }
+
+    /// Trace-derived local endpoint candidate. It never feeds L1/L2 state or
+    /// timing and is zero for non-local/unsupported records.
+    pub const fn local_canonical_sectors(&self) -> u16 {
+        self.local_canonical_sectors
+    }
+
+    /// Trace-derived local endpoint candidate using the captured 256-byte
+    /// stack-frame stride. It never feeds cache state or timing.
+    pub const fn local_frame256_sectors(&self) -> u16 {
+        self.local_frame256_sectors
+    }
+
+    pub const fn warp_uniform_address(&self) -> bool {
+        self.warp_uniform_address
     }
 }
 
@@ -2586,6 +2686,10 @@ pub struct ValidatedWarp {
     predicate_on_masks: Vec<u32>,
     instrumentation_order_anchors: Vec<CompactInstrumentationOrderAnchor>,
     memories: Vec<ValidatedMemoryInstruction>,
+    /// Dynamic constant-bank offsets retained as a bounded, launch-local
+    /// demand observer. These are not global allocation addresses and never
+    /// participate in cache state or timing.
+    constant_memory_addresses: Vec<u64>,
     async_copy_projections: Vec<AsyncCopyProjection>,
     ldgsts_source_cohorts: Vec<LdgstsSourceCohort>,
     ldgsts_source_sector_cohort_masks: Vec<u32>,
@@ -2614,6 +2718,7 @@ impl ValidatedWarp {
         let mut predicate_on_masks = Vec::with_capacity(warp.instructions.len());
         let mut instrumentation_order_anchors = Vec::new();
         let mut memories = Vec::new();
+        let mut constant_memory_addresses = Vec::new();
         let mut async_copy_projections = Vec::new();
         let mut ldgsts_source_cohorts = Vec::new();
         let mut ldgsts_source_sector_cohort_masks = Vec::new();
@@ -2623,6 +2728,11 @@ impl ValidatedWarp {
         let mut sector_errors = Vec::new();
         let mut shared_word_scratch = Vec::new();
         for (record_ix, instruction) in warp.instructions.into_iter().enumerate() {
+            let constant_memory_span = CompactArenaSpan::new(
+                constant_memory_addresses.len(),
+                instruction.constant_memory_addresses.len(),
+            );
+            constant_memory_addresses.extend_from_slice(&instruction.constant_memory_addresses);
             if let Some(order) = instruction.instrumentation_order {
                 instrumentation_order_anchors.push(CompactInstrumentationOrderAnchor {
                     order,
@@ -2653,6 +2763,21 @@ impl ValidatedWarp {
                                 record: format!("{label} warp={map_key} inst={record_ix}"),
                                 source,
                             })?
+                    } else {
+                        0
+                    };
+                let shared_sm86_wavefronts_32x4 =
+                    if matches!(resolved_route, Ok(ValidatedMemoryRoute::Shared)) {
+                        project_shared_bank_wavefronts_32x4_sm86(
+                            preflight,
+                            &mut shared_word_scratch,
+                        )
+                        .map_err(|source| {
+                            TraceError::SharedBankProjection {
+                                record: format!("{label} warp={map_key} inst={record_ix}"),
+                                source,
+                            }
+                        })?
                     } else {
                         0
                     };
@@ -2711,10 +2836,8 @@ impl ValidatedWarp {
                 let global_atomic_transactions = meta.op_class == pb::MemoryOpClass::Atomic
                     && matches!(resolved_route, Ok(ValidatedMemoryRoute::Global))
                     && payload_contract.carries_atomic_addresses();
-                let local_interleaved = if matches!(
-                    resolved_route,
-                    Ok(ValidatedMemoryRoute::Local)
-                ) {
+                let local_interleaved = if matches!(resolved_route, Ok(ValidatedMemoryRoute::Local))
+                {
                     match compact_sector_vector_for_operand(preflight, None, true) {
                         Ok(staged) => {
                             let start = local_interleaved_sectors.len();
@@ -2731,14 +2854,13 @@ impl ValidatedWarp {
                 } else {
                     CompactSectorPlan::ready(local_interleaved_sectors.len(), 0)
                 };
-                let local_interleaved_dynamic = matches!(
-                    resolved_route,
-                    Ok(ValidatedMemoryRoute::Local)
-                ) && preflight
-                    .instruction()
-                    .addresses
-                    .iter()
-                    .any(|address| address.compression_format == lanes::FORMAT_BASE_DELTA);
+                let local_interleaved_dynamic =
+                    matches!(resolved_route, Ok(ValidatedMemoryRoute::Local))
+                        && preflight
+                            .instruction()
+                            .addresses
+                            .iter()
+                            .any(|address| address.compression_format == lanes::FORMAT_BASE_DELTA);
                 let sector_projection = if matches!(
                     resolved_route,
                     Ok(ValidatedMemoryRoute::Global | ValidatedMemoryRoute::Local)
@@ -2881,6 +3003,17 @@ impl ValidatedWarp {
                 } else {
                     0
                 };
+                let (local_canonical_sectors, local_frame256_sectors) =
+                    if matches!(resolved_route, Ok(ValidatedMemoryRoute::Local)) {
+                        (
+                            local_canonical_sector_count(preflight, None),
+                            local_canonical_sector_count(preflight, Some(256)),
+                        )
+                    } else {
+                        (0, 0)
+                    };
+                let warp_uniform_address = warp_uniform_address(preflight);
+
                 let route = match resolved_route {
                     Ok(route) => CompactMemoryRoute::ready(route),
                     Err(error) => {
@@ -2902,6 +3035,11 @@ impl ValidatedWarp {
                     shared_ideal_wavefronts: shared_bank_ideal_wavefronts_32x4,
                     shared_legacy_wavefronts: shared_legacy_bank_wavefronts_32x4,
                     shared_legacy_ideal_wavefronts: shared_legacy_bank_ideal_wavefronts_32x4,
+                    shared_sm86_wavefronts: shared_sm86_wavefronts_32x4,
+                    local_canonical_sectors,
+                    local_frame256_sectors,
+                    warp_uniform_address,
+
                     meta: CompactMemoryMeta::new(
                         meta.op_class,
                         meta.access_kind,
@@ -2926,7 +3064,11 @@ impl ValidatedWarp {
             predicate_on_masks.push(predicate_on_mask);
             instructions.push(ValidatedInstruction {
                 pc: instruction.pc,
+                data_width: instruction.data_width,
                 memory_index,
+                constant_memory_span,
+                constant_memory_bank: instruction.constant_memory_bank,
+                constant_memory_offset: instruction.constant_memory_offset,
                 sm_id: instruction.sm_id.unwrap_or_default(),
                 warpid_sm: instruction.warpid_sm.unwrap_or_default(),
                 identity_presence,
@@ -2944,6 +3086,7 @@ impl ValidatedWarp {
             predicate_on_masks,
             instrumentation_order_anchors,
             memories,
+            constant_memory_addresses,
             async_copy_projections,
             ldgsts_source_cohorts,
             ldgsts_source_sector_cohort_masks,
@@ -2989,9 +3132,13 @@ impl ValidatedWarp {
                                 .ok()
                                 .map(|index| self.instrumentation_order_anchors[index].order)
                         });
+                let constant_memory_addresses = instruction
+                    .constant_memory_span
+                    .slice(&self.constant_memory_addresses);
                 ValidatedInstructionRef {
                     instruction,
                     memory,
+                    constant_memory_addresses,
                     function_unique_id: self.function_unique_id,
                     warpid_tb: self.map_key,
                     instruction_index: u32::try_from(instruction_index).unwrap_or_else(|_| {
@@ -3166,7 +3313,11 @@ impl ValidatedWarp {
 /// Packed scheduler fields retained from one validated dynamic instruction.
 struct ValidatedInstruction {
     pc: u32,
+    data_width: Option<i32>,
     memory_index: u32,
+    constant_memory_span: CompactArenaSpan,
+    constant_memory_bank: Option<u32>,
+    constant_memory_offset: Option<u64>,
     sm_id: i32,
     warpid_sm: i32,
     identity_presence: u8,
@@ -3198,6 +3349,7 @@ impl ValidatedInstruction {
 pub struct ValidatedInstructionRef<'a> {
     instruction: &'a ValidatedInstruction,
     memory: Option<&'a ValidatedMemoryInstruction>,
+    constant_memory_addresses: &'a [u64],
     function_unique_id: i32,
     warpid_tb: i32,
     instruction_index: u32,
@@ -3267,6 +3419,35 @@ impl<'a> ValidatedInstructionRef<'a> {
 
     pub const fn memory(self) -> Option<&'a ValidatedMemoryInstruction> {
         self.memory
+    }
+
+    pub const fn data_width(self) -> Option<i32> {
+        self.instruction.data_width
+    }
+
+    /// Dynamic constant-bank offsets observed by the producer. These are a
+    /// demand-only trace projection; they are not device allocation addresses
+    /// and must not be sent through the global cache/L2 path.
+    pub const fn constant_memory_addresses(self) -> &'a [u64] {
+        self.constant_memory_addresses
+    }
+
+    pub const fn constant_memory_bank_offset(self) -> Option<(u32, u64)> {
+        match (
+            self.instruction.constant_memory_bank,
+            self.instruction.constant_memory_offset,
+        ) {
+            (Some(bank), Some(offset)) => Some((bank, offset)),
+            _ => None,
+        }
+    }
+
+    /// Whether either constant metadata field was present on the wire. A
+    /// partial legacy record is retained as typed metadata and never treated
+    /// as an active lane-demand observation.
+    pub const fn constant_memory_metadata_present(self) -> bool {
+        self.instruction.constant_memory_bank.is_some()
+            || self.instruction.constant_memory_offset.is_some()
     }
 }
 
@@ -3473,7 +3654,8 @@ fn compact_sector_vector_for_operand(
                     .checked_mul(i64::try_from(lanes::LANES_PER_WARP).unwrap_or(32))
                     .and_then(|value| {
                         value.checked_add(
-                            i64::try_from(lane).unwrap_or(0)
+                            i64::try_from(lane)
+                                .unwrap_or(0)
                                 .checked_mul(i64::from(words_per_lane))?,
                         )
                     })
@@ -7389,9 +7571,7 @@ pub fn project_shared_bank_wavefronts_32x4(
                                 let lane_lo = phase * lanes_per_phase;
                                 lane >= lane_lo && lane < lane_lo + lanes_per_phase
                             };
-                            if !in_phase
-                                || address == lanes::LANE_INACTIVE_SENTINEL
-                            {
+                            if !in_phase || address == lanes::LANE_INACTIVE_SENTINEL {
                                 continue;
                             }
                             let first_word =
@@ -7469,9 +7649,10 @@ pub fn project_shared_bank_wavefronts_32x4(
 /// Whole-warp shared service projection retained for scheduler timing. This
 /// deliberately excludes the phase-local observer refinement so changing the
 /// L1TEX counter model cannot change SM issue or cycle state.
-pub fn project_shared_bank_wavefronts_32x4_legacy(
+fn project_shared_bank_wavefronts_32x4_legacy_with_policy(
     preflight: PreflightedMemoryAccess<'_>,
     word_scratch: &mut Vec<i64>,
+    dedup_atomic: bool,
 ) -> Result<u32, SharedBankProjectionError> {
     word_scratch.clear();
     let mut projected_words = 0_u64;
@@ -7532,7 +7713,7 @@ pub fn project_shared_bank_wavefronts_32x4_legacy(
     }
     let is_shared_atomic = preflight.meta().access_kind == Some(pb::MemoryOpAccessKind::Atomic)
         || preflight.meta().op_class == pb::MemoryOpClass::Atomic;
-    if !is_shared_atomic {
+    if dedup_atomic || !is_shared_atomic {
         word_scratch.sort_unstable();
         word_scratch.dedup();
     }
@@ -7545,6 +7726,24 @@ pub fn project_shared_bank_wavefronts_32x4_legacy(
     }
     u32::try_from(bank_words.into_iter().max().unwrap_or(0))
         .map_err(|_| SharedBankProjectionError::CountOverflow { bank: 0 })
+}
+
+/// Whole-warp shared service projection retained for SM120 scheduler timing.
+pub fn project_shared_bank_wavefronts_32x4_legacy(
+    preflight: PreflightedMemoryAccess<'_>,
+    word_scratch: &mut Vec<i64>,
+) -> Result<u32, SharedBankProjectionError> {
+    project_shared_bank_wavefronts_32x4_legacy_with_policy(preflight, word_scratch, false)
+}
+
+/// SM86 compatibility projection from the original branch. It deduplicates
+/// broadcasts for every shared record, including records whose producer
+/// metadata carries an atomic class.
+pub fn project_shared_bank_wavefronts_32x4_sm86(
+    preflight: PreflightedMemoryAccess<'_>,
+    word_scratch: &mut Vec<i64>,
+) -> Result<u32, SharedBankProjectionError> {
+    project_shared_bank_wavefronts_32x4_legacy_with_policy(preflight, word_scratch, true)
 }
 
 /// Whole-warp width-only ideal paired with the scheduler projection.

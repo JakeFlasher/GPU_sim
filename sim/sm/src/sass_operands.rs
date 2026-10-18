@@ -300,7 +300,9 @@ impl FixedLatencyOperandStatus {
 }
 
 fn classify_opcode(opcode: &str, arch: ArchId) -> Option<FixedLatencyOpcode> {
-    if arch == ArchId::Sm120 && (generic_opcode(opcode) || opcode.starts_with("IADD3") || opcode.starts_with("LOP3")) {
+    if arch == ArchId::Sm120
+        && (generic_opcode(opcode) || opcode.starts_with("IADD3") || opcode.starts_with("LOP3"))
+    {
         return Some(FixedLatencyOpcode::Generic);
     }
     match opcode {
@@ -389,8 +391,16 @@ fn generic_opcode(opcode: &str) -> bool {
             | "ULOP3"
             | "LDMATRIX"
             | "LDSM"
-            | "LD" | "LDG" | "LDL" | "LDS" | "LDC" | "LDCU" | "ULDC"
-            | "STG" | "STL" | "STS"
+            | "LD"
+            | "LDG"
+            | "LDL"
+            | "LDS"
+            | "LDC"
+            | "LDCU"
+            | "ULDC"
+            | "STG"
+            | "STL"
+            | "STS"
             | "ULOP"
             | "LOP"
     )
@@ -487,8 +497,8 @@ fn parse_register(text: &str) -> Result<Option<SassRegisterOperand>, ()> {
             "64" if span_registers == 1 => span_registers = 2,
             "128" if span_registers == 1 => span_registers = 4,
             // Sub-register selectors do not span an additional register.
-            "H0" | "H1" | "B0" | "B1" | "B2" | "B3"
-            | "H0_H0" | "H1_H1" | "B0_B0" | "B1_B1" | "B2_B2" | "B3_B3" => {}
+            "H0" | "H1" | "B0" | "B1" | "B2" | "B3" | "H0_H0" | "H1_H1" | "B0_B0" | "B1_B1"
+            | "B2_B2" | "B3_B3" => {}
             _ => return Err(()),
         }
     }
@@ -541,11 +551,13 @@ fn parse_generic_destination(text: &str) -> Result<SassRegisterOperand, String> 
 fn parse_generic_source(
     text: &str,
     slot: usize,
-) -> Result<(Option<SassSourceOperand>, Option<SassRegisterOperand>), FixedLatencyOperandGapReason> {
+) -> Result<(Option<SassSourceOperand>, Option<SassRegisterOperand>), FixedLatencyOperandGapReason>
+{
     match parse_register(text) {
         Ok(Some(operand)) => match operand.register.file {
-            SassRegisterFile::Regular | SassRegisterFile::Uniform
-                if !operand.logical_not => Ok((Some(SassSourceOperand::Register(operand)), None)),
+            SassRegisterFile::Regular | SassRegisterFile::Uniform if !operand.logical_not => {
+                Ok((Some(SassSourceOperand::Register(operand)), None))
+            }
             SassRegisterFile::Predicate | SassRegisterFile::UniformPredicate => {
                 Ok((None, Some(operand)))
             }
@@ -578,13 +590,18 @@ fn project_generic(
     let modifiers: Vec<_> = opcode_text.split('.').skip(1).collect();
     let has = |modifier: &str| modifiers.contains(&modifier);
     let is_store = matches!(head, "STG" | "STL" | "STS");
-    let is_memory = is_store || matches!(head, "LD" | "LDG" | "LDL" | "LDS" | "LDSM" | "LDC" | "LDCU" | "ULDC");
+    let is_memory = is_store
+        || matches!(
+            head,
+            "LD" | "LDG" | "LDL" | "LDS" | "LDSM" | "LDC" | "LDCU" | "ULDC"
+        );
     // SHFL/VOTE transfer values between lanes; a same-lane ready ledger is
     // insufficient. PR pack/unpack and uniform-from-lane selection also need
     // dedicated semantics. Do not fabricate destinations from position zero.
     if matches!(head, "SHFL" | "VOTE" | "P2R" | "R2P" | "R2UR" | "LDMATRIX") {
         return Err(FixedLatencyOperandGapReason::UnsupportedSource {
-            slot: 0, operand: format!("{head}: cross-lane or aggregate-register semantics unavailable"),
+            slot: 0,
+            operand: format!("{head}: cross-lane or aggregate-register semantics unavailable"),
         });
     }
     if operands.len() < 2 || (matches!(head, "SHF" | "USHF") && (has("U64") || has("S64"))) {
@@ -594,70 +611,140 @@ fn project_generic(
         });
     }
     let mut destination_count = if is_store { 0 } else { 1 };
-    if matches!(head, "ISETP" | "UISETP" | "FSETP" | "UFSETP" | "PLOP3" | "UPLOP3") {
+    if matches!(
+        head,
+        "ISETP" | "UISETP" | "FSETP" | "UFSETP" | "PLOP3" | "UPLOP3"
+    ) {
         destination_count = 2;
-    } else if matches!(head, "IADD" | "IADD3" | "UIADD" | "UIADD3" | "LEA" | "ULEA" | "IMAD" | "UIMAD") {
+    } else if matches!(
+        head,
+        "IADD" | "IADD3" | "UIADD" | "UIADD3" | "LEA" | "ULEA" | "IMAD" | "UIMAD"
+    ) {
         // Carry outputs precede the data sources. Trailing predicates are
         // inputs. PT/UPT outputs are discarded constants, not missing roles.
         while destination_count < operands.len()
-            && parse_register(operands[destination_count]).ok().flatten().is_some_and(|operand| {
-                matches!(operand.register.file, SassRegisterFile::Predicate | SassRegisterFile::UniformPredicate)
-            })
+            && parse_register(operands[destination_count])
+                .ok()
+                .flatten()
+                .is_some_and(|operand| {
+                    matches!(
+                        operand.register.file,
+                        SassRegisterFile::Predicate | SassRegisterFile::UniformPredicate
+                    )
+                })
         {
             destination_count += 1;
         }
     } else if matches!(head, "LOP3" | "ULOP3")
-        && parse_register(operands[0]).ok().flatten().is_some_and(|operand| {
-            matches!(operand.register.file, SassRegisterFile::Predicate | SassRegisterFile::UniformPredicate)
-        })
+        && parse_register(operands[0])
+            .ok()
+            .flatten()
+            .is_some_and(|operand| {
+                matches!(
+                    operand.register.file,
+                    SassRegisterFile::Predicate | SassRegisterFile::UniformPredicate
+                )
+            })
     {
         destination_count = 2;
     }
     if destination_count >= operands.len() {
         return Err(FixedLatencyOperandGapReason::UnexpectedOperandCount {
-            expected: "at least one source after destinations", got: operands.len(),
+            expected: "at least one source after destinations",
+            got: operands.len(),
         });
     }
     let conversion = matches!(head, "F2F" | "F2I" | "I2F" | "I2I");
-    let types: Vec<_> = modifiers.iter().copied()
-        .filter(|token| matches!(*token, "F64" | "F32" | "F16" | "BF16" | "U64" | "S64" | "U32" | "S32" | "U16" | "S16" | "U8" | "S8"))
+    let types: Vec<_> = modifiers
+        .iter()
+        .copied()
+        .filter(|token| {
+            matches!(
+                *token,
+                "F64"
+                    | "F32"
+                    | "F16"
+                    | "BF16"
+                    | "U64"
+                    | "S64"
+                    | "U32"
+                    | "S32"
+                    | "U16"
+                    | "S16"
+                    | "U8"
+                    | "S8"
+            )
+        })
         .collect();
     // Conversion suffixes omit default types. A lone S64 on I2F is
     // the source width, not a two-register FP32 destination; a lone F64
     // on F2I is likewise a source type.
-    let destination_pair = conversion && if matches!(head, "I2F" | "F2F") {
-        types.iter().find(|t| t.starts_with('F')).is_some_and(|t| *t == "F64")
-    } else {
-        types.iter().find(|t| t.starts_with('S') || t.starts_with('U')).is_some_and(|t| t.ends_with("64"))
-    };
-    let source_pair = conversion && if head == "I2F" {
-        types.iter().find(|t| t.starts_with('S') || t.starts_with('U')).is_some_and(|t| t.ends_with("64"))
-    } else if head == "F2I" {
-        types.iter().find(|t| t.starts_with('F')).is_some_and(|t| *t == "F64")
-    } else {
-        types.get(1).is_some_and(|t| t.ends_with("64"))
-    };
-    let pair_alu = matches!(head, "DADD" | "DMUL" | "DFMA") || (has("64") && matches!(head, "IADD" | "IADD3" | "UIADD" | "UIADD3" | "MOV" | "UMOV"))
+    let destination_pair = conversion
+        && if matches!(head, "I2F" | "F2F") {
+            types
+                .iter()
+                .find(|t| t.starts_with('F'))
+                .is_some_and(|t| *t == "F64")
+        } else {
+            types
+                .iter()
+                .find(|t| t.starts_with('S') || t.starts_with('U'))
+                .is_some_and(|t| t.ends_with("64"))
+        };
+    let source_pair = conversion
+        && if head == "I2F" {
+            types
+                .iter()
+                .find(|t| t.starts_with('S') || t.starts_with('U'))
+                .is_some_and(|t| t.ends_with("64"))
+        } else if head == "F2I" {
+            types
+                .iter()
+                .find(|t| t.starts_with('F'))
+                .is_some_and(|t| *t == "F64")
+        } else {
+            types.get(1).is_some_and(|t| t.ends_with("64"))
+        };
+    let pair_alu = matches!(head, "DADD" | "DMUL" | "DFMA")
+        || (has("64") && matches!(head, "IADD" | "IADD3" | "UIADD" | "UIADD3" | "MOV" | "UMOV"))
         || (head == "IMNMX" && (has("S64") || has("U64")));
     let width = if head == "LDSM" {
         // Observed SM120 matrix-load destination register vector, not the
         // .16 element width. Other forms remain an explicit projection gap.
-        if has("M88") && has("4") { 4 } else if has("M88") && has("2") { 2 }
-        else if has("M88") && has("1") { 1 } else {
+        if has("M88") && has("4") {
+            4
+        } else if has("M88") && has("2") {
+            2
+        } else if has("M88") && has("1") {
+            1
+        } else {
             return Err(FixedLatencyOperandGapReason::UnsupportedDestination {
                 operand: opcode_text.to_owned(),
             });
         }
-    } else if has("128") { 4 } else if has("64") { 2 } else { 1 };
+    } else if has("128") {
+        4
+    } else if has("64") {
+        2
+    } else {
+        1
+    };
     let wide_imad = matches!(head, "IMAD" | "UIMAD") && has("WIDE");
     let mut destinations = Vec::new();
     for text in &operands[..destination_count] {
-        let mut operand = parse_generic_destination(text).map_err(|operand| {
-            FixedLatencyOperandGapReason::UnsupportedDestination { operand }
-        })?;
-        if matches!(operand.register.file, SassRegisterFile::Regular | SassRegisterFile::Uniform) {
-            operand.register.span_registers = if is_memory { width } else if pair_alu || wide_imad
-                || destination_pair { 2 } else { 1 };
+        let mut operand = parse_generic_destination(text)
+            .map_err(|operand| FixedLatencyOperandGapReason::UnsupportedDestination { operand })?;
+        if matches!(
+            operand.register.file,
+            SassRegisterFile::Regular | SassRegisterFile::Uniform
+        ) {
+            operand.register.span_registers = if is_memory {
+                width
+            } else if pair_alu || wide_imad || destination_pair {
+                2
+            } else {
+                1
+            };
         }
         destinations.push(operand);
     }
@@ -670,7 +757,9 @@ fn project_generic(
             // offsets (including UR descriptor pointers). Preserve these RAWs
             // without interpreting the address or cache policy.
             for token in text.split(|c: char| !c.is_ascii_alphanumeric() && c != '.') {
-                if token.is_empty() { continue; }
+                if token.is_empty() {
+                    continue;
+                }
                 if let Ok(Some(operand)) = parse_register(token) {
                     sources.push(SassSourceOperand::Register(operand));
                 }
@@ -680,20 +769,33 @@ fn project_generic(
         let (source, predicate) = parse_generic_source(text, slot)?;
         if let Some(mut source) = source {
             if let SassSourceOperand::Register(ref mut operand) = source {
-                let pair = pair_alu || (wide_imad && slot == 2)
+                let pair = pair_alu
+                    || (wide_imad && slot == 2)
                     || source_pair
                     || (matches!(head, "ISETP" | "UISETP" | "IMNMX") && (has("S64") || has("U64")));
-                if is_store { operand.register.span_registers = width; }
-                else if pair { operand.register.span_registers = 2; }
-                if operand.reused && slot < 8 { textual_reuse |= 1 << slot; }
+                if is_store {
+                    operand.register.span_registers = width;
+                } else if pair {
+                    operand.register.span_registers = 2;
+                }
+                if operand.reused && slot < 8 {
+                    textual_reuse |= 1 << slot;
+                }
             }
             sources.push(source);
         }
-        if let Some(predicate) = predicate { predicate_sources.push(predicate); }
+        if let Some(predicate) = predicate {
+            predicate_sources.push(predicate);
+        }
     }
     // PACK_*_MERGE_C retains destination components, hence a real RAW on C.
     if opcode_text.contains("MERGE") {
-        sources.extend(destinations.iter().copied().map(SassSourceOperand::Register));
+        sources.extend(
+            destinations
+                .iter()
+                .copied()
+                .map(SassSourceOperand::Register),
+        );
     }
     // These are logical register roles, not register-bank/reuse-cache timing.
     // A hypothesized SM120 high-word reuse layout must not discard an explicit
@@ -709,8 +811,11 @@ fn project_generic(
 
 pub(crate) fn project_guard_predicate(text: Option<&str>) -> Option<SassRegister> {
     let operand = parse_register(text?.trim_start_matches('@')).ok()??;
-    matches!(operand.register.file, SassRegisterFile::Predicate | SassRegisterFile::UniformPredicate)
-        .then_some(operand.register)
+    matches!(
+        operand.register.file,
+        SassRegisterFile::Predicate | SassRegisterFile::UniformPredicate
+    )
+    .then_some(operand.register)
 }
 
 fn looks_like_immediate(text: &str) -> bool {
@@ -964,4 +1069,3 @@ pub fn project_fixed_latency_operands(
         Err(reason) => FixedLatencyOperandStatus::Gap(FixedLatencyOperandGap { opcode, reason }),
     }
 }
-

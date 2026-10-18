@@ -1,0 +1,1 @@
+{"axes": {"batch_size": 1, "seq_len": 16, "num_heads": 48, "head_dim": 128}, "inputs": {"query": {"type": "random"}, "key": {"type": "random"}, "weight_q": {"type": "random"}, "weight_k": {"type": "random"}, "eps": {"type": "scalar", "value": 1e-06}}}

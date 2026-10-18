@@ -1,0 +1,320 @@
+[
+  {
+    "slug": "002_vae_conv3x3_groupnorm_silu_residual_fused",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/002_vae_conv3x3_groupnorm_silu_residual_fused",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/002_vae_conv3x3_groupnorm_silu_residual_fused/reference.py"
+  },
+  {
+    "slug": "003_lm_head_projection_with_logit_slicing",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/003_lm_head_projection_with_logit_slicing",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/003_lm_head_projection_with_logit_slicing/reference.py"
+  },
+  {
+    "slug": "004_attention_output_projection_with_reshape_backward",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/004_attention_output_projection_with_reshape_backward",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/004_attention_output_projection_with_reshape_backward/reference.py"
+  },
+  {
+    "slug": "005_conv_gated_projection_with_causal_conv",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/005_conv_gated_projection_with_causal_conv",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/005_conv_gated_projection_with_causal_conv/reference.py"
+  },
+  {
+    "slug": "006_hyena_depthwise_conv1d_split_gate",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/006_hyena_depthwise_conv1d_split_gate",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/006_hyena_depthwise_conv1d_split_gate/reference.py"
+  },
+  {
+    "slug": "007_hyena_fft_size_padding_rfft",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/007_hyena_fft_size_padding_rfft",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/007_hyena_fft_size_padding_rfft/reference.py"
+  },
+  {
+    "slug": "008_expert_output_weighted_index_add_accumulation",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/008_expert_output_weighted_index_add_accumulation",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/008_expert_output_weighted_index_add_accumulation/reference.py"
+  },
+  {
+    "slug": "010_attention_value_projection_with_transpose",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/010_attention_value_projection_with_transpose",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/010_attention_value_projection_with_transpose/reference.py"
+  },
+  {
+    "slug": "012_fused_cos_sin_embedding_generation",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/012_fused_cos_sin_embedding_generation",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/012_fused_cos_sin_embedding_generation/reference.py"
+  },
+  {
+    "slug": "013_fused_residual_rms_norm_backward",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/013_fused_residual_rms_norm_backward",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/013_fused_residual_rms_norm_backward/reference.py"
+  },
+  {
+    "slug": "014_rotary_embedding_with_attention_scaling_backward",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/014_rotary_embedding_with_attention_scaling_backward",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/014_rotary_embedding_with_attention_scaling_backward/reference.py"
+  },
+  {
+    "slug": "016_rope_inverse_frequency_computation",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/016_rope_inverse_frequency_computation",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/016_rope_inverse_frequency_computation/reference.py"
+  },
+  {
+    "slug": "025_video_latent_gelu_activation",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/025_video_latent_gelu_activation",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/025_video_latent_gelu_activation/reference.py"
+  },
+  {
+    "slug": "027_video_spatial_attention_with_rope_3d",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/027_video_spatial_attention_with_rope_3d",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/027_video_spatial_attention_with_rope_3d/reference.py"
+  },
+  {
+    "slug": "028_hybrid_attention_mask_preparation",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/028_hybrid_attention_mask_preparation",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/028_hybrid_attention_mask_preparation/reference.py"
+  },
+  {
+    "slug": "029_mamba_conv1d_with_gating",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/029_mamba_conv1d_with_gating",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/029_mamba_conv1d_with_gating/reference.py"
+  },
+  {
+    "slug": "030_attention_output_projection_with_residual",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/030_attention_output_projection_with_residual",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/030_attention_output_projection_with_residual/reference.py"
+  },
+  {
+    "slug": "031_repeat_kv_attention_matmul",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/031_repeat_kv_attention_matmul",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/031_repeat_kv_attention_matmul/reference.py"
+  },
+  {
+    "slug": "032_attention_weights_matmul_with_value_projection",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/032_attention_weights_matmul_with_value_projection",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/032_attention_weights_matmul_with_value_projection/reference.py"
+  },
+  {
+    "slug": "033_post_norm_residual",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/033_post_norm_residual",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/033_post_norm_residual/reference.py"
+  },
+  {
+    "slug": "034_flux_multi_axis_rope_frequency_computation",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/034_flux_multi_axis_rope_frequency_computation",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/034_flux_multi_axis_rope_frequency_computation/reference.py"
+  },
+  {
+    "slug": "037_flux_feedforward_gelu_approximate",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/037_flux_feedforward_gelu_approximate",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/037_flux_feedforward_gelu_approximate/reference.py"
+  },
+  {
+    "slug": "038_flux_multi_head_rmsnorm_qk",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/038_flux_multi_head_rmsnorm_qk",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/038_flux_multi_head_rmsnorm_qk/reference.py"
+  },
+  {
+    "slug": "039_adaptive_instance_normalization_2d_backward",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/039_adaptive_instance_normalization_2d_backward",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/039_adaptive_instance_normalization_2d_backward/reference.py"
+  },
+  {
+    "slug": "040_conv2d_residual_block",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/040_conv2d_residual_block",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/040_conv2d_residual_block/reference.py"
+  },
+  {
+    "slug": "041_strided_conv2d_downsampling",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/041_strided_conv2d_downsampling",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/041_strided_conv2d_downsampling/reference.py"
+  },
+  {
+    "slug": "045_fused_linear_gelu_grn_linear",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/045_fused_linear_gelu_grn_linear",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/045_fused_linear_gelu_grn_linear/reference.py"
+  },
+  {
+    "slug": "049_attention_qk_matmul_with_gqa_repeat_and_scaling",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/049_attention_qk_matmul_with_gqa_repeat_and_scaling",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/049_attention_qk_matmul_with_gqa_repeat_and_scaling/reference.py"
+  },
+  {
+    "slug": "050_attention_qkv_projection_with_bias_and_reshape",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/050_attention_qkv_projection_with_bias_and_reshape",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/050_attention_qkv_projection_with_bias_and_reshape/reference.py"
+  },
+  {
+    "slug": "051_attention_qkv_with_qk_norm_single_kernel_backward",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/051_attention_qkv_with_qk_norm_single_kernel_backward",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/051_attention_qkv_with_qk_norm_single_kernel_backward/reference.py"
+  },
+  {
+    "slug": "053_gaussian_topk_sparse_activation",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/053_gaussian_topk_sparse_activation",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/053_gaussian_topk_sparse_activation/reference.py"
+  },
+  {
+    "slug": "056_mamba_ssm_dt_projection_softplus_clamp_backward",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/056_mamba_ssm_dt_projection_softplus_clamp_backward",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/056_mamba_ssm_dt_projection_softplus_clamp_backward/reference.py"
+  },
+  {
+    "slug": "059_moe_group_score_aggregation_and_masking",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/059_moe_group_score_aggregation_and_masking",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/059_moe_group_score_aggregation_and_masking/reference.py"
+  },
+  {
+    "slug": "061_tanh_gated_residual_add_backward",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/061_tanh_gated_residual_add_backward",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/061_tanh_gated_residual_add_backward/reference.py"
+  },
+  {
+    "slug": "064_latent_kv_expansion_with_split",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/064_latent_kv_expansion_with_split",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/064_latent_kv_expansion_with_split/reference.py"
+  },
+  {
+    "slug": "065_fused_statistics_projection_and_split",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/065_fused_statistics_projection_and_split",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/065_fused_statistics_projection_and_split/reference.py"
+  },
+  {
+    "slug": "068_fused_rope_application_backward",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/068_fused_rope_application_backward",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/068_fused_rope_application_backward/reference.py"
+  },
+  {
+    "slug": "069_rms_norm",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/069_rms_norm",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/069_rms_norm/reference.py"
+  },
+  {
+    "slug": "071_kv_cache_update_with_rope",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/071_kv_cache_update_with_rope",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/071_kv_cache_update_with_rope/reference.py"
+  },
+  {
+    "slug": "078_group_norm_fusion",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/078_group_norm_fusion",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/078_group_norm_fusion/reference.py"
+  },
+  {
+    "slug": "083_attention_score_value_matmul",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/083_attention_score_value_matmul",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/083_attention_score_value_matmul/reference.py"
+  },
+  {
+    "slug": "084_silu_activation_backward",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/084_silu_activation_backward",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/084_silu_activation_backward/reference.py"
+  },
+  {
+    "slug": "088_rotary_position_embedding_application",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/088_rotary_position_embedding_application",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/088_rotary_position_embedding_application/reference.py"
+  },
+  {
+    "slug": "090_batched_2d_rope_position_encoding_backward",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/090_batched_2d_rope_position_encoding_backward",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/090_batched_2d_rope_position_encoding_backward/reference.py"
+  },
+  {
+    "slug": "094_time_decay_exponential_stabilization",
+    "category": "L1",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/094_time_decay_exponential_stabilization",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/094_time_decay_exponential_stabilization/reference.py"
+  },
+  {
+    "slug": "004_fused_residual_rms_mlp",
+    "category": "L2",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/004_fused_residual_rms_mlp",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/004_fused_residual_rms_mlp/reference.py"
+  },
+  {
+    "slug": "005_swiglu_mlp_backward",
+    "category": "L2",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/005_swiglu_mlp_backward",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/005_swiglu_mlp_backward/reference.py"
+  },
+  {
+    "slug": "008_moe_sparse_routing_and_dispatch",
+    "category": "L2",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/008_moe_sparse_routing_and_dispatch",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/008_moe_sparse_routing_and_dispatch/reference.py"
+  },
+  {
+    "slug": "031_flux_timestep_guidance_projection_embedding",
+    "category": "L2",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/031_flux_timestep_guidance_projection_embedding",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/031_flux_timestep_guidance_projection_embedding/reference.py"
+  },
+  {
+    "slug": "033_multi_scale_feature_pyramid",
+    "category": "L2",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/033_multi_scale_feature_pyramid",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/033_multi_scale_feature_pyramid/reference.py"
+  },
+  {
+    "slug": "035_convnextv2_block_with_grn",
+    "category": "L2",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/035_convnextv2_block_with_grn",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/035_convnextv2_block_with_grn/reference.py"
+  },
+  {
+    "slug": "036_convnextv2_layer_with_nhwc_persistence_backward",
+    "category": "L2",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/036_convnextv2_layer_with_nhwc_persistence_backward",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/036_convnextv2_layer_with_nhwc_persistence_backward/reference.py"
+  },
+  {
+    "slug": "075_sam_hq_mask_decoder_two_way_transformer",
+    "category": "L2",
+    "problem": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/075_sam_hq_mask_decoder_two_way_transformer",
+    "reference": "/home/jakeshea/sm86_rtx_3090_capture/workloads/sm86_snapshot_controls/075_sam_hq_mask_decoder_two_way_transformer/reference.py"
+  }
+]

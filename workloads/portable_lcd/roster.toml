@@ -1,0 +1,194 @@
+# portable_lcd suite roster — all 15 LCD-portable kernels.
+#
+# Each row carries the fields the standalone subtree contract verifier
+# (`workloads/portable_lcd/verify_kernel_contracts.py`) reads to drive
+# per-row checks: build artifact path, manifest path, trace dir, and
+# the per-row shape names the runner exposes.
+#
+# Status semantics:
+#   active   — slug directory exists with a built `<slug>_run` binary;
+#              contract verifier checks fatbin slices, NVBit trace,
+#              suite SASS coverage, and manifest schema validity for
+#              this row.
+#   pending  — slug directory does not yet exist; contract verifier
+#              skips this row and reports it as "pending".
+#
+# Tier "P" denotes LCD-portable: build slices target the BASE archs
+# `sm_86`, `sm_90`, `sm_120` plus a `compute_80` PTX fallback. The
+# architecture-conditional variants (sm_90a / sm_120a / sm_120f) are
+# forbidden as build targets per the LCD discipline.
+
+schema_version = 1
+
+# -----------------------------------------------------------------------------
+# First wave — 6 foundational kernels (LCD-portable feature coverage)
+# -----------------------------------------------------------------------------
+
+[[rows]]
+slug = "gemm_hmma_bf16_sm80"
+tier = "P"
+family = "gemm_hmma"
+primary_precision = "BF16"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+correctness_shape = "correctness_00"
+timing_shape = "timing_00"
+status = "active"
+wave = "first"
+
+[[rows]]
+slug = "rmsnorm_fwd_bf16_sm80"
+tier = "P"
+family = "norm_fwd"
+primary_precision = "BF16"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+correctness_shape = "correctness_00"
+timing_shape = "timing_00"
+status = "active"
+wave = "first"
+
+[[rows]]
+slug = "softmax_safe_bf16_sm80"
+tier = "P"
+family = "softmax"
+primary_precision = "BF16"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+correctness_shape = "correctness_00"
+timing_shape = "timing_00"
+status = "active"
+wave = "first"
+
+[[rows]]
+slug = "swiglu_fwd_bf16_sm80"
+tier = "P"
+family = "activation"
+primary_precision = "BF16"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+correctness_shape = "correctness_00"
+timing_shape = "timing_00"
+status = "active"
+wave = "first"
+
+[[rows]]
+slug = "embedding_gather_int32_sm80"
+tier = "P"
+family = "embedding"
+primary_precision = "BF16"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+correctness_shape = "correctness_00"
+timing_shape = "timing_00"
+status = "active"
+wave = "first"
+
+[[rows]]
+slug = "cross_entropy_fwd_fp32_sm80"
+tier = "P"
+family = "loss"
+primary_precision = "FP32"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+correctness_shape = "correctness_00"
+timing_shape = "timing_00"
+status = "active"
+wave = "first"
+
+# -----------------------------------------------------------------------------
+# Wave 2 — 9 kernels extending tensor-core / attention / sparse / norm coverage
+# -----------------------------------------------------------------------------
+
+[[rows]]
+slug = "gemm_hmma_fp16_sm80"
+tier = "P"
+family = "gemm_hmma"
+primary_precision = "FP16"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+correctness_shape = "correctness_00"
+timing_shape = "timing_00"
+status = "active"
+wave = "second"
+
+[[rows]]
+slug = "gemm_imma_int8_sm80"
+tier = "P"
+family = "gemm_imma"
+primary_precision = "INT8"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+correctness_shape = "correctness_00"
+timing_shape = "timing_00"
+status = "active"
+wave = "second"
+
+[[rows]]
+slug = "gemm_sparse_2to4_bf16_sm80"
+tier = "P"
+family = "gemm_sparse"
+primary_precision = "BF16"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+correctness_shape = "correctness_00"
+timing_shape = "timing_00"
+status = "active"
+wave = "second"
+
+[[rows]]
+slug = "flash_attn_fwd_bf16_sm80"
+tier = "P"
+family = "attention"
+primary_precision = "BF16"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+correctness_shape = "correctness_00"
+timing_shape = "timing_00"
+status = "active"
+wave = "second"
+
+[[rows]]
+slug = "flash_attn_bwd_bf16_sm80"
+tier = "P"
+family = "attention"
+primary_precision = "BF16"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+correctness_shape = "correctness_00"
+timing_shape = "timing_00"
+status = "active"
+wave = "second"
+
+[[rows]]
+slug = "rmsnorm_bwd_bf16_sm80"
+tier = "P"
+family = "norm_bwd"
+primary_precision = "BF16"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+correctness_shape = "correctness_00"
+timing_shape = "timing_00"
+status = "active"
+wave = "second"
+
+[[rows]]
+slug = "layernorm_fwd_bf16_sm80"
+tier = "P"
+family = "norm_fwd"
+primary_precision = "BF16"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+correctness_shape = "correctness_00"
+timing_shape = "timing_00"
+status = "active"
+wave = "second"
+
+[[rows]]
+slug = "silu_fwd_bf16_sm80"
+tier = "P"
+family = "activation"
+primary_precision = "BF16"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+correctness_shape = "correctness_00"
+timing_shape = "timing_00"
+status = "active"
+wave = "second"
+
+[[rows]]
+slug = "conv2d_implicit_gemm_bf16_sm80"
+tier = "P"
+family = "conv2d"
+primary_precision = "BF16"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+correctness_shape = "correctness_00"
+timing_shape = "timing_00"
+status = "active"
+wave = "second"

@@ -25,7 +25,10 @@ use sim_trace::ExecInfo;
 
 use crate::control_bits::{ControlBits, ControlSidecar, DepBarrier, FunctionControl, WaitMask};
 use crate::issue::Sm120AlphaConfig;
-use crate::sass_operands::{FixedLatencyOperandStatus, SassRegister, project_fixed_latency_operands, project_guard_predicate};
+use crate::sass_operands::{
+    FixedLatencyOperandStatus, SassRegister, project_fixed_latency_operands,
+    project_guard_predicate,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ProgramError {
@@ -272,7 +275,10 @@ pub(crate) fn is_clocklo_opcode_text(text: &str) -> bool {
 }
 
 pub(crate) fn is_gpu_membar_opcode_text(text: &str) -> bool {
-    text.split_ascii_whitespace().next() == Some("MEMBAR.SC.GPU")
+    matches!(
+        text.split_ascii_whitespace().next(),
+        Some("MEMBAR.GL") | Some("MEMBAR.GPU") | Some("MEMBAR.SC.GPU")
+    )
 }
 
 impl IssueSlot {
@@ -326,6 +332,28 @@ impl IssueSlot {
 
     pub(crate) const fn is_gpu_membar(&self) -> bool {
         self.gpu_membar
+    }
+
+    /// Source-qualified dependent SFU form used by the SM86 effective timing
+    /// arm. The narrow same-register shape (`MUFU.* Rn, Rn`) is visible in the
+    /// static SASS text; all other SFU forms retain the initiation-only model.
+    pub(crate) fn is_sfu_dependent_chain(&self) -> bool {
+        if !matches!(self.opcode_text.split_ascii_whitespace().next(), Some(opcode) if
+            opcode.starts_with("MUFU") || matches!(opcode, "RCP" | "RSQ" | "EX2" | "LG2" | "SIN" | "COS"))
+        {
+            return false;
+        }
+        let Some((_, operands)) = self.opcode_text.split_once(char::is_whitespace) else {
+            return false;
+        };
+        let mut fields = operands.trim().trim_end_matches(';').split(',');
+        let Some(destination) = fields.next().map(str::trim) else {
+            return false;
+        };
+        let Some(source) = fields.next().map(str::trim) else {
+            return false;
+        };
+        destination == source && destination.strip_prefix('R').is_some()
     }
 
     pub(crate) fn is_cctl_invalidate_all(&self) -> bool {
@@ -509,7 +537,9 @@ fn classify(
 fn alpha_mem_role(opcode_text: &str) -> MemRole {
     let opcode = opcode_text.split_ascii_whitespace().next().unwrap_or("");
     match opcode_head(opcode_text) {
-        "LDG" if opcode.contains("STRONG.SM") || opcode.contains(".CA") || opcode.contains(".EF") => {
+        "LDG"
+            if opcode.contains("STRONG.SM") || opcode.contains(".CA") || opcode.contains(".EF") =>
+        {
             // The live SM120 probe emits STRONG.SM for the cache-all source
             // form. Preserve the route distinction only where SASS exposes it;
             // a bare LDG.E remains conservative/bypass.
@@ -577,9 +607,7 @@ fn protocol_op(opcode_text: &str) -> ProtocolOp {
     if head == "ARRIVES" && opcode_text.contains("LDGSTSBAR") {
         return ProtocolOp::DeferredArrivalRegistration;
     }
-    if head == "SYNCS"
-        && (opcode_text.contains("ARRIVE") || opcode_text.contains("EXCH"))
-    {
+    if head == "SYNCS" && (opcode_text.contains("ARRIVE") || opcode_text.contains("EXCH")) {
         return ProtocolOp::MBarrierAccounting;
     }
     match head {
@@ -609,17 +637,30 @@ fn classify_pipeline_sm120_alpha(
             generation_rearm_cycles: config.barrier_generation_rearm_cycles,
         });
     }
-    let (latency_cycles, initiation_interval_cycles) = if matches!(head, "FFMA" | "FADD" | "FMUL" | "HFMA2" | "HADD2" | "HMUL2") {
-        (config.fma_latency_cycles, config.fma_initiation_interval_cycles)
-    } else if head == "IMAD" {
-        (config.mad_latency_cycles, config.mad_initiation_interval_cycles)
-    } else if matches!(head, "IADD" | "IADD3" | "UIADD3" | "UIADD") {
-        (config.add_latency_cycles, config.add_initiation_interval_cycles)
-    } else if matches!(head, "LOP3" | "LEA" | "SHF") {
-        (config.scalar_latency_cycles, config.scalar_initiation_interval_cycles)
-    } else {
-        return Ok(PipelineClass::DispatchOnly);
-    };
+    let (latency_cycles, initiation_interval_cycles) =
+        if matches!(head, "FFMA" | "FADD" | "FMUL" | "HFMA2" | "HADD2" | "HMUL2") {
+            (
+                config.fma_latency_cycles,
+                config.fma_initiation_interval_cycles,
+            )
+        } else if head == "IMAD" {
+            (
+                config.mad_latency_cycles,
+                config.mad_initiation_interval_cycles,
+            )
+        } else if matches!(head, "IADD" | "IADD3" | "UIADD3" | "UIADD") {
+            (
+                config.add_latency_cycles,
+                config.add_initiation_interval_cycles,
+            )
+        } else if matches!(head, "LOP3" | "LEA" | "SHF") {
+            (
+                config.scalar_latency_cycles,
+                config.scalar_initiation_interval_cycles,
+            )
+        } else {
+            return Ok(PipelineClass::DispatchOnly);
+        };
     if latency_cycles > 0 {
         return Ok(PipelineClass::ScalarAlu {
             latency_cycles,
@@ -1096,14 +1137,15 @@ fn build_schedules_with_pipeline_arch_and_alpha(
                 // rather than in a later pass over the slots.
                 if alpha.is_none()
                     && let Some(interval) = compact_backward_predicate_interval(
-                    pc,
-                    &inst.opcode_text,
-                    pipeline_class,
-                    function,
-                    inst.predicate.as_deref(),
-                    pipeline_arch,
-                )? {
-                        pipeline_class = PipelineClass::Branch {
+                        pc,
+                        &inst.opcode_text,
+                        pipeline_class,
+                        function,
+                        inst.predicate.as_deref(),
+                        pipeline_arch,
+                    )?
+                {
+                    pipeline_class = PipelineClass::Branch {
                         next_issue_interval_cycles: interval,
                     };
                 }
@@ -1159,7 +1201,7 @@ fn build_schedules_with_pipeline_arch_and_alpha(
                         .next()
                         .is_some_and(|opcode| opcode.starts_with("HMMA.16816"))
                 {
-                        slot.pipeline_class = PipelineClass::Tensor {
+                    slot.pipeline_class = PipelineClass::Tensor {
                         initiation_interval_cycles: effective_dense_hmma_interval(
                             dense_tensor_sites,
                             initiation_interval_cycles,
@@ -1182,4 +1224,3 @@ fn build_schedules_with_pipeline_arch_and_alpha(
     }
     Ok(schedules)
 }
-

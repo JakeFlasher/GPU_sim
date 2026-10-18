@@ -1,0 +1,1 @@
+{"axes": {"batch_size": 1, "seqlen": 8, "d_model": 64, "freq_len": 9}, "inputs": {"x": {"type": "random"}}}

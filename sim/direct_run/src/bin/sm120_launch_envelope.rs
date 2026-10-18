@@ -87,7 +87,11 @@ enum Error {
     #[error("kernel {kernel_id} block {block} has no traced sm_id")]
     MissingBlockSm { kernel_id: i32, block: i64 },
     #[error("kernel {kernel_id} block {block} warp {warp} has no traced warpid_sm")]
-    MissingWarpSlot { kernel_id: i32, block: i64, warp: i32 },
+    MissingWarpSlot {
+        kernel_id: i32,
+        block: i64,
+        warp: i32,
+    },
 }
 
 #[derive(Debug, Serialize)]

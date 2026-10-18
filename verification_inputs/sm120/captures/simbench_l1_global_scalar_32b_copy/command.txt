@@ -1,0 +1,1 @@
+bash -c /root/GPU_simulator_rebase/workloads/simbench_bw/l1/global_scalar_32b_copy/global_scalar_32b_copy_run\ --samples\ 16\ --bins\ 16\ --seed\ 42\ --shape-point\ trace_sm120\ --summary 

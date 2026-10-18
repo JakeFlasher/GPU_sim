@@ -1074,8 +1074,7 @@ impl ObligationFrontier {
                 captured_polling_is_not_counterfactual: true,
                 qualified_synchronization_available: qualified_satisfied_generations != 0,
                 qualified_synchronization_applied: false,
-                qualified_synchronization_reason:
-                    "diagnostic frontier only; no counterfactual polling loop was substituted",
+                qualified_synchronization_reason: "diagnostic frontier only; no counterfactual polling loop was substituted",
                 qualified_phase_observations: qualified_satisfied_generations,
                 protocol_scoped_phase_candidates,
                 qualified_satisfied_generations,
@@ -1094,10 +1093,8 @@ impl ObligationFrontier {
                 post_result_narrowed_frontiers,
                 current_query_only_frontiers,
                 deferred_arrival_obligations,
-                engine_completion_clock:
-                    "unavailable: no engine-originated per-generation timestamp",
-                model_timing_input:
-                    "none: frontier is evidence/model diagnostics, not replay timing",
+                engine_completion_clock: "unavailable: no engine-originated per-generation timestamp",
+                model_timing_input: "none: frontier is evidence/model diagnostics, not replay timing",
             },
             phase,
         )

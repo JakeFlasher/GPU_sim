@@ -1,0 +1,1822 @@
+{
+  "arch": "sm_86",
+  "binary": "/home/jakeshea/5090_branch/GPU_simulator_rebase/workloads/simbench_bw/l1/cp_async_shared_tile_copy/cp_async_shared_tile_copy_run",
+  "binary_source": "extra_info/native_static_metadata.json",
+  "functions": {
+    "cp_async_shared_tile_copy_kernel": [
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 2,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fe400078e00ff",
+        "low_word": "0x00000a00ff017624",
+        "opcode_text": "IMAD.MOV.U32 R1, RZ, RZ, c[0x0][0x28]",
+        "pc": 0,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 1,
+          "wait_mask": 0,
+          "write_barrier": 1,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000e620000002100",
+        "low_word": "0x0000000000007919",
+        "opcode_text": "S2R R0, SR_TID.X",
+        "pc": 16,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 1,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fe20000000a00",
+        "low_word": "0x00005c0000047ab9",
+        "opcode_text": "ULDC.64 UR4, c[0x0][0x170]",
+        "pc": 32,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 1,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fe20003800000",
+        "low_word": "0x0000010000007945",
+        "opcode_text": "BSSY B0, 0x140",
+        "pc": 48,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 2,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fe4000f8e023f",
+        "low_word": "0x00000004050472a4",
+        "opcode_text": "UIMAD UR4, UR5, UR4, URZ",
+        "pc": 64,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 4,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fc80000000a00",
+        "low_word": "0x0000460000067ab9",
+        "opcode_text": "ULDC.64 UR6, c[0x0][0x118]",
+        "pc": 80,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 13,
+          "wait_mask": 2,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x002fda000bf26270",
+        "low_word": "0x0000000400007c0c",
+        "opcode_text": "ISETP.GE.AND P1, PT, R0, UR4, PT",
+        "pc": 96,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 5,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fea0003800000",
+        "low_word": "0x000000b000001947",
+        "opcode_text": "BRA 0x130",
+        "pc": 112,
+        "predicate": "@P1",
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 1,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fe200078e0000",
+        "low_word": "0x000000ffff047224",
+        "opcode_text": "IMAD.MOV.U32 R4, RZ, RZ, R0",
+        "pc": 128,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 3,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fc60000000f00",
+        "low_word": "0x0000000400077802",
+        "opcode_text": "MOV R7, 0x4",
+        "pc": 144,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 1,
+          "stall": 2,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x040fe400078e00ff",
+        "low_word": "0x0000000404057824",
+        "opcode_text": "IMAD.SHL.U32 R5, R4.reuse, 0x4, RZ",
+        "pc": 160,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 1,
+          "stall": 1,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x040fe200078e0207",
+        "low_word": "0x0000580004027625",
+        "opcode_text": "IMAD.WIDE R2, R4.reuse, R7, c[0x0][0x160]",
+        "pc": 176,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 4,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fc80007ffe0ff",
+        "low_word": "0x0000000004047a10",
+        "opcode_text": "IADD3 R4, R4, c[0x0][0x0], RZ",
+        "pc": 192,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 1,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fe20000000800",
+        "low_word": "0x00000000fffff984",
+        "opcode_text": "LDS RZ, [RZ]",
+        "pc": 208,
+        "predicate": "@!PT",
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 1,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fe20000000800",
+        "low_word": "0x00000000fffff984",
+        "opcode_text": "LDS RZ, [RZ]",
+        "pc": 224,
+        "predicate": "@!PT",
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 1,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fe20000000800",
+        "low_word": "0x00000000fffff984",
+        "opcode_text": "LDS RZ, [RZ]",
+        "pc": 240,
+        "predicate": "@!PT",
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 1,
+          "reuse": 0,
+          "stall": 1,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x0003e2000b921846",
+        "low_word": "0x0000000002057fae",
+        "opcode_text": "LDGSTS.E [R5], [R2.64]",
+        "pc": 256,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 13,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fda000bf06270",
+        "low_word": "0x0000000404007c0c",
+        "opcode_text": "ISETP.GE.AND P0, PT, R4, UR4, PT",
+        "pc": 272,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 5,
+          "wait_mask": 2,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x002fea000383ffff",
+        "low_word": "0xffffff7000008947",
+        "opcode_text": "BRA 0xa0",
+        "pc": 288,
+        "predicate": "@!P0",
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 5,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fea0003800000",
+        "low_word": "0x0000000000007941",
+        "opcode_text": "BSYNC B0",
+        "pc": 304,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 1,
+          "wait_mask": 0,
+          "write_barrier": 0,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000e220000000000",
+        "low_word": "0x00000000000079af",
+        "opcode_text": "LDGDEPBAR",
+        "pc": 320,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 4,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fc80000000000",
+        "low_word": "0x000080000000791a",
+        "opcode_text": "DEPBAR.LE SB0, 0x0",
+        "pc": 336,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 6,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fec0000010000",
+        "low_word": "0x0000000000007b1d",
+        "opcode_text": "BAR.SYNC.DEFER_BLOCKING 0x0",
+        "pc": 352,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 5,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fea0003800000",
+        "low_word": "0x000000000000194d",
+        "opcode_text": "EXIT",
+        "pc": 368,
+        "predicate": "@P1",
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 1,
+          "wait_mask": 0,
+          "write_barrier": 1,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000e620000209000",
+        "low_word": "0x0000000000057b06",
+        "opcode_text": "I2F.U32.RP R5, c[0x0][0x0]",
+        "pc": 384,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 1,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fe200078e33ff",
+        "low_word": "0x00000000ff047212",
+        "opcode_text": "LOP3.LUT R4, RZ, R0, RZ, 0x33, !PT",
+        "pc": 400,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 1,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fe20003800000",
+        "low_word": "0x0000023000007945",
+        "opcode_text": "BSSY B0, 0x3e0",
+        "pc": 416,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 2,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fe40003f45070",
+        "low_word": "0x00000000ff007a0c",
+        "opcode_text": "ISETP.NE.U32.AND P2, PT, RZ, c[0x0][0x0], PT",
+        "pc": 432,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 3,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fc6000fffe0ff",
+        "low_word": "0x0000000404047c10",
+        "opcode_text": "IADD3 R4, R4, UR4, RZ",
+        "pc": 448,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 2,
+          "wait_mask": 2,
+          "write_barrier": 1,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x002e640000001000",
+        "low_word": "0x0000000500057308",
+        "opcode_text": "MUFU.RCP R5, R5",
+        "pc": 464,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 6,
+          "wait_mask": 2,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x002fcc0007ffe0ff",
+        "low_word": "0x0ffffffe05027810",
+        "opcode_text": "IADD3 R2, R5, 0xffffffe, RZ",
+        "pc": 480,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 1,
+          "reuse": 0,
+          "stall": 2,
+          "wait_mask": 0,
+          "write_barrier": 2,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x0002a4000021f000",
+        "low_word": "0x0000000200037305",
+        "opcode_text": "F2I.FTZ.U32.TRUNC.NTZ R3, R2",
+        "pc": 496,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 1,
+          "wait_mask": 2,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x002fe20000000f00",
+        "low_word": "0x000000ff00027202",
+        "opcode_text": "MOV R2, RZ",
+        "pc": 512,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 4,
+          "wait_mask": 4,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x004fc800078e0a03",
+        "low_word": "0x000000ffff077224",
+        "opcode_text": "IMAD.MOV R7, RZ, RZ, -R3",
+        "pc": 528,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 4,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fc800078e02ff",
+        "low_word": "0x0000000007077a24",
+        "opcode_text": "IMAD R7, R7, c[0x0][0x0], RZ",
+        "pc": 544,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 6,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fcc00078e0002",
+        "low_word": "0x0000000703037227",
+        "opcode_text": "IMAD.HI.U32 R3, R3, R7, R2",
+        "pc": 560,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 4,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fc800078e00ff",
+        "low_word": "0x0000000403037227",
+        "opcode_text": "IMAD.HI.U32 R3, R3, R4, RZ",
+        "pc": 576,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 4,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fc800078e0a03",
+        "low_word": "0x000000ffff057224",
+        "opcode_text": "IMAD.MOV R5, RZ, RZ, -R3",
+        "pc": 592,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 5,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fca00078e0204",
+        "low_word": "0x0000000005047a24",
+        "opcode_text": "IMAD R4, R5, c[0x0][0x0], R4",
+        "pc": 608,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 13,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fda0003f06070",
+        "low_word": "0x0000000004007a0c",
+        "opcode_text": "ISETP.GE.U32.AND P0, PT, R4, c[0x0][0x0], PT",
+        "pc": 624,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 2,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fe40007ffe0ff",
+        "low_word": "0x8000000004040a10",
+        "opcode_text": "IADD3 R4, R4, -c[0x0][0x0], RZ",
+        "pc": 640,
+        "predicate": "@P0",
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 2,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fe40007ffe0ff",
+        "low_word": "0x0000000103030810",
+        "opcode_text": "IADD3 R3, R3, 0x1, RZ",
+        "pc": 656,
+        "predicate": "@P0",
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 13,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fda0003f26070",
+        "low_word": "0x0000000004007a0c",
+        "opcode_text": "ISETP.GE.U32.AND P1, PT, R4, c[0x0][0x0], PT",
+        "pc": 672,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 2,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fe40007ffe0ff",
+        "low_word": "0x0000000103031810",
+        "opcode_text": "IADD3 R3, R3, 0x1, RZ",
+        "pc": 688,
+        "predicate": "@P1",
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 4,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fc800078e33ff",
+        "low_word": "0x00000000ff03aa12",
+        "opcode_text": "LOP3.LUT R3, RZ, c[0x0][0x0], RZ, 0x33, !PT",
+        "pc": 704,
+        "predicate": "@!P2",
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 1,
+          "stall": 2,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x040fe40007ffe0ff",
+        "low_word": "0x0000000103027810",
+        "opcode_text": "IADD3 R2, R3.reuse, 0x1, RZ",
+        "pc": 720,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 2,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fe40003f26070",
+        "low_word": "0x000000030300780c",
+        "opcode_text": "ISETP.GE.U32.AND P1, PT, R3, 0x3, PT",
+        "pc": 736,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 13,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fda000780c0ff",
+        "low_word": "0x0000000302027812",
+        "opcode_text": "LOP3.LUT P0, R2, R2, 0x3, RZ, 0xc0, !PT",
+        "pc": 752,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 5,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fea0003800000",
+        "low_word": "0x000000c000008947",
+        "opcode_text": "BRA 0x3d0",
+        "pc": 768,
+        "predicate": "@!P0",
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 1,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fe20000000f00",
+        "low_word": "0x0000000400097802",
+        "opcode_text": "MOV R9, 0x4",
+        "pc": 784,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 1,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fe200078e0002",
+        "low_word": "0x000000ffff047224",
+        "opcode_text": "IMAD.MOV.U32 R4, RZ, RZ, R2",
+        "pc": 800,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 3,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fc600000006ff",
+        "low_word": "0x0000000200057819",
+        "opcode_text": "SHF.L.U32 R5, R0, 0x2, RZ",
+        "pc": 816,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 4,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fc800078e0209",
+        "low_word": "0x00005a0000027625",
+        "opcode_text": "IMAD.WIDE R2, R0, R9, c[0x0][0x168]",
+        "pc": 832,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 1,
+          "reuse": 0,
+          "stall": 1,
+          "wait_mask": 0,
+          "write_barrier": 2,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x0002a20000000800",
+        "low_word": "0x0000000005077984",
+        "opcode_text": "LDS R7, [R5]",
+        "pc": 848,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 2,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fe40007ffe0ff",
+        "low_word": "0xffffffff04047810",
+        "opcode_text": "IADD3 R4, R4, -0x1, RZ",
+        "pc": 864,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 2,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fe40007ffe0ff",
+        "low_word": "0x0000000000007a10",
+        "opcode_text": "IADD3 R0, R0, c[0x0][0x0], RZ",
+        "pc": 880,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 1,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fe20003f05270",
+        "low_word": "0x000000ff0400720c",
+        "opcode_text": "ISETP.NE.AND P0, PT, R4, RZ, PT",
+        "pc": 896,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 1,
+          "stall": 1,
+          "wait_mask": 2,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x042fe200078e0205",
+        "low_word": "0x0000000009057a24",
+        "opcode_text": "IMAD R5, R9.reuse, c[0x0][0x0], R5",
+        "pc": 912,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 1,
+          "reuse": 0,
+          "stall": 2,
+          "wait_mask": 4,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x0043e4000c101906",
+        "low_word": "0x0000000702007986",
+        "opcode_text": "STG.E [R2.64], R7",
+        "pc": 928,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 9,
+          "wait_mask": 2,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x002fd200078e0202",
+        "low_word": "0x0000000009027a25",
+        "opcode_text": "IMAD.WIDE R2, R9, c[0x0][0x0], R2",
+        "pc": 944,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 5,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fea000383ffff",
+        "low_word": "0xffffff8000000947",
+        "opcode_text": "BRA 0x350",
+        "pc": 960,
+        "predicate": "@P0",
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 5,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fea0003800000",
+        "low_word": "0x0000000000007941",
+        "opcode_text": "BSYNC B0",
+        "pc": 976,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 5,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fea0003800000",
+        "low_word": "0x000000000000994d",
+        "opcode_text": "EXIT",
+        "pc": 992,
+        "predicate": "@!P1",
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 1,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fe200078e00ff",
+        "low_word": "0x00000004000a7824",
+        "opcode_text": "IMAD.SHL.U32 R10, R0, 0x4, RZ",
+        "pc": 1008,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 5,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fca0000000f00",
+        "low_word": "0x0000000400137802",
+        "opcode_text": "MOV R19, 0x4",
+        "pc": 1024,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 1,
+          "stall": 1,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x040fe200078e020a",
+        "low_word": "0x00000000130c7a24",
+        "opcode_text": "IMAD R12, R19.reuse, c[0x0][0x0], R10",
+        "pc": 1040,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 1,
+          "reuse": 0,
+          "stall": 1,
+          "wait_mask": 2,
+          "write_barrier": 2,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x0022a20000000800",
+        "low_word": "0x000000000a0b7984",
+        "opcode_text": "LDS R11, [R10]",
+        "pc": 1056,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 1,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fe200078e0213",
+        "low_word": "0x00005a0000027625",
+        "opcode_text": "IMAD.WIDE R2, R0, R19, c[0x0][0x168]",
+        "pc": 1072,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 2,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fe40000000f00",
+        "low_word": "0x0000000000177a02",
+        "opcode_text": "MOV R23, c[0x0][0x0]",
+        "pc": 1088,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 1,
+          "wait_mask": 0,
+          "write_barrier": 3,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000ee20000000800",
+        "low_word": "0x000000000c0d7984",
+        "opcode_text": "LDS R13, [R12]",
+        "pc": 1104,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 1,
+          "stall": 2,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x040fe400078e020c",
+        "low_word": "0x00000000130e7a24",
+        "opcode_text": "IMAD R14, R19.reuse, c[0x0][0x0], R12",
+        "pc": 1120,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 3,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fc600078e0202",
+        "low_word": "0x0000000013047a25",
+        "opcode_text": "IMAD.WIDE R4, R19, c[0x0][0x0], R2",
+        "pc": 1136,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 1,
+          "wait_mask": 0,
+          "write_barrier": 4,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000f220000000800",
+        "low_word": "0x000000000e0f7984",
+        "opcode_text": "LDS R15, [R14]",
+        "pc": 1152,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 1,
+          "stall": 2,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x040fe400078e020e",
+        "low_word": "0x0000000013107a24",
+        "opcode_text": "IMAD R16, R19.reuse, c[0x0][0x0], R14",
+        "pc": 1168,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 3,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fc600078e0204",
+        "low_word": "0x0000000013067a25",
+        "opcode_text": "IMAD.WIDE R6, R19, c[0x0][0x0], R4",
+        "pc": 1184,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 1,
+          "wait_mask": 0,
+          "write_barrier": 5,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000f620000000800",
+        "low_word": "0x0000000010117984",
+        "opcode_text": "LDS R17, [R16]",
+        "pc": 1200,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 2,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fe400078e00ff",
+        "low_word": "0x00000000ff157624",
+        "opcode_text": "IMAD.MOV.U32 R21, RZ, RZ, c[0x0][0x0]",
+        "pc": 1216,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 4,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fc800078e0206",
+        "low_word": "0x0000000013087a25",
+        "opcode_text": "IMAD.WIDE R8, R19, c[0x0][0x0], R6",
+        "pc": 1232,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 2,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fe400078e0200",
+        "low_word": "0x0000000215007824",
+        "opcode_text": "IMAD R0, R21, 0x2, R0",
+        "pc": 1248,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 3,
+          "wait_mask": 2,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x002fc600078e0210",
+        "low_word": "0x00000000130a7a24",
+        "opcode_text": "IMAD R10, R19, c[0x0][0x0], R16",
+        "pc": 1264,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 4,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fc800078e08ff",
+        "low_word": "0x0000000017007211",
+        "opcode_text": "LEA R0, R23, R0, 0x1",
+        "pc": 1280,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 1,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fe2000bf06270",
+        "low_word": "0x0000000400007c0c",
+        "opcode_text": "ISETP.GE.AND P0, PT, R0, UR4, PT",
+        "pc": 1296,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 1,
+          "reuse": 0,
+          "stall": 4,
+          "wait_mask": 4,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x0043e8000c101906",
+        "low_word": "0x0000000b02007986",
+        "opcode_text": "STG.E [R2.64], R11",
+        "pc": 1312,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 1,
+          "reuse": 0,
+          "stall": 4,
+          "wait_mask": 8,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x0083e8000c101906",
+        "low_word": "0x0000000d04007986",
+        "opcode_text": "STG.E [R4.64], R13",
+        "pc": 1328,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 1,
+          "reuse": 0,
+          "stall": 4,
+          "wait_mask": 16,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x0103e8000c101906",
+        "low_word": "0x0000000f06007986",
+        "opcode_text": "STG.E [R6.64], R15",
+        "pc": 1344,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 1,
+          "reuse": 0,
+          "stall": 1,
+          "wait_mask": 32,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x0203e2000c101906",
+        "low_word": "0x0000001108007986",
+        "opcode_text": "STG.E [R8.64], R17",
+        "pc": 1360,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 5,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fea000383ffff",
+        "low_word": "0xfffffea000008947",
+        "opcode_text": "BRA 0x410",
+        "pc": 1376,
+        "predicate": "@!P0",
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 5,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 1
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fea0003800000",
+        "low_word": "0x000000000000794d",
+        "opcode_text": "EXIT",
+        "pc": 1392,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 0,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fc0000383ffff",
+        "low_word": "0xfffffff000007947",
+        "opcode_text": "BRA 0x580",
+        "pc": 1408,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 0,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fc00000000000",
+        "low_word": "0x0000000000007918",
+        "opcode_text": "NOP",
+        "pc": 1424,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 0,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fc00000000000",
+        "low_word": "0x0000000000007918",
+        "opcode_text": "NOP",
+        "pc": 1440,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 0,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fc00000000000",
+        "low_word": "0x0000000000007918",
+        "opcode_text": "NOP",
+        "pc": 1456,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 0,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fc00000000000",
+        "low_word": "0x0000000000007918",
+        "opcode_text": "NOP",
+        "pc": 1472,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 0,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fc00000000000",
+        "low_word": "0x0000000000007918",
+        "opcode_text": "NOP",
+        "pc": 1488,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 0,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fc00000000000",
+        "low_word": "0x0000000000007918",
+        "opcode_text": "NOP",
+        "pc": 1504,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 0,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fc00000000000",
+        "low_word": "0x0000000000007918",
+        "opcode_text": "NOP",
+        "pc": 1520,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 0,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fc00000000000",
+        "low_word": "0x0000000000007918",
+        "opcode_text": "NOP",
+        "pc": 1536,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 0,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fc00000000000",
+        "low_word": "0x0000000000007918",
+        "opcode_text": "NOP",
+        "pc": 1552,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 0,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fc00000000000",
+        "low_word": "0x0000000000007918",
+        "opcode_text": "NOP",
+        "pc": 1568,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 0,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fc00000000000",
+        "low_word": "0x0000000000007918",
+        "opcode_text": "NOP",
+        "pc": 1584,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 0,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fc00000000000",
+        "low_word": "0x0000000000007918",
+        "opcode_text": "NOP",
+        "pc": 1600,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 0,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fc00000000000",
+        "low_word": "0x0000000000007918",
+        "opcode_text": "NOP",
+        "pc": 1616,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 0,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fc00000000000",
+        "low_word": "0x0000000000007918",
+        "opcode_text": "NOP",
+        "pc": 1632,
+        "predicate": null,
+        "status": "decoded"
+      },
+      {
+        "control": {
+          "read_barrier": 7,
+          "reuse": 0,
+          "stall": 0,
+          "wait_mask": 0,
+          "write_barrier": 7,
+          "yield_flag": 0
+        },
+        "control_decode_source": "NVBit_getSassBinary_raw_high_word",
+        "high_word": "0x000fc00000000000",
+        "low_word": "0x0000000000007918",
+        "opcode_text": "NOP",
+        "pc": 1648,
+        "predicate": null,
+        "status": "decoded"
+      }
+    ]
+  },
+  "metadata_provenance": {
+    "control_latency_claims": false,
+    "function_source_architectures": {
+      "cp_async_shared_tile_copy_kernel": "sm_86"
+    },
+    "metadata_kind": "native_static_sm120_v3",
+    "runtime_architecture": "sm_86",
+    "source_architectures": [
+      "sm_86"
+    ],
+    "static_exporter_version": 3,
+    "static_source": "NVBit Instr::getSass/getSassBinary/getOperand"
+  },
+  "parser_contract": {
+    "control_layout": {
+      "read_barrier": "bits 8:10 (7 = none)",
+      "reserved_must_be_zero": "bits 21:22",
+      "reuse": "bits 17:20",
+      "source": "high_word >> 41 (23 bits)",
+      "stall": "bits 0:3",
+      "wait_mask": "bits 11:16",
+      "write_barrier": "bits 5:7 (7 = none)",
+      "yield_flag": "bit 4"
+    },
+    "supported_arches": [
+      "sm_86"
+    ],
+    "supported_toolkit_versions": [
+      "NVBit-native-static-v3",
+      "NVBit-native-static-v3"
+    ]
+  },
+  "summary": {
+    "functions": {
+      "cp_async_shared_tile_copy_kernel": {
+        "decoded": 104,
+        "instructions": 104,
+        "stall_cycles_static_sum": 292,
+        "unknown_encoding": 0
+      }
+    },
+    "total_decoded": 104,
+    "total_unknown_encoding": 0
+  },
+  "toolkit_version": "NVBit-native-sm86-static-v3"
+}

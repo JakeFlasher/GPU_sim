@@ -87,10 +87,9 @@ use sim_arch::{
 };
 use sim_mem::{
     AsyncCopyCompletion, CacheOpToken, EvAccess, EvAccessUnobserved, FillKey, L1AccessError,
-    L1Cache, L1Config, L1Counters, L1LookupBatch, L1LookupClient, L1MergeAudit,
-    L1MutationBudget, L1StorePolicy,
-    L1WriteLookupObserver, L1WriteLookupObserverPlan, L2Source, LdgstsL1Policy, MemRole,
-    MemoryOrigin, decode_async_copy_completion, opcode_head,
+    L1Cache, L1Config, L1Counters, L1LookupBatch, L1LookupClient, L1MergeAudit, L1MutationBudget,
+    L1StorePolicy, L1WriteLookupObserver, L1WriteLookupObserverPlan, L2Source, LdgstsL1Policy,
+    MemRole, MemoryOrigin, decode_async_copy_completion, opcode_head,
 };
 #[cfg(feature = "reference")]
 use sim_semantics::{
@@ -107,8 +106,8 @@ use sim_semantics::{NativeBoundaryExecutionPath, NativeBoundaryExecutionResult};
 use crate::control_bits::{ControlDomainError, DepBarrier, WaitMask};
 use crate::metrics::{SmActivity, WarpLifetime};
 use crate::program::{
-    sm120_alpha_scalar_control_stall_suppressed, FunctionSchedule, IssueSlot, OpClass,
-    PipelineClass,
+    FunctionSchedule, IssueSlot, OpClass, PipelineClass,
+    sm120_alpha_scalar_control_stall_suppressed,
 };
 use crate::sass_operands::{
     FixedLatencyOpcode, FixedLatencyOperandStatus, SassRegister, SassRegisterFile,
@@ -121,39 +120,41 @@ pub(crate) const MAX_ASYNC_DECISION_SNAPSHOTS: usize = 1_024;
 
 mod config;
 pub use config::{IssueModelParams, IssueResourceSource, Sm120AlphaConfig};
-pub(crate) use config::{checked_cycle_add, SharedMemoryResidency};
+pub(crate) use config::{SharedMemoryResidency, checked_cycle_add};
 
 mod memory_types;
 pub use memory_types::{MemoryOperation, TailFlags};
 
 mod readiness;
 pub use readiness::{
-    AsyncInstrumentationOrderDiagnostics, AsyncIssueOverlapDiagnostics,
-    AsyncReadinessDiagnostics, AsyncWaitPrefixDiagnostics, BarrierPipelineDiagnostics,
-    BypassAsyncCopyDiagnostics, CtaBarrierDiagnostics, ControlPipelineDiagnostics,
-    ClockIssueDiagnostics, GlobalMemoryIssueDiagnostics, ReadinessCauseCycles,
-    ReadinessCounterError, ResultWritebackDiagnostics,
+    AsyncInstrumentationOrderDiagnostics, AsyncIssueOverlapDiagnostics, AsyncReadinessDiagnostics,
+    AsyncWaitPrefixDiagnostics, BarrierPipelineDiagnostics, BypassAsyncCopyDiagnostics,
+    ClockIssueDiagnostics, ControlPipelineDiagnostics, CtaBarrierDiagnostics,
+    GlobalMemoryIssueDiagnostics, ReadinessCauseCycles, ReadinessCounterError,
+    ResultWritebackDiagnostics,
 };
 use readiness::{
-    checked_readiness_add, dependency_origin, observe_readiness_constraint,
-    is_zero_u64, operand_read_dependency_origin, projected_global_memory_issue,
-    projected_l1_write_lookup_hits,
+    checked_readiness_add, dependency_origin, is_zero_u64, observe_readiness_constraint,
+    operand_read_dependency_origin, projected_global_memory_issue, projected_l1_write_lookup_hits,
 };
 
 mod candidates;
 pub use candidates::{
-    MemoryAdmissionCandidate, MemoryAdmissionCandidateDiagnostics, MemoryAdmissionCandidateError,
-    MemoryAdmissionCandidateResult, MemoryAdmissionFeedbackDiagnostics, MemoryServiceCandidate,
-    MemoryServiceCandidateDiagnostics, MemoryServiceCandidateError, MemoryServiceCandidateOperation,
-    MemoryServiceCandidateResult, MemoryServiceCandidateScope, MemoryWriteAckDiagnostics,
     MAX_MEMORY_ADMISSION_CANDIDATES, MAX_MEMORY_ADMISSION_QUEUE_CAPACITY,
     MAX_MEMORY_ADMISSION_SERVICE_WIDTH_SECTORS, MAX_MEMORY_SERVICE_CANDIDATES,
+    MemoryAdmissionCandidate, MemoryAdmissionCandidateDiagnostics, MemoryAdmissionCandidateError,
+    MemoryAdmissionCandidateResult, MemoryAdmissionFeedbackDiagnostics, MemoryServiceCandidate,
+    MemoryServiceCandidateDiagnostics, MemoryServiceCandidateError,
+    MemoryServiceCandidateOperation, MemoryServiceCandidateResult, MemoryServiceCandidateScope,
+    MemoryWriteAckDiagnostics,
 };
 pub(crate) use candidates::{
-    validate_memory_admission_candidates, validate_memory_service_candidates,
-    MemoryAdmissionCandidateState,
+    MemoryAdmissionCandidateState, validate_memory_admission_candidates,
+    validate_memory_service_candidates,
 };
-use candidates::{MemoryAdmissionFeedbackState, MemoryServiceCandidateState, MemoryAdmissionFeedbackIssue};
+use candidates::{
+    MemoryAdmissionFeedbackIssue, MemoryAdmissionFeedbackState, MemoryServiceCandidateState,
+};
 
 /// One dynamic instruction, compacted for replay.
 #[derive(Debug, Clone, Copy)]
@@ -178,6 +179,10 @@ impl ReplayInst {
 /// sector arena its records' `off/len` payloads index.
 #[derive(Debug, Default)]
 pub(crate) struct WarpReplay {
+    /// Block-local dynamic warp identity from the trace roster. Huerta's
+    /// youngest-warp comparator uses this identity; retaining it separately
+    /// from the physical SM slot makes the scheduler priority auditable.
+    pub(crate) warp_id: i32,
     /// Physical warp slot on the SM (`warpid_sm` when traced); sub-core
     /// assignment is `warp_slot % 4`.
     pub(crate) warp_slot: i32,
@@ -263,7 +268,6 @@ pub(crate) struct BlockReplay {
     pub(crate) launch_index: i64,
     pub(crate) warps: Vec<WarpReplay>,
 }
-
 
 /// Memory-model mode for one SM replay.
 #[derive(Debug, Clone, Copy)]
@@ -761,9 +765,6 @@ pub enum IssueError {
     ReadinessDiagnostic(#[from] ReadinessCounterError),
 }
 
-
-
-
 impl ClockIssueDiagnostics {
     const fn is_empty(&self) -> bool {
         self.reads_issued == 0
@@ -841,6 +842,13 @@ pub struct InstructionFrontEndDiagnostics {
     pub prefetch_l1_misses: u64,
     pub stream_restarts: u64,
     pub maximum_fetch_latency_cycles: u64,
+    /// Fetches that continued the warp issued in the prior cycle, independent
+    /// of whether issue hold was cleared by Yield.
+    pub fetch_last_issued_continuations: u64,
+    pub yield_hold_separations: u64,
+    /// Dynamic non-fall-through control transfers observed by the front end.
+    /// This is an observer only; the rejected H26 flush arm is not active.
+    pub control_flow_redirects: u64,
 }
 
 impl InstructionFrontEndDiagnostics {
@@ -869,6 +877,9 @@ impl InstructionFrontEndDiagnostics {
         add!(prefetch_l1_hits);
         add!(prefetch_l1_misses);
         add!(stream_restarts);
+        add!(fetch_last_issued_continuations);
+        add!(yield_hold_separations);
+        add!(control_flow_redirects);
         next.maximum_fetch_latency_cycles = next
             .maximum_fetch_latency_cycles
             .max(addend.maximum_fetch_latency_cycles);
@@ -880,6 +891,9 @@ impl InstructionFrontEndDiagnostics {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub struct MemoryIssuePipelineDiagnostics {
     pub instructions_admitted: u64,
+    /// Dynamic instructions classified into the source-qualified constant
+    /// pressure path (`11 + 39` SM86 operand frontier).
+    pub constant_pressure_instructions: u64,
     pub operand_pipeline_delay_cycles: u64,
     pub shared_queue_delay_cycles: u64,
     pub maximum_operand_pipeline_delay_cycles: u64,
@@ -900,6 +914,11 @@ impl MemoryIssuePipelineDiagnostics {
                 "readiness.memory_issue_pipeline.instructions_admitted",
                 &mut next.instructions_admitted,
                 addend.instructions_admitted,
+            ),
+            (
+                "readiness.memory_issue_pipeline.constant_pressure_instructions",
+                &mut next.constant_pressure_instructions,
+                addend.constant_pressure_instructions,
             ),
             (
                 "readiness.memory_issue_pipeline.operand_pipeline_delay_cycles",
@@ -952,7 +971,77 @@ pub struct ImmediateConstantCacheDiagnostics {
     /// Scheduler issue opportunities consumed by those waits. This is an
     /// SM-side causal count and is not directly comparable to NCU stalls.
     pub miss_wait_cycles: u64,
+    /// Cycles for which the source-backed SM86 greedy-warp L0C window
+    /// deliberately blocked youngest-warp switching. This is a mechanism
+    /// diagnostic, not an elapsed-cycle prediction.
+    pub greedy_switch_block_cycles: u64,
+    /// Non-greedy candidate probes attempted after a prior candidate missed
+    /// in IMC. These counters describe the bounded scan, not hardware warp
+    /// sampling.
+    pub non_greedy_scan_attempts: u64,
+    pub non_greedy_scan_misses: u64,
+    pub non_greedy_scan_successes: u64,
     pub maximum_pending_lines: u64,
+}
+
+/// Conditional SM86 register-file read envelope. These counters describe the
+/// bounded effective model, not a claim about proprietary physical wiring.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+pub struct Sm86RegisterReadDiagnostics {
+    pub reservations: u64,
+    pub source_reads: [u64; 2],
+    /// Readiness delay that was actually charged before issue. This is
+    /// distinct from a residual same-cycle reservation conflict at dispatch.
+    pub applied_wait_cycles: u64,
+    pub port_conflict_cycles: u64,
+    pub rfc_hits: u64,
+    pub rfc_misses: u64,
+    pub unsupported_shapes: u64,
+}
+
+impl Sm86RegisterReadDiagnostics {
+    fn add_checked(&mut self, addend: &Self) -> Result<(), ReadinessCounterError> {
+        let mut next = *self;
+        next.reservations = checked_readiness_add(
+            "readiness.sm86_register_read.reservations",
+            next.reservations,
+            addend.reservations,
+        )?;
+        for bank in 0..2 {
+            next.source_reads[bank] = checked_readiness_add(
+                "readiness.sm86_register_read.source_reads",
+                next.source_reads[bank],
+                addend.source_reads[bank],
+            )?;
+        }
+        next.port_conflict_cycles = checked_readiness_add(
+            "readiness.sm86_register_read.port_conflict_cycles",
+            next.port_conflict_cycles,
+            addend.port_conflict_cycles,
+        )?;
+        next.applied_wait_cycles = checked_readiness_add(
+            "readiness.sm86_register_read.applied_wait_cycles",
+            next.applied_wait_cycles,
+            addend.applied_wait_cycles,
+        )?;
+        next.rfc_hits = checked_readiness_add(
+            "readiness.sm86_register_read.rfc_hits",
+            next.rfc_hits,
+            addend.rfc_hits,
+        )?;
+        next.rfc_misses = checked_readiness_add(
+            "readiness.sm86_register_read.rfc_misses",
+            next.rfc_misses,
+            addend.rfc_misses,
+        )?;
+        next.unsupported_shapes = checked_readiness_add(
+            "readiness.sm86_register_read.unsupported_shapes",
+            next.unsupported_shapes,
+            addend.unsupported_shapes,
+        )?;
+        *self = next;
+        Ok(())
+    }
 }
 
 impl ImmediateConstantCacheDiagnostics {
@@ -980,6 +1069,10 @@ impl ImmediateConstantCacheDiagnostics {
         add!(lines_filled);
         add!(miss_wait_events);
         add!(miss_wait_cycles);
+        add!(greedy_switch_block_cycles);
+        add!(non_greedy_scan_attempts);
+        add!(non_greedy_scan_misses);
+        add!(non_greedy_scan_successes);
         next.maximum_pending_lines = next.maximum_pending_lines.max(addend.maximum_pending_lines);
         *self = next;
         Ok(())
@@ -993,12 +1086,18 @@ pub struct ReadinessDiagnostics {
     pub constraint_exposure_cycles: ReadinessCauseCycles,
     pub delayed_ready_issues: u64,
     pub tied_limiting_causes: u64,
+    /// Count of within-CTA resident-warp priority inversions between the
+    /// admission/arrival order and the trace's dynamic warp-id order. This is
+    /// observational; it never selects timing or fits NCU.
+    pub youngest_priority_order_mismatches: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instruction_front_end: Option<Box<InstructionFrontEndDiagnostics>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub memory_issue_pipeline: Option<Box<MemoryIssuePipelineDiagnostics>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub immediate_constant_cache: Option<Box<ImmediateConstantCacheDiagnostics>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sm86_register_read: Option<Box<Sm86RegisterReadDiagnostics>>,
     pub async_groups: AsyncReadinessDiagnostics,
     /// Read-only scalar async decision records. These are emitted only when a
     /// modeled async-group wait is selected; they never participate in issue
@@ -1084,6 +1183,11 @@ impl ReadinessDiagnostics {
             next.tied_limiting_causes,
             addend.tied_limiting_causes,
         )?;
+        next.youngest_priority_order_mismatches = checked_readiness_add(
+            "readiness.youngest_priority_order_mismatches",
+            next.youngest_priority_order_mismatches,
+            addend.youngest_priority_order_mismatches,
+        )?;
         if let Some(addend_front_end) = addend.instruction_front_end.as_deref() {
             if let Some(current) = next.instruction_front_end.as_deref_mut() {
                 current.add_checked(addend_front_end)?;
@@ -1105,6 +1209,13 @@ impl ReadinessDiagnostics {
                 next.immediate_constant_cache = Some(Box::new(*addend_immediate_constant));
             }
         }
+        if let Some(addend_register_read) = addend.sm86_register_read.as_deref() {
+            if let Some(current) = next.sm86_register_read.as_deref_mut() {
+                current.add_checked(addend_register_read)?;
+            } else {
+                next.sm86_register_read = Some(Box::new(*addend_register_read));
+            }
+        }
         next.async_groups.add_checked(&addend.async_groups)?;
         // Snapshots are optional diagnostics.  Keep the serialized report
         // bounded even for very large multi-SM launches; the dropped count
@@ -1114,15 +1225,12 @@ impl ReadinessDiagnostics {
             next.async_decision_snapshots_dropped,
             addend.async_decision_snapshots_dropped,
         )?;
-        let available = MAX_ASYNC_DECISION_SNAPSHOTS
-            .saturating_sub(next.async_decision_snapshots.len());
+        let available =
+            MAX_ASYNC_DECISION_SNAPSHOTS.saturating_sub(next.async_decision_snapshots.len());
         let kept = available.min(addend.async_decision_snapshots.len());
         next.async_decision_snapshots
             .extend_from_slice(&addend.async_decision_snapshots[..kept]);
-        let omitted = addend
-            .async_decision_snapshots
-            .len()
-            .saturating_sub(kept);
+        let omitted = addend.async_decision_snapshots.len().saturating_sub(kept);
         next.async_decision_snapshots_dropped = checked_readiness_add(
             "readiness.async_decision_snapshots_dropped",
             next.async_decision_snapshots_dropped,
@@ -1238,9 +1346,35 @@ impl ReadinessDiagnostics {
     /// replay accounting; these counters remain observation-only.
     /// Schema 26 separates the uniform/SFU readiness counter from the tensor
     /// pipeline counter.
+    /// Schema 27 adds the bounded SM86 greedy L0C miss-switch blocking
+    /// diagnostic to the immediate-constant accounting. Schema 28 adds the
+    /// bounded non-greedy candidate-scan counters.
+    /// Schema 29 adds the explicit within-CTA dynamic-youngest priority audit.
+    /// Schema 30 adds a dynamic control-flow redirect observer; it does not
+    /// activate the rejected branch-stream flush timing arm.
+    /// Schema 31 adds the source-qualified constant-pressure memory-pipeline
+    /// observer.
     pub fn schema_version(&self) -> u32 {
+        // The priority-audit field is serialized for every replay mode, even
+        // when no IMC surface is present; retain one unambiguous current
+        // schema rather than pretending the additive field is absent.
+        return 31;
+        #[allow(unreachable_code)]
         let feedback = self.memory_admission_feedback.as_deref();
-        if self.limiting_cycles.pipeline_sfu != 0
+        if self.immediate_constant_cache.is_some()
+            && self
+                .immediate_constant_cache
+                .as_deref()
+                .is_some_and(|cache| {
+                    cache.non_greedy_scan_attempts != 0
+                        || cache.non_greedy_scan_misses != 0
+                        || cache.non_greedy_scan_successes != 0
+                })
+        {
+            28
+        } else if self.immediate_constant_cache.is_some() {
+            27
+        } else if self.limiting_cycles.pipeline_sfu != 0
             || self.constraint_exposure_cycles.pipeline_sfu != 0
         {
             26
@@ -1367,7 +1501,10 @@ const SM120_FLAT_STORE_RETIRE_CYCLES_PER_SECTOR: u64 = 19;
 const SM120_FLAT_REDUCTION_RETIRE_CYCLES_PER_SECTOR: u64 = 17;
 
 fn sm120_flat_global_service_rate(opcode_text: &str) -> u64 {
-    let opcode = opcode_text.split_ascii_whitespace().next().unwrap_or(opcode_text);
+    let opcode = opcode_text
+        .split_ascii_whitespace()
+        .next()
+        .unwrap_or(opcode_text);
     if opcode.contains(".128") {
         SM120_FLAT_GLOBAL_128B_SERVICE_CYCLES_PER_SECTOR
     } else if opcode.contains(".64") {
@@ -1383,10 +1520,14 @@ fn sm120_flat_service_work(kind: AccessKind, opcode_text: &str) -> Option<(bool,
         | AccessKind::GlobalBypass { len, .. }
         | AccessKind::GlobalUntagged { len, .. }
         | AccessKind::GlobalStore { len, .. }
-        | AccessKind::GlobalReduction { len, .. } if len != 0 => Some((
-            true,
-            u64::from(len).saturating_mul(sm120_flat_global_service_rate(opcode_text)),
-        )),
+        | AccessKind::GlobalReduction { len, .. }
+            if len != 0 =>
+        {
+            Some((
+                true,
+                u64::from(len).saturating_mul(sm120_flat_global_service_rate(opcode_text)),
+            ))
+        }
         AccessKind::Shared { wavefronts, .. } if wavefronts != 0 => Some((
             false,
             wavefronts.saturating_mul(SM120_FLAT_SHARED_SERVICE_CYCLES_PER_WAVEFRONT),
@@ -2271,6 +2412,9 @@ impl InstructionFrontEndState {
                 prefetch_l1_misses: boundary.prefetch_l1_misses,
                 stream_restarts: boundary.stream_restarts,
                 maximum_fetch_latency_cycles: boundary.maximum_fetch_latency_cycles,
+                fetch_last_issued_continuations: 0,
+                yield_hold_separations: 0,
+                control_flow_redirects: 0,
             },
         })
     }
@@ -2679,6 +2823,7 @@ pub(crate) fn stateful_write_lookup_observer_enabled(schedule: &FunctionSchedule
 #[derive(Debug, Clone, Copy)]
 struct MemoryPipelineSlot {
     operand_ready_latency: u64,
+    constant_pressure: bool,
 }
 
 fn memory_pipeline_slot(
@@ -2726,6 +2871,7 @@ fn memory_pipeline_slot(
     };
     Some(MemoryPipelineSlot {
         operand_ready_latency,
+        constant_pressure: deep_constant,
     })
 }
 
@@ -2868,11 +3014,8 @@ impl ScalarExecutionPipelineState {
             if next.release_times[subcore].len() >= self.config.in_flight_capacity as usize {
                 return Err(IssueError::ScalarExecutionPipelineQueueFull { subcore, time: now });
             }
-            let ready_for_service = checked_cycle_add(
-                "scalar execution pipeline latency",
-                now,
-                latency_cycles,
-            )?;
+            let ready_for_service =
+                checked_cycle_add("scalar execution pipeline latency", now, latency_cycles)?;
             let service_start = ready_for_service.max(next.next_service[subcore]);
             next.next_service[subcore] = checked_cycle_add(
                 "scalar execution pipeline initiation",
@@ -2994,6 +3137,13 @@ impl MemoryIssuePipelineState {
                 diagnostics.instructions_admitted,
                 1,
             )?;
+            if slot.constant_pressure {
+                diagnostics.constant_pressure_instructions = checked_u64_counter_add(
+                    "memory-pipeline constant-pressure instruction",
+                    diagnostics.constant_pressure_instructions,
+                    1,
+                )?;
+            }
             diagnostics.operand_pipeline_delay_cycles = checked_u64_counter_add(
                 "memory-pipeline operand delay",
                 diagnostics.operand_pipeline_delay_cycles,
@@ -3169,7 +3319,9 @@ impl ReadinessCauseCycles {
                 &mut self.instruction_front_end,
             ),
             ReadinessCause::RegisterRaw => ("register RAW", &mut self.register_raw),
-            ReadinessCause::RegisterPredicate => ("register predicate", &mut self.register_predicate),
+            ReadinessCause::RegisterPredicate => {
+                ("register predicate", &mut self.register_predicate)
+            }
             ReadinessCause::RegisterWaw => ("register WAW", &mut self.register_waw),
             ReadinessCause::ControlStall => ("control stall readiness", &mut self.control_stall),
             ReadinessCause::DependenceCounterRead => (
@@ -3438,6 +3590,11 @@ const BYPASS_TOPOLOGY_CANDIDATE_WAVEFRONT_CYCLES: u64 = 4;
 const BYPASS_TOPOLOGY_CANDIDATE_BANK_CYCLES: u64 = 2;
 const BYPASS_PIPELINE_CANDIDATE_Q: [u64; 5] = [1, 2, 4, 8, 16];
 
+/// Independent RTX 3090 Ti clock64 dependent-MUFU probe endpoint. This is an
+/// effective source-qualified latency for same-register SFU chains, not a
+/// universal SFU latency or a claim about hidden pipeline stages.
+const SM86_DEPENDENT_SFU_LATENCY_CYCLES: u64 = 30;
+
 fn bypass_topology_candidate_penalty(
     bypass_wavefronts: u64,
     bank_wavefronts: u64,
@@ -3648,6 +3805,7 @@ struct WarpState<'a> {
     register_ready: Vec<RegisterReadyEntry>,
     block: usize,
     launch_index: i64,
+    warp_id: i32,
     warp_slot: i32,
     /// Index into its sub-core's pick list while live (retired warps are
     /// swap-removed from the list; the swapped-in warp's position is
@@ -3663,6 +3821,9 @@ struct WarpState<'a> {
     /// Completion of this warp's own arrival through the SM-shared barrier
     /// service. The CTA arm above carries only other-participant rendezvous.
     barrier_pipeline_ready: u64,
+    /// Effective dependent-SFU result frontier. Only the narrow static
+    /// same-register MUFU/RCP/RSQ/EX2/LG2/SIN/COS shape updates this field.
+    sfu_dependency_ready: u64,
     branch_pipeline_ready: u64,
     block_barrier_dispatch: Option<u64>,
     block_barrier_arrival: Option<u64>,
@@ -3694,9 +3855,146 @@ impl FixedRegisterReady {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct Sm86RfcKey {
+    block: usize,
+    warp_slot: i32,
+    bank: u8,
+    register: u16,
+    operand: u8,
+}
+
+#[derive(Debug, Clone, Default)]
+struct Sm86RegisterReadPlan {
+    modeled: bool,
+    next_port_ready: [u64; 2],
+    reads: [u64; 2],
+    port_conflict_cycles: u64,
+    rfc_hits: u64,
+    rfc_misses: u64,
+    rfc_consumes: Vec<Sm86RfcKey>,
+    rfc_inserts: Vec<Sm86RfcKey>,
+    unsupported_shape: bool,
+}
+
+fn sm86_register_read_plan(
+    status: &FixedLatencyOperandStatus,
+    block: usize,
+    warp_slot: i32,
+    now: u64,
+    port_ready: [u64; 2],
+    rfc: &VecDeque<Sm86RfcKey>,
+) -> Result<Sm86RegisterReadPlan, IssueError> {
+    let projection = match status {
+        FixedLatencyOperandStatus::Projected(projection) => projection,
+        FixedLatencyOperandStatus::NotApplicable => {
+            return Ok(Sm86RegisterReadPlan::default());
+        }
+        FixedLatencyOperandStatus::Gap(_) => {
+            return Ok(Sm86RegisterReadPlan {
+                unsupported_shape: true,
+                ..Sm86RegisterReadPlan::default()
+            });
+        }
+    };
+    let mut plan = Sm86RegisterReadPlan {
+        modeled: true,
+        next_port_ready: port_ready,
+        ..Sm86RegisterReadPlan::default()
+    };
+    for (operand_ix, source) in projection.sources().iter().enumerate() {
+        let SassSourceOperand::Register(source) = source else {
+            continue;
+        };
+        let register = source.register();
+        if register.file() != SassRegisterFile::Regular || register.index().is_none() {
+            continue;
+        }
+        // The first arm deliberately refuses vector-register RFC/port
+        // attribution rather than inventing a multi-cell slot mapping.
+        if register.span_registers() != 1 {
+            plan.unsupported_shape = true;
+            continue;
+        }
+        let bank = register
+            .sm86_regular_bank()
+            .ok_or(IssueError::CounterOverflow {
+                counter: "SM86 register-read bank",
+            })?;
+        let key = Sm86RfcKey {
+            block,
+            warp_slot,
+            bank,
+            register: register.index().ok_or(IssueError::CounterOverflow {
+                counter: "SM86 register-read index",
+            })?,
+            operand: u8::try_from(operand_ix).map_err(|_| IssueError::CounterOverflow {
+                counter: "SM86 register-read operand position",
+            })?,
+        };
+        if source.reused() {
+            if rfc.contains(&key) {
+                plan.rfc_hits =
+                    plan.rfc_hits
+                        .checked_add(1)
+                        .ok_or(IssueError::CounterOverflow {
+                            counter: "SM86 register-file reuse hits",
+                        })?;
+                plan.rfc_consumes.push(key);
+                continue;
+            }
+            plan.rfc_misses =
+                plan.rfc_misses
+                    .checked_add(1)
+                    .ok_or(IssueError::CounterOverflow {
+                        counter: "SM86 register-file reuse misses",
+                    })?;
+            // A miss still reads the regular register and seeds the compiler
+            // managed entry for the next same-key use.
+            plan.rfc_inserts.push(key);
+        }
+        let bank_index = usize::from(bank);
+        plan.reads[bank_index] =
+            plan.reads[bank_index]
+                .checked_add(1)
+                .ok_or(IssueError::CounterOverflow {
+                    counter: "SM86 register-file source reads",
+                })?;
+    }
+    if plan.reads.iter().any(|&reads| reads > 3) {
+        plan.unsupported_shape = true;
+        return Ok(plan);
+    }
+    let first_read = now.checked_add(1).ok_or(IssueError::TimeOverflow {
+        operation: "SM86 register-read port window",
+        base: now,
+        delta: 1,
+    })?;
+    for bank in 0..2 {
+        if plan.reads[bank] == 0 {
+            continue;
+        }
+        let start = first_read.max(plan.next_port_ready[bank]);
+        plan.port_conflict_cycles = plan.port_conflict_cycles.max(start - first_read);
+        plan.next_port_ready[bank] =
+            start
+                .checked_add(plan.reads[bank])
+                .ok_or(IssueError::TimeOverflow {
+                    operation: "SM86 register-read port reservation",
+                    base: start,
+                    delta: plan.reads[bank],
+                })?;
+    }
+    Ok(plan)
+}
+
 fn issue_register_overlap(left: SassRegister, right: SassRegister) -> bool {
-    if left.file() != right.file() { return false; }
-    let (Some(left_index), Some(right_index)) = (left.index(), right.index()) else { return false; };
+    if left.file() != right.file() {
+        return false;
+    }
+    let (Some(left_index), Some(right_index)) = (left.index(), right.index()) else {
+        return false;
+    };
     u32::from(left_index) < u32::from(right_index) + u32::from(right.span_registers())
         && u32::from(right_index) < u32::from(left_index) + u32::from(left.span_registers())
 }
@@ -3724,9 +4022,13 @@ fn issue_fixed_register_ready(
             }
         }
     }
-    let FixedLatencyOperandStatus::Projected(projection) = status else { return ready; };
+    let FixedLatencyOperandStatus::Projected(projection) = status else {
+        return ready;
+    };
     for source in projection.sources() {
-        let SassSourceOperand::Register(operand) = source else { continue; };
+        let SassSourceOperand::Register(operand) = source else {
+            continue;
+        };
         let register = operand.register();
         let lanes = issue_register_lane_mask(register, mask);
         for entry in entries {
@@ -3762,8 +4064,14 @@ fn issue_record_fixed_register_writes(
     mask: u32,
     ready_at: u64,
 ) {
-    let FixedLatencyOperandStatus::Projected(projection) = status else { return; };
-    for register in projection.destinations().iter().flat_map(|dst| dst.register().components()) {
+    let FixedLatencyOperandStatus::Projected(projection) = status else {
+        return;
+    };
+    for register in projection
+        .destinations()
+        .iter()
+        .flat_map(|dst| dst.register().components())
+    {
         let lanes = issue_register_lane_mask(register, mask);
         for entry in entries
             .iter_mut()
@@ -3772,7 +4080,13 @@ fn issue_record_fixed_register_writes(
             entry.lane_mask &= !lanes;
         }
         entries.retain(|entry| entry.lane_mask != 0);
-        if lanes != 0 { entries.push(RegisterReadyEntry { register, lane_mask: lanes, ready_at }); }
+        if lanes != 0 {
+            entries.push(RegisterReadyEntry {
+                register,
+                lane_mask: lanes,
+                ready_at,
+            });
+        }
     }
 }
 
@@ -4974,7 +5288,12 @@ impl WarpState<'_> {
         Some(t)
     }
 
-    fn ready_at(&self) -> Option<u64> {
+    /// Earliest time at which the current instruction is ready when the
+    /// immediate-constant (L0C/L1C) response frontier is deliberately
+    /// ignored.  Huerta's SM86 scheduler treats that path specially: a
+    /// greedy warp may remain the candidate for a bounded miss-switch
+    /// window while all ordinary control/dependency frontiers are ready.
+    fn ready_at_without_immediate_constant(&self) -> Option<u64> {
         if self.done || self.at_block_barrier {
             return None;
         }
@@ -4984,9 +5303,13 @@ impl WarpState<'_> {
                 .max(dependency_ready)
                 .max(self.cta_barrier_ready)
                 .max(self.barrier_pipeline_ready)
-                .max(self.branch_pipeline_ready)
-                .max(self.imc_wait_until),
+                .max(self.branch_pipeline_ready),
         )
+    }
+
+    fn ready_at(&self) -> Option<u64> {
+        self.ready_at_without_immediate_constant()
+            .map(|ready| ready.max(self.imc_wait_until))
     }
 }
 
@@ -5283,11 +5606,7 @@ pub(crate) fn data_ready_time(
             }
             (None, _) => {
                 if needs_ready {
-                    checked_cycle_add(
-                        "flat global visibility",
-                        t,
-                        params.global_flat_latency,
-                    )
+                    checked_cycle_add("flat global visibility", t, params.global_flat_latency)
                         .map(Some)
                 } else {
                     Ok(None)
@@ -5305,11 +5624,7 @@ pub(crate) fn data_ready_time(
             }
             None => {
                 if needs_ready {
-                    checked_cycle_add(
-                        "flat global visibility",
-                        t,
-                        params.global_flat_latency,
-                    )
+                    checked_cycle_add("flat global visibility", t, params.global_flat_latency)
                         .map(Some)
                 } else {
                     Ok(None)
@@ -5347,11 +5662,7 @@ pub(crate) fn data_ready_time(
                 }
                 None => {
                     if needs_ready {
-                        checked_cycle_add(
-                            "flat global visibility",
-                            t,
-                            params.global_flat_latency,
-                        )
+                        checked_cycle_add("flat global visibility", t, params.global_flat_latency)
                             .map(Some)
                     } else {
                         Ok(None)
@@ -5967,6 +6278,9 @@ struct ImmediateConstantPlan {
     picks: [Option<usize>; SUB_CORES],
     cache: Option<Box<[ImmediateConstantCacheState; SUB_CORES]>>,
     waits: [Option<(usize, u64)>; SUB_CORES],
+    /// Additional non-greedy candidates that were probed and parked while
+    /// scanning past an IMC miss in the same scheduler opportunity.
+    extra_waits: Vec<(usize, u64)>,
     miss_observed: bool,
 }
 
@@ -6017,6 +6331,13 @@ pub(crate) struct SmCore<'a> {
     immediate_constant_schedule: Box<[(u32, Box<[u64]>)]>,
     /// Private IMC/L0C state for each SMSP; absent for compact replay inputs.
     immediate_constant_cache: Option<Box<[ImmediateConstantCacheState; SUB_CORES]>>,
+    /// Remaining Huerta SM86 L0C miss-switch opportunities for each SMSP.
+    /// A successful issue reloads this bounded countdown; while the held
+    /// (greedy) warp is otherwise ready but its immediate-constant operand is
+    /// not, the scheduler keeps it selected until the countdown expires.
+    /// This is intentionally separate from `imc_wait_until`, which is the
+    /// response frontier for the specific line request.
+    immediate_constant_switch_remaining: [u64; SUB_CORES],
     params: IssueModelParams,
     shared_memory_residency: SharedMemoryResidency,
     physical_warp_slots: u32,
@@ -6037,6 +6358,11 @@ pub(crate) struct SmCore<'a> {
     block_states: Vec<BlockState>,
     subcore_warps: [Vec<usize>; SUB_CORES],
     hold: [Option<usize>; SUB_CORES],
+    /// Fetch/decode continuation is distinct from issue hold. The SM86
+    /// control bit Yield drops issue hold for the next cycle, but Huerta's
+    /// fetch/decode model continues the warp issued in the previous cycle
+    /// while its instruction buffer has capacity.
+    fetch_last_issued: [Option<usize>; SUB_CORES],
     /// Architecture-local CTA-barrier issue resource present when the joined
     /// function contains a characterized barrier instruction.
     barrier_issue: Option<CtaBarrierIssue>,
@@ -6050,6 +6376,12 @@ pub(crate) struct SmCore<'a> {
     sfu_pipe_ready: [u64; SUB_CORES],
     /// Finite scalar INT/FP execution windows, one per SMSP.
     scalar_execution_pipeline: Option<Box<ScalarExecutionPipelineState>>,
+    /// Full-mode SM86 effective register-read envelope.  Ports are per SMSP
+    /// and bank; the reuse set is compiler-keyed and intentionally not a
+    /// physical register-file claim.
+    sm86_rf_enabled: bool,
+    sm86_rf_port_ready: [[u64; 2]; SUB_CORES],
+    sm86_rfc: [VecDeque<Sm86RfcKey>; SUB_CORES],
     /// Cold shared observer/async-return state is boxed to keep the actor's
     /// compact hot structure within the established 4 KiB bound.
     shared_write_lookup_runtime: Box<SharedWriteLookupRuntime>,
@@ -6199,16 +6531,16 @@ impl<'a> SmCore<'a> {
                 got: params.arch,
             });
         }
-        let physical_warp_slots = if matches!(params.resource_source, IssueResourceSource::Sm120Alpha)
-        {
-            params.max_resident_warps_per_sm
-        } else {
-            params
-                .arch
-                .issue_hypotheses()
-                .require("physical_warp_slots")?
-                .max_resident_warps_per_sm
-        };
+        let physical_warp_slots =
+            if matches!(params.resource_source, IssueResourceSource::Sm120Alpha) {
+                params.max_resident_warps_per_sm
+            } else {
+                params
+                    .arch
+                    .issue_hypotheses()
+                    .require("physical_warp_slots")?
+                    .max_resident_warps_per_sm
+            };
         let schedule_slots = schedule
             .by_pc
             .iter()
@@ -6302,25 +6634,33 @@ impl<'a> SmCore<'a> {
                         .issue_slot(u64::from(inst.pc))
                         .is_some_and(|slot| opcode_head(slot.opcode_text()) == "LDGDEPBAR")
                     {
-                        sm120_flat_async_group_count = sm120_flat_async_group_count.saturating_add(1);
+                        sm120_flat_async_group_count =
+                            sm120_flat_async_group_count.saturating_add(1);
                     }
                     match inst.kind {
-                        AccessKind::GlobalBypass { token: CacheOpToken::Atom, len, .. } => {
+                        AccessKind::GlobalBypass {
+                            token: CacheOpToken::Atom,
+                            len,
+                            ..
+                        } => {
                             sm120_flat_atomic_present = true;
-                            sm120_flat_global_sectors = sm120_flat_global_sectors.saturating_add(u64::from(len));
+                            sm120_flat_global_sectors =
+                                sm120_flat_global_sectors.saturating_add(u64::from(len));
                         }
                         AccessKind::GlobalReduction { len, .. } => {
-                            sm120_flat_global_sectors = sm120_flat_global_sectors.saturating_add(u64::from(len));
+                            sm120_flat_global_sectors =
+                                sm120_flat_global_sectors.saturating_add(u64::from(len));
                         }
                         AccessKind::GlobalEligible { len, .. }
                         | AccessKind::GlobalBypass { len, .. }
                         | AccessKind::GlobalUntagged { len, .. }
                         | AccessKind::GlobalStore { len, .. } => {
-                            sm120_flat_global_sectors = sm120_flat_global_sectors.saturating_add(u64::from(len));
-
+                            sm120_flat_global_sectors =
+                                sm120_flat_global_sectors.saturating_add(u64::from(len));
                         }
                         AccessKind::Shared { wavefronts, .. } => {
-                            sm120_flat_shared_wavefronts = sm120_flat_shared_wavefronts.saturating_add(wavefronts);
+                            sm120_flat_shared_wavefronts =
+                                sm120_flat_shared_wavefronts.saturating_add(wavefronts);
                         }
                         AccessKind::NonMemory
                         | AccessKind::PredicatedOffMemory
@@ -6557,6 +6897,9 @@ impl<'a> SmCore<'a> {
         let readiness = ReadinessDiagnostics {
             async_wait_prefix: has_nonzero_async_wait
                 .then(|| Box::new(AsyncWaitPrefixDiagnostics::default())),
+            sm86_register_read: (params.arch == ArchId::Sm86
+                && matches!(mode, SmMemMode::L1Shared(_)))
+            .then(|| Box::new(Sm86RegisterReadDiagnostics::default())),
             ..ReadinessDiagnostics::default()
         };
         #[cfg(feature = "reference")]
@@ -6570,6 +6913,7 @@ impl<'a> SmCore<'a> {
             constant_path_pcs: constant_path_pcs.into_boxed_slice(),
             immediate_constant_schedule: immediate_constant_schedule.into_boxed_slice(),
             immediate_constant_cache,
+            immediate_constant_switch_remaining: [0; SUB_CORES],
             params: *params,
             shared_memory_residency,
             physical_warp_slots,
@@ -6585,11 +6929,15 @@ impl<'a> SmCore<'a> {
             block_states: Vec::new(),
             subcore_warps: Default::default(),
             hold: [None; SUB_CORES],
+            fetch_last_issued: [None; SUB_CORES],
             barrier_issue,
             barrier_pipe_ready: 0,
             tensor_pipe_ready: [0; SUB_CORES],
             sfu_pipe_ready: [0; SUB_CORES],
             scalar_execution_pipeline,
+            sm86_rf_enabled: params.arch == ArchId::Sm86 && matches!(mode, SmMemMode::L1Shared(_)),
+            sm86_rf_port_ready: [[0; 2]; SUB_CORES],
+            sm86_rfc: std::array::from_fn(|_| VecDeque::new()),
             shared_write_lookup_runtime: Box::new(SharedWriteLookupRuntime {
                 observer: write_lookup_observer,
                 async_l1_hit_service_ready: [0; SUB_CORES],
@@ -6623,7 +6971,8 @@ impl<'a> SmCore<'a> {
                     || sm120_flat_shared_wavefronts >= SM120_FLAT_SERVICE_SECTOR_THRESHOLD),
             sm120_flat_global_service_ready: 0,
             sm120_flat_shared_service_ready: 0,
-            sm120_flat_multiwarp_service_enabled: params.resource_source() == IssueResourceSource::Sm120Alpha
+            sm120_flat_multiwarp_service_enabled: params.resource_source()
+                == IssueResourceSource::Sm120Alpha
                 && matches!(mode, SmMemMode::Flat)
                 && sm120_flat_live_warps > 1
                 && sm120_flat_global_sectors >= SM120_FLAT_SERVICE_SECTOR_THRESHOLD,
@@ -6632,7 +6981,8 @@ impl<'a> SmCore<'a> {
                 && matches!(mode, SmMemMode::Flat)
                 && sm120_flat_live_warps > 1
                 && sm120_flat_global_sectors >= 8 * SM120_FLAT_SERVICE_SECTOR_THRESHOLD,
-            sm120_flat_multiwarp_medium: params.resource_source() == IssueResourceSource::Sm120Alpha
+            sm120_flat_multiwarp_medium: params.resource_source()
+                == IssueResourceSource::Sm120Alpha
                 && matches!(mode, SmMemMode::Flat)
                 && sm120_flat_live_warps > 1
                 && sm120_flat_global_sectors >= SM120_FLAT_SERVICE_SECTOR_THRESHOLD,
@@ -6644,10 +6994,14 @@ impl<'a> SmCore<'a> {
             sm120_flat_async_dense: params.resource_source() == IssueResourceSource::Sm120Alpha
                 && matches!(mode, SmMemMode::Flat)
                 && sm120_flat_async_group_count > 8,
-            sm120_flat_async_service_enabled: params.resource_source() == IssueResourceSource::Sm120Alpha
+            sm120_flat_async_service_enabled: params.resource_source()
+                == IssueResourceSource::Sm120Alpha
                 && matches!(mode, SmMemMode::Flat)
                 && sm120_flat_async_group_count <= 8
-                && schedule.by_pc.values().any(|slot| opcode_head(slot.opcode_text()) == "LDGDEPBAR"),
+                && schedule
+                    .by_pc
+                    .values()
+                    .any(|slot| opcode_head(slot.opcode_text()) == "LDGDEPBAR"),
             sm120_flat_async_service_ready: 0,
             // Fresh q7 group-depth probes are a logical overlap surface:
             // depth 1 needs no extra arm, depth 2 needs ~44 cycles/group,
@@ -6663,7 +7017,8 @@ impl<'a> SmCore<'a> {
                 0
             },
             sm120_flat_async_depth_service_ready: 0,
-            sm120_flat_store_retire_enabled: params.resource_source() == IssueResourceSource::Sm120Alpha
+            sm120_flat_store_retire_enabled: params.resource_source()
+                == IssueResourceSource::Sm120Alpha
                 && matches!(mode, SmMemMode::Flat)
                 && !sm120_flat_atomic_present
                 && sm120_flat_live_warps == 1
@@ -7920,6 +8275,7 @@ impl<'a> SmCore<'a> {
         l2_requests: u64,
         unique_regions: u64,
         issue_time: u64,
+        now: u64,
     ) -> Result<Option<MemoryWriteAck>, IssueError> {
         self.memory_admission_feedback
             .as_mut()
@@ -7935,6 +8291,7 @@ impl<'a> SmCore<'a> {
                 l2_requests,
                 unique_regions,
                 issue_time,
+                now,
             )
     }
 
@@ -7980,6 +8337,30 @@ impl<'a> SmCore<'a> {
     /// [`Advance::Done`].
     pub(crate) fn result(&self) -> SmSimResult {
         let mut readiness = (*self.readiness).clone();
+        // The released Huerta scheduler orders a greedy warp followed by
+        // descending dynamic warp IDs.  The replay admission path currently
+        // stamps warps in the validated block-roster order; retain an explicit
+        // audit of any within-CTA inversion instead of silently assuming the
+        // two orders are equivalent. This diagnostic never selects timing.
+        let mut priority_mismatches = 0_u64;
+        for left in 0..self.warps.len() {
+            for right in (left + 1)..self.warps.len() {
+                let a = &self.warps[left];
+                let b = &self.warps[right];
+                if a.block != b.block
+                    || a.warp_slot.rem_euclid(SUB_CORES as i32)
+                        != b.warp_slot.rem_euclid(SUB_CORES as i32)
+                {
+                    continue;
+                }
+                let arrival_order = a.arrival.cmp(&b.arrival);
+                let dynamic_order = a.warp_id.cmp(&b.warp_id);
+                if arrival_order != dynamic_order {
+                    priority_mismatches = priority_mismatches.saturating_add(1);
+                }
+            }
+        }
+        readiness.youngest_priority_order_mismatches = priority_mismatches;
         if let Some(front_end) = self.instruction_front_end.as_ref() {
             readiness.instruction_front_end = Some(Box::new(front_end.diagnostics));
         }
@@ -8011,6 +8392,18 @@ impl<'a> SmCore<'a> {
                 diagnostics.miss_wait_cycles = diagnostics
                     .miss_wait_cycles
                     .saturating_add(addend.miss_wait_cycles);
+                diagnostics.greedy_switch_block_cycles = diagnostics
+                    .greedy_switch_block_cycles
+                    .saturating_add(addend.greedy_switch_block_cycles);
+                diagnostics.non_greedy_scan_attempts = diagnostics
+                    .non_greedy_scan_attempts
+                    .saturating_add(addend.non_greedy_scan_attempts);
+                diagnostics.non_greedy_scan_misses = diagnostics
+                    .non_greedy_scan_misses
+                    .saturating_add(addend.non_greedy_scan_misses);
+                diagnostics.non_greedy_scan_successes = diagnostics
+                    .non_greedy_scan_successes
+                    .saturating_add(addend.non_greedy_scan_successes);
                 diagnostics.maximum_pending_lines = diagnostics
                     .maximum_pending_lines
                     .max(addend.maximum_pending_lines);
@@ -8087,6 +8480,9 @@ impl<'a> SmCore<'a> {
         // benefits from the same invariant.
         if self.hold[subcore] == Some(warp_index) {
             self.hold[subcore] = None;
+        }
+        if self.fetch_last_issued[subcore] == Some(warp_index) {
+            self.fetch_last_issued[subcore] = None;
         }
         self.warps[warp_index].done = true;
         self.warps[warp_index].next_slot = None;
@@ -8285,12 +8681,14 @@ impl<'a> SmCore<'a> {
                         register_ready: Vec::new(),
                         block: block_ix,
                         launch_index: blk.launch_index,
+                        warp_id: w.warp_id,
                         warp_slot: w.warp_slot,
                         pos_in_subcore,
                         arrival,
                         at_block_barrier: false,
                         cta_barrier_ready: 0,
                         barrier_pipeline_ready: 0,
+                        sfu_dependency_ready: 0,
                         branch_pipeline_ready: 0,
                         block_barrier_dispatch: None,
                         block_barrier_arrival: None,
@@ -9509,17 +9907,34 @@ impl<'a> SmCore<'a> {
         let mut async_snapshot = None;
         if self.params.resource_source() == IssueResourceSource::Sm120Alpha {
             let inst = warp.insts[warp.next];
-            let ready = issue_fixed_register_ready(slot.fixed_latency_operands(),
-                inst.effective_lane_mask(), inst.active_lane_mask, slot.guard_predicate,
-                &warp.register_ready);
-            for (cause, until) in [(ReadinessCause::RegisterRaw, ready.raw),
+            let ready = issue_fixed_register_ready(
+                slot.fixed_latency_operands(),
+                inst.effective_lane_mask(),
+                inst.active_lane_mask,
+                slot.guard_predicate,
+                &warp.register_ready,
+            );
+            for (cause, until) in [
+                (ReadinessCause::RegisterRaw, ready.raw),
                 (ReadinessCause::RegisterPredicate, ready.predicate),
-                (ReadinessCause::RegisterWaw, ready.waw)] {
-                observe_readiness_constraint(projected, base, until, cause,
-                    &mut ready_at, &mut limiting, &mut tied)?;
+                (ReadinessCause::RegisterWaw, ready.waw),
+            ] {
+                observe_readiness_constraint(
+                    projected,
+                    base,
+                    until,
+                    cause,
+                    &mut ready_at,
+                    &mut limiting,
+                    &mut tied,
+                )?;
             }
         }
-
+        // SM86 RF reservations are Control/Allocate resource observations,
+        // not scheduler eligibility. Huerta's Ampere model allows CGGTY issue
+        // to continue while the fixed-latency operand-read window reserves its
+        // downstream port. Keep the reservation transactional, but do not
+        // charge its conflict as a pre-issue readiness cause here.
 
         if self.instruction_front_end.is_some() {
             let until = warp.instruction_front_end_ready_at().ok_or(
@@ -9936,6 +10351,17 @@ impl<'a> SmCore<'a> {
                 &mut limiting,
                 &mut tied,
             )?;
+            if self.params.arch == ArchId::Sm86 && slot.is_sfu_dependent_chain() {
+                observe_readiness_constraint(
+                    projected,
+                    base,
+                    self.warps[warp_index].sfu_dependency_ready,
+                    ReadinessCause::PipelineSfu,
+                    &mut ready_at,
+                    &mut limiting,
+                    &mut tied,
+                )?;
+            }
         }
         if matches!(slot.pipeline_class, PipelineClass::ScalarAlu { .. }) {
             let until = self
@@ -9970,23 +10396,25 @@ impl<'a> SmCore<'a> {
                     ))?;
             } else {
                 let inst = warp.insts[warp.next];
-                projected.async_decision_snapshots.push(AsyncDecisionSnapshot {
-                    function_unique_id: self.schedule.function_unique_id(),
-                    pc: inst.pc,
-                    warp_slot: warp.warp_slot,
-                    instruction: u64::try_from(warp.next).unwrap_or(u64::MAX),
-                    protocol: "committed_async_group_prefix_wait",
-                    committed_groups_before,
-                    required_prefix_len,
-                    wait_threshold: slot.async_copy_wait_max_pending_groups,
-                    readiness_cycle,
-                    decision_cycle: effective_ready,
-                    issue_cycle: now,
-                    observation_scope: "selected_warp_issue_opportunity",
-                    semantics: "selected_only_not_blocked_witness",
-                    membership: "committed-prefix membership from scalar model state",
-                    limiting_cause: limiting.map(readiness_cause_name),
-                });
+                projected
+                    .async_decision_snapshots
+                    .push(AsyncDecisionSnapshot {
+                        function_unique_id: self.schedule.function_unique_id(),
+                        pc: inst.pc,
+                        warp_slot: warp.warp_slot,
+                        instruction: u64::try_from(warp.next).unwrap_or(u64::MAX),
+                        protocol: "committed_async_group_prefix_wait",
+                        committed_groups_before,
+                        required_prefix_len,
+                        wait_threshold: slot.async_copy_wait_max_pending_groups,
+                        readiness_cycle,
+                        decision_cycle: effective_ready,
+                        issue_cycle: now,
+                        observation_scope: "selected_warp_issue_opportunity",
+                        semantics: "selected_only_not_blocked_witness",
+                        membership: "committed-prefix membership from scalar model state",
+                        limiting_cause: limiting.map(readiness_cause_name),
+                    });
             }
         }
         if effective_ready > base {
@@ -10042,13 +10470,13 @@ impl<'a> SmCore<'a> {
         };
         let fetches: [Option<usize>; SUB_CORES] = std::array::from_fn(|subcore| {
             let can_fetch = |warp: usize| self.warps[warp].can_fetch_instruction(capacity);
-            match self.hold[subcore] {
+            match self.fetch_last_issued[subcore] {
                 Some(warp) if can_fetch(warp) => Some(warp),
                 _ => self.subcore_warps[subcore]
                     .iter()
                     .copied()
                     .filter(|&warp| can_fetch(warp))
-                    .max_by_key(|&warp| self.warps[warp].arrival),
+                    .max_by_key(|&warp| (self.warps[warp].arrival, self.warps[warp].warp_id)),
             }
         });
         let use_shadow = original
@@ -10087,6 +10515,20 @@ impl<'a> SmCore<'a> {
                     return Err(error);
                 }
             };
+            if self.fetch_last_issued[subcore] == Some(warp) {
+                front_end.diagnostics.fetch_last_issued_continuations = checked_u64_counter_add(
+                    "fetch last-issued continuation diagnostic",
+                    front_end.diagnostics.fetch_last_issued_continuations,
+                    1,
+                )?;
+                if self.hold[subcore] != Some(warp) {
+                    front_end.diagnostics.yield_hold_separations = checked_u64_counter_add(
+                        "fetch Yield/issue-hold separation diagnostic",
+                        front_end.diagnostics.yield_hold_separations,
+                        1,
+                    )?;
+                }
+            }
             fetched[subcore] = Some((warp, ready_at));
         }
         if let Err(error) = front_end.prefetch_cycle(now) {
@@ -10655,14 +11097,137 @@ impl<'a> SmCore<'a> {
         Ok(projected)
     }
 
+    fn sm86_register_read_plan_for(
+        &self,
+        subcore: usize,
+        warp: usize,
+        now: u64,
+    ) -> Result<Sm86RegisterReadPlan, IssueError> {
+        let state = &self.warps[warp];
+        let slot = state
+            .next_slot
+            .ok_or(IssueError::MissingIssueSlot { warp })?;
+        sm86_register_read_plan(
+            slot.fixed_latency_operands(),
+            state.block,
+            state.warp_slot,
+            now,
+            self.sm86_rf_port_ready[subcore],
+            &self.sm86_rfc[subcore],
+        )
+    }
+
+    fn apply_sm86_register_read_plan(
+        &mut self,
+        subcore: usize,
+        warp: usize,
+        plan: &Sm86RegisterReadPlan,
+        projected: &mut ReadinessDiagnostics,
+    ) -> Result<(), IssueError> {
+        if !plan.modeled {
+            if plan.unsupported_shape {
+                if let Some(diag) = projected.sm86_register_read.as_deref_mut() {
+                    diag.unsupported_shapes = diag.unsupported_shapes.checked_add(1).ok_or(
+                        IssueError::CounterOverflow {
+                            counter: "readiness.sm86_register_read.unsupported_shapes",
+                        },
+                    )?;
+                }
+            }
+            return Ok(());
+        }
+        if plan.unsupported_shape {
+            if let Some(diag) = projected.sm86_register_read.as_deref_mut() {
+                diag.unsupported_shapes =
+                    diag.unsupported_shapes
+                        .checked_add(1)
+                        .ok_or(IssueError::CounterOverflow {
+                            counter: "readiness.sm86_register_read.unsupported_shapes",
+                        })?;
+            }
+            return Ok(());
+        }
+        self.sm86_rf_port_ready[subcore] = plan.next_port_ready;
+        for key in &plan.rfc_consumes {
+            if let Some(index) = self.sm86_rfc[subcore].iter().position(|entry| entry == key) {
+                self.sm86_rfc[subcore].remove(index);
+            }
+        }
+        for key in &plan.rfc_inserts {
+            if let Some(index) = self.sm86_rfc[subcore].iter().position(|entry| entry == key) {
+                self.sm86_rfc[subcore].remove(index);
+            }
+            let bank_entries = self.sm86_rfc[subcore]
+                .iter()
+                .filter(|entry| entry.bank == key.bank)
+                .count();
+            if bank_entries >= 3 {
+                if let Some(index) = self.sm86_rfc[subcore]
+                    .iter()
+                    .position(|entry| entry.bank == key.bank)
+                {
+                    self.sm86_rfc[subcore].remove(index);
+                }
+            }
+            self.sm86_rfc[subcore].push_back(*key);
+        }
+        if let Some(diag) = projected.sm86_register_read.as_deref_mut() {
+            diag.reservations =
+                diag.reservations
+                    .checked_add(1)
+                    .ok_or(IssueError::CounterOverflow {
+                        counter: "readiness.sm86_register_read.reservations",
+                    })?;
+            for bank in 0..2 {
+                diag.source_reads[bank] = diag.source_reads[bank]
+                    .checked_add(plan.reads[bank])
+                    .ok_or(IssueError::CounterOverflow {
+                        counter: "readiness.sm86_register_read.source_reads",
+                    })?;
+            }
+            diag.port_conflict_cycles = diag
+                .port_conflict_cycles
+                .checked_add(plan.port_conflict_cycles)
+                .ok_or(IssueError::CounterOverflow {
+                    counter: "readiness.sm86_register_read.port_conflict_cycles",
+                })?;
+            diag.rfc_hits =
+                diag.rfc_hits
+                    .checked_add(plan.rfc_hits)
+                    .ok_or(IssueError::CounterOverflow {
+                        counter: "readiness.sm86_register_read.rfc_hits",
+                    })?;
+            diag.rfc_misses = diag.rfc_misses.checked_add(plan.rfc_misses).ok_or(
+                IssueError::CounterOverflow {
+                    counter: "readiness.sm86_register_read.rfc_misses",
+                },
+            )?;
+        }
+        // A retired warp cannot leave stale compiler-RFC entries behind. The
+        // key contains block and traced warp slot, so this is only a bounded
+        // hygiene pass for a reused physical slot.
+        let _ = warp;
+        Ok(())
+    }
+
     /// Earliest issue time after both warp/control dependencies and the next
     /// instruction's characterized execution resource are available. A missing
     /// slot remains selectable so the established typed invariant error is
     /// preserved at the transaction boundary.
-    fn issue_ready_at<const CHECK_ASYNC: bool>(&self, subcore: usize, warp: usize) -> Option<u64> {
-        let mut warp_ready = self.warps[warp].ready_at()?;
+    fn issue_ready_at_impl<const CHECK_ASYNC: bool>(
+        &self,
+        subcore: usize,
+        warp: usize,
+        include_immediate_constant: bool,
+    ) -> Option<u64> {
+        let mut warp_ready = if include_immediate_constant {
+            self.warps[warp].ready_at()?
+        } else {
+            self.warps[warp].ready_at_without_immediate_constant()?
+        };
         if self.params.resource_source() == IssueResourceSource::Sm120Alpha
-            && let Some(slot) = self.warps[warp].next_slot {
+            && let Some(slot) = self.warps[warp].next_slot
+        {
             let mask = self.warps[warp].insts[self.warps[warp].next].effective_lane_mask();
             let register_ready = issue_fixed_register_ready(
                 slot.fixed_latency_operands(),
@@ -10710,7 +11275,20 @@ impl<'a> SmCore<'a> {
             if let Some(slot) = state.next_slot {
                 let completion_ready = feedback.completion_ready_at(warp, slot)?;
                 warp_ready = warp_ready.max(completion_ready);
+                let terminal_exit = state
+                    .next
+                    .checked_add(1)
+                    .is_some_and(|next| next == state.insts.len());
+                let exit_ready = feedback.exit_ready_at(warp, slot, terminal_exit)?;
+                warp_ready = warp_ready.max(exit_ready);
             }
+        }
+        if self.params.arch == ArchId::Sm86
+            && self.warps[warp]
+                .next_slot
+                .is_some_and(IssueSlot::is_sfu_dependent_chain)
+        {
+            warp_ready = warp_ready.max(self.warps[warp].sfu_dependency_ready);
         }
         if CHECK_ASYNC
             && let Some(IssueSlot {
@@ -10739,6 +11317,18 @@ impl<'a> SmCore<'a> {
         Some(warp_ready.max(pipeline_ready))
     }
 
+    fn issue_ready_at<const CHECK_ASYNC: bool>(&self, subcore: usize, warp: usize) -> Option<u64> {
+        self.issue_ready_at_impl::<CHECK_ASYNC>(subcore, warp, true)
+    }
+
+    fn issue_ready_at_without_immediate_constant<const CHECK_ASYNC: bool>(
+        &self,
+        subcore: usize,
+        warp: usize,
+    ) -> Option<u64> {
+        self.issue_ready_at_impl::<CHECK_ASYNC>(subcore, warp, false)
+    }
+
     fn is_issue_ready<const CHECK_ASYNC: bool>(
         &self,
         subcore: usize,
@@ -10749,17 +11339,86 @@ impl<'a> SmCore<'a> {
             .is_some_and(|ready| ready <= now)
     }
 
+    /// True when an SM86 warp is otherwise ready but its current CBANK line
+    /// is not yet available in the private immediate-constant cache.
+    fn immediate_constant_blocked(&self, subcore: usize, warp: usize, now: u64) -> bool {
+        if self.params.arch != ArchId::Sm86 {
+            return false;
+        }
+        let Some(cache) = self.immediate_constant_cache.as_ref() else {
+            return false;
+        };
+        let state = &self.warps[warp];
+        let Some(lines) = self.immediate_constant_lines(state.insts[state.next].pc) else {
+            return false;
+        };
+        if lines.is_empty() {
+            return false;
+        }
+        state.imc_wait_until > now || lines.iter().any(|&line| !cache[subcore].contains(line))
+    }
+
+    /// Huerta's bounded L0C miss-switch arm: keep the held (greedy) warp
+    /// selected only while ordinary control/dependency/resource readiness is
+    /// satisfied and the four-cycle carded window remains.
+    fn l0c_greedy_hold_candidate<const CHECK_ASYNC: bool>(
+        &self,
+        subcore: usize,
+        warp: usize,
+        now: u64,
+    ) -> bool {
+        self.params.arch == ArchId::Sm86
+            && self.immediate_constant_cache.is_some()
+            && self.hold[subcore] == Some(warp)
+            && self.immediate_constant_switch_remaining[subcore] > 0
+            && self.immediate_constant_blocked(subcore, warp, now)
+            && self
+                .issue_ready_at_without_immediate_constant::<CHECK_ASYNC>(subcore, warp)
+                .is_some_and(|ready| ready <= now)
+    }
+
+    /// Once the four-cycle window is exhausted, Huerta still probes the
+    /// greedy warp first on each issue-stage pass; only the *switch* becomes
+    /// legal after its miss. Keeping this marker distinct from the active
+    /// window lets `issue_cycle` stage that miss before scanning siblings.
+    fn l0c_expired_greedy_probe<const CHECK_ASYNC: bool>(
+        &self,
+        subcore: usize,
+        warp: usize,
+        now: u64,
+    ) -> bool {
+        self.params.arch == ArchId::Sm86
+            && self.immediate_constant_cache.is_some()
+            && self.hold[subcore] == Some(warp)
+            && self.immediate_constant_switch_remaining[subcore] == 0
+            && self.immediate_constant_blocked(subcore, warp, now)
+            && self
+                .issue_ready_at_without_immediate_constant::<CHECK_ASYNC>(subcore, warp)
+                .is_some_and(|ready| ready <= now)
+    }
+
+    fn scheduler_candidate<const CHECK_ASYNC: bool>(
+        &self,
+        subcore: usize,
+        warp: usize,
+        now: u64,
+    ) -> bool {
+        self.is_issue_ready::<CHECK_ASYNC>(subcore, warp, now)
+            || self.l0c_greedy_hold_candidate::<CHECK_ASYNC>(subcore, warp, now)
+            || self.l0c_expired_greedy_probe::<CHECK_ASYNC>(subcore, warp, now)
+    }
+
     fn pick_warps<const CHECK_ASYNC: bool>(&self, now: u64) -> [Option<usize>; SUB_CORES] {
         std::array::from_fn(|subcore| {
             // CGGTY pick: held warp while its control state and execution
             // resource are ready, else youngest fully-ready warp.
             match self.hold[subcore] {
-                Some(w) if self.is_issue_ready::<CHECK_ASYNC>(subcore, w, now) => Some(w),
+                Some(w) if self.scheduler_candidate::<CHECK_ASYNC>(subcore, w, now) => Some(w),
                 _ => self.subcore_warps[subcore]
                     .iter()
                     .copied()
                     .filter(|&w| self.is_issue_ready::<CHECK_ASYNC>(subcore, w, now))
-                    .max_by_key(|&w| self.warps[w].arrival),
+                    .max_by_key(|&w| (self.warps[w].arrival, self.warps[w].warp_id)),
             }
         })
     }
@@ -10779,7 +11438,7 @@ impl<'a> SmCore<'a> {
         let mut picks = [None; SUB_CORES];
         for (subcore, pick) in picks.iter_mut().enumerate() {
             let permitted = |warp: usize| {
-                if !self.is_issue_ready::<CHECK_ASYNC>(subcore, warp, now) {
+                if !self.scheduler_candidate::<CHECK_ASYNC>(subcore, warp, now) {
                     return false;
                 }
                 let state = &self.warps[warp];
@@ -10795,8 +11454,10 @@ impl<'a> SmCore<'a> {
                 _ => self.subcore_warps[subcore]
                     .iter()
                     .copied()
-                    .filter(|&warp| permitted(warp))
-                    .max_by_key(|&warp| self.warps[warp].arrival),
+                    .filter(|&warp| {
+                        self.is_issue_ready::<CHECK_ASYNC>(subcore, warp, now) && permitted(warp)
+                    })
+                    .max_by_key(|&warp| (self.warps[warp].arrival, self.warps[warp].warp_id)),
             };
             if let Some(warp) = selected {
                 let state = &self.warps[warp];
@@ -12613,6 +13274,7 @@ impl<'a> SmCore<'a> {
                 picks,
                 cache: None,
                 waits: [None; SUB_CORES],
+                extra_waits: Vec::new(),
                 miss_observed: false,
             });
         };
@@ -12647,6 +13309,7 @@ impl<'a> SmCore<'a> {
             picks: effective,
             cache: Some(cache),
             waits,
+            extra_waits: Vec::new(),
             miss_observed,
         })
     }
@@ -12677,12 +13340,129 @@ impl<'a> SmCore<'a> {
             selected = [None; SUB_CORES];
             selected[subcore] = warp;
         }
+        let l0c_forced_hold: [bool; SUB_CORES] = std::array::from_fn(|subcore| {
+            selected[subcore].is_some_and(|warp| {
+                if self.has_async_copy_protocol {
+                    self.l0c_greedy_hold_candidate::<true>(subcore, warp, t)
+                } else {
+                    self.l0c_greedy_hold_candidate::<false>(subcore, warp, t)
+                }
+            })
+        });
         let imc_plan = self.preflight_immediate_constant(selected, t)?;
-        let picks = imc_plan.picks;
-        let effective_picks = picks;
+        let mut picks = imc_plan.picks;
+        let effective_picks;
         let mut imc_cache = imc_plan.cache;
         let imc_waits = imc_plan.waits;
-        let imc_miss_observed = imc_plan.miss_observed;
+        let mut extra_imc_waits = imc_plan.extra_waits;
+        let mut imc_miss_observed = imc_plan.miss_observed;
+        if let Some(cache) = imc_cache.as_mut() {
+            for (subcore, forced) in l0c_forced_hold.iter().copied().enumerate() {
+                if forced && imc_waits[subcore].is_some() {
+                    cache[subcore].diagnostics.greedy_switch_block_cycles = cache[subcore]
+                        .diagnostics
+                        .greedy_switch_block_cycles
+                        .saturating_add(1);
+                }
+            }
+        }
+
+        // Huerta's issue loop continues through the remaining priority list
+        // after a non-greedy warp misses in L0C. The previous Rust path
+        // stopped after the first parked candidate, which could create a
+        // false dispatch bubble when a younger sibling was also CBANK-bound.
+        // Scan only when the four-cycle greedy hold did not apply, preserve
+        // every line reservation made by parked candidates, and keep the
+        // memory-admission candidate as a final transactional constraint.
+        if imc_cache.is_some() {
+            for subcore in 0..SUB_CORES {
+                let Some(initial) = selected[subcore] else {
+                    continue;
+                };
+                let held_active_window = self.hold[subcore] == Some(initial)
+                    && self.immediate_constant_switch_remaining[subcore] > 0;
+                if picks[subcore].is_some() || held_active_window || imc_waits[subcore].is_none() {
+                    continue;
+                }
+                let Some(cache) = imc_cache.as_mut() else {
+                    break;
+                };
+                let mut tried = vec![initial];
+                loop {
+                    let candidate = self.subcore_warps[subcore]
+                        .iter()
+                        .copied()
+                        .filter(|warp| {
+                            !tried.contains(warp)
+                                && if self.has_async_copy_protocol {
+                                    self.issue_ready_at_without_immediate_constant::<true>(
+                                        subcore, *warp,
+                                    )
+                                } else {
+                                    self.issue_ready_at_without_immediate_constant::<false>(
+                                        subcore, *warp,
+                                    )
+                                }
+                                .is_some_and(|ready| ready <= t)
+                        })
+                        .max_by_key(|warp| (self.warps[*warp].arrival, self.warps[*warp].warp_id));
+                    let Some(candidate) = candidate else { break };
+                    tried.push(candidate);
+
+                    if let Some(feedback) = self.memory_admission_feedback.as_ref() {
+                        let mut additions = [0usize; SUB_CORES];
+                        for (other, pick) in picks.iter().enumerate() {
+                            if other == subcore {
+                                continue;
+                            }
+                            if let Some(warp) = *pick {
+                                feedback.record_transaction_addition(
+                                    other,
+                                    self.warps[warp].insts[self.warps[warp].next].kind,
+                                    &mut additions,
+                                );
+                            }
+                        }
+                        let kind = self.warps[candidate].insts[self.warps[candidate].next].kind;
+                        if !feedback.permits_transaction_addition(subcore, kind, &additions, t) {
+                            continue;
+                        }
+                    }
+
+                    cache[subcore].diagnostics.non_greedy_scan_attempts = cache[subcore]
+                        .diagnostics
+                        .non_greedy_scan_attempts
+                        .saturating_add(1);
+                    let state = &self.warps[candidate];
+                    let lines = self
+                        .immediate_constant_lines(state.insts[state.next].pc)
+                        .unwrap_or(&[]);
+                    let wait = if state.imc_wait_until > t {
+                        Some(state.imc_wait_until)
+                    } else if lines.is_empty() {
+                        None
+                    } else {
+                        cache[subcore].reserve(lines, t, self.params.l1_miss_latency)?
+                    };
+                    if let Some(ready) = wait.filter(|ready| *ready > t) {
+                        cache[subcore].diagnostics.non_greedy_scan_misses = cache[subcore]
+                            .diagnostics
+                            .non_greedy_scan_misses
+                            .saturating_add(1);
+                        extra_imc_waits.push((candidate, ready));
+                        imc_miss_observed = true;
+                        continue;
+                    }
+                    cache[subcore].diagnostics.non_greedy_scan_successes = cache[subcore]
+                        .diagnostics
+                        .non_greedy_scan_successes
+                        .saturating_add(1);
+                    picks[subcore] = Some(candidate);
+                    break;
+                }
+            }
+        }
+        effective_picks = picks;
         let memory_pipeline_plan =
             if let Some(memory_pipeline) = self.memory_issue_pipeline.as_ref() {
                 let mut selected = [None; SUB_CORES];
@@ -12889,6 +13669,43 @@ impl<'a> SmCore<'a> {
             state.pending.retain(|event| event.writeback_at >= t);
         }
 
+        // Reserve the SM86 RF read-port/RFC state only after every selected
+        // instruction has passed the existing transaction preflight. One warp
+        // per SMSP is selected, so these plans cannot alias another pick's
+        // per-SMSP port timeline.
+        let mut sm86_rf_plans: [Option<Sm86RegisterReadPlan>; SUB_CORES] = [None, None, None, None];
+        if self.sm86_rf_enabled {
+            for (subcore, pick) in picks.iter().enumerate() {
+                let Some(warp) = *pick else { continue };
+                let plan = self.sm86_register_read_plan_for(subcore, warp, t)?;
+                sm86_rf_plans[subcore] = Some(plan);
+            }
+        }
+
+        // Project the source-backed Huerta L0C miss-switch countdown only
+        // after all ordinary preflight checks have passed.  A parked greedy
+        // warp consumes one bounded opportunity per observed miss; every
+        // effective instruction reloads the carded window for the next
+        // instruction.  Sibling selection is therefore enabled only after
+        // the four miss opportunities have elapsed.
+        let mut projected_immediate_constant_switch = self.immediate_constant_switch_remaining;
+        if self.params.arch == ArchId::Sm86
+            && let Some(config) = self.params.immediate_constant_cache
+        {
+            for (subcore, selected_warp) in selected.iter().enumerate() {
+                if self.hold[subcore] == *selected_warp
+                    && imc_waits[subcore].is_some()
+                    && projected_immediate_constant_switch[subcore] > 0
+                {
+                    projected_immediate_constant_switch[subcore] -= 1;
+                }
+            }
+            for (subcore, pick) in picks.iter().enumerate() {
+                if pick.is_some() {
+                    projected_immediate_constant_switch[subcore] = config.switch_after_miss_cycles;
+                }
+            }
+        }
         // An IMC miss consumes the SMSP issue opportunity even though no
         // traced instruction is dispatched.  Keep it separate from the exact
         // executed-instruction counter below.
@@ -12896,6 +13713,9 @@ impl<'a> SmCore<'a> {
         for (sc, pick) in picks.into_iter().enumerate() {
             let Some(wix) = pick else { continue };
             issued_this_cycle = true;
+            if let Some(plan) = sm86_rf_plans[sc].as_ref() {
+                self.apply_sm86_register_read_plan(sc, wix, plan, &mut projected_readiness)?;
+            }
 
             // Issue exactly one instruction from warp `wix`.
             let (
@@ -12958,15 +13778,23 @@ impl<'a> SmCore<'a> {
                 .flatten();
             let observe_async_copy =
                 self.has_async_copy_protocol && async_copy_source_count(inst.kind).is_some();
-            let fixed_latency_status = (self.params.resource_source() == IssueResourceSource::Sm120Alpha)
-                .then(|| self.warps[wix]
-                .next_slot
-                .map(|current| current.fixed_latency_operands())).flatten();
+            let fixed_latency_status = (self.params.resource_source()
+                == IssueResourceSource::Sm120Alpha)
+                .then(|| {
+                    self.warps[wix]
+                        .next_slot
+                        .map(|current| current.fixed_latency_operands())
+                })
+                .flatten();
             let observe_register_result = inst.effective_lane_mask() != 0
                 && matches!(self.mem, MemModel::Flat)
-                && fixed_latency_status.and_then(|s| s.projected()).is_some_and(|p| {
-                    p.destinations().iter().any(|dst| !dst.register().is_constant())
-                });
+                && fixed_latency_status
+                    .and_then(|s| s.projected())
+                    .is_some_and(|p| {
+                        p.destinations()
+                            .iter()
+                            .any(|dst| !dst.register().is_constant())
+                    });
 
             // The instruction has passed its IMC probe and is now dispatched;
             // touch each resident line in the cloned cache state.  A line that
@@ -13051,20 +13879,26 @@ impl<'a> SmCore<'a> {
             };
             let sm120_flat_store_retire_completion = if self.sm120_flat_store_retire_enabled {
                 let (len, per_sector) = match inst.kind {
-                    AccessKind::GlobalStore { len, .. } =>
-                        (u64::from(len), SM120_FLAT_STORE_RETIRE_CYCLES_PER_SECTOR),
-                    AccessKind::GlobalReduction { len, .. } =>
-                        (u64::from(len), SM120_FLAT_REDUCTION_RETIRE_CYCLES_PER_SECTOR),
+                    AccessKind::GlobalStore { len, .. } => {
+                        (u64::from(len), SM120_FLAT_STORE_RETIRE_CYCLES_PER_SECTOR)
+                    }
+                    AccessKind::GlobalReduction { len, .. } => (
+                        u64::from(len),
+                        SM120_FLAT_REDUCTION_RETIRE_CYCLES_PER_SECTOR,
+                    ),
                     _ => (0, 0),
                 };
                 (len != 0).then(|| {
-                    let done = self.sm120_flat_store_retire_ready
+                    let done = self
+                        .sm120_flat_store_retire_ready
                         .max(t)
                         .saturating_add(len.saturating_mul(per_sector));
                     self.sm120_flat_store_retire_ready = done;
                     done
                 })
-            } else { None };
+            } else {
+                None
+            };
             // Memory hierarchy mutation happens when the local address/operand
             // stages reach the SM-shared acceptor, not when the scheduler first
             // dispatches the instruction.
@@ -13106,7 +13940,12 @@ impl<'a> SmCore<'a> {
             if self.params.resource_source() == IssueResourceSource::Sm120Alpha
                 && matches!(self.mem, MemModel::Flat)
                 && self.sm120_flat_async_dense
-                && let AccessKind::GlobalAsyncCopy { off, len: len @ 1.., l1_policy, .. } = inst.kind
+                && let AccessKind::GlobalAsyncCopy {
+                    off,
+                    len: len @ 1..,
+                    l1_policy,
+                    ..
+                } = inst.kind
             {
                 // Retain a bounded recent-source working set for non-bulk
                 // cp.async. Repeated tile copies cannot all be cold DRAM
@@ -13115,10 +13954,21 @@ impl<'a> SmCore<'a> {
                 let mut source_ready = t;
                 for &sector in &warp_sectors[off..off + usize::from(len)] {
                     let ready = if l1_policy == LdgstsL1Policy::CacheAtAllLevels {
-                        if let Some(position) = self.sm120_async_sources.iter().position(|&(key, _)| key == sector) {
-                            let entry = self.sm120_async_sources.remove(position).expect("located source");
+                        if let Some(position) = self
+                            .sm120_async_sources
+                            .iter()
+                            .position(|&(key, _)| key == sector)
+                        {
+                            let entry = self
+                                .sm120_async_sources
+                                .remove(position)
+                                .expect("located source");
                             self.sm120_async_sources.push_back(entry);
-                            entry.1.max(checked_cycle_add("warm async source", t, self.params.l1_hit_latency)?)
+                            entry.1.max(checked_cycle_add(
+                                "warm async source",
+                                t,
+                                self.params.l1_hit_latency,
+                            )?)
                         } else {
                             let latency = if self.sm120_flat_async_dense {
                                 // Fresh group-depth probes show dense repeated
@@ -13134,10 +13984,18 @@ impl<'a> SmCore<'a> {
                             };
                             let ready = checked_cycle_add("cold async source", t, latency)?;
                             self.sm120_async_sources.push_back((sector, ready));
-                            if self.sm120_async_sources.len() > 128 { self.sm120_async_sources.pop_front(); }
+                            if self.sm120_async_sources.len() > 128 {
+                                self.sm120_async_sources.pop_front();
+                            }
                             ready
                         }
-                    } else { checked_cycle_add("bypass async source", t, self.params.global_flat_latency)? };
+                    } else {
+                        checked_cycle_add(
+                            "bypass async source",
+                            t,
+                            self.params.global_flat_latency,
+                        )?
+                    };
                     source_ready = source_ready.max(ready);
                 }
                 data_ready = Some(source_ready);
@@ -13145,7 +14003,8 @@ impl<'a> SmCore<'a> {
             if let Some(service_done) = sm120_flat_service_completion
                 && (write_barrier.is_some()
                     || control.read_barrier.is_some()
-                    || observe_async_copy || observe_register_result)
+                    || observe_async_copy
+                    || observe_register_result)
             {
                 data_ready = Some(data_ready.map_or(service_done, |ready| ready.max(service_done)));
             }
@@ -13158,20 +14017,27 @@ impl<'a> SmCore<'a> {
             if observe_register_result {
                 let completion = match pipeline_class {
                     PipelineClass::ScalarAlu { latency_cycles, .. } => {
-                        let base = checked_cycle_add("scalar register completion", t, latency_cycles)?;
-                        scalar_execution_pipeline_plan.as_ref()
+                        let base =
+                            checked_cycle_add("scalar register completion", t, latency_cycles)?;
+                        scalar_execution_pipeline_plan
+                            .as_ref()
                             .and_then(|plan| plan.next.release_times[sc].back().copied())
                             .map_or(base, |ready| base.max(ready))
                     }
                     _ => data_ready.unwrap_or(self.params.non_memory_ready(t)?),
                 };
                 if let Some(status) = fixed_latency_status {
-                    self.warps[wix].register_ready.retain(|entry| entry.ready_at > t);
+                    self.warps[wix]
+                        .register_ready
+                        .retain(|entry| entry.ready_at > t);
                     issue_record_fixed_register_writes(
-                        &mut self.warps[wix].register_ready, status,
-                        inst.effective_lane_mask(), completion,
+                        &mut self.warps[wix].register_ready,
+                        status,
+                        inst.effective_lane_mask(),
+                        completion,
                     );
-                    self.local_completion_time = Some(self.local_completion_time.unwrap_or(0).max(completion));
+                    self.local_completion_time =
+                        Some(self.local_completion_time.unwrap_or(0).max(completion));
                 }
             }
             if cctl_invalidate_all && matches!(self.mem, MemModel::L1Shared(_)) {
@@ -13212,7 +14078,9 @@ impl<'a> SmCore<'a> {
                         (0, 0)
                     } else {
                         (
-                            if self.sm120_flat_async_dense { 0 } else {
+                            if self.sm120_flat_async_dense {
+                                0
+                            } else {
                                 async_copy_completion_work(inst.kind).unwrap_or(0)
                             },
                             async_destination_wavefronts[sc],
@@ -13251,6 +14119,17 @@ impl<'a> SmCore<'a> {
                         t,
                         initiation_interval_cycles,
                     )?;
+                    if self.params.arch == ArchId::Sm86
+                        && self.warps[wix]
+                            .next_slot
+                            .is_some_and(IssueSlot::is_sfu_dependent_chain)
+                    {
+                        self.warps[wix].sfu_dependency_ready = checked_cycle_add(
+                            "SM86 dependent SFU result readiness",
+                            t,
+                            SM86_DEPENDENT_SFU_LATENCY_CYCLES,
+                        )?;
+                    }
                 }
                 PipelineClass::ScalarAlu { .. } => {}
                 PipelineClass::DispatchOnly => {}
@@ -13352,7 +14231,8 @@ impl<'a> SmCore<'a> {
                             "async commit mutation disagrees with its pre-issue state"
                         );
                         if committed && self.sm120_flat_async_service_enabled {
-                            let done = self.sm120_flat_async_service_ready
+                            let done = self
+                                .sm120_flat_async_service_ready
                                 .max(t)
                                 .saturating_add(SM120_FLAT_ASYNC_GROUP_SERVICE_CYCLES);
                             self.sm120_flat_async_service_ready = done;
@@ -13365,7 +14245,8 @@ impl<'a> SmCore<'a> {
                             }
                         }
                         if committed && self.sm120_flat_async_depth_service_per_group != 0 {
-                            let done = self.sm120_flat_async_depth_service_ready
+                            let done = self
+                                .sm120_flat_async_depth_service_ready
                                 .max(t)
                                 .saturating_add(self.sm120_flat_async_depth_service_per_group);
                             self.sm120_flat_async_depth_service_ready = done;
@@ -13377,7 +14258,6 @@ impl<'a> SmCore<'a> {
                                 group.completion_time = group.completion_time.max(done);
                             }
                         }
-
                     }
                     OpClass::AsyncCopyWait => {
                         let max_pending_groups = self.warps[wix]
@@ -13433,6 +14313,16 @@ impl<'a> SmCore<'a> {
                 self.warps[wix].cta_barrier_ready = 0;
                 self.warps[wix].barrier_pipeline_ready = 0;
                 self.warps[wix].branch_pipeline_ready = 0;
+                if matches!(pipeline_class, PipelineClass::Branch { .. })
+                    && next_pc != inst.pc.saturating_add(16)
+                    && let Some(front_end) = self.instruction_front_end.as_mut()
+                {
+                    front_end.diagnostics.control_flow_redirects = checked_u64_counter_add(
+                        "instruction control-flow redirect observer",
+                        front_end.diagnostics.control_flow_redirects,
+                        1,
+                    )?;
+                }
             }
             if !retires_warp
                 && let PipelineClass::Branch {
@@ -13444,6 +14334,7 @@ impl<'a> SmCore<'a> {
             }
             // Single hold write: never hold a yielded or finished warp.
             self.hold[sc] = (!control.yield_flag && !self.warps[wix].done).then_some(wix);
+            self.fetch_last_issued[sc] = (!self.warps[wix].done).then_some(wix);
 
             // Block barrier arrival AFTER stream bookkeeping: a finished
             // warp never waits.
@@ -13578,12 +14469,22 @@ impl<'a> SmCore<'a> {
         if let Some(plan) = scalar_execution_pipeline_plan {
             self.scalar_execution_pipeline = Some(Box::new(plan.next));
         }
-        for &(warp, ready) in imc_waits.iter().flatten() {
+        for (warp, ready) in imc_waits
+            .iter()
+            .flatten()
+            .copied()
+            .chain(extra_imc_waits.iter().copied())
+        {
             self.warps[warp].imc_wait_until = ready;
         }
         if let Some(cache) = imc_cache.as_mut() {
-            for wait in imc_waits.iter().flatten() {
-                let subcore = self.warps[wait.0].warp_slot.rem_euclid(SUB_CORES as i32) as usize;
+            for (warp, _) in imc_waits
+                .iter()
+                .flatten()
+                .copied()
+                .chain(extra_imc_waits.iter().copied())
+            {
+                let subcore = self.warps[warp].warp_slot.rem_euclid(SUB_CORES as i32) as usize;
                 cache[subcore].diagnostics.miss_wait_events = cache[subcore]
                     .diagnostics
                     .miss_wait_events
@@ -13595,6 +14496,7 @@ impl<'a> SmCore<'a> {
             }
         }
         if imc_cache.is_some() {
+            self.immediate_constant_switch_remaining = projected_immediate_constant_switch;
             self.immediate_constant_cache = imc_cache;
         }
         // Counts are bounded by next_issued, whose checked increment was
@@ -14103,4 +15005,3 @@ pub(crate) fn simulate_sm_with_residency(
     debug_assert!(out.is_empty(), "synchronous modes emit no requests");
     Ok(core.result())
 }
-

@@ -574,4 +574,3 @@ pub fn run(spec: &ArchitectureSpec, programs: &[SimtProgram]) -> Result<CustomRe
         groups,
     })
 }
-

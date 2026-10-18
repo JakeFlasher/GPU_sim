@@ -159,7 +159,8 @@ fn add_dynamic(
                 routing.native_phase_query_instruction_records = routing
                     .native_phase_query_instruction_records
                     .saturating_add(1);
-                if static_opcodes.is_some_and(|opcodes| contains_opcode(opcodes, "SYNCS.PHASECHK")) {
+                if static_opcodes.is_some_and(|opcodes| contains_opcode(opcodes, "SYNCS.PHASECHK"))
+                {
                     // `alpha_op_class` currently routes every PHASECHK to
                     // AsyncCopyWait. This is a structural mismatch candidate
                     // because PHASECHK is a transaction-barrier query, not a
@@ -167,9 +168,8 @@ fn add_dynamic(
                     routing.alpha_static_async_wait_classification = routing
                         .alpha_static_async_wait_classification
                         .saturating_add(1);
-                    routing.structural_mismatch_candidates = routing
-                        .structural_mismatch_candidates
-                        .saturating_add(1);
+                    routing.structural_mismatch_candidates =
+                        routing.structural_mismatch_candidates.saturating_add(1);
                 }
             }
             if observation.is_async_copy_arrival {
@@ -182,12 +182,10 @@ fn add_dynamic(
                     // `alpha_op_class` falls through to Other for ARRIVES;
                     // the deferred copy-arrival effect is not represented by
                     // an ordinary arrival or async-group event here.
-                    routing.alpha_static_other_classification = routing
-                        .alpha_static_other_classification
-                        .saturating_add(1);
-                    routing.structural_mismatch_candidates = routing
-                        .structural_mismatch_candidates
-                        .saturating_add(1);
+                    routing.alpha_static_other_classification =
+                        routing.alpha_static_other_classification.saturating_add(1);
+                    routing.structural_mismatch_candidates =
+                        routing.structural_mismatch_candidates.saturating_add(1);
                 }
             }
             report.executed_lane_union |= observation.executed_lane_mask;
@@ -261,36 +259,37 @@ fn add_dynamic(
         report.tma_generation_relations = report
             .tma_generation_relations
             .saturating_add(relations.generation_relations.len() as u64);
-        report.tma_exact_payload_cohorts = report
-            .tma_exact_payload_cohorts
-            .saturating_add(relations
+        report.tma_exact_payload_cohorts = report.tma_exact_payload_cohorts.saturating_add(
+            relations
                 .generation_relations
                 .iter()
                 .filter(|relation| {
                     relation.association
                         == sim_trace::async_sidecars::TmaGenerationAssociation::ExactPayloadCohort
                 })
-                .count() as u64);
-        report.tma_payload_accounted_relations = report
-            .tma_payload_accounted_relations
-            .saturating_add(relations
-                .generation_relations
-                .iter()
-                .filter(|relation| {
-                    relation.service_state
-                        == sim_trace::async_sidecars::TmaServiceState::PayloadAccounted
-                })
-                .count() as u64);
-        report.tma_phase_readiness_relations = report
-            .tma_phase_readiness_relations
-            .saturating_add(relations
+                .count() as u64,
+        );
+        report.tma_payload_accounted_relations =
+            report.tma_payload_accounted_relations.saturating_add(
+                relations
+                    .generation_relations
+                    .iter()
+                    .filter(|relation| {
+                        relation.service_state
+                            == sim_trace::async_sidecars::TmaServiceState::PayloadAccounted
+                    })
+                    .count() as u64,
+            );
+        report.tma_phase_readiness_relations = report.tma_phase_readiness_relations.saturating_add(
+            relations
                 .generation_relations
                 .iter()
                 .filter(|relation| {
                     relation.service_state
                         == sim_trace::async_sidecars::TmaServiceState::PhaseReadinessObserved
                 })
-                .count() as u64);
+                .count() as u64,
+        );
         report.unresolved_generation_barriers = report
             .unresolved_generation_barriers
             .saturating_add(relations.unresolved_generation_barriers);
@@ -300,19 +299,15 @@ fn add_dynamic(
         report.phase_readiness_observations = report
             .phase_readiness_observations
             .saturating_add(observations.phase_readiness_observations(cluster).len() as u64);
-        let (frontier, _) = sim_trace::obligations::ObligationFrontier::from_launch(
-            observations,
-            cluster,
+        let (frontier, _) =
+            sim_trace::obligations::ObligationFrontier::from_launch(observations, cluster);
+        report.query_evaluation_observations = report.query_evaluation_observations.saturating_add(
+            frontier
+                .consumer_frontiers
+                .iter()
+                .filter(|frontier| frontier.query_evaluation_observed)
+                .count() as u64,
         );
-        report.query_evaluation_observations = report
-            .query_evaluation_observations
-            .saturating_add(
-                frontier
-                    .consumer_frontiers
-                    .iter()
-                    .filter(|frontier| frontier.query_evaluation_observed)
-                    .count() as u64,
-            );
         report.pre_result_frontiers = report
             .pre_result_frontiers
             .saturating_add(frontier.pre_result_frontiers);
@@ -325,15 +320,13 @@ fn add_dynamic(
         report.deferred_arrival_obligations = report
             .deferred_arrival_obligations
             .saturating_add(frontier.deferred_arrival_obligations);
-        report.accounting_events = report
-            .accounting_events
-            .saturating_add(
-                frontier
-                    .ledgers
-                    .iter()
-                    .map(|ledger| ledger.accounting_events.len() as u64)
-                    .sum::<u64>(),
-            );
+        report.accounting_events = report.accounting_events.saturating_add(
+            frontier
+                .ledgers
+                .iter()
+                .map(|ledger| ledger.accounting_events.len() as u64)
+                .sum::<u64>(),
+        );
     }
     Ok(())
 }
@@ -356,8 +349,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let mut protocol_routing = ProtocolRouting {
         classification_scope: "static_opcode_join_candidate; runtime_handler_not_observed",
-        source_rule:
-            "source metadata contains PHASECHK/ARRIVES.LDGSTSBAR; alpha schedule and handler effects are not executed by this report, so counts are candidate inventory only",
+        source_rule: "source metadata contains PHASECHK/ARRIVES.LDGSTSBAR; alpha schedule and handler effects are not executed by this report, so counts are candidate inventory only",
         ..ProtocolRouting::default()
     };
     add_dynamic(

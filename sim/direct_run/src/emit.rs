@@ -6,9 +6,7 @@
 
 use serde::ser::{Serialize, SerializeStruct, Serializer};
 use sim_arch::ArchId;
-use sim_mem::{
-    L1CounterError, L1Counters, L1OriginCounters, L2Counters, L2Source, MemoryOrigin,
-};
+use sim_mem::{L1CounterError, L1Counters, L1OriginCounters, L2Counters, L2Source, MemoryOrigin};
 use sim_sm::{
     DramStats, FrontEndCounters, FullCounterEstimatorProvenance, FullKernelReplayResult,
     FullLaunchCoverage, FullLaunchSetCounters, FullLaunchTimingDiagnostic, L2SourceSplit,
@@ -453,11 +451,17 @@ impl MemUnit {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Unavailable {
     /// This descriptor has no reviewed counting semantics on the replay architecture.
-    ArchitectureUnsupported { arch: ArchId },
+    ArchitectureUnsupported {
+        arch: ArchId,
+    },
     /// The replay's mem-mode did not attach the counting unit this metric
     /// reads (e.g. no L2 counters under `Flat`/`L1Const`).
-    MemModeLacksUnit { needs: MemUnit },
-    ScopeUnestablished { detail: &'static str },
+    MemModeLacksUnit {
+        needs: MemUnit,
+    },
+    ScopeUnestablished {
+        detail: &'static str,
+    },
 }
 
 impl Serialize for Unavailable {
@@ -917,9 +921,10 @@ pub(crate) fn global_resident_hit_adjustment(
     }
     trace
         .map(|metrics| {
-            metrics
-                .l1_global_resident_hits
-                .saturating_sub(l1.origin(MemoryOrigin::Global).effective_lookup_hits())
+            metrics.l1_global_resident_hits.saturating_sub(
+                l1.origin(MemoryOrigin::Global)
+                    .effective_lookup_hits_for_arch(arch),
+            )
         })
         .unwrap_or(0)
 }
@@ -952,9 +957,10 @@ pub(crate) fn global_read_resident_hit_adjustment(
     }
     trace
         .map(|metrics| {
-            metrics
-                .l1_global_resident_hits
-                .saturating_sub(l1.origin(MemoryOrigin::Global).effective_lookup_hits())
+            metrics.l1_global_resident_hits.saturating_sub(
+                l1.origin(MemoryOrigin::Global)
+                    .effective_lookup_hits_for_arch(arch),
+            )
         })
         .unwrap_or(0)
 }
@@ -1019,10 +1025,12 @@ fn single_binding_cycles(result: &FullKernelReplayResult) -> Result<BindingCycle
         frontier = frontier.max(cycles);
     }
     if let Some(envelope) = super::sm120_front_end_envelope_cycles(result) {
-        frontier = frontier.checked_add(envelope).ok_or(EmitError::CounterOverflow {
-            key: "exec_cycles_gpc_max",
-            operation: "SM120 GPC front-end envelope",
-        })?;
+        frontier = frontier
+            .checked_add(envelope)
+            .ok_or(EmitError::CounterOverflow {
+                key: "exec_cycles_gpc_max",
+                operation: "SM120 GPC front-end envelope",
+            })?;
     }
     Ok(BindingCycles::from_aggregated_frontier(frontier))
 }
@@ -1067,10 +1075,11 @@ fn emit_gmem_st_sectors(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitError
 }
 
 /// `l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct` — the op_ld sector
-/// lookup-hit rate. NCU counts resident-data hits plus accesses that merge into
-/// a fill allocated by an earlier logical request. Same-request line-sector
-/// coalescing remains a miss. The denominator also folds in READ-class bypass
-/// (LDGSTS `.BYPASS`) sectors, which cannot hit L1.
+/// tag-lookup-hit rate. The bounded observer counts resident hits and merge
+/// observations, then removes one tag miss for each fresh line allocation.
+/// This is deliberately separate from modeled data readiness. The denominator
+/// also folds in READ-class bypass (LDGSTS `.BYPASS`) sectors, which cannot hit
+/// L1.
 fn emit_l1tex_read_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitError> {
     let key = "cache_hit_rate_l1tex_read_sector";
     let Some(l1) = snap.l1 else {
@@ -1080,7 +1089,7 @@ fn emit_l1tex_read_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitE
     };
     let global = l1.origin(MemoryOrigin::Global);
     let num = global
-        .effective_lookup_hits()
+        .effective_lookup_hits_for_arch(snap.arch)
         .saturating_add(global_read_resident_hit_adjustment(
             snap.arch,
             l1,
@@ -1108,28 +1117,31 @@ pub(crate) fn l1_write_hit_terms(
 ) -> [u64; 2] {
     match arch {
         ArchId::Sm86 => [l1.write_lookup_hits, 0],
-        ArchId::Sm120 if trace.is_some_and(|metrics| {
-            metrics
-                .launch_resources
-                .as_ref()
-                .is_some_and(|resources| resources.block_threads <= 256)
-                &&
-            metrics
-                .memory
-                .get("global_store")
-                .is_none_or(|traffic| traffic.sectors == 0)
-                && metrics
-                    .memory
-                    .get("unclassified_global")
-                    .is_some_and(|traffic| traffic.sectors != 0)
-        }) => [l1.write_lookup_hits, l1.reduction_hits],
+        ArchId::Sm120
+            if trace.is_some_and(|metrics| {
+                metrics
+                    .launch_resources
+                    .as_ref()
+                    .is_some_and(|resources| resources.block_threads <= 256)
+                    && metrics
+                        .memory
+                        .get("global_store")
+                        .is_none_or(|traffic| traffic.sectors == 0)
+                    && metrics
+                        .memory
+                        .get("unclassified_global")
+                        .is_some_and(|traffic| traffic.sectors != 0)
+            }) =>
+        {
+            [l1.write_lookup_hits, l1.reduction_hits]
+        }
         ArchId::Sm120 => [l1.store_hits, l1.reduction_hits],
     }
 }
 
-/// `l1tex__t_sector_hit_rate.pct` — the unified L1TEX sector hit rate over all
-/// modeled op classes. Loads use resident-data hits plus prior-request pending-
-/// fill merges; write-hit accounting is architecture-specific (see above).
+/// `l1tex__t_sector_hit_rate.pct` — the unified L1TEX sector lookup-hit rate
+/// over all modeled op classes. Loads use the bounded tag-lookup projection;
+/// write-hit accounting is architecture-specific (see above).
 /// The full bypass stream (atom included) is in the denominator —
 /// `bypass_atom_sectors` must NOT be added on top because it is already a subset
 /// of `bypass_sectors`.
@@ -1148,26 +1160,26 @@ fn emit_l1tex_unified_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, Em
             metrics.local_interleaved_dynamic_store_records != 0
                 && metrics.local_interleaved_l1_store_hits != 0
         });
-    let (local_read_hits, local_read_den, local_store_hits, local_store_den) =
-        if use_local_observer {
-            let metrics = snap.trace_metrics.expect("observer predicate proved");
-            (
-                metrics.local_interleaved_l1_load_hits,
-                metrics.local_interleaved_load_sectors,
-                metrics.local_interleaved_l1_store_hits,
-                metrics.local_interleaved_store_sectors,
-            )
-        } else {
-            (
-                local.effective_lookup_hits(),
-                local_read_requests,
-                local.store_hits,
-                local_store_sectors,
-            )
-        };
+    let (local_read_hits, local_read_den, local_store_hits, local_store_den) = if use_local_observer
+    {
+        let metrics = snap.trace_metrics.expect("observer predicate proved");
+        (
+            metrics.local_interleaved_l1_load_hits,
+            metrics.local_interleaved_load_sectors,
+            metrics.local_interleaved_l1_store_hits,
+            metrics.local_interleaved_store_sectors,
+        )
+    } else {
+        (
+            local.effective_lookup_hits_for_arch(snap.arch),
+            local_read_requests,
+            local.store_hits,
+            local_store_sectors,
+        )
+    };
     let global = l1.origin(MemoryOrigin::Global);
     let effective_read_hits = global
-        .effective_lookup_hits()
+        .effective_lookup_hits_for_arch(snap.arch)
         .saturating_add(global_resident_hit_adjustment(
             snap.arch,
             l1,
@@ -1264,17 +1276,23 @@ fn emit_l2_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitError> {
     )?))
 }
 
-/// `dram__sectors_op_read.sum` — data demand plus compulsory executed SASS
-/// sectors. Effective SM120 runs additionally include observed global-to-shared
-/// TMA load payload sectors when the sidecar supplies them; this is a
-/// conditional demand model, not a recovered engine path.
+/// `dram__sectors_op_read.sum` — data demand plus source-qualified front-end
+/// fetch demand.  SM86 GCC/ICC fetches whole aligned 128-byte instruction
+/// lines, so its term uses the unique-line sector ledger rather than the
+/// smaller set of executed 32-byte sectors.  Effective SM120 runs retain the
+/// historical executed-sector/TMA demand arm.  None of these terms changes
+/// cache state or DRAM service timing.
 fn emit_dram_read_sectors(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitError> {
     let Some(dram) = snap.dram else {
         return Ok(EmitOutcome::Unavailable(Unavailable::MemModeLacksUnit {
             needs: MemUnit::Dram,
         }));
     };
-    let compulsory = snap.front_end.compulsory_instruction_read_sectors();
+    let compulsory = if snap.arch == ArchId::Sm86 {
+        snap.front_end.static_instruction_line_read_sectors()
+    } else {
+        snap.front_end.compulsory_instruction_read_sectors()
+    };
     // Small traced launches with a compact instruction footprint can expose
     // compulsory constant-bank sectors outside the TEX data path. Keep this
     // source-derived arm narrow: both the global-load and executed-code
@@ -1309,6 +1327,7 @@ fn emit_dram_read_sectors(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitErr
             Some(snap.partial_store_sectors.min(store_misses))
         })
         .unwrap_or(0);
+
     let total = if snap.arch == ArchId::Sm120 {
         checked_sum(
             "traffic_dram_read_sectors",
@@ -1324,7 +1343,7 @@ fn emit_dram_read_sectors(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitErr
     } else {
         checked_sum(
             "traffic_dram_read_sectors",
-            "data and compulsory instruction DRAM-read sectors",
+            "data and aligned 128-byte GCC instruction-line DRAM-read sectors",
             &[dram.read_sectors, compulsory],
         )?
     };

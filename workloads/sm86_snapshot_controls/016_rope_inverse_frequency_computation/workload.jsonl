@@ -1,0 +1,1 @@
+{"axes": {"half_head_dim": 64, "head_dim": 128}, "inputs": {"rope_theta": {"type": "scalar", "value": 4000000.0}}}

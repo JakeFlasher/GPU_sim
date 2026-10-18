@@ -408,16 +408,19 @@ fn compact_sector_ids(
     let mut diagnostics = SectorDiagnostics::default();
     for value in values {
         if value.oob {
-            diagnostics.raw_oob_address_refs = diagnostics.raw_oob_address_refs
+            diagnostics.raw_oob_address_refs = diagnostics
+                .raw_oob_address_refs
                 .checked_add(1)
                 .ok_or("TMA OOB-address diagnostic counter overflow")?;
             continue;
         }
-        diagnostics.raw_valid_address_refs = diagnostics.raw_valid_address_refs
+        diagnostics.raw_valid_address_refs = diagnostics
+            .raw_valid_address_refs
             .checked_add(1)
             .ok_or("TMA valid-address diagnostic counter overflow")?;
         let sector = value.address >> 5;
-        let sector = i64::try_from(sector).map_err(|_| "TMA source address exceeds the signed sector-id domain")?;
+        let sector = i64::try_from(sector)
+            .map_err(|_| "TMA source address exceeds the signed sector-id domain")?;
         if seen.insert(sector) {
             sectors.push(sector);
         }
@@ -431,8 +434,8 @@ fn compact_sector_ids(
     for &sector in &sectors {
         lines.insert(sector.div_euclid(4));
     }
-    diagnostics.unique_line_count = u64::try_from(lines.len())
-        .map_err(|_| "TMA unique-line diagnostic counter overflow")?;
+    diagnostics.unique_line_count =
+        u64::try_from(lines.len()).map_err(|_| "TMA unique-line diagnostic counter overflow")?;
     Ok((sectors.into_boxed_slice(), diagnostics))
 }
 
@@ -585,20 +588,27 @@ impl AsyncSidecars {
                         compact_sector_ids(row.src_addresses.as_deref())
                             .map_err(|message| error(message.to_owned()))?
                     } else {
-                        (Vec::<i64>::new().into_boxed_slice(), SectorDiagnostics::default())
+                        (
+                            Vec::<i64>::new().into_boxed_slice(),
+                            SectorDiagnostics::default(),
+                        )
                     };
                     let (destination_sector_ids, destination_diagnostics) = if head == "UTMASTG" {
                         compact_sector_ids(row.dst_addresses.as_deref())
                             .map_err(|message| error(message.to_owned()))?
                     } else {
-                        (Vec::<i64>::new().into_boxed_slice(), SectorDiagnostics::default())
+                        (
+                            Vec::<i64>::new().into_boxed_slice(),
+                            SectorDiagnostics::default(),
+                        )
                     };
                     let sector_diagnostics = if is_load {
                         source_diagnostics
                     } else {
                         destination_diagnostics
                     };
-                    let tensor_map_data_type = row.tensor_map.as_ref().and_then(|map| map.data_type);
+                    let tensor_map_data_type =
+                        row.tensor_map.as_ref().and_then(|map| map.data_type);
                     let tensor_map_rank = row.tensor_map.as_ref().and_then(|map| map.rank);
                     let tensor_map_box_dims = row
                         .tensor_map
@@ -1337,10 +1347,7 @@ impl LaunchObservations {
     /// multiple unresolved arrivals are retained as candidates instead of
     /// pairing records by parity/file order.  The resulting service state is
     /// model/evidence state; no engine completion timestamp is introduced.
-    pub fn tma_generation_relations(
-        &self,
-        cluster: [u32; 3],
-    ) -> Vec<TmaGenerationRelation> {
+    pub fn tma_generation_relations(&self, cluster: [u32; 3]) -> Vec<TmaGenerationRelation> {
         type Barrier = ([u32; 3], u32, Option<u32>, Option<u32>);
         const MAX_RELATIONS: usize = 512;
         const MAX_EVENT_REFS: usize = 64;
@@ -1420,8 +1427,7 @@ impl LaunchObservations {
                 .collect();
             let phase_query_event_count = phase_query_events.len() as u64;
             let successful_phase_query_event_count = successful_phase_query_events.len() as u64;
-            let unsuccessful_phase_query_event_count =
-                unsuccessful_phase_query_events.len() as u64;
+            let unsuccessful_phase_query_event_count = unsuccessful_phase_query_events.len() as u64;
             let event_refs_truncated = phase_query_events.len() > MAX_EVENT_REFS
                 || successful_phase_query_events.len() > MAX_EVENT_REFS
                 || unsuccessful_phase_query_events.len() > MAX_EVENT_REFS;
@@ -1433,17 +1439,17 @@ impl LaunchObservations {
                 .into_iter()
                 .take(MAX_EVENT_REFS)
                 .collect();
-            let unsuccessful_phase_query_events: Vec<ObservationKey> = unsuccessful_phase_query_events
-                .into_iter()
-                .take(MAX_EVENT_REFS)
-                .collect();
+            let unsuccessful_phase_query_events: Vec<ObservationKey> =
+                unsuccessful_phase_query_events
+                    .into_iter()
+                    .take(MAX_EVENT_REFS)
+                    .collect();
             let expected_transaction_bytes = matching_sync
                 .iter()
                 .filter_map(|(_, observation)| observation.expected_tx_bytes)
                 .next();
-            let observed_payload_bytes = producers
-                .iter()
-                .try_fold(0_u64, |sum, (_, observation)| {
+            let observed_payload_bytes =
+                producers.iter().try_fold(0_u64, |sum, (_, observation)| {
                     sum.checked_add(observation.bytes?)
                 });
             let (observed_payload_bytes, payload_conservation) = match observed_payload_bytes {
@@ -1455,7 +1461,9 @@ impl LaunchObservations {
             };
             let scope_exact = raw.is_some()
                 && (cluster == [1, 1, 1] || rank.is_none())
-                && producers.iter().all(|(_, observation)| observation.bytes.is_some());
+                && producers
+                    .iter()
+                    .all(|(_, observation)| observation.bytes.is_some());
             let exact = accounting_events.len() == 1
                 && payload_conservation
                 && scope_exact

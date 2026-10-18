@@ -346,10 +346,23 @@ pub struct L2SourceSplit {
     pub read_pending_merge_hits: u64,
     pub store_lookup_requests: u64,
     pub store_lookup_hits: u64,
+    /// Observer-only per-SM line/sector packet candidate. A second global
+    /// store to the same sector within the bounded admission window is
+    /// retained as one candidate packet; this never changes the L2 state,
+    /// source-sector baseline, DRAM demand, or timing.
+    pub store_packet_candidate_sectors: u64,
     pub atomic_lookup_requests: u64,
     pub atomic_lookup_hits: u64,
     pub reduction_lookup_requests: u64,
     pub reduction_lookup_hits: u64,
+    /// Source-qualified samples of the number of pending L2 sectors observed
+    /// immediately before each event request. This is a PRT/fill-pressure
+    /// observer, not a GA102 capacity claim or a timing input.
+    pub pending_pressure_samples: [u64; 4],
+    /// Sum of pending-sector counts for the corresponding source samples.
+    /// Consumers can form a bounded mean pressure without treating a gauge as
+    /// additive traffic or selecting a hidden hash.
+    pub pending_pressure_sum: [u64; 4],
     origin_sectors: [[u64; 4]; 2],
     origin_hits: [[u64; 4]; 2],
 }
@@ -527,6 +540,8 @@ impl L2SourceSplit {
         }
         let mut sectors = [0; 4];
         let mut hits = [0; 4];
+        let mut pending_pressure_samples = [0; 4];
+        let mut pending_pressure_sum = [0; 4];
         for i in 0..4 {
             sectors[i] = self.sectors[i].checked_add(other.sectors[i]).ok_or(
                 SystemCounterError::Overflow {
@@ -539,6 +554,16 @@ impl L2SourceSplit {
                     .ok_or(SystemCounterError::Overflow {
                         counter: "L2 source hits",
                     })?;
+            pending_pressure_samples[i] = self.pending_pressure_samples[i]
+                .checked_add(other.pending_pressure_samples[i])
+                .ok_or(SystemCounterError::Overflow {
+                    counter: "L2 source pending-pressure samples",
+                })?;
+            pending_pressure_sum[i] = self.pending_pressure_sum[i]
+                .checked_add(other.pending_pressure_sum[i])
+                .ok_or(SystemCounterError::Overflow {
+                    counter: "L2 source pending-pressure sum",
+                })?;
         }
         let mut origin_sectors = [[0; 4]; 2];
         let mut origin_hits = [[0; 4]; 2];
@@ -591,6 +616,12 @@ impl L2SourceSplit {
                 .ok_or(SystemCounterError::Overflow {
                     counter: "L2 store lookup hits",
                 })?,
+            store_packet_candidate_sectors: self
+                .store_packet_candidate_sectors
+                .checked_add(other.store_packet_candidate_sectors)
+                .ok_or(SystemCounterError::Overflow {
+                    counter: "L2 store packet candidate sectors",
+                })?,
             atomic_lookup_requests: self
                 .atomic_lookup_requests
                 .checked_add(other.atomic_lookup_requests)
@@ -615,6 +646,8 @@ impl L2SourceSplit {
                 .ok_or(SystemCounterError::Overflow {
                     counter: "L2 reduction lookup hits",
                 })?,
+            pending_pressure_samples,
+            pending_pressure_sum,
             origin_sectors,
             origin_hits,
         };
@@ -629,17 +662,55 @@ impl L2SourceSplit {
 #[cfg(feature = "reference")]
 use crate::issue::AdvanceDiagnostics;
 use crate::issue::{
-    AdmissionRequestWitness, Advance, BlockReplay, IssueError, IssueModelParams,
-    MemRequest, MemoryAdmissionCandidate, MemoryAdmissionCandidateState, MemoryOperation,
-    MemoryServiceCandidate, MemoryWriteAck, PayloadStoreSite, ReplayHorizon, ReplyTo,
-    SharedMemoryResidency, SmCore, SmMemMode, SmSimResult, TailFlags, checked_cycle_add,
-    stateful_write_lookup_observer_enabled, validate_memory_admission_candidates,
-    validate_memory_service_candidates,
+    AdmissionRequestWitness, Advance, BlockReplay, IssueError, IssueModelParams, MemRequest,
+    MemoryAdmissionCandidate, MemoryAdmissionCandidateState, MemoryOperation,
+    MemoryServiceCandidate, MemoryServiceCandidateOperation, MemoryWriteAck, PayloadStoreSite,
+    ReplayHorizon, ReplyTo, SharedMemoryResidency, SmCore, SmMemMode, SmSimResult, TailFlags,
+    checked_cycle_add, stateful_write_lookup_observer_enabled,
+    validate_memory_admission_candidates, validate_memory_service_candidates,
 };
 use crate::program::FunctionSchedule;
 #[cfg(feature = "reference")]
 use sim_mem::FillKey;
-use sim_mem::L1WriteLookupObserver;
+use sim_mem::{L1WriteLookupObserver, MemRole};
+
+/// Gate the opt-in write-admission/completion arm on a source-qualified
+/// workload shape. A candidate may be present in the replay configuration for
+/// every launch, but it is timing-active only when the static stream contains
+/// global STORE/RED work and either a device-scope fence/ERRBAR/CCTL marker or
+/// the candidate's explicit terminal-EXIT drain arm. The latter is a bounded
+/// no-fence path: it reuses the typed acknowledgement stream rather than
+/// claiming a generic store queue or a physical CTA-retirement mechanism.
+fn qualifies_store_fence_feedback(
+    schedule: &FunctionSchedule,
+    candidate: MemoryAdmissionCandidate,
+) -> bool {
+    let has_global_write = schedule.by_pc.values().any(|slot| {
+        matches!(
+            (candidate.operation, slot.mem_role()),
+            (MemoryServiceCandidateOperation::Store, MemRole::Store)
+                | (
+                    MemoryServiceCandidateOperation::Reduction,
+                    MemRole::Reduction
+                )
+        )
+    });
+    let has_device_fence = schedule.by_pc.values().any(|slot| {
+        slot.visibility_fence_semantics()
+            .is_some_and(|(scope, _)| scope == sim_mem::VisibilityScope::Device)
+    });
+    let has_errbar_or_cctl = schedule.by_pc.values().any(|slot| {
+        let opcode = slot.opcode_text().split_ascii_whitespace().next();
+        matches!(opcode, Some("ERRBAR") | Some("CCTL.IVALL"))
+    });
+    has_global_write
+        && (has_device_fence
+            || has_errbar_or_cctl
+            || ((candidate.exit_waits_for_service_completion
+                || candidate.exit_waits_for_admission_drain)
+                && !has_device_fence
+                && !has_errbar_or_cctl))
+}
 
 #[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum SystemCounterError {
@@ -2584,7 +2655,7 @@ struct L2SystemCommit {
     observed_hits: u64,
     /// Observer-only read/atomic contribution. Store/reduction packetization
     /// is reconstructed from the issuing instruction topology after the event
-    /// stream drains, so it never changes physical L2 state or response time.
+    /// stream drains, so it never changes modeled L2 state or response time.
     lookup_observer_requests: u64,
     lookup_observer_hits: u64,
     read_lookup_requests: u64,
@@ -2596,13 +2667,29 @@ struct L2SystemCommit {
     atomic_lookup_hits: u64,
     reduction_lookup_requests: u64,
     reduction_lookup_hits: u64,
+    /// Source-qualified sectored fill-ownership observer. A pending merge is
+    /// a lookup miss that reuses an older allocation's ready frontier; a new
+    /// fill owns a new lower-level fetch capability. These values never alter
+    /// service timing or cache state.
+    pending_merge_sectors: u64,
+    new_fill_sectors: u64,
+    pending_pressure_samples: u64,
+    pending_pressure_sum: u64,
+    l2_frontier_samples: u64,
+    l2_issue_to_fill_cycles_sum: u64,
+    l2_issue_to_fill_cycles_max: u64,
+    l2_issue_to_response_cycles_sum: u64,
+    l2_issue_to_response_cycles_max: u64,
+    l2_service_delay_cycles_sum: u64,
+    l2_service_delay_cycles_max: u64,
 }
 
 /// Aggregate DRAM read-bandwidth model (the §6.3 "DRAM
-/// bandwidth-latency" increment). The carded covariate is the vendor
-/// peak at the LOCKED operating point (`ArchCard.dram_bandwidth` —
-/// bytes/second over the locked SM clock, ~747 B/SM-cycle on the
-/// 3090 Ti); the model is one G/D/1 byte server over the shared hierarchy
+/// bandwidth-latency" increment). The configured carded rate is a model
+/// covariate: the corpus runner defaults to the independently measured
+/// 825 GB/s effective-rate hypothesis, while direct `sim-run` without an
+/// override falls back to the architecture-card peak. Neither value is a
+/// physical controller claim; the model is one G/D/1 byte server over the shared hierarchy
 /// read-miss sector stream: each fetching sector demands 32 B, and a
 /// reply-carrying request or intrinsically returning ATOM cannot complete
 /// before BOTH its latency arm and the server's completion of ITS OWN request's
@@ -2621,7 +2708,8 @@ pub enum DramBw {
     /// event-vs-const equivalence-differential mode — the constant path
     /// has no bandwidth concept, so equivalence is proven here.
     Unmodeled { arch: ArchId },
-    /// Carded aggregate service rate at the locked operating point.
+    /// Configured carded aggregate service rate; runner/default provenance is
+    /// carried by the direct-run configuration rather than inferred here.
     Carded {
         arch: ArchId,
         bytes_per_sec: u64,
@@ -2653,6 +2741,15 @@ impl DramBw {
                 capacity_sectors, ..
             } => Some(capacity_sectors),
             _ => None,
+        }
+    }
+
+    pub const fn service_rate_bytes_per_sec(self) -> Option<u64> {
+        match self {
+            Self::Carded { bytes_per_sec, .. } | Self::CardedWriteback { bytes_per_sec, .. } => {
+                Some(bytes_per_sec)
+            }
+            Self::Unmodeled { .. } => None,
         }
     }
 }
@@ -2747,6 +2844,7 @@ pub struct DramStats {
     /// Architecture provenance bound by the shared-L2 system. Unbound
     /// synthetic stats are rejected before aggregation or emission.
     arch: Option<ArchId>,
+    pub service_rate_bytes_per_sec: Option<u64>,
     /// 32 B DRAM read fetches DEMANDED by the run (L2-missing sectors
     /// of read operations plus missing sectors of ATOM and RED internal RMW reads).
     /// Counted in BOTH modes: under `Unmodeled` it audits the ablation's demand
@@ -2804,6 +2902,21 @@ pub struct DramStats {
     pub maximum_terminal_l2_dirty_sectors: u64,
     pub maximum_terminal_l1_dirty_lines: u64,
     pub maximum_terminal_l1_dirty_sectors: u64,
+    /// Observer-only effective partition/slice pressure candidates. The
+    /// mapping uses line-id modulo/XOR hypotheses; it is not physical GA102
+    /// swizzling and never feeds the byte server.
+    pub dram_partition_modulo_sectors: [u64; 12],
+    pub dram_partition_xor_sectors: [u64; 12],
+    pub dram_slice_modulo_sectors: [u64; 6],
+    /// Timing-neutral per-request frontier observers. Sums are model-domain
+    /// intervals, not hardware completion timestamps or queue claims.
+    pub l2_frontier_samples: u64,
+    pub l2_issue_to_fill_cycles_sum: u64,
+    pub l2_issue_to_fill_cycles_max: u64,
+    pub l2_issue_to_response_cycles_sum: u64,
+    pub l2_issue_to_response_cycles_max: u64,
+    pub l2_service_delay_cycles_sum: u64,
+    pub l2_service_delay_cycles_max: u64,
     by_origin: [DramOriginStats; 2],
 }
 
@@ -2813,6 +2926,11 @@ impl DramStats {
             arch: Some(arch),
             ..Self::default()
         }
+    }
+
+    pub fn with_service_rate(mut self, rate: Option<u64>) -> Self {
+        self.service_rate_bytes_per_sec = rate;
+        self
     }
 
     pub fn arch(&self) -> Option<ArchId> {
@@ -2886,6 +3004,29 @@ impl DramStats {
         Ok(self)
     }
 
+    fn with_partition_candidate(mut self, line: i64, sectors: u64) -> Result<Self, SystemError> {
+        let line = u64::try_from(line).unwrap_or_default();
+        let modulo = usize::try_from(line % 12).unwrap_or(0);
+        let xor = usize::try_from((line ^ (line >> 7)) % 12).unwrap_or(0);
+        let slice = usize::try_from(line % 6).unwrap_or(0);
+        self.dram_partition_modulo_sectors[modulo] = self.dram_partition_modulo_sectors[modulo]
+            .checked_add(sectors)
+            .ok_or(SystemError::CounterOverflow {
+                counter: "DRAM modulo partition candidate sectors",
+            })?;
+        self.dram_partition_xor_sectors[xor] = self.dram_partition_xor_sectors[xor]
+            .checked_add(sectors)
+            .ok_or(SystemError::CounterOverflow {
+                counter: "DRAM XOR partition candidate sectors",
+            })?;
+        self.dram_slice_modulo_sectors[slice] = self.dram_slice_modulo_sectors[slice]
+            .checked_add(sectors)
+            .ok_or(SystemError::CounterOverflow {
+                counter: "DRAM slice candidate sectors",
+            })?;
+        Ok(self)
+    }
+
     /// Build a coherent synthetic observer from explicit origin lanes.
     pub fn from_origins(
         arch: ArchId,
@@ -2909,6 +3050,7 @@ impl DramStats {
             })?;
         Ok(Self {
             arch: Some(arch),
+            service_rate_bytes_per_sec: None,
             read_sectors,
             atomic_rmw_read_sectors: 0,
             reduction_rmw_read_sectors: 0,
@@ -2936,6 +3078,16 @@ impl DramStats {
             maximum_terminal_l2_dirty_sectors: 0,
             maximum_terminal_l1_dirty_lines: 0,
             maximum_terminal_l1_dirty_sectors: 0,
+            dram_partition_modulo_sectors: [0; 12],
+            dram_partition_xor_sectors: [0; 12],
+            dram_slice_modulo_sectors: [0; 6],
+            l2_frontier_samples: 0,
+            l2_issue_to_fill_cycles_sum: 0,
+            l2_issue_to_fill_cycles_max: 0,
+            l2_issue_to_response_cycles_sum: 0,
+            l2_issue_to_response_cycles_max: 0,
+            l2_service_delay_cycles_sum: 0,
+            l2_service_delay_cycles_max: 0,
             by_origin: [global, local],
         })
     }
@@ -3049,6 +3201,52 @@ impl DramStats {
             add_topology!(l2_dirty_eviction_lines, "L2 dirty eviction lines");
         let l2_dirty_evicted_sectors =
             add_topology!(l2_dirty_evicted_sectors, "L2 dirty evicted sectors");
+        let mut dram_partition_modulo_sectors = [0; 12];
+        let mut dram_partition_xor_sectors = [0; 12];
+        let mut dram_slice_modulo_sectors = [0; 6];
+        for index in 0..12 {
+            dram_partition_modulo_sectors[index] = self.dram_partition_modulo_sectors[index]
+                .checked_add(other.dram_partition_modulo_sectors[index])
+                .ok_or(SystemCounterError::Overflow {
+                    counter: "DRAM modulo partition candidate sectors",
+                })?;
+            dram_partition_xor_sectors[index] = self.dram_partition_xor_sectors[index]
+                .checked_add(other.dram_partition_xor_sectors[index])
+                .ok_or(SystemCounterError::Overflow {
+                    counter: "DRAM XOR partition candidate sectors",
+                })?;
+        }
+        for index in 0..6 {
+            dram_slice_modulo_sectors[index] = self.dram_slice_modulo_sectors[index]
+                .checked_add(other.dram_slice_modulo_sectors[index])
+                .ok_or(SystemCounterError::Overflow {
+                    counter: "DRAM slice candidate sectors",
+                })?;
+        }
+        macro_rules! add_frontier {
+            ($field:ident, $name:literal) => {
+                let $field = self
+                    .$field
+                    .checked_add(other.$field)
+                    .ok_or(SystemCounterError::Overflow { counter: $name })?;
+            };
+        }
+        add_frontier!(l2_frontier_samples, "L2 frontier samples");
+        add_frontier!(l2_issue_to_fill_cycles_sum, "L2 issue-to-fill cycles");
+        let l2_issue_to_fill_cycles_max = self
+            .l2_issue_to_fill_cycles_max
+            .max(other.l2_issue_to_fill_cycles_max);
+        add_frontier!(
+            l2_issue_to_response_cycles_sum,
+            "L2 issue-to-response cycles"
+        );
+        let l2_issue_to_response_cycles_max = self
+            .l2_issue_to_response_cycles_max
+            .max(other.l2_issue_to_response_cycles_max);
+        add_frontier!(l2_service_delay_cycles_sum, "L2 service-delay cycles");
+        let l2_service_delay_cycles_max = self
+            .l2_service_delay_cycles_max
+            .max(other.l2_service_delay_cycles_max);
         let mut by_origin = self.by_origin;
         for origin in MemoryOrigin::ALL {
             let origin_ix = origin.index();
@@ -3067,6 +3265,9 @@ impl DramStats {
         }
         let next = Self {
             arch: self.arch,
+            service_rate_bytes_per_sec: self
+                .service_rate_bytes_per_sec
+                .or(other.service_rate_bytes_per_sec),
             read_sectors,
             atomic_rmw_read_sectors,
             reduction_rmw_read_sectors,
@@ -3161,6 +3362,16 @@ impl DramStats {
             maximum_terminal_l1_dirty_sectors: self
                 .maximum_terminal_l1_dirty_sectors
                 .max(other.maximum_terminal_l1_dirty_sectors),
+            dram_partition_modulo_sectors,
+            dram_partition_xor_sectors,
+            dram_slice_modulo_sectors,
+            l2_frontier_samples,
+            l2_issue_to_fill_cycles_sum,
+            l2_issue_to_fill_cycles_max,
+            l2_issue_to_response_cycles_sum,
+            l2_issue_to_response_cycles_max,
+            l2_service_delay_cycles_sum,
+            l2_service_delay_cycles_max,
             by_origin,
         };
         self.validate_origin_partition()?;
@@ -3241,9 +3452,7 @@ pub struct L1PayloadAdmissionEvent {
 /// mode; `Carded` rates are validated non-zero here (typed
 /// [`SystemError::DramBandwidthInvalid`], never a clamp).
 
-
 #[allow(clippy::too_many_arguments)]
-
 
 /// Drain resident dirty sectors from the per-SM L1s through the explicit
 /// writeback queue. The cache plans are committed only after every lower-level
@@ -3475,6 +3684,8 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
     checked_l2_counters(arch, l2)?;
     require_arch(arch, dram.arch(), "DRAM configuration")?;
     require_l2_pending_read_semantics(arch, l2.config().is_effective())?;
+    let memory_admission_feedback = memory_admission_feedback
+        .filter(|candidate| qualifies_store_fence_feedback(schedule, *candidate));
     params.validate_l1_timing(l1_config)?;
     // Fail closed on an inverted ladder: every horizon/run-ahead bound
     // below assumes no response can price under the L2-hit arm.
@@ -3593,11 +3804,14 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
     });
 
     let mut queue: EventQueue<Ev> = EventQueue::new();
+    // Replyless STORE/RED requests remain batchable even when the typed
+    // admission/ack lane is active. The batch event still processes each
+    // request independently; retaining it avoids changing unrelated L2
+    // ordering merely because the terminal-EXIT arm is enabled.
     #[cfg(feature = "performance-counters")]
-    let batch_replyless_writes = memory_admission_feedback.is_none()
-        && std::env::var_os("SIM_RUN_DISABLE_L2_ACCESS_BATCHING").is_none();
+    let batch_replyless_writes = std::env::var_os("SIM_RUN_DISABLE_L2_ACCESS_BATCHING").is_none();
     #[cfg(not(feature = "performance-counters"))]
-    let batch_replyless_writes = memory_admission_feedback.is_none();
+    let batch_replyless_writes = true;
     let mut scratch: Vec<MemRequest> = Vec::new();
     let mut l1_visibility_observations = Vec::new();
     let mut l1_fence_observations = Vec::new();
@@ -3654,7 +3868,8 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
     } else {
         None
     };
-    let mut dram_stats = DramStats::for_arch(arch);
+    let mut dram_stats =
+        DramStats::for_arch(arch).with_service_rate(dram.service_rate_bytes_per_sec());
     // Seed actor wakes before producer events.  At equal cycle zero this lets
     // the actor observe `payload_due` and park before the value mutation is
     // applied, rather than allowing a queued payload admission to run ahead
@@ -3722,6 +3937,9 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
     let mut atomic_lookup_requests = 0_u64;
     let mut reduction_lookup_hits = 0_u64;
     let mut reduction_lookup_requests = 0_u64;
+    const STORE_PACKET_WINDOW_CYCLES: u64 = 8;
+    let mut store_packet_last: HashMap<(usize, i64, u8), u64> = HashMap::new();
+    let mut store_packet_candidate_sectors = 0_u64;
     let mut staged_l2 = l2.try_snapshot()?;
     while let Some(ev) = queue.pop()? {
         #[cfg(feature = "reference")]
@@ -3927,6 +4145,31 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                     // immediately. If insertion fails, the kernel-private L2
                     // snapshot is discarded and the caller-owned model is unchanged.
                     let line = req.sector_id >> 2;
+                    // Stage an observer-only per-SM line/sector packet
+                    // candidate. The source-sector baseline below remains
+                    // one sector per request; a failed transactional access
+                    // must not leak coalescer state.
+                    let mut store_packet_keys = Vec::new();
+                    if req.origin == MemoryOrigin::Global && req.operation == MemoryOperation::Store
+                    {
+                        store_packet_last.retain(|(owner, _, _), last| {
+                            *owner != sm_ix
+                                || req.issue_time.saturating_sub(*last)
+                                    <= STORE_PACKET_WINDOW_CYCLES
+                        });
+                        for sector in 0_u8..4 {
+                            if req.sector_mask & (1 << sector) == 0 {
+                                continue;
+                            }
+                            let key = (sm_ix, line, sector);
+                            let recent = store_packet_last.get(&key).is_some_and(|last| {
+                                req.issue_time.saturating_sub(*last) <= STORE_PACKET_WINDOW_CYCLES
+                            });
+                            if !recent {
+                                store_packet_keys.push(key);
+                            }
+                        }
+                    }
                     let (l2_access, commit) = staged_l2.access_mask_event_coalesced_transactional(
                         line,
                         req.sector_mask,
@@ -3935,42 +4178,64 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                             let lookup = preview.lookup;
                             let merged_ready = pending_l2_ready.merged_ready(preview)?;
                             pending_l2_ready.preflight_register(preview)?;
+                            let pending_pressure_sum = u64::try_from(pending_l2_ready.len())
+                                .map_err(|_| SystemError::CounterOverflow {
+                                    counter: "L2 pending-pressure occupancy",
+                                })?;
                             let requested_sectors = u64::from(lookup.sectors);
                             let counted_hits = u64::from(lookup.counted_hits);
+                            let pending_merge_sectors =
+                                u64::from(preview.pending_merge_mask().count_ones());
+                            let new_fill_sectors = u64::from(preview.fill_mask().count_ones());
                             let observer_operation =
                                 req.observer_operation.unwrap_or(req.operation);
-                            let lookup_for_operation = |operation| -> Result<(u64, u64), SystemError> {
-                                Ok(match operation {
-                                MemoryOperation::Read => (
-                                    requested_sectors,
-                                    counted_hits
-                                        .checked_add(u64::from(
-                                            preview.pending_merge_mask().count_ones(),
-                                        ))
-                                        .ok_or(SystemError::CounterOverflow {
-                                            counter: "L2 read lookup observer hits",
-                                        })?,
-                                ),
-                                // ATOM is a returning write-class request,
-                                // but the sector lookup observer still uses
-                                // present sectors. Physical write-tag and RMW
-                                // accounting remain separate from this
-                                // source-unit hit/miss endpoint.
-                                MemoryOperation::Atomic => (
-                                    requested_sectors,
-                                    u64::from(lookup.present_sectors),
-                                ),
-                                // The source-unit TEX sector observer counts
-                                // write-class lookup sectors too.  Keep these
-                                // as per-sector requests; packet counts are a
-                                // separate endpoint and must not be mixed into
-                                // `lts__t_sectors_srcunit_tex`.
-                                MemoryOperation::Store | MemoryOperation::Reduction => (
-                                    requested_sectors,
-                                    u64::from(lookup.present_sectors),
-                                ),
-                                })
-                            };
+                            let lookup_for_operation =
+                                |operation| -> Result<(u64, u64), SystemError> {
+                                    Ok(match operation {
+                                        MemoryOperation::Read => (
+                                            requested_sectors,
+                                            counted_hits
+                                                .checked_add(u64::from(
+                                                    preview.pending_merge_mask().count_ones(),
+                                                ))
+                                                .ok_or(SystemError::CounterOverflow {
+                                                    counter: "L2 read lookup observer hits",
+                                                })?,
+                                        ),
+                                        // ATOM is a returning write-class request,
+                                        // but the sector lookup observer still uses
+                                        // present sectors. Physical write-tag and RMW
+                                        // accounting remain separate from this
+                                        // source-unit hit/miss endpoint.
+                                        MemoryOperation::Atomic => {
+                                            (requested_sectors, u64::from(lookup.present_sectors))
+                                        }
+                                        // The source-unit TEX sector observer counts
+                                        // write-class lookup sectors too.  Keep these
+                                        // as per-sector requests; packet counts are a
+                                        // separate endpoint and must not be mixed into
+                                        // `lts__t_sectors_srcunit_tex`.
+                                        // The current source-unit projection retains
+                                        // the independently declared write-tag arm;
+                                        // write packetization and per-op NCU scope are
+                                        // not yet isolated across the scored corpus.
+                                        // This is observer-only and never changes L2
+                                        // state, DRAM demand, or completion timing.
+                                        MemoryOperation::Store => {
+                                            if arch == ArchId::Sm86 {
+                                                (requested_sectors, requested_sectors)
+                                            } else {
+                                                (
+                                                    requested_sectors,
+                                                    u64::from(lookup.present_sectors),
+                                                )
+                                            }
+                                        }
+                                        MemoryOperation::Reduction => {
+                                            (requested_sectors, u64::from(lookup.present_sectors))
+                                        }
+                                    })
+                                };
                             // Physical lookup totals remain tied to the
                             // actual hierarchy operation. The optional
                             // observer tag only partitions operation-qualified
@@ -4071,7 +4336,8 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                             let topology_stats = match preview.eviction() {
                                 Some(eviction) => dram_stats.with_l2_eviction(eviction)?,
                                 None => dram_stats,
-                            };
+                            }
+                            .with_partition_candidate(line, fetch_sectors)?;
                             // Clean replacements remain topology observations;
                             // only a nonzero dirty mask reserves writeback
                             // service capacity.
@@ -4288,6 +4554,23 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                             } else {
                                 None
                             };
+                            let service_done = read_service
+                                .as_ref()
+                                .map(|plan| plan.service_done_cycle())
+                                .or_else(|| service_preview.map(|(_, ready)| ready));
+                            let l2_frontier_samples = u64::from(
+                                fetch_sectors != 0 || response.is_some() || service_done.is_some(),
+                            );
+                            let issue_to_fill_cycles = fill_ready
+                                .map(|ready| ready.saturating_sub(req.issue_time))
+                                .unwrap_or(0);
+                            let issue_to_response_cycles = response
+                                .as_ref()
+                                .map(|value| value.ready.saturating_sub(req.issue_time))
+                                .unwrap_or(0);
+                            let service_delay_cycles = service_done
+                                .map(|ready| ready.saturating_sub(req.issue_time))
+                                .unwrap_or(0);
 
                             Ok(L2SystemCommit {
                                 source_ix,
@@ -4313,54 +4596,105 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                                 observed_hits: counted_hits,
                                 lookup_observer_requests,
                                 lookup_observer_hits,
-                                read_lookup_requests: if matches!(observer_operation, MemoryOperation::Read) {
+                                read_lookup_requests: if matches!(
+                                    observer_operation,
+                                    MemoryOperation::Read
+                                ) {
                                     operation_observer_requests
                                 } else {
                                     0
                                 },
-                                read_lookup_hits: if matches!(observer_operation, MemoryOperation::Read) {
+                                read_lookup_hits: if matches!(
+                                    observer_operation,
+                                    MemoryOperation::Read
+                                ) {
                                     operation_observer_hits
                                 } else {
                                     0
                                 },
-                                read_pending_merge_hits: if matches!(observer_operation, MemoryOperation::Read) {
+                                read_pending_merge_hits: if matches!(
+                                    observer_operation,
+                                    MemoryOperation::Read
+                                ) {
                                     u64::from(preview.pending_merge_mask().count_ones())
                                 } else {
                                     0
                                 },
-                                store_lookup_requests: if matches!(observer_operation, MemoryOperation::Store) {
+                                store_lookup_requests: if matches!(
+                                    observer_operation,
+                                    MemoryOperation::Store
+                                ) {
                                     operation_observer_requests
                                 } else {
                                     0
                                 },
-                                store_lookup_hits: if matches!(observer_operation, MemoryOperation::Store) {
+                                store_lookup_hits: if matches!(
+                                    observer_operation,
+                                    MemoryOperation::Store
+                                ) {
                                     operation_observer_hits
                                 } else {
                                     0
                                 },
-                                atomic_lookup_requests: if matches!(observer_operation, MemoryOperation::Atomic) {
+                                atomic_lookup_requests: if matches!(
+                                    observer_operation,
+                                    MemoryOperation::Atomic
+                                ) {
                                     operation_observer_requests
                                 } else {
                                     0
                                 },
-                                atomic_lookup_hits: if matches!(observer_operation, MemoryOperation::Atomic) {
+                                atomic_lookup_hits: if matches!(
+                                    observer_operation,
+                                    MemoryOperation::Atomic
+                                ) {
                                     operation_observer_hits
                                 } else {
                                     0
                                 },
-                                reduction_lookup_requests: if matches!(observer_operation, MemoryOperation::Reduction) {
+                                reduction_lookup_requests: if matches!(
+                                    observer_operation,
+                                    MemoryOperation::Reduction
+                                ) {
                                     operation_observer_requests
                                 } else {
                                     0
                                 },
-                                reduction_lookup_hits: if matches!(observer_operation, MemoryOperation::Reduction) {
+                                reduction_lookup_hits: if matches!(
+                                    observer_operation,
+                                    MemoryOperation::Reduction
+                                ) {
                                     operation_observer_hits
                                 } else {
                                     0
                                 },
+                                pending_merge_sectors,
+                                new_fill_sectors,
+                                pending_pressure_samples: 1,
+                                pending_pressure_sum,
+                                l2_frontier_samples,
+                                l2_issue_to_fill_cycles_sum: issue_to_fill_cycles,
+                                l2_issue_to_fill_cycles_max: issue_to_fill_cycles,
+                                l2_issue_to_response_cycles_sum: issue_to_response_cycles,
+                                l2_issue_to_response_cycles_max: issue_to_response_cycles,
+                                l2_service_delay_cycles_sum: service_delay_cycles,
+                                l2_service_delay_cycles_max: service_delay_cycles,
                             })
                         },
                     )?;
+
+                    for key in &store_packet_keys {
+                        store_packet_last.insert(*key, req.issue_time);
+                    }
+                    store_packet_candidate_sectors = store_packet_candidate_sectors
+                        .checked_add(u64::try_from(store_packet_keys.len()).map_err(|_| {
+                            SystemError::CounterOverflow {
+                                counter: "L2 store packet candidate sectors",
+                            }
+                        })?)
+                        .ok_or(SystemError::CounterOverflow {
+                            counter: "L2 store packet candidate sectors",
+                        })?;
 
                     if let Some(writeback_queue) = writeback_queue.as_mut() {
                         let mut service_plans = Vec::with_capacity(2);
@@ -4433,6 +4767,22 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                         .ok_or(SystemError::CounterOverflow {
                             counter: "L2 reduction lookup observer hits",
                         })?;
+                    staged_l2.record_fill_ownership_observer(
+                        commit.pending_merge_sectors,
+                        commit.new_fill_sectors,
+                    )?;
+                    l2_by_source.pending_pressure_samples[commit.source_ix] = l2_by_source
+                        .pending_pressure_samples[commit.source_ix]
+                        .checked_add(commit.pending_pressure_samples)
+                        .ok_or(SystemError::CounterOverflow {
+                            counter: "L2 source pending-pressure samples",
+                        })?;
+                    l2_by_source.pending_pressure_sum[commit.source_ix] = l2_by_source
+                        .pending_pressure_sum[commit.source_ix]
+                        .checked_add(commit.pending_pressure_sum)
+                        .ok_or(SystemError::CounterOverflow {
+                            counter: "L2 source pending-pressure sum",
+                        })?;
 
                     if observe_admission_groups
                         && let Some(witness) = req.admission_witness
@@ -4475,6 +4825,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                                 completed.l2_requests,
                                 completed.unique_regions,
                                 completed.issue_time,
+                                ev.time,
                             )?
                         {
                             queue.schedule_at(
@@ -4578,6 +4929,39 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                     dram_stats.read_sectors = commit.read_sectors;
                     dram_stats.atomic_rmw_read_sectors = commit.atomic_rmw_read_sectors;
                     dram_stats.reduction_rmw_read_sectors = commit.reduction_rmw_read_sectors;
+                    dram_stats.l2_frontier_samples = dram_stats
+                        .l2_frontier_samples
+                        .checked_add(commit.l2_frontier_samples)
+                        .ok_or(SystemError::CounterOverflow {
+                            counter: "L2 frontier samples",
+                        })?;
+                    dram_stats.l2_issue_to_fill_cycles_sum = dram_stats
+                        .l2_issue_to_fill_cycles_sum
+                        .checked_add(commit.l2_issue_to_fill_cycles_sum)
+                        .ok_or(SystemError::CounterOverflow {
+                            counter: "L2 issue-to-fill frontier cycles",
+                        })?;
+                    dram_stats.l2_issue_to_fill_cycles_max = dram_stats
+                        .l2_issue_to_fill_cycles_max
+                        .max(commit.l2_issue_to_fill_cycles_max);
+                    dram_stats.l2_issue_to_response_cycles_sum = dram_stats
+                        .l2_issue_to_response_cycles_sum
+                        .checked_add(commit.l2_issue_to_response_cycles_sum)
+                        .ok_or(SystemError::CounterOverflow {
+                            counter: "L2 issue-to-response frontier cycles",
+                        })?;
+                    dram_stats.l2_issue_to_response_cycles_max = dram_stats
+                        .l2_issue_to_response_cycles_max
+                        .max(commit.l2_issue_to_response_cycles_max);
+                    dram_stats.l2_service_delay_cycles_sum = dram_stats
+                        .l2_service_delay_cycles_sum
+                        .checked_add(commit.l2_service_delay_cycles_sum)
+                        .ok_or(SystemError::CounterOverflow {
+                            counter: "L2 service-delay frontier cycles",
+                        })?;
+                    dram_stats.l2_service_delay_cycles_max = dram_stats
+                        .l2_service_delay_cycles_max
+                        .max(commit.l2_service_delay_cycles_max);
                     for origin in MemoryOrigin::ALL {
                         let origin_ix = origin.index();
                         dram_stats.by_origin[origin_ix].read_sectors =
@@ -4594,6 +4978,12 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                         commit.topology_stats.l2_dirty_eviction_lines;
                     dram_stats.l2_dirty_evicted_sectors =
                         commit.topology_stats.l2_dirty_evicted_sectors;
+                    dram_stats.dram_partition_modulo_sectors =
+                        commit.topology_stats.dram_partition_modulo_sectors;
+                    dram_stats.dram_partition_xor_sectors =
+                        commit.topology_stats.dram_partition_xor_sectors;
+                    dram_stats.dram_slice_modulo_sectors =
+                        commit.topology_stats.dram_slice_modulo_sectors;
                     if let Some(done) = commit.dram_free_fp
                         && let Some(server) = &mut dram_server
                     {
@@ -5097,6 +5487,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
     l2_by_source.read_pending_merge_hits = read_pending_merge_hits;
     l2_by_source.store_lookup_requests = store_lookup_requests;
     l2_by_source.store_lookup_hits = store_lookup_hits;
+    l2_by_source.store_packet_candidate_sectors = store_packet_candidate_sectors;
     l2_by_source.atomic_lookup_requests = atomic_lookup_requests;
     l2_by_source.atomic_lookup_hits = atomic_lookup_hits;
     l2_by_source.reduction_lookup_requests = reduction_lookup_requests;
@@ -5235,8 +5626,6 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
     Ok(result)
 }
 
-
-
 fn replay_horizon(response: Option<u64>, unpriced: Option<u64>) -> ReplayHorizon {
     match (response, unpriced) {
         (Some(left), Some(right)) => ReplayHorizon::Bounded(left.min(right)),
@@ -5284,6 +5673,11 @@ fn schedule_emitted_requests(
                 end += 1;
             }
             if end - index > 1 {
+                for batched in &scratch[index..end] {
+                    if feedback_prices_request(memory_admission_feedback, *batched) {
+                        unpriced.insert(sm, batched.issue_time)?;
+                    }
+                }
                 let requests = end - index;
                 let sequence_span = NonZeroU64::new(u64::try_from(requests).map_err(|_| {
                     SystemError::CounterOverflow {
@@ -5514,6 +5908,13 @@ fn run_sm(
         wake_at: Some(wake),
     } = adv
     {
+        // A cross-SM event may advance the shared queue clock while this
+        // actor still has a locally known wake timestamp. Never enqueue a
+        // stale wake into the global queue; re-arm at the current event
+        // boundary and let `SmCore::advance` catch the actor up on the next
+        // pass. This preserves event causality without fabricating service
+        // completion time.
+        let wake = wake.max(queue.now());
         let covered = wake_due.next(ix).is_some_and(|t| t <= wake);
         if !covered {
             queue.schedule_at(wake, TargetId(target), Ev::SmWake)?;

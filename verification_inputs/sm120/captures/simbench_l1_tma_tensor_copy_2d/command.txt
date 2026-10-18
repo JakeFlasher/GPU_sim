@@ -1,0 +1,1 @@
+bash -c /root/GPU_simulator_rebase/workloads/simbench_bw/l1/tma_tensor_copy_2d/tma_tensor_copy_2d_run\ --rows\ 64\ --cols\ 64\ --seed\ 53\ --shape-point\ trace_sm120 

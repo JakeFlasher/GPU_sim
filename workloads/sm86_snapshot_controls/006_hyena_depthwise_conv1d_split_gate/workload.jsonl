@@ -1,0 +1,1 @@
+{"axes": {"batch_size": 1, "seq_len": 8, "d_model": 64, "hyena_order": 2, "inner_width": 192, "short_filter_order": 3}, "inputs": {"u": {"type": "random"}, "short_filter_weight": {"type": "random"}, "short_filter_bias": {"type": "random"}}}

@@ -1,0 +1,1 @@
+{"uuid": "e259b448-b73a-5efa-81c4-f0c9e1531e3e", "axes": {"batch_size": 1, "seq_len": 4}, "inputs": {"topk_idx": {"type": "custom"}}, "tolerance": {"max_atol": 1e-05, "max_rtol": 0.01}}

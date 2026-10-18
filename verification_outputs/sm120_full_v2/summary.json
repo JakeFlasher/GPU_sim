@@ -1,0 +1,56 @@
+{
+  "capture_root": "/home/jakeshea/5090_branch_1016/unified_gpu_simulator/verification_inputs/sm120",
+  "sim_bin": "/home/jakeshea/5090_branch_1016/unified_gpu_simulator/sim/target/release/sim-run",
+  "arch_card": "/home/jakeshea/5090_branch_1016/unified_gpu_simulator/arch_profiles/cards/sm_120-rtx-5090.json",
+  "captures_discovered": 1,
+  "pchase_card": "/home/jakeshea/5090_branch_1016/unified_gpu_simulator/data/pchase/sm_86_static_card.json",
+  "target_arch": "sm_120",
+  "scope": "all recursively discovered traces; none selected by replay outcome",
+  "selected_captures": [],
+  "memory_mode": "l1-l2",
+  "fast_memory_mode": "flat",
+  "cache_scope": "launch",
+  "cache_scope_fallbacks": 0,
+  "sm120_effective_l1": {
+    "line_capacity": 1024,
+    "hit_latency_cycles": 50,
+    "miss_latency_cycles": 512
+  },
+  "sm120_effective_l2": {
+    "capacity_bytes": 100663296,
+    "line_bytes": 128,
+    "sector_bytes": 32,
+    "num_slices": 1,
+    "associativity": 16,
+    "replacement": "lru",
+    "slice_hash": "line_mod",
+    "write_policy": "write_allocate_non_inclusive"
+  },
+  "sm120_effective_l1_override": null,
+  "sm120_effective_l2_override": null,
+  "carded_dram": true,
+  "carded_dram_requested": null,
+  "dram_service_rate_bytes_per_sec": null,
+  "dram_service_rate_requested": null,
+  "dram_service_rate_defaulted": false,
+  "memory_admission_feedback": null,
+  "memory_admission_feedback_defaulted": false,
+  "memory_admission_feedback_scope_suppressed": false,
+  "memory_admission_feedback_disabled": false,
+  "ncu_shaped_metrics": true,
+  "ncu_shaped_metrics_requested": true,
+  "workers": 1,
+  "ncu_used_as_input": false,
+  "modes": {
+    "full": {
+      "status_counts": {
+        "ok": 1
+      },
+      "launches": 1,
+      "driver_total_wall_ns": 7000000,
+      "jsonl_artifact": "/home/jakeshea/5090_branch_1016/unified_gpu_simulator/verification_outputs/sm120_full_v2/full.jsonl.zst",
+      "jsonl_compression": "zstd -T1 -1",
+      "ncu_shaped_metrics_applied": true
+    }
+  }
+}

@@ -73,13 +73,13 @@ impl PhaseClockEvidence {
         let entries = match fs::read_dir(root) {
             Ok(entries) => entries,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                return Ok(Self::default())
+                return Ok(Self::default());
             }
             Err(error) => {
                 return Err(PhaseSidecarError {
                     path: root.to_owned(),
                     message: error.to_string(),
-                })
+                });
             }
         };
         for entry in entries {
@@ -89,11 +89,14 @@ impl PhaseClockEvidence {
             })?;
             let path = entry.path();
             let name = path.file_name().and_then(|value| value.to_str());
-            if name.is_some_and(|value| {
-                value.starts_with("phase_records_") && value.ends_with(".bin")
-            }) {
+            if name
+                .is_some_and(|value| value.starts_with("phase_records_") && value.ends_with(".bin"))
+            {
                 if paths.len() == MAX_FILES {
-                    return Err(PhaseSidecarError { path, message: "too many phase files".to_owned() });
+                    return Err(PhaseSidecarError {
+                        path,
+                        message: "too many phase files".to_owned(),
+                    });
                 }
                 paths.push(path);
             }
@@ -110,14 +113,19 @@ impl PhaseClockEvidence {
         let mut scopes: BTreeMap<PhaseScope, PhasePair> = BTreeMap::new();
         let mut total_bytes = 0_u64;
         for path in paths {
-            let error = |message: String| PhaseSidecarError { path: path.clone(), message };
+            let error = |message: String| PhaseSidecarError {
+                path: path.clone(),
+                message,
+            };
             let (repeat_index, launch_index) = file_scope(&path)
                 .ok_or_else(|| error("expected phase_records_<repeat>_<launch>.bin".to_owned()))?;
             let file = File::open(&path).map_err(|e| error(e.to_string()))?;
             let mut bytes = Vec::new();
-            file.take(MAX_FILE_BYTES + 1).read_to_end(&mut bytes)
+            file.take(MAX_FILE_BYTES + 1)
+                .read_to_end(&mut bytes)
                 .map_err(|e| error(e.to_string()))?;
-            total_bytes = total_bytes.checked_add(bytes.len() as u64)
+            total_bytes = total_bytes
+                .checked_add(bytes.len() as u64)
                 .ok_or_else(|| error("phase byte count overflow".to_owned()))?;
             if bytes.len() as u64 > MAX_FILE_BYTES || total_bytes > MAX_TOTAL_BYTES {
                 return Err(error("phase data exceeds byte limit".to_owned()));
@@ -136,27 +144,42 @@ impl PhaseClockEvidence {
                     path: path.clone(),
                     message: "phase record has an invalid fixed-width layout".to_owned(),
                 })?;
-                if record.launch_index != launch_index || record.clock_role > 1
-                    || record.phase_kind > 3 || record.cta.iter().any(|v| *v < 0)
-                    || record.sm_id < 0 || !(0..32).contains(&record.warp)
-                    || record.active_mask == 0 {
-                    return Err(error("invalid phase scope, role, kind or lane mask".to_owned()));
+                if record.launch_index != launch_index
+                    || record.clock_role > 1
+                    || record.phase_kind > 3
+                    || record.cta.iter().any(|v| *v < 0)
+                    || record.sm_id < 0
+                    || !(0..32).contains(&record.warp)
+                    || record.active_mask == 0
+                {
+                    return Err(error(
+                        "invalid phase scope, role, kind or lane mask".to_owned(),
+                    ));
                 }
-                evidence.records = evidence.records.checked_add(1).ok_or_else(|| {
-                    PhaseSidecarError {
-                        path: path.clone(),
-                        message: "phase record count overflows u64".to_owned(),
-                    }
-                })?;
+                evidence.records =
+                    evidence
+                        .records
+                        .checked_add(1)
+                        .ok_or_else(|| PhaseSidecarError {
+                            path: path.clone(),
+                            message: "phase record count overflows u64".to_owned(),
+                        })?;
                 evidence.launches.insert(record.launch_index);
                 let pair = scopes.entry(record.scope(repeat_index)).or_default();
-                let slot = if record.clock_role == 0 { &mut pair.open } else { &mut pair.close };
-                if slot.is_some() { pair.duplicate = true; } else { *slot = Some(record); }
+                let slot = if record.clock_role == 0 {
+                    &mut pair.open
+                } else {
+                    &mut pair.close
+                };
+                if slot.is_some() {
+                    pair.duplicate = true;
+                } else {
+                    *slot = Some(record);
+                }
             }
         }
         for (scope, pair) in scopes {
-            let Some((open, close)) = pair.open.zip(pair.close).filter(|_| !pair.duplicate)
-            else {
+            let Some((open, close)) = pair.open.zip(pair.close).filter(|_| !pair.duplicate) else {
                 evidence.ambiguous_scopes += 1;
                 continue;
             };
@@ -216,7 +239,11 @@ impl PhaseClockRecord {
 }
 
 fn read_u32(bytes: &[u8], offset: usize) -> Option<u32> {
-    bytes.get(offset..offset + 4)?.try_into().ok().map(u32::from_le_bytes)
+    bytes
+        .get(offset..offset + 4)?
+        .try_into()
+        .ok()
+        .map(u32::from_le_bytes)
 }
 
 fn read_i32(bytes: &[u8], offset: usize) -> Option<i32> {
@@ -224,14 +251,22 @@ fn read_i32(bytes: &[u8], offset: usize) -> Option<i32> {
 }
 
 fn read_u64(bytes: &[u8], offset: usize) -> Option<u64> {
-    bytes.get(offset..offset + 8)?.try_into().ok().map(u64::from_le_bytes)
+    bytes
+        .get(offset..offset + 8)?
+        .try_into()
+        .ok()
+        .map(u64::from_le_bytes)
 }
 
 fn decode_record(bytes: &[u8]) -> Option<PhaseClockRecord> {
     (bytes.len() == RECORD_BYTES).then_some(())?;
     Some(PhaseClockRecord {
         launch_index: read_u32(bytes, 0)?,
-        cta: [read_i32(bytes, 4)?, read_i32(bytes, 8)?, read_i32(bytes, 12)?],
+        cta: [
+            read_i32(bytes, 4)?,
+            read_i32(bytes, 8)?,
+            read_i32(bytes, 12)?,
+        ],
         sm_id: read_i32(bytes, 16)?,
         warp: read_i32(bytes, 20)?,
         phase_id: read_u32(bytes, 24)?,
@@ -251,6 +286,9 @@ struct PhasePair {
 
 fn file_scope(path: &Path) -> Option<(u32, u32)> {
     let name = path.file_name()?.to_str()?;
-    let (repeat, launch) = name.strip_prefix("phase_records_")?.strip_suffix(".bin")?.split_once('_')?;
+    let (repeat, launch) = name
+        .strip_prefix("phase_records_")?
+        .strip_suffix(".bin")?
+        .split_once('_')?;
     Some((repeat.parse().ok()?, launch.parse().ok()?))
 }

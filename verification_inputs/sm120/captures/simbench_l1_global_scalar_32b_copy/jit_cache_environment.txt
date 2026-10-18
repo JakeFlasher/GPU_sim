@@ -1,0 +1,3 @@
+CUDA_CACHE_PATH=/root/sm120_rtx_5090_capture/jit_cache/simbench_l1_global_scalar_32b_copy_sm120
+CUDA_CACHE_DISABLE=0
+CUDA_FORCE_PTX_JIT=0
