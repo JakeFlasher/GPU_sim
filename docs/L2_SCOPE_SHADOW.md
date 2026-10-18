@@ -20,13 +20,13 @@ The observer is strictly diagnostic:
 The arrays are serialized under `counters.l2_by_source` as
 `client_scope_*`; index order is documented by `L2ClientScope` in
 `sim/sm/src/issue.rs`. They are not scored predictions. The final full replay
-artifacts are `full_replay_runs/l2_scope2_sm120_enabled/` and
-`full_replay_runs/l2_scope2_sm86/`. They passed the required status profiles,
+artifacts are `full_replay_runs/l2_scope3_sm120_enabled/` and
+`full_replay_runs/l2_scope3_sm86/`. They passed the required status profiles,
 reuse invariants, and twelve-worker full-only runs. The refined run also
 assigns write, atomic, reduction, and async bypass requests at their emission
 seams instead of leaving those classes as `Unknown`; ordinary bypasses remain
 unknown when the trace has no stronger static qualifier. The combined
-comparison is `FULL_NUMERIC_COMPARISON_L2_SHADOW2.json`; its only intended
+comparison is `FULL_NUMERIC_COMPARISON_L2_SHADOW3.json`; its only intended
 SM120 differences are the already-approved async L1 scope projection, while
 SM86 has zero common numeric differences.
 

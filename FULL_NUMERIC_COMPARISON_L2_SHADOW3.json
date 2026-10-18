@@ -1,0 +1,975 @@
+{
+  "comparison_schema_version": 2,
+  "normalization": {
+    "canonical_capture": "replace('/', '__') for the historical SM120 capture-id separator only; collisions fail",
+    "numeric_fields": "all common finite numeric fields, excluding documented wall-clock and observer-only additive fields",
+    "required_metadata": [
+      "status",
+      "architecture",
+      "memory_mode",
+      "cache_scope",
+      "launch_count",
+      "returncode"
+    ]
+  },
+  "cases": [
+    {
+      "label": "l2_shadow3_sm120",
+      "baseline_path": "full_replay_runs/revert_pending_sm120_enabled/full.jsonl.zst",
+      "unified_path": "full_replay_runs/l2_scope3_sm120_enabled/full.jsonl.zst",
+      "rows": 339,
+      "unified_rows": 339,
+      "common_rows": 339,
+      "missing_rows": [],
+      "extra_rows": [],
+      "duplicate_baseline_rows": [],
+      "duplicate_unified_rows": [],
+      "nonfinite_baseline_rows": [],
+      "nonfinite_unified_rows": [],
+      "status_counts_baseline": {
+        "ok": 339
+      },
+      "status_counts_unified": {
+        "ok": 339
+      },
+      "required_metadata_diffs": [],
+      "missing_baseline_numeric_fields": [],
+      "rows_with_numeric_diffs": 30,
+      "numeric_diff_count": 896,
+      "top_numeric_diffs": [
+        {
+          "path": "launches.2.cache_lookup_predictions.0.timing_state.observer_resident_hits",
+          "count": 4,
+          "example": [
+            "sol_l1_002_vae_residual_sm120adapted",
+            16928,
+            12948
+          ]
+        },
+        {
+          "path": "launches.2.cache_lookup_predictions.0.timing_state.remaining_lookups",
+          "count": 4,
+          "example": [
+            "sol_l1_002_vae_residual_sm120adapted",
+            18432,
+            22412
+          ]
+        },
+        {
+          "path": "launches.2.cache_lookup_predictions.0.timing_state.resident_data_hits",
+          "count": 4,
+          "example": [
+            "sol_l1_002_vae_residual_sm120adapted",
+            16928,
+            12948
+          ]
+        },
+        {
+          "path": "launches.2.cache_lookup_predictions.0.observer.misses",
+          "count": 4,
+          "example": [
+            "sol_l1_002_vae_residual_sm120adapted",
+            18432,
+            22412
+          ]
+        },
+        {
+          "path": "launches.2.cache_lookup_predictions.0.observer.hits",
+          "count": 4,
+          "example": [
+            "sol_l1_002_vae_residual_sm120adapted",
+            16928,
+            12948
+          ]
+        },
+        {
+          "path": "launches.2.cache_lookup_predictions.1.timing_state.observer_resident_hits",
+          "count": 4,
+          "example": [
+            "sol_l1_002_vae_residual_sm120adapted",
+            16928,
+            12948
+          ]
+        },
+        {
+          "path": "launches.2.cache_lookup_predictions.1.timing_state.remaining_lookups",
+          "count": 4,
+          "example": [
+            "sol_l1_002_vae_residual_sm120adapted",
+            20480,
+            24460
+          ]
+        },
+        {
+          "path": "launches.2.cache_lookup_predictions.1.timing_state.resident_data_hits",
+          "count": 4,
+          "example": [
+            "sol_l1_002_vae_residual_sm120adapted",
+            16928,
+            12948
+          ]
+        },
+        {
+          "path": "launches.2.cache_lookup_predictions.1.observer.misses",
+          "count": 4,
+          "example": [
+            "sol_l1_002_vae_residual_sm120adapted",
+            20480,
+            24460
+          ]
+        },
+        {
+          "path": "launches.2.cache_lookup_predictions.1.observer.hits",
+          "count": 4,
+          "example": [
+            "sol_l1_002_vae_residual_sm120adapted",
+            16928,
+            12948
+          ]
+        },
+        {
+          "path": "launches.2.metric_predictions.cache_hit_rate_l1tex_read_sector.outcome.value.value",
+          "count": 4,
+          "example": [
+            "sol_l1_002_vae_residual_sm120adapted",
+            0.47873303167420816,
+            0.36617647058823527
+          ]
+        },
+        {
+          "path": "launches.2.metric_predictions.cache_hit_rate_l1tex_read_sector.outcome.value.numerator",
+          "count": 4,
+          "example": [
+            "sol_l1_002_vae_residual_sm120adapted",
+            16928,
+            12948
+          ]
+        },
+        {
+          "path": "launches.2.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.value",
+          "count": 4,
+          "example": [
+            "sol_l1_002_vae_residual_sm120adapted",
+            0.4525235243798118,
+            0.3461291702309666
+          ]
+        },
+        {
+          "path": "launches.2.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.numerator",
+          "count": 4,
+          "example": [
+            "sol_l1_002_vae_residual_sm120adapted",
+            16928,
+            12948
+          ]
+        },
+        {
+          "path": "launches.9.cache_lookup_predictions.0.timing_state.observer_resident_hits",
+          "count": 3,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            1728,
+            0
+          ]
+        },
+        {
+          "path": "launches.9.cache_lookup_predictions.0.timing_state.remaining_lookups",
+          "count": 3,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            576,
+            2304
+          ]
+        },
+        {
+          "path": "launches.9.cache_lookup_predictions.0.timing_state.resident_data_hits",
+          "count": 3,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            1728,
+            0
+          ]
+        },
+        {
+          "path": "launches.9.cache_lookup_predictions.0.observer.misses",
+          "count": 3,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            576,
+            2304
+          ]
+        },
+        {
+          "path": "launches.9.cache_lookup_predictions.0.observer.hits",
+          "count": 3,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            1728,
+            0
+          ]
+        },
+        {
+          "path": "launches.9.cache_lookup_predictions.1.timing_state.observer_resident_hits",
+          "count": 3,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            1728,
+            0
+          ]
+        },
+        {
+          "path": "launches.9.cache_lookup_predictions.1.timing_state.remaining_lookups",
+          "count": 3,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            1088,
+            2816
+          ]
+        },
+        {
+          "path": "launches.9.cache_lookup_predictions.1.timing_state.resident_data_hits",
+          "count": 3,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            1728,
+            0
+          ]
+        },
+        {
+          "path": "launches.9.cache_lookup_predictions.1.observer.misses",
+          "count": 3,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            1088,
+            2816
+          ]
+        },
+        {
+          "path": "launches.9.cache_lookup_predictions.1.observer.hits",
+          "count": 3,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            1728,
+            0
+          ]
+        },
+        {
+          "path": "launches.9.metric_predictions.cache_hit_rate_l1tex_read_sector.outcome.value.value",
+          "count": 3,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            0.75,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.9.metric_predictions.cache_hit_rate_l1tex_read_sector.outcome.value.numerator",
+          "count": 3,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            1728,
+            0
+          ]
+        },
+        {
+          "path": "launches.9.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.value",
+          "count": 3,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            0.6136363636363636,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.9.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.numerator",
+          "count": 3,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            1728,
+            0
+          ]
+        },
+        {
+          "path": "launches.46.cache_lookup_predictions.0.timing_state.observer_resident_hits",
+          "count": 3,
+          "example": [
+            "quant_004_fp8_moe_native_groupwise",
+            4,
+            2
+          ]
+        },
+        {
+          "path": "launches.46.cache_lookup_predictions.0.timing_state.remaining_lookups",
+          "count": 3,
+          "example": [
+            "quant_004_fp8_moe_native_groupwise",
+            68,
+            70
+          ]
+        },
+        {
+          "path": "launches.46.cache_lookup_predictions.0.timing_state.resident_data_hits",
+          "count": 3,
+          "example": [
+            "quant_004_fp8_moe_native_groupwise",
+            4,
+            2
+          ]
+        },
+        {
+          "path": "launches.46.cache_lookup_predictions.0.observer.misses",
+          "count": 3,
+          "example": [
+            "quant_004_fp8_moe_native_groupwise",
+            68,
+            70
+          ]
+        },
+        {
+          "path": "launches.46.cache_lookup_predictions.0.observer.hits",
+          "count": 3,
+          "example": [
+            "quant_004_fp8_moe_native_groupwise",
+            4,
+            2
+          ]
+        },
+        {
+          "path": "launches.46.cache_lookup_predictions.1.timing_state.observer_resident_hits",
+          "count": 3,
+          "example": [
+            "quant_004_fp8_moe_native_groupwise",
+            4,
+            2
+          ]
+        },
+        {
+          "path": "launches.46.cache_lookup_predictions.1.timing_state.remaining_lookups",
+          "count": 3,
+          "example": [
+            "quant_004_fp8_moe_native_groupwise",
+            68,
+            70
+          ]
+        },
+        {
+          "path": "launches.46.cache_lookup_predictions.1.timing_state.resident_data_hits",
+          "count": 3,
+          "example": [
+            "quant_004_fp8_moe_native_groupwise",
+            4,
+            2
+          ]
+        },
+        {
+          "path": "launches.46.cache_lookup_predictions.1.observer.misses",
+          "count": 3,
+          "example": [
+            "quant_004_fp8_moe_native_groupwise",
+            68,
+            70
+          ]
+        },
+        {
+          "path": "launches.46.cache_lookup_predictions.1.observer.hits",
+          "count": 3,
+          "example": [
+            "quant_004_fp8_moe_native_groupwise",
+            4,
+            2
+          ]
+        },
+        {
+          "path": "launches.46.metric_predictions.cache_hit_rate_l1tex_read_sector.outcome.value.value",
+          "count": 3,
+          "example": [
+            "quant_004_fp8_moe_native_groupwise",
+            0.05555555555555555,
+            0.027777777777777776
+          ]
+        },
+        {
+          "path": "launches.46.metric_predictions.cache_hit_rate_l1tex_read_sector.outcome.value.numerator",
+          "count": 3,
+          "example": [
+            "quant_004_fp8_moe_native_groupwise",
+            4,
+            2
+          ]
+        },
+        {
+          "path": "launches.46.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.value",
+          "count": 3,
+          "example": [
+            "quant_004_fp8_moe_native_groupwise",
+            0.05555555555555555,
+            0.027777777777777776
+          ]
+        },
+        {
+          "path": "launches.46.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.numerator",
+          "count": 3,
+          "example": [
+            "quant_004_fp8_moe_native_groupwise",
+            4,
+            2
+          ]
+        },
+        {
+          "path": "launches.3.cache_lookup_predictions.0.timing_state.observer_resident_hits",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            768,
+            0
+          ]
+        },
+        {
+          "path": "launches.3.cache_lookup_predictions.0.timing_state.remaining_lookups",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            4352,
+            5120
+          ]
+        },
+        {
+          "path": "launches.3.cache_lookup_predictions.0.timing_state.resident_data_hits",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            768,
+            0
+          ]
+        },
+        {
+          "path": "launches.3.cache_lookup_predictions.0.observer.misses",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            4352,
+            5120
+          ]
+        },
+        {
+          "path": "launches.3.cache_lookup_predictions.0.observer.hits",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            768,
+            0
+          ]
+        },
+        {
+          "path": "launches.3.cache_lookup_predictions.1.timing_state.observer_resident_hits",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            768,
+            0
+          ]
+        },
+        {
+          "path": "launches.3.cache_lookup_predictions.1.timing_state.remaining_lookups",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            8448,
+            9216
+          ]
+        },
+        {
+          "path": "launches.3.cache_lookup_predictions.1.timing_state.resident_data_hits",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            768,
+            0
+          ]
+        },
+        {
+          "path": "launches.3.cache_lookup_predictions.1.observer.misses",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            8448,
+            9216
+          ]
+        },
+        {
+          "path": "launches.3.cache_lookup_predictions.1.observer.hits",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            768,
+            0
+          ]
+        },
+        {
+          "path": "launches.3.metric_predictions.cache_hit_rate_l1tex_read_sector.outcome.value.value",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            0.15,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.3.metric_predictions.cache_hit_rate_l1tex_read_sector.outcome.value.numerator",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            768,
+            0
+          ]
+        },
+        {
+          "path": "launches.3.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.value",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            0.08333333333333333,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.3.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.numerator",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            768,
+            0
+          ]
+        },
+        {
+          "path": "launches.27.cache_lookup_predictions.0.timing_state.observer_resident_hits",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            1536,
+            0
+          ]
+        },
+        {
+          "path": "launches.27.cache_lookup_predictions.0.timing_state.remaining_lookups",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            4608,
+            6144
+          ]
+        },
+        {
+          "path": "launches.27.cache_lookup_predictions.0.timing_state.resident_data_hits",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            1536,
+            0
+          ]
+        },
+        {
+          "path": "launches.27.cache_lookup_predictions.0.observer.misses",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            4608,
+            6144
+          ]
+        },
+        {
+          "path": "launches.27.cache_lookup_predictions.0.observer.hits",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            1536,
+            0
+          ]
+        },
+        {
+          "path": "launches.27.cache_lookup_predictions.1.timing_state.observer_resident_hits",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            1536,
+            0
+          ]
+        },
+        {
+          "path": "launches.27.cache_lookup_predictions.1.timing_state.remaining_lookups",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            8704,
+            10240
+          ]
+        },
+        {
+          "path": "launches.27.cache_lookup_predictions.1.timing_state.resident_data_hits",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            1536,
+            0
+          ]
+        },
+        {
+          "path": "launches.27.cache_lookup_predictions.1.observer.misses",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            8704,
+            10240
+          ]
+        },
+        {
+          "path": "launches.27.cache_lookup_predictions.1.observer.hits",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            1536,
+            0
+          ]
+        },
+        {
+          "path": "launches.27.metric_predictions.cache_hit_rate_l1tex_read_sector.outcome.value.value",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            0.25,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.27.metric_predictions.cache_hit_rate_l1tex_read_sector.outcome.value.numerator",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            1536,
+            0
+          ]
+        },
+        {
+          "path": "launches.27.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.value",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            0.15,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.27.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.numerator",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            1536,
+            0
+          ]
+        },
+        {
+          "path": "launches.15.cache_lookup_predictions.0.timing_state.observer_resident_hits",
+          "count": 3,
+          "example": [
+            "sol_l2_035_convnext_grn_sm120adapted",
+            1152,
+            0
+          ]
+        },
+        {
+          "path": "launches.15.cache_lookup_predictions.0.timing_state.remaining_lookups",
+          "count": 3,
+          "example": [
+            "sol_l2_035_convnext_grn_sm120adapted",
+            384,
+            1536
+          ]
+        },
+        {
+          "path": "launches.15.cache_lookup_predictions.0.timing_state.resident_data_hits",
+          "count": 3,
+          "example": [
+            "sol_l2_035_convnext_grn_sm120adapted",
+            1152,
+            0
+          ]
+        },
+        {
+          "path": "launches.15.cache_lookup_predictions.0.observer.misses",
+          "count": 3,
+          "example": [
+            "sol_l2_035_convnext_grn_sm120adapted",
+            384,
+            1536
+          ]
+        },
+        {
+          "path": "launches.15.cache_lookup_predictions.0.observer.hits",
+          "count": 3,
+          "example": [
+            "sol_l2_035_convnext_grn_sm120adapted",
+            1152,
+            0
+          ]
+        },
+        {
+          "path": "launches.15.cache_lookup_predictions.1.timing_state.observer_resident_hits",
+          "count": 3,
+          "example": [
+            "sol_l2_035_convnext_grn_sm120adapted",
+            1152,
+            0
+          ]
+        },
+        {
+          "path": "launches.15.cache_lookup_predictions.1.timing_state.remaining_lookups",
+          "count": 3,
+          "example": [
+            "sol_l2_035_convnext_grn_sm120adapted",
+            1408,
+            2560
+          ]
+        },
+        {
+          "path": "launches.15.cache_lookup_predictions.1.timing_state.resident_data_hits",
+          "count": 3,
+          "example": [
+            "sol_l2_035_convnext_grn_sm120adapted",
+            1152,
+            0
+          ]
+        },
+        {
+          "path": "launches.15.cache_lookup_predictions.1.observer.misses",
+          "count": 3,
+          "example": [
+            "sol_l2_035_convnext_grn_sm120adapted",
+            1408,
+            2560
+          ]
+        },
+        {
+          "path": "launches.15.cache_lookup_predictions.1.observer.hits",
+          "count": 3,
+          "example": [
+            "sol_l2_035_convnext_grn_sm120adapted",
+            1152,
+            0
+          ]
+        },
+        {
+          "path": "launches.15.metric_predictions.cache_hit_rate_l1tex_read_sector.outcome.value.value",
+          "count": 3,
+          "example": [
+            "sol_l2_035_convnext_grn_sm120adapted",
+            0.75,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.15.metric_predictions.cache_hit_rate_l1tex_read_sector.outcome.value.numerator",
+          "count": 3,
+          "example": [
+            "sol_l2_035_convnext_grn_sm120adapted",
+            1152,
+            0
+          ]
+        },
+        {
+          "path": "launches.15.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.value",
+          "count": 3,
+          "example": [
+            "sol_l2_035_convnext_grn_sm120adapted",
+            0.45,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.15.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.numerator",
+          "count": 3,
+          "example": [
+            "sol_l2_035_convnext_grn_sm120adapted",
+            1152,
+            0
+          ]
+        },
+        {
+          "path": "launches.35.cache_lookup_predictions.0.timing_state.observer_resident_hits",
+          "count": 2,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            32,
+            0
+          ]
+        },
+        {
+          "path": "launches.35.cache_lookup_predictions.0.timing_state.remaining_lookups",
+          "count": 2,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            288,
+            320
+          ]
+        },
+        {
+          "path": "launches.35.cache_lookup_predictions.0.timing_state.resident_data_hits",
+          "count": 2,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            32,
+            0
+          ]
+        },
+        {
+          "path": "launches.35.cache_lookup_predictions.0.observer.misses",
+          "count": 2,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            288,
+            320
+          ]
+        },
+        {
+          "path": "launches.35.cache_lookup_predictions.0.observer.hits",
+          "count": 2,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            32,
+            0
+          ]
+        },
+        {
+          "path": "launches.35.cache_lookup_predictions.1.timing_state.observer_resident_hits",
+          "count": 2,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            32,
+            0
+          ]
+        },
+        {
+          "path": "launches.35.cache_lookup_predictions.1.timing_state.remaining_lookups",
+          "count": 2,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            2336,
+            2368
+          ]
+        },
+        {
+          "path": "launches.35.cache_lookup_predictions.1.timing_state.resident_data_hits",
+          "count": 2,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            32,
+            0
+          ]
+        },
+        {
+          "path": "launches.35.cache_lookup_predictions.1.observer.misses",
+          "count": 2,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            2336,
+            2368
+          ]
+        },
+        {
+          "path": "launches.35.cache_lookup_predictions.1.observer.hits",
+          "count": 2,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            32,
+            0
+          ]
+        },
+        {
+          "path": "launches.35.metric_predictions.cache_hit_rate_l1tex_read_sector.outcome.value.value",
+          "count": 2,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            0.1,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.35.metric_predictions.cache_hit_rate_l1tex_read_sector.outcome.value.numerator",
+          "count": 2,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            32,
+            0
+          ]
+        },
+        {
+          "path": "launches.35.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.value",
+          "count": 2,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            0.013513513513513514,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.35.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.numerator",
+          "count": 2,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            32,
+            0
+          ]
+        },
+        {
+          "path": "launches.23.cache_lookup_predictions.0.timing_state.observer_resident_hits",
+          "count": 2,
+          "example": [
+            "quant_004_fp8_moe_expert_linear_sm120adapted_small",
+            16384,
+            0
+          ]
+        },
+        {
+          "path": "launches.23.cache_lookup_predictions.0.timing_state.remaining_lookups",
+          "count": 2,
+          "example": [
+            "quant_004_fp8_moe_expert_linear_sm120adapted_small",
+            49152,
+            65536
+          ]
+        }
+      ],
+      "ok": false
+    },
+    {
+      "label": "l2_shadow3_sm86",
+      "baseline_path": "full_replay_runs/revert_pending_sm86/full.jsonl.zst",
+      "unified_path": "full_replay_runs/l2_scope3_sm86/full.jsonl.zst",
+      "rows": 356,
+      "unified_rows": 356,
+      "common_rows": 356,
+      "missing_rows": [],
+      "extra_rows": [],
+      "duplicate_baseline_rows": [],
+      "duplicate_unified_rows": [],
+      "nonfinite_baseline_rows": [],
+      "nonfinite_unified_rows": [],
+      "status_counts_baseline": {
+        "control_error": 62,
+        "ok": 286,
+        "replay_error": 8
+      },
+      "status_counts_unified": {
+        "control_error": 62,
+        "ok": 286,
+        "replay_error": 8
+      },
+      "required_metadata_diffs": [],
+      "missing_baseline_numeric_fields": [],
+      "rows_with_numeric_diffs": 0,
+      "numeric_diff_count": 0,
+      "top_numeric_diffs": [],
+      "ok": true
+    }
+  ],
+  "ok": false
+}

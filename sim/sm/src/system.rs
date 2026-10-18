@@ -4254,6 +4254,40 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                                 u64::from((lookup.present_mask & req.sector_mask).count_ones());
                             let client_scope_fill_misses = new_fill_sectors;
                             let client_scope_pending_merges = pending_merge_sectors;
+                            if req.operation == MemoryOperation::Read {
+                                let resident_mask = lookup.present_mask & req.sector_mask;
+                                let pending_mask = preview.pending_merge_mask();
+                                let fill_mask = preview.fill_mask();
+                                debug_assert_eq!(
+                                    resident_mask | pending_mask | fill_mask,
+                                    req.sector_mask,
+                                    "read client-scope masks must cover the request"
+                                );
+                                debug_assert_eq!(
+                                    resident_mask & pending_mask,
+                                    0,
+                                    "read resident/pending client-scope masks overlap"
+                                );
+                                debug_assert_eq!(
+                                    resident_mask & fill_mask,
+                                    0,
+                                    "read resident/fill client-scope masks overlap"
+                                );
+                                debug_assert_eq!(
+                                    pending_mask & fill_mask,
+                                    0,
+                                    "read pending/fill client-scope masks overlap"
+                                );
+                            } else {
+                                debug_assert_eq!(
+                                    client_scope_pending_merges, 0,
+                                    "write-class client-scope pending arm must be zero"
+                                );
+                                debug_assert_eq!(
+                                    client_scope_fill_misses, 0,
+                                    "write-class client-scope fill arm must be zero"
+                                );
+                            }
                             let ltc128b_shadow_promoted_sectors = if req.client_scope
                                 == L2ClientScope::Ltc128b
                                 && preview.fill_mask() != 0

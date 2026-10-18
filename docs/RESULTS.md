@@ -154,7 +154,7 @@ bypass classes at the request-emission seam (ordinary unqualified bypasses
 remain `Unknown`). Full-only validation with twelve workers passed for both
 lanes: SM120 339/339 `ok` and 11,558 launches; SM86 286/62/8 and 12,392
 launches. The reuse invariant checker passed. The machine-readable
-`FULL_NUMERIC_COMPARISON_L2_SHADOW2.json` shows no physical-cache, DRAM, or
+`FULL_NUMERIC_COMPARISON_L2_SHADOW3.json` shows no physical-cache, DRAM, or
 timing regression: its 896 SM120 numeric differences are only the already
 approved async L1 scope projection, and SM86 has zero common numeric
 differences. The client-scope arrays and LTC128B sibling volume remain

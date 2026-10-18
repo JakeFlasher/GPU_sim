@@ -84,7 +84,7 @@ seam. It reports conserved resident/pending/fill masks by static client class
 and potential LTC128B sibling volume only; write, atomic, reduction, and async
 bypass requests are tagged at emission while unqualified bypasses remain
 `Unknown`. It does not alter scored L2/DRAM or timing outputs. The final
-twelve-worker full comparison is in `FULL_NUMERIC_COMPARISON_L2_SHADOW2.json`;
+twelve-worker full comparison is in `FULL_NUMERIC_COMPARISON_L2_SHADOW3.json`;
 read-scope masks conserve request sectors, while write-class pending/fill arms
 are zero by the `WriteAtomic` event class. Same-cycle folded sectors use the
 lead request's diagnostic scope. Gemini's closure gate freezes active L2/DRAM

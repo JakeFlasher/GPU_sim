@@ -60,7 +60,7 @@ This file is deliberately a current-state note rather than a duplicate.
   reduction, and async-bypass requests at emission; unqualified bypasses stay
   `Unknown`. It leaves physical L2/DRAM/timing intact and passed both
   twelve-worker full lanes (SM120 339/339, SM86 286/62/8); see
-  `docs/L2_SCOPE_SHADOW.md` and `FULL_NUMERIC_COMPARISON_L2_SHADOW2.json`.
+  `docs/L2_SCOPE_SHADOW.md` and `FULL_NUMERIC_COMPARISON_L2_SHADOW3.json`.
   Read-scope masks conserve request sectors; write-class pending/fill arms are
   zero by construction, and same-cycle folded sectors use the lead request's
   diagnostic scope. These are attribution boundaries, not hardware-hit claims.

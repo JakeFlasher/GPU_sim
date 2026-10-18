@@ -521,11 +521,11 @@ Implemented diagnostic seam (no code change was requested from the consultant):
 
 Evidence from final full replay:
 
-* `full_replay_runs/l2_scope2_sm120_enabled/full.jsonl.zst`: 339/339 `ok`,
+* `full_replay_runs/l2_scope3_sm120_enabled/full.jsonl.zst`: 339/339 `ok`,
   11,558 launches, reuse validator passed.
-* `full_replay_runs/l2_scope2_sm86/full.jsonl.zst`: 286 `ok`, 62
+* `full_replay_runs/l2_scope3_sm86/full.jsonl.zst`: 286 `ok`, 62
   `control_error`, 8 `replay_error`, 12,392 launches, reuse validator passed.
-* `FULL_NUMERIC_COMPARISON_L2_SHADOW2.json`: SM86 has zero common numeric
+* `FULL_NUMERIC_COMPARISON_L2_SHADOW3.json`: SM86 has zero common numeric
   differences. SM120 has 896 differences in 30 rows, all approved async-L1
   projection fields; no physical L2/DRAM/timing fields differ.
 
