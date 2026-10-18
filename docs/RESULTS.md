@@ -139,8 +139,9 @@ research gaps; Gemini rejected active sibling-sector promotion.
 
 The committed L2 event seam now emits passive client-scope accounting for
 ordinary LDG, constant LDG, LTC128B, LDGSTS cache/bypass, local, store,
-atomic, reduction, and unknown requests. Each request is partitioned into
-resident, pending-merge, and fill-miss masks. LTC128B potential sibling
+atomic, reduction, and unknown requests. Read requests are partitioned into
+resident, pending-merge, and fill-miss masks; write-class requests retain
+resident/pending observations without a read fill-miss arm. LTC128B potential sibling
 promotion is reported only as diagnostic volume; no sibling sector is inserted
 into physical cache or DRAM state.
 

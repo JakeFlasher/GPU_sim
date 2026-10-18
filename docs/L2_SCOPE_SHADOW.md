@@ -3,8 +3,9 @@
 The L2 event path now records a passive client-scope decomposition. Static
 SASS/access metadata tags requests as ordinary LDG, constant LDG, LTC128B,
 LDGSTS cache/bypass, local, store, atomic, reduction, or unknown. At the
-transactional L2 commit boundary, each request is partitioned into resident,
-pending-merge, and fill-miss masks.
+transactional L2 commit boundary, each read request is partitioned into
+resident, pending-merge, and fill-miss masks. Write-class requests retain
+resident/pending observations but have no read fill-miss arm by design.
 
 The observer is strictly diagnostic:
 
