@@ -41,3 +41,10 @@ already contain full four-sector lines, SM120 cache geometry is unresolved, and
 forcing a physical four-sector fill would inflate miss/DRAM counts. Any future
 projection must first show conserved, sign-consistent scope identity on held-out
 and full corpora without changing physical state.
+
+The later pure-LTC L1 resident-plus-older-pending idea is not part of this
+shadow's scored output. Its 62 nonzero-target improvement was not sufficient:
+the complete pure-LTC audit includes zero-target rows and two false positives,
+and sector-unit conservation has not been proven without clamping. Likewise,
+TMA shadow L2 hits remain diagnostic; replacing raw TMA payload DRAM demand
+with shadow misses worsened the independent full-report residual.

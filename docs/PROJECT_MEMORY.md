@@ -90,4 +90,7 @@ are zero by the `WriteAtomic` event class. Same-cycle folded sectors use the
 lead request's diagnostic scope. Gemini's closure gate freezes active L2/DRAM
 changes because the remaining residuals require trace-unobservable geometry,
 fill-buffer/TMA/carveout, or endpoint-scope evidence; no NCU fitting or count
-balancing is permitted. See `docs/L2_SCOPE_SHADOW.md`.
+balancing is permitted. A subsequent pure-LTC resident+older-pending L1
+candidate remains shadow-only after a zero-target audit found two false
+positives and sector-unit conservation is not yet proven; TMA-shadow DRAM
+subtraction was empirically rejected. See `docs/L2_SCOPE_SHADOW.md`.

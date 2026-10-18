@@ -67,3 +67,8 @@ This file is deliberately a current-state note rather than a duplicate.
   Gemini's closure gate freezes active L2/DRAM changes: remaining residuals
   need unobservable SM120 geometry/fill-buffer/TMA/carveout or endpoint-scope
   evidence, not NCU fitting or count balancing.
+* Follow-up candidate audit: TMA-shadow L2 misses must not replace raw TMA
+  payload DRAM demand (full-row evaluation worsened). A pure-LTC resident plus
+  older-pending L1 numerator is mechanistically plausible but remains
+  shadow-only: 300 zero-target rows and two false positives, plus unproven
+  sector-unit conservation, fail the promotion gate.

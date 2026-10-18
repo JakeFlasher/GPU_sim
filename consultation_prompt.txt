@@ -549,3 +549,81 @@ Gemini's disposition: finalize the typed shadow as diagnostic-only; the
 `WriteAtomic` gate makes the fill/pending arrays zero for write classes; stop
 active L2/DRAM promotion and document the metadata/scope ceiling. Do not
 promote LTC128B siblings, subtract pending merges globally, or fit NCU values.
+
+FOCUSED ACCURACY ESCALATION — PURE LTC128B L1 SCOPE
+====================================================
+The original <10% objective remains active. A new trace-only candidate was
+found after rejecting TMA-shadow-to-DRAM subtraction. This prompt records the
+ambiguity before any code change.
+
+Current evidence (evaluation only; NCU is never a replay/model input):
+
+* Full SM120 replay is green at 339/339 captures and 11,558 launches with
+  twelve workers; SM86 is green at 286/62/8 and 12,392 launches.
+* The source post-replay report's SM120 global `op_ld` L1 lookup mean APE is
+  about 39%. For launches whose exact decoded `trace_metrics.memory_scope` is
+  `{global_load_ltc128b}`, 62 nonzero-target rows have current mean APE about
+  54.4% under the live effective-L1 projection. A trace-only candidate reduces
+  that offline evaluation to about 4.38%; resident-only is about 97.3%.
+* Candidate numerator: `l1_global_resident_hits +
+  l1_ordinary_global_older_pending_merges`; denominator:
+  `l1_global_lookup_sectors`, clamped. In the current 362 pure-LTC rows,
+  `resident + older <= denominator` always holds (maximum ratio observed
+  0.7895). Mixed constant/LDG, async, all other SM120 scopes, and SM86 remain
+  unchanged.
+
+Relevant code/data seams:
+
+* `sim/sm/src/metrics.rs::TraceMetrics` derives the three counters from decoded
+  SASS/access spans and records `memory_scope`, `l1_request_mask_audit`,
+  same-request merges, and older-pending merges. It does not read NCU.
+* `sim/direct_run/src/emit.rs::emit_l1tex_read_hit_rate` currently uses
+  `L1OriginCounters::effective_lookup_hits_for_arch`, whose SM120 branch is a
+  model-relative hit/merge projection. The same metric feeds
+  `cache_lookup_prediction_reports` through the emitted metric bundle.
+* The proposed change would be report-only at that emission seam, guarded by
+  `arch == Sm120`, exact singleton scope `global_load_ltc128b`, complete
+  request/merge conservation, and `resident + older <= lookup_sectors`; it
+  would not alter L1/L2 tags, MSHRs, DRAM, issue timing, or unified-L1 output.
+
+Questions for Gemini (brain only; do not edit code):
+
+1. Is adding the trace-qualified older-pending merge witness to resident L1
+   hits scientifically valid for this exact static client scope, or does it
+   double-count NCU tag lookups / confuse pending fills with hits?
+2. Are the singleton scope, denominator, mask-conservation, and no-state-change
+   gates sufficient? Specify any additional invariant and held-out/full
+   acceptance/rollback gate. Reject NCU fitting, per-workload rules, guessed
+   geometry, and broad pending subtraction.
+3. Should this affect only `l1tex__t_sectors_pipe_lsu_mem_global_op_ld` and
+   its hit-rate projection, or also unified L1/L2 metrics?
+
+Gemini's focused yes/no response: **YES, provisionally defensible**. It states
+that exact `.LTC128B` static scope isolates the client; resident and older
+pending are mutually exclusive trace outcomes with parameter-free meaning;
+`resident + older <= denominator` bounds the result; and the offline NCU rows
+are validation only, not fitting. The final detailed response timed out while
+inspecting files, so implementation must preserve the stated gates and run a
+complete full replay before promotion.
+
+FINAL LTC128B GATE — SHADOW-ONLY DISPOSITION
+============================================
+Gemini's subsequent short consultation supersedes the provisional yes/no for
+promotion. The candidate remains a useful shadow diagnostic but must not enter
+the scored L1 projection yet. The older-pending counter is promotable only
+after proving that it is sector-unit, shared-LSU MSHR hit-on-miss accounting
+for LTC128B—not a request-level or cross-client count. A valid partition must
+show, without clamping, `resident + older_pending + true_misses ==
+l1_global_lookup_sectors` with zero mask overflow on every pure-LTC row. The
+offline 54.4%→4.38% result used 62 nonzero NCU rows and is therefore not
+sufficient; 300 zero-target pure-LTC rows must be included in a held-out family
+audit. That audit found two false positives (nonzero candidate hits where the
+NCU target was zero), so immediate promotion is rejected. Mixed, async, and
+SM86 paths remain unchanged.
+
+The separate TMA-shadow-to-DRAM candidate is also rejected. Replacing raw TMA
+payload demand with address-shadow L2 misses worsened the gated 37-row DRAM
+APE from 39.56% to 67.62% (all-row 49.28% to 49.37%). Shadow hits do not prove
+NCU DRAM-sector semantics because descriptor policy, cross-CTA chronology,
+fill-buffer horizons, evictions, and payload-volume accounting are unknown.
+Keep TMA shadow fields diagnostic and retain the raw payload demand arm.

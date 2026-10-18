@@ -166,3 +166,14 @@ geometry, replacement/fill-buffer behavior, TMA chronology, carveout/runtime
 state, or NCU endpoint scope; fitting or count-balancing those values would
 not be a defensible replay improvement. The <10% objective remains open, but
 this shadow phase has no safe trace-only promotion left.
+
+## Rejected follow-up projections
+
+Two trace-only candidates were audited after the typed L2 shadow. Replacing
+raw TMA payload demand with address-shadow L2 misses worsened the gated DRAM
+APE (39.56% to 67.62%), so the raw payload arm remains. A pure-
+`global_load_ltc128b` L1 candidate using trace resident hits plus older
+pending merges improved 62 nonzero-target rows (54.4% to 4.38%), but the full
+pure-LTC audit contains 300 zero-target rows and two false positives. Because
+the older-pending counter's sector-unit partition is not yet proven, this
+candidate remains shadow-only; no scored L1 correction was promoted.
