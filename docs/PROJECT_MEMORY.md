@@ -43,3 +43,7 @@ against NCU labels; the current evidence points to an upstream write
 coalescing/cross-launch semantic gap. Per-launch SM86 shared-memory carveout
 is not present in trace sidecars and cannot be inferred honestly from the
 card maximum.
+
+For future replay work, run **full replay only**. Do not spend time producing
+fast-mode artifacts; use the complete integrated `l1-l2` path with all
+supported features enabled by default and twelve workers.
