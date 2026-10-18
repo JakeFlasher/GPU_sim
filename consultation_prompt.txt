@@ -83,3 +83,35 @@ with `--model gemini-4-argon-high --effort high --mode plan`. Its guidance was
 to reject generic count balancing, inspect upstream write coalescing and
 cross-launch state, preserve the operation-read endpoint, and retain missing
 carveout metadata as an explicit limitation.
+
+Follow-up evidence and promoted observer slice
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The trace protobuf for `sol_l2_032_dual_stream_sm120` kernel 67 was decoded
+using the checked-in dynamic-trace schema. Its four z-block threadblock files
+contain 128 global-store records and 256 active address entries, but only 32
+launch-wide distinct 32-byte sectors. The existing launch-local
+`store_packet_candidate_sectors` observer reports 32. NCU reports 32 generic
+store sectors for the matching grid/block. This justified promoting the
+packet candidate only in the SM120 generic source-TEX observer; L2 state,
+DRAM demand, completion, and timing remain unchanged.
+
+The same corpus exposes complete TMA address shadows. A representative
+Blackwell kernel has 2,304 TMA-load sectors (576 hits) and 4,096 TMA-store
+sectors (3,072 apparent shadow hits), while NCU's generic row has 576 hits and
+5,824 misses with operation-read exactly 576 hits/1,728 misses and stores all
+misses. The generic observer therefore now uses complete TMA load shadow hits
+and treats TMA-store payload sectors as cold misses, matching the already
+established partial-payload semantics. Full DRAM-enabled SM120 replay and
+SM86 replay with twelve workers completed with expected status profiles; the
+SM120 generic-hit APE decreased to approximately 24.3%, but the requested
+sub-10% closure is not yet reached.
+
+Open insight question: can ordinary (non-TMA) SM120 operation-read residuals
+be separated by a trace-semantic client/form rule without using NCU labels?
+The remaining worst cases include split-K kernels where the trace models over
+1,000 read-hit sectors while the NCU operation-read row reports tens; the
+generic client endpoint and ordered joins may be scope-limited. Any proposed
+change must preserve operation-read sector conservation, full replay status
+profiles, and all timing/state frontiers, and must be rejected if it is a
+per-workload rule or count-balancing heuristic.

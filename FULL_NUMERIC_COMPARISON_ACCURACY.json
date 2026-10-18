@@ -14,35 +14,9 @@
   },
   "cases": [
     {
-      "label": "sm120_disabled",
-      "baseline_path": "<source-root>/final_results/dram_disabled/full.jsonl.zst",
-      "unified_path": "full_replay_runs/priority4_sm120_disabled/full.jsonl.zst",
-      "rows": 339,
-      "unified_rows": 339,
-      "common_rows": 339,
-      "missing_rows": [],
-      "extra_rows": [],
-      "duplicate_baseline_rows": [],
-      "duplicate_unified_rows": [],
-      "nonfinite_baseline_rows": [],
-      "nonfinite_unified_rows": [],
-      "status_counts_baseline": {
-        "ok": 339
-      },
-      "status_counts_unified": {
-        "ok": 339
-      },
-      "required_metadata_diffs": [],
-      "missing_baseline_numeric_fields": [],
-      "rows_with_numeric_diffs": 0,
-      "numeric_diff_count": 0,
-      "top_numeric_diffs": [],
-      "ok": true
-    },
-    {
       "label": "sm120_enabled",
       "baseline_path": "<source-root>/final_results/dram_enabled/full.jsonl.zst",
-      "unified_path": "full_replay_runs/priority5_sm120_enabled/full.jsonl.zst",
+      "unified_path": "full_replay_runs/tma_scope_sm120_enabled/full.jsonl.zst",
       "rows": 339,
       "unified_rows": 339,
       "common_rows": 339,
@@ -60,15 +34,916 @@
       },
       "required_metadata_diffs": [],
       "missing_baseline_numeric_fields": [],
-      "rows_with_numeric_diffs": 0,
-      "numeric_diff_count": 0,
-      "top_numeric_diffs": [],
-      "ok": true
+      "rows_with_numeric_diffs": 196,
+      "numeric_diff_count": 3152,
+      "top_numeric_diffs": [
+        {
+          "path": "launches.0.cache_lookup_predictions.2.observer.hits",
+          "count": 64,
+          "example": [
+            "cutlass_fp8_bf16_blockwise_gemm_sm120",
+            768,
+            0
+          ]
+        },
+        {
+          "path": "launches.0.cache_lookup_predictions.2.observer.lookups",
+          "count": 55,
+          "example": [
+            "cutlass_mxfp8_bf16_sparse_gemm_sm120",
+            4672,
+            2304
+          ]
+        },
+        {
+          "path": "launches.2.cache_lookup_predictions.2.observer.hits",
+          "count": 45,
+          "example": [
+            "cutlass_mxfp8_bf16_sparse_gemm_sm120_m256_n256_k256",
+            6711,
+            3639
+          ]
+        },
+        {
+          "path": "launches.2.cache_lookup_predictions.2.observer.lookups",
+          "count": 42,
+          "example": [
+            "cutlass_nvfp4_nvfp4_sparse_gemm_sm120",
+            1249,
+            865
+          ]
+        },
+        {
+          "path": "launches.1.cache_lookup_predictions.2.observer.hits",
+          "count": 36,
+          "example": [
+            "cutlass_fp8_bf16_blockwise_gemm_sm120",
+            768,
+            0
+          ]
+        },
+        {
+          "path": "launches.0.cache_lookup_predictions.2.timing_state.observer_resident_hits",
+          "count": 34,
+          "example": [
+            "cutlass_fp8_bf16_blockwise_gemm_sm120",
+            768,
+            0
+          ]
+        },
+        {
+          "path": "launches.3.cache_lookup_predictions.2.observer.hits",
+          "count": 34,
+          "example": [
+            "cutlass_nvfp4_grouped_gemm__heterogeneous_1sm",
+            3607,
+            2263
+          ]
+        },
+        {
+          "path": "launches.2.cache_lookup_predictions.2.timing_state.observer_resident_hits",
+          "count": 32,
+          "example": [
+            "cutlass_mxfp8_bf16_sparse_gemm_sm120_m256_n256_k256",
+            6455,
+            3383
+          ]
+        },
+        {
+          "path": "launches.3.cache_lookup_predictions.2.timing_state.observer_resident_hits",
+          "count": 32,
+          "example": [
+            "cutlass_nvfp4_grouped_gemm__heterogeneous_1sm",
+            3345,
+            2001
+          ]
+        },
+        {
+          "path": "launches.0.cache_lookup_predictions.2.timing_state.observer_reclassified_lookups",
+          "count": 32,
+          "example": [
+            "flashinfer_bench__004_gemm_n128_k2048-index1",
+            3962,
+            3866
+          ]
+        },
+        {
+          "path": "launches.3.cache_lookup_predictions.2.observer.lookups",
+          "count": 32,
+          "example": [
+            "quant_002_fp8_qkv_native_sm120",
+            2176,
+            2080
+          ]
+        },
+        {
+          "path": "launches.3.cache_lookup_predictions.2.timing_state.physical_hits_not_observed",
+          "count": 30,
+          "example": [
+            "quant_002_fp8_qkv_native_sm120",
+            12,
+            108
+          ]
+        },
+        {
+          "path": "launches.1.cache_lookup_predictions.2.timing_state.observer_resident_hits",
+          "count": 29,
+          "example": [
+            "cutlass_fp8_bf16_blockwise_gemm_sm120",
+            768,
+            0
+          ]
+        },
+        {
+          "path": "launches.2.cache_lookup_predictions.2.timing_state.physical_hits_not_observed",
+          "count": 29,
+          "example": [
+            "cutlass_nvfp4_nvfp4_sparse_gemm_sm120",
+            12,
+            396
+          ]
+        },
+        {
+          "path": "launches.1.cache_lookup_predictions.2.observer.lookups",
+          "count": 27,
+          "example": [
+            "cutlass_nvfp4_nvfp4_sparse_gemm_sm120",
+            1249,
+            865
+          ]
+        },
+        {
+          "path": "launches.0.cache_lookup_predictions.2.timing_state.physical_hits_not_observed",
+          "count": 25,
+          "example": [
+            "cutlass_mxfp8_bf16_sparse_gemm_sm120",
+            240,
+            2608
+          ]
+        },
+        {
+          "path": "launches.4.cache_lookup_predictions.2.observer.hits",
+          "count": 22,
+          "example": [
+            "quant_008_nvfp4_multimodal_sm120",
+            384,
+            0
+          ]
+        },
+        {
+          "path": "launches.11.cache_lookup_predictions.2.observer.hits",
+          "count": 21,
+          "example": [
+            "flashinfer_attention__018_mla_paged_decode_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            56,
+            32
+          ]
+        },
+        {
+          "path": "launches.11.cache_lookup_predictions.2.observer.lookups",
+          "count": 21,
+          "example": [
+            "flashinfer_attention__018_mla_paged_decode_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            224,
+            200
+          ]
+        },
+        {
+          "path": "launches.4.cache_lookup_predictions.2.observer.lookups",
+          "count": 21,
+          "example": [
+            "quant_008_nvfp4_multimodal_sm120",
+            2560,
+            2176
+          ]
+        },
+        {
+          "path": "launches.1.cache_lookup_predictions.2.timing_state.physical_hits_not_observed",
+          "count": 20,
+          "example": [
+            "cutlass_nvfp4_nvfp4_sparse_gemm_sm120",
+            12,
+            396
+          ]
+        },
+        {
+          "path": "launches.8.cache_lookup_predictions.2.observer.hits",
+          "count": 20,
+          "example": [
+            "quant_002_fp8_qkv_native_sm120",
+            448,
+            64
+          ]
+        },
+        {
+          "path": "launches.8.cache_lookup_predictions.2.observer.lookups",
+          "count": 20,
+          "example": [
+            "quant_002_fp8_qkv_native_sm120",
+            8704,
+            8320
+          ]
+        },
+        {
+          "path": "launches.4.cache_lookup_predictions.2.timing_state.observer_resident_hits",
+          "count": 19,
+          "example": [
+            "quant_008_nvfp4_multimodal_sm120",
+            384,
+            0
+          ]
+        },
+        {
+          "path": "launches.4.cache_lookup_predictions.2.timing_state.physical_hits_not_observed",
+          "count": 18,
+          "example": [
+            "quant_008_nvfp4_multimodal_sm120",
+            96,
+            480
+          ]
+        },
+        {
+          "path": "launches.13.cache_lookup_predictions.2.observer.hits",
+          "count": 17,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            16,
+            0
+          ]
+        },
+        {
+          "path": "launches.13.cache_lookup_predictions.2.observer.lookups",
+          "count": 17,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            64,
+            48
+          ]
+        },
+        {
+          "path": "launches.12.cache_lookup_predictions.2.observer.hits",
+          "count": 15,
+          "example": [
+            "flashinfer_attention__014_gqa_paged_prefill_causal_h32_kv4_d128_ps1-index0-vectorized-v2",
+            96,
+            0
+          ]
+        },
+        {
+          "path": "launches.12.cache_lookup_predictions.2.observer.lookups",
+          "count": 15,
+          "example": [
+            "flashinfer_attention__014_gqa_paged_prefill_causal_h32_kv4_d128_ps1-index0-vectorized-v2",
+            3200,
+            3104
+          ]
+        },
+        {
+          "path": "launches.16.cache_lookup_predictions.2.observer.hits",
+          "count": 15,
+          "example": [
+            "sol_l1_021_vision_varlen_attention_sm120",
+            640,
+            448
+          ]
+        },
+        {
+          "path": "launches.16.cache_lookup_predictions.2.observer.lookups",
+          "count": 15,
+          "example": [
+            "sol_l1_021_vision_varlen_attention_sm120",
+            1288,
+            1096
+          ]
+        },
+        {
+          "path": "launches.0.cache_lookup_predictions.2.timing_state.remaining_lookups",
+          "count": 14,
+          "example": [
+            "cutlass_fp8_bf16_blockwise_gemm_sm120",
+            1282,
+            2050
+          ]
+        },
+        {
+          "path": "launches.0.cache_lookup_predictions.2.observer.misses",
+          "count": 14,
+          "example": [
+            "cutlass_fp8_bf16_blockwise_gemm_sm120",
+            1282,
+            2050
+          ]
+        },
+        {
+          "path": "launches.2.cache_lookup_predictions.2.timing_state.observer_reclassified_lookups",
+          "count": 14,
+          "example": [
+            "sol_l1_037_flux_ffn_sm120adapted",
+            7584,
+            7200
+          ]
+        },
+        {
+          "path": "launches.11.cache_lookup_predictions.2.timing_state.observer_reclassified_lookups",
+          "count": 13,
+          "example": [
+            "flashinfer_attention__018_mla_paged_decode_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            26,
+            2
+          ]
+        },
+        {
+          "path": "launches.13.cache_lookup_predictions.2.timing_state.physical_hits_not_observed",
+          "count": 13,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            12,
+            28
+          ]
+        },
+        {
+          "path": "launches.13.cache_lookup_predictions.2.timing_state.observer_resident_hits",
+          "count": 13,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            16,
+            0
+          ]
+        },
+        {
+          "path": "launches.8.cache_lookup_predictions.2.timing_state.observer_reclassified_lookups",
+          "count": 13,
+          "example": [
+            "quant_004_fp8_moe_expert_linear_sm120adapted_small",
+            98112,
+            96584
+          ]
+        },
+        {
+          "path": "launches.9.cache_lookup_predictions.2.observer.hits",
+          "count": 12,
+          "example": [
+            "flashinfer_attention__016_gqa_ragged_prefill_causal_h32_kv4_d128-index0-vectorized-v2",
+            96,
+            0
+          ]
+        },
+        {
+          "path": "launches.9.cache_lookup_predictions.2.observer.lookups",
+          "count": 12,
+          "example": [
+            "flashinfer_attention__016_gqa_ragged_prefill_causal_h32_kv4_d128-index0-vectorized-v2",
+            3200,
+            3104
+          ]
+        },
+        {
+          "path": "launches.10.cache_lookup_predictions.2.observer.hits",
+          "count": 12,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            16,
+            0
+          ]
+        },
+        {
+          "path": "launches.10.cache_lookup_predictions.2.observer.lookups",
+          "count": 12,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            288,
+            272
+          ]
+        },
+        {
+          "path": "launches.5.cache_lookup_predictions.2.observer.hits",
+          "count": 12,
+          "example": [
+            "sol_l1_013_rms_backward_sm120adapted",
+            7,
+            0
+          ]
+        },
+        {
+          "path": "launches.5.cache_lookup_predictions.2.observer.lookups",
+          "count": 12,
+          "example": [
+            "sol_l1_013_rms_backward_sm120adapted",
+            136,
+            129
+          ]
+        },
+        {
+          "path": "launches.6.cache_lookup_predictions.2.observer.hits",
+          "count": 12,
+          "example": [
+            "sol_l1_038_flux_rmsnorm_qk_sm120",
+            672,
+            96
+          ]
+        },
+        {
+          "path": "launches.6.cache_lookup_predictions.2.observer.lookups",
+          "count": 12,
+          "example": [
+            "sol_l1_038_flux_rmsnorm_qk_sm120",
+            13056,
+            12480
+          ]
+        },
+        {
+          "path": "launches.1.cache_lookup_predictions.2.timing_state.resident_data_hits",
+          "count": 11,
+          "example": [
+            "cutlass_fp8_bf16_blockwise_gemm_sm120",
+            768,
+            0
+          ]
+        },
+        {
+          "path": "launches.1.cache_lookup_predictions.2.timing_state.remaining_lookups",
+          "count": 11,
+          "example": [
+            "cutlass_fp8_bf16_blockwise_gemm_sm120",
+            1282,
+            2050
+          ]
+        },
+        {
+          "path": "launches.1.cache_lookup_predictions.2.observer.misses",
+          "count": 11,
+          "example": [
+            "cutlass_fp8_bf16_blockwise_gemm_sm120",
+            1282,
+            2050
+          ]
+        },
+        {
+          "path": "launches.27.cache_lookup_predictions.2.observer.hits",
+          "count": 11,
+          "example": [
+            "quant_002_fp8_qkv_native_sm120",
+            112,
+            16
+          ]
+        },
+        {
+          "path": "launches.27.cache_lookup_predictions.2.observer.lookups",
+          "count": 11,
+          "example": [
+            "quant_002_fp8_qkv_native_sm120",
+            2176,
+            2080
+          ]
+        },
+        {
+          "path": "launches.33.cache_lookup_predictions.2.observer.hits",
+          "count": 11,
+          "example": [
+            "quant_002_fp8_qkv_native_sm120",
+            1,
+            0
+          ]
+        },
+        {
+          "path": "launches.33.cache_lookup_predictions.2.observer.lookups",
+          "count": 11,
+          "example": [
+            "quant_002_fp8_qkv_native_sm120",
+            34,
+            33
+          ]
+        },
+        {
+          "path": "launches.26.cache_lookup_predictions.2.observer.hits",
+          "count": 11,
+          "example": [
+            "quant_012_fp8_shared_native_sm120",
+            112,
+            16
+          ]
+        },
+        {
+          "path": "launches.26.cache_lookup_predictions.2.observer.lookups",
+          "count": 11,
+          "example": [
+            "quant_012_fp8_shared_native_sm120",
+            2176,
+            2080
+          ]
+        },
+        {
+          "path": "launches.7.cache_lookup_predictions.2.observer.hits",
+          "count": 11,
+          "example": [
+            "sol_l1_039_adain_backward_sm120",
+            28,
+            4
+          ]
+        },
+        {
+          "path": "launches.7.cache_lookup_predictions.2.observer.lookups",
+          "count": 11,
+          "example": [
+            "sol_l1_039_adain_backward_sm120",
+            288,
+            264
+          ]
+        },
+        {
+          "path": "launches.23.cache_lookup_predictions.2.observer.hits",
+          "count": 10,
+          "example": [
+            "quant_016_fp8_mla_qkv_native_sm120",
+            56,
+            8
+          ]
+        },
+        {
+          "path": "launches.23.cache_lookup_predictions.2.observer.lookups",
+          "count": 10,
+          "example": [
+            "quant_016_fp8_mla_qkv_native_sm120",
+            1088,
+            1040
+          ]
+        },
+        {
+          "path": "launches.15.cache_lookup_predictions.2.observer.hits",
+          "count": 10,
+          "example": [
+            "sol_l1_039_adain_backward_sm120",
+            28,
+            4
+          ]
+        },
+        {
+          "path": "launches.15.cache_lookup_predictions.2.observer.lookups",
+          "count": 10,
+          "example": [
+            "sol_l1_039_adain_backward_sm120",
+            288,
+            264
+          ]
+        },
+        {
+          "path": "launches.14.cache_lookup_predictions.2.timing_state.observer_reclassified_lookups",
+          "count": 10,
+          "example": [
+            "sol_l1_086_sam_iou_hypernetwork_sm120",
+            100,
+            52
+          ]
+        },
+        {
+          "path": "launches.14.cache_lookup_predictions.2.observer.hits",
+          "count": 10,
+          "example": [
+            "sol_l1_086_sam_iou_hypernetwork_sm120",
+            160,
+            112
+          ]
+        },
+        {
+          "path": "launches.14.cache_lookup_predictions.2.observer.lookups",
+          "count": 10,
+          "example": [
+            "sol_l1_086_sam_iou_hypernetwork_sm120",
+            712,
+            664
+          ]
+        },
+        {
+          "path": "launches.0.cache_lookup_predictions.2.timing_state.resident_data_hits",
+          "count": 9,
+          "example": [
+            "cutlass_fp8_bf16_blockwise_gemm_sm120",
+            768,
+            0
+          ]
+        },
+        {
+          "path": "launches.33.cache_lookup_predictions.2.timing_state.physical_hits_not_observed",
+          "count": 9,
+          "example": [
+            "quant_002_fp8_qkv_native_sm120",
+            0,
+            1
+          ]
+        },
+        {
+          "path": "launches.33.cache_lookup_predictions.2.timing_state.observer_resident_hits",
+          "count": 9,
+          "example": [
+            "quant_002_fp8_qkv_native_sm120",
+            1,
+            0
+          ]
+        },
+        {
+          "path": "launches.39.cache_lookup_predictions.2.observer.hits",
+          "count": 9,
+          "example": [
+            "quant_013_fp8_mla_kv_native_sm120",
+            8640,
+            8256
+          ]
+        },
+        {
+          "path": "launches.39.cache_lookup_predictions.2.observer.lookups",
+          "count": 9,
+          "example": [
+            "quant_013_fp8_mla_kv_native_sm120",
+            16896,
+            16512
+          ]
+        },
+        {
+          "path": "launches.21.cache_lookup_predictions.2.observer.hits",
+          "count": 9,
+          "example": [
+            "quant_017_fp8_shared_native_sm120",
+            112,
+            16
+          ]
+        },
+        {
+          "path": "launches.21.cache_lookup_predictions.2.observer.lookups",
+          "count": 9,
+          "example": [
+            "quant_017_fp8_shared_native_sm120",
+            2176,
+            2080
+          ]
+        },
+        {
+          "path": "launches.5.cache_lookup_predictions.2.timing_state.physical_hits_not_observed",
+          "count": 9,
+          "example": [
+            "sol_l1_013_rms_backward_sm120adapted",
+            0,
+            7
+          ]
+        },
+        {
+          "path": "launches.5.cache_lookup_predictions.2.timing_state.observer_resident_hits",
+          "count": 9,
+          "example": [
+            "sol_l1_013_rms_backward_sm120adapted",
+            7,
+            0
+          ]
+        },
+        {
+          "path": "launches.10.cache_lookup_predictions.2.timing_state.physical_hits_not_observed",
+          "count": 8,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            12,
+            28
+          ]
+        },
+        {
+          "path": "launches.10.cache_lookup_predictions.2.timing_state.observer_resident_hits",
+          "count": 8,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            16,
+            0
+          ]
+        },
+        {
+          "path": "launches.11.cache_lookup_predictions.2.timing_state.physical_hits_not_observed",
+          "count": 8,
+          "example": [
+            "quant_001_fp8_attention_output_native_sm120",
+            48,
+            432
+          ]
+        },
+        {
+          "path": "launches.11.cache_lookup_predictions.2.timing_state.observer_resident_hits",
+          "count": 8,
+          "example": [
+            "quant_001_fp8_attention_output_native_sm120",
+            448,
+            64
+          ]
+        },
+        {
+          "path": "launches.27.cache_lookup_predictions.2.timing_state.physical_hits_not_observed",
+          "count": 8,
+          "example": [
+            "quant_002_fp8_qkv_native_sm120",
+            12,
+            108
+          ]
+        },
+        {
+          "path": "launches.27.cache_lookup_predictions.2.timing_state.observer_resident_hits",
+          "count": 8,
+          "example": [
+            "quant_002_fp8_qkv_native_sm120",
+            112,
+            16
+          ]
+        },
+        {
+          "path": "launches.36.cache_lookup_predictions.2.observer.hits",
+          "count": 8,
+          "example": [
+            "quant_004_fp8_moe_expert_linear_sm120adapted_small",
+            896,
+            128
+          ]
+        },
+        {
+          "path": "launches.36.cache_lookup_predictions.2.observer.lookups",
+          "count": 8,
+          "example": [
+            "quant_004_fp8_moe_expert_linear_sm120adapted_small",
+            17408,
+            16640
+          ]
+        },
+        {
+          "path": "launches.22.cache_lookup_predictions.2.observer.hits",
+          "count": 8,
+          "example": [
+            "quant_007_fp8_vision_qkv_sm120adapted",
+            7168,
+            6016
+          ]
+        },
+        {
+          "path": "launches.22.cache_lookup_predictions.2.observer.lookups",
+          "count": 8,
+          "example": [
+            "quant_007_fp8_vision_qkv_sm120adapted",
+            13824,
+            12672
+          ]
+        },
+        {
+          "path": "launches.25.cache_lookup_predictions.2.observer.hits",
+          "count": 8,
+          "example": [
+            "quant_011_fp8_router_native_sm120",
+            276,
+            160
+          ]
+        },
+        {
+          "path": "launches.25.cache_lookup_predictions.2.observer.lookups",
+          "count": 8,
+          "example": [
+            "quant_011_fp8_router_native_sm120",
+            1396,
+            1280
+          ]
+        },
+        {
+          "path": "launches.34.cache_lookup_predictions.2.observer.hits",
+          "count": 8,
+          "example": [
+            "quant_013_fp8_mla_kv_native_sm120",
+            56,
+            8
+          ]
+        },
+        {
+          "path": "launches.34.cache_lookup_predictions.2.observer.lookups",
+          "count": 8,
+          "example": [
+            "quant_013_fp8_mla_kv_native_sm120",
+            1088,
+            1040
+          ]
+        },
+        {
+          "path": "launches.12.cache_lookup_predictions.2.timing_state.observer_reclassified_lookups",
+          "count": 8,
+          "example": [
+            "sol_l1_014_rope_scaling_backward",
+            44,
+            28
+          ]
+        },
+        {
+          "path": "launches.16.cache_lookup_predictions.2.timing_state.physical_hits_not_observed",
+          "count": 8,
+          "example": [
+            "sol_l1_070_mamba2_chunk_diagonal_sm120",
+            12,
+            28
+          ]
+        },
+        {
+          "path": "launches.16.cache_lookup_predictions.2.timing_state.observer_resident_hits",
+          "count": 8,
+          "example": [
+            "sol_l1_070_mamba2_chunk_diagonal_sm120",
+            16,
+            0
+          ]
+        },
+        {
+          "path": "launches.20.cache_lookup_predictions.2.observer.hits",
+          "count": 8,
+          "example": [
+            "sol_l1_086_sam_iou_hypernetwork_sm120",
+            160,
+            112
+          ]
+        },
+        {
+          "path": "launches.20.cache_lookup_predictions.2.observer.lookups",
+          "count": 8,
+          "example": [
+            "sol_l1_086_sam_iou_hypernetwork_sm120",
+            712,
+            664
+          ]
+        },
+        {
+          "path": "launches.12.cache_lookup_predictions.2.timing_state.physical_hits_not_observed",
+          "count": 7,
+          "example": [
+            "flashinfer_attention__014_gqa_paged_prefill_causal_h32_kv4_d128_ps1-index0-vectorized-v2",
+            24,
+            120
+          ]
+        },
+        {
+          "path": "launches.12.cache_lookup_predictions.2.timing_state.observer_resident_hits",
+          "count": 7,
+          "example": [
+            "flashinfer_attention__014_gqa_paged_prefill_causal_h32_kv4_d128_ps1-index0-vectorized-v2",
+            96,
+            0
+          ]
+        },
+        {
+          "path": "launches.9.cache_lookup_predictions.2.timing_state.physical_hits_not_observed",
+          "count": 7,
+          "example": [
+            "flashinfer_attention__016_gqa_ragged_prefill_causal_h32_kv4_d128-index0-vectorized-v2",
+            24,
+            120
+          ]
+        },
+        {
+          "path": "launches.9.cache_lookup_predictions.2.timing_state.observer_resident_hits",
+          "count": 7,
+          "example": [
+            "flashinfer_attention__016_gqa_ragged_prefill_causal_h32_kv4_d128-index0-vectorized-v2",
+            96,
+            0
+          ]
+        },
+        {
+          "path": "launches.8.cache_lookup_predictions.2.timing_state.physical_hits_not_observed",
+          "count": 7,
+          "example": [
+            "quant_002_fp8_qkv_native_sm120",
+            48,
+            432
+          ]
+        },
+        {
+          "path": "launches.8.cache_lookup_predictions.2.timing_state.observer_resident_hits",
+          "count": 7,
+          "example": [
+            "quant_002_fp8_qkv_native_sm120",
+            448,
+            64
+          ]
+        },
+        {
+          "path": "launches.30.cache_lookup_predictions.2.observer.hits",
+          "count": 7,
+          "example": [
+            "quant_004_fp8_moe_expert_linear_sm120adapted_small",
+            224,
+            32
+          ]
+        },
+        {
+          "path": "launches.30.cache_lookup_predictions.2.observer.lookups",
+          "count": 7,
+          "example": [
+            "quant_004_fp8_moe_expert_linear_sm120adapted_small",
+            4352,
+            4160
+          ]
+        }
+      ],
+      "ok": false
     },
     {
       "label": "sm86",
       "baseline_path": "<source-root>/final_results/3090ti/full.jsonl.zst",
-      "unified_path": "full_replay_runs/priority4_sm86/full.jsonl.zst",
+      "unified_path": "full_replay_runs/tma_scope_sm86/full.jsonl.zst",
       "rows": 356,
       "unified_rows": 356,
       "common_rows": 356,

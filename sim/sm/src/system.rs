@@ -346,6 +346,11 @@ pub struct L2SourceSplit {
     pub read_pending_merge_hits: u64,
     pub store_lookup_requests: u64,
     pub store_lookup_hits: u64,
+    /// Observer-only resident hits among the launch-local coalesced store
+    /// packet candidate. This is distinct from the physical per-record store
+    /// hit lane: repeated writes to one sector may hit the timed L2 model but
+    /// are one source-TEX packet at the external client boundary.
+    pub store_packet_lookup_hits: u64,
     /// Observer-only per-SM line/sector packet candidate. A second global
     /// store to the same sector within the bounded admission window is
     /// retained as one candidate packet; this never changes the L2 state,
@@ -615,6 +620,12 @@ impl L2SourceSplit {
                 .checked_add(other.store_lookup_hits)
                 .ok_or(SystemCounterError::Overflow {
                     counter: "L2 store lookup hits",
+                })?,
+            store_packet_lookup_hits: self
+                .store_packet_lookup_hits
+                .checked_add(other.store_packet_lookup_hits)
+                .ok_or(SystemCounterError::Overflow {
+                    counter: "L2 store packet lookup hits",
                 })?,
             store_packet_candidate_sectors: self
                 .store_packet_candidate_sectors
@@ -2663,6 +2674,7 @@ struct L2SystemCommit {
     read_pending_merge_hits: u64,
     store_lookup_requests: u64,
     store_lookup_hits: u64,
+    store_packet_lookup_hits: u64,
     atomic_lookup_requests: u64,
     atomic_lookup_hits: u64,
     reduction_lookup_requests: u64,
@@ -3933,6 +3945,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
     let mut read_lookup_requests = 0_u64;
     let mut store_lookup_hits = 0_u64;
     let mut store_lookup_requests = 0_u64;
+    let mut store_packet_lookup_hits = 0_u64;
     let mut atomic_lookup_hits = 0_u64;
     let mut atomic_lookup_requests = 0_u64;
     let mut reduction_lookup_hits = 0_u64;
@@ -4187,6 +4200,18 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                             let pending_merge_sectors =
                                 u64::from(preview.pending_merge_mask().count_ones());
                             let new_fill_sectors = u64::from(preview.fill_mask().count_ones());
+                            let store_packet_lookup_hits = if req.origin == MemoryOrigin::Global
+                                && req.operation == MemoryOperation::Store
+                            {
+                                store_packet_keys
+                                    .iter()
+                                    .filter(|(_, _, sector)| {
+                                        preview.lookup.present_mask & (1_u8 << sector) != 0
+                                    })
+                                    .count() as u64
+                            } else {
+                                0
+                            };
                             let observer_operation =
                                 req.observer_operation.unwrap_or(req.operation);
                             let lookup_for_operation =
@@ -4636,6 +4661,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                                 } else {
                                     0
                                 },
+                                store_packet_lookup_hits,
                                 atomic_lookup_requests: if matches!(
                                     observer_operation,
                                     MemoryOperation::Atomic
@@ -4746,6 +4772,11 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                         .checked_add(commit.store_lookup_hits)
                         .ok_or(SystemError::CounterOverflow {
                             counter: "L2 store lookup observer hits",
+                        })?;
+                    store_packet_lookup_hits = store_packet_lookup_hits
+                        .checked_add(commit.store_packet_lookup_hits)
+                        .ok_or(SystemError::CounterOverflow {
+                            counter: "L2 store packet lookup hits",
                         })?;
                     atomic_lookup_requests = atomic_lookup_requests
                         .checked_add(commit.atomic_lookup_requests)
@@ -5487,6 +5518,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
     l2_by_source.read_pending_merge_hits = read_pending_merge_hits;
     l2_by_source.store_lookup_requests = store_lookup_requests;
     l2_by_source.store_lookup_hits = store_lookup_hits;
+    l2_by_source.store_packet_lookup_hits = store_packet_lookup_hits;
     l2_by_source.store_packet_candidate_sectors = store_packet_candidate_sectors;
     l2_by_source.atomic_lookup_requests = atomic_lookup_requests;
     l2_by_source.atomic_lookup_hits = atomic_lookup_hits;

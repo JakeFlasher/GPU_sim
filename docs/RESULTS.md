@@ -45,29 +45,32 @@ The complete artifacts are `full_replay_runs/priority4_sm120_disabled/`,
 `full_replay_runs/priority5_sm120_enabled/`, and
 `full_replay_runs/priority4_sm86/`.
 
-`FULL_NUMERIC_COMPARISON_ACCURACY.json` compares these rows with the retained
-baseline trees: both SM120 cases have zero row/metadata/numeric differences;
-SM86 has the expected opcode-field differences from the LDG.CONSTANT fix and
-no status, row-identity, or dropped-field differences.
+`FULL_NUMERIC_COMPARISON_ACCURACY.json` compares the enabled SM120 and SM86
+rows with the retained baseline trees. Row identities, statuses, required
+metadata, and dropped-field checks remain clean; numeric differences are the
+intentional observer changes (SM120 packet/TMA scope and SM86 LDG.CONSTANT
+scope), not replay failures. The SM120 DRAM-disabled variant is not part of
+the current required replay scope.
 
 The report joins NCU only after replay. The current residuals are not all
 replay correctness failures:
 
 * SM86 LDG opcode scope now includes traced `LDG.CONSTANT` forms and improved
   from 44.8% to 1.36% APE; LTC128B and LDGSTS remain separate scope lanes.
-* SM120 operation-read L2 misses and most sector-volume rows are close, while
-  generic L2 hit, unified-L1 hit, DRAM-client totals, and some timing endpoints
-  remain high-residual scope/effective-model gaps.
+* SM120 operation-read L2 misses and most sector-volume rows are close. The
+  trace-semantic store-packet and TMA-store-cold-miss observers reduce generic
+  L2 hit APE to about **24.3%** (from about 57%), while unified-L1 hit,
+  DRAM-client totals, and some timing endpoints remain high-residual
+  scope/effective-model gaps.
 * SM86 shared-memory carveout values are absent from trace sidecars, so NCU's
   per-launch occupancy/configuration endpoints cannot be reconstructed from
   the current replay inputs without an external runtime-resource source.
 
-The generic SM120 L2 discrepancy is retained as an explicit residual rather
-than corrected by count balancing: a representative mixed launch emits 128
-simulator store lookups (96 hits) while its NCU generic source-TEX row reports
-32 store sectors (3 hits). The operation-read endpoint is independently
-conserved. See [`consultation_prompt.txt`](../consultation_prompt.txt) for the
-brain-review context and required evidence for a future upstream coalescer
-slice. These limitations prevent an honest claim that every major NCU metric
-is below 10% APE yet; no NCU value is used as a replay or model-selection
-input.
+The remaining generic SM120 L2 residual is retained explicitly rather than
+corrected by count balancing: trace-semantic coalescing now removes repeated
+store packets and TMA stores are treated as cold misses, but ordinary
+operation-read/client scope and resident-state differences remain. See
+[`consultation_prompt.txt`](../consultation_prompt.txt) for the evidence and
+Gemini consultation context. These limitations prevent an honest claim that
+every major NCU metric is below 10% APE yet; no NCU value is used as a replay
+or model-selection input.

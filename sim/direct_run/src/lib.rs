@@ -2283,6 +2283,35 @@ fn cache_lookup_prediction_reports(
                             && metrics.local_interleaved_l1_store_hits != 0
                             && metrics.local_interleaved_store_sectors != 0
                     });
+                    // SM120's source-TEX endpoint observes the coalesced
+                    // L1/TEX-to-L2 store packet boundary, not every repeated
+                    // timed-cache write lookup.  The packet candidate is
+                    // derived solely from decoded line/sector identity and
+                    // issue-window topology; it never changes L2 state,
+                    // DRAM demand, or timing. Keep SM86 on its established
+                    // physical/source projection.
+                    let (base_lookup_hits, base_lookup_requests) =
+                        if counters.arch() == Some(ArchId::Sm120)
+                            && let Some(split) = l2_by_source
+                            && split.store_packet_candidate_sectors != 0
+                        {
+                            let non_store_hits =
+                                counters.lookup_hits.saturating_sub(split.store_lookup_hits);
+                            let non_store_requests = counters
+                                .lookup_requests
+                                .saturating_sub(split.store_lookup_requests);
+                            (
+                                non_store_hits.saturating_add(
+                                    split.store_packet_lookup_hits.min(
+                                        split.store_packet_candidate_sectors,
+                                    ),
+                                ),
+                                non_store_requests
+                                    .saturating_add(split.store_packet_candidate_sectors),
+                            )
+                        } else {
+                            (counters.lookup_hits, counters.lookup_requests)
+                        };
                     let (ordinary_hits, ordinary_lookups, local_role) =
                         if let (Some(metrics), Some(split)) = (local_observer, l2_by_source) {
                             let (local_store_sectors, local_store_hits) =
@@ -2294,12 +2323,12 @@ fn cache_lookup_prediction_reports(
                                 .local_interleaved_l2_store_hits
                                 .saturating_sub(local_store_hits);
                             (
-                                counters.lookup_hits.saturating_add(extra_hits),
-                                counters.lookup_requests.saturating_add(extra_sectors),
+                                base_lookup_hits.saturating_add(extra_hits),
+                                base_lookup_requests.saturating_add(extra_sectors),
                                 " plus_dynamic_local_store_interleave_observer",
                             )
                         } else {
-                            (counters.lookup_hits, counters.lookup_requests, "")
+                            (base_lookup_hits, base_lookup_requests, "")
                         };
                     // Full-warp consecutive STG records can carry the same
                     // sectors twice.  The SM120 write-combining path absorbs
@@ -2348,11 +2377,21 @@ fn cache_lookup_prediction_reports(
                             metrics.tma_shadow_l2_requests != 0
                                 && metrics.tma_shadow_l2_address_unavailable == 0
                         }) {
+                            // TMA load addresses share the source-TEX lookup
+                            // endpoint; TMA stores are a destination payload
+                            // stream and must not manufacture source lookup
+                            // hits. Keep their request population as cold
+                            // misses in this generic observer, matching the
+                            // already-established partial-payload arm below.
                             (
-                                metrics.tma_shadow_l2_hits,
-                                metrics.tma_shadow_l2_misses,
-                                metrics.tma_shadow_l2_requests,
-                                "conserving_source_sector_observer_plus_complete_tma_address_shadow; generic_hit_rate_alias_unjoined",
+                                metrics.tma_shadow_l2_load_hits,
+                                metrics
+                                    .tma_shadow_l2_load_misses
+                                    .saturating_add(metrics.tma_shadow_l2_store_requests),
+                                metrics
+                                    .tma_shadow_l2_load_requests
+                                    .saturating_add(metrics.tma_shadow_l2_store_requests),
+                                "conserving_source_sector_observer_plus_complete_tma_load_shadow; store-payload-cold-miss; generic_hit_rate_alias_unjoined",
                             )
                         } else if let Some(metrics) = trace.filter(|metrics| {
                             metrics.tma_sidecar_payload_bytes_observed != 0
