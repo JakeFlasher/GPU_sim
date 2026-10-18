@@ -1,0 +1,1001 @@
+{
+  "comparison_schema_version": 2,
+  "normalization": {
+    "canonical_capture": "replace('/', '__') for the historical SM120 capture-id separator only; collisions fail",
+    "numeric_fields": "all common finite numeric fields, excluding documented wall-clock and observer-only additive fields",
+    "required_metadata": [
+      "status",
+      "architecture",
+      "memory_mode",
+      "cache_scope",
+      "launch_count",
+      "returncode"
+    ]
+  },
+  "cases": [
+    {
+      "label": "sm120_disabled",
+      "baseline_path": "<source-root>/final_results/dram_disabled/full.jsonl.zst",
+      "unified_path": "full_replay_runs/priority4_sm120_disabled/full.jsonl.zst",
+      "rows": 339,
+      "unified_rows": 339,
+      "common_rows": 339,
+      "missing_rows": [],
+      "extra_rows": [],
+      "duplicate_baseline_rows": [],
+      "duplicate_unified_rows": [],
+      "nonfinite_baseline_rows": [],
+      "nonfinite_unified_rows": [],
+      "status_counts_baseline": {
+        "ok": 339
+      },
+      "status_counts_unified": {
+        "ok": 339
+      },
+      "required_metadata_diffs": [],
+      "missing_baseline_numeric_fields": [],
+      "rows_with_numeric_diffs": 0,
+      "numeric_diff_count": 0,
+      "top_numeric_diffs": [],
+      "ok": true
+    },
+    {
+      "label": "sm120_enabled",
+      "baseline_path": "<source-root>/final_results/dram_enabled/full.jsonl.zst",
+      "unified_path": "full_replay_runs/priority5_sm120_enabled/full.jsonl.zst",
+      "rows": 339,
+      "unified_rows": 339,
+      "common_rows": 339,
+      "missing_rows": [],
+      "extra_rows": [],
+      "duplicate_baseline_rows": [],
+      "duplicate_unified_rows": [],
+      "nonfinite_baseline_rows": [],
+      "nonfinite_unified_rows": [],
+      "status_counts_baseline": {
+        "ok": 339
+      },
+      "status_counts_unified": {
+        "ok": 339
+      },
+      "required_metadata_diffs": [],
+      "missing_baseline_numeric_fields": [],
+      "rows_with_numeric_diffs": 0,
+      "numeric_diff_count": 0,
+      "top_numeric_diffs": [],
+      "ok": true
+    },
+    {
+      "label": "sm86",
+      "baseline_path": "<source-root>/final_results/3090ti/full.jsonl.zst",
+      "unified_path": "full_replay_runs/priority4_sm86/full.jsonl.zst",
+      "rows": 356,
+      "unified_rows": 356,
+      "common_rows": 356,
+      "missing_rows": [],
+      "extra_rows": [],
+      "duplicate_baseline_rows": [],
+      "duplicate_unified_rows": [],
+      "nonfinite_baseline_rows": [],
+      "nonfinite_unified_rows": [],
+      "status_counts_baseline": {
+        "control_error": 62,
+        "ok": 286,
+        "replay_error": 8
+      },
+      "status_counts_unified": {
+        "control_error": 62,
+        "ok": 286,
+        "replay_error": 8
+      },
+      "required_metadata_diffs": [],
+      "missing_baseline_numeric_fields": [],
+      "rows_with_numeric_diffs": 204,
+      "numeric_diff_count": 1476,
+      "top_numeric_diffs": [
+        {
+          "path": "launches.0.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 113,
+          "example": [
+            "fp16_hmma_gemm_traceable",
+            0,
+            96
+          ]
+        },
+        {
+          "path": "launches.0.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 113,
+          "example": [
+            "fp16_hmma_gemm_traceable",
+            0.0,
+            96.0
+          ]
+        },
+        {
+          "path": "launches.1.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 27,
+          "example": [
+            "simbench_l1_dram_streaming_dot_product",
+            0,
+            32768
+          ]
+        },
+        {
+          "path": "launches.1.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 27,
+          "example": [
+            "simbench_l1_dram_streaming_dot_product",
+            0.0,
+            32768.0
+          ]
+        },
+        {
+          "path": "launches.22.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 25,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            0,
+            544
+          ]
+        },
+        {
+          "path": "launches.22.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 25,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            0.0,
+            544.0
+          ]
+        },
+        {
+          "path": "launches.2.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 23,
+          "example": [
+            "simbench_l1_dram_streaming_dot_product",
+            0,
+            32768
+          ]
+        },
+        {
+          "path": "launches.2.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 23,
+          "example": [
+            "simbench_l1_dram_streaming_dot_product",
+            0.0,
+            32768.0
+          ]
+        },
+        {
+          "path": "launches.3.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 16,
+          "example": [
+            "simbench_l1_dram_streaming_dot_product",
+            0,
+            32768
+          ]
+        },
+        {
+          "path": "launches.3.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 16,
+          "example": [
+            "simbench_l1_dram_streaming_dot_product",
+            0.0,
+            32768.0
+          ]
+        },
+        {
+          "path": "launches.11.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 15,
+          "example": [
+            "sm86_adapted_l1_017_moe_swiglu_backward_sm120",
+            0,
+            576
+          ]
+        },
+        {
+          "path": "launches.11.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 15,
+          "example": [
+            "sm86_adapted_l1_017_moe_swiglu_backward_sm120",
+            0.0,
+            576.0
+          ]
+        },
+        {
+          "path": "launches.64.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 15,
+          "example": [
+            "sm86_adapted_l2_009_decoder_moe_sm120",
+            0,
+            352
+          ]
+        },
+        {
+          "path": "launches.64.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 15,
+          "example": [
+            "sm86_adapted_l2_009_decoder_moe_sm120",
+            0.0,
+            352.0
+          ]
+        },
+        {
+          "path": "launches.14.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 13,
+          "example": [
+            "sm86_adapted_l1_021_vision_varlen_attention_sm120",
+            0,
+            192
+          ]
+        },
+        {
+          "path": "launches.14.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 13,
+          "example": [
+            "sm86_adapted_l1_021_vision_varlen_attention_sm120",
+            0.0,
+            192.0
+          ]
+        },
+        {
+          "path": "launches.4.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 11,
+          "example": [
+            "simbench_l1_dram_streaming_dot_product",
+            0,
+            32768
+          ]
+        },
+        {
+          "path": "launches.4.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 11,
+          "example": [
+            "simbench_l1_dram_streaming_dot_product",
+            0.0,
+            32768.0
+          ]
+        },
+        {
+          "path": "launches.15.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 11,
+          "example": [
+            "sm86_adapted_l1_067_flash_gqa_sm120",
+            0,
+            512
+          ]
+        },
+        {
+          "path": "launches.15.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 11,
+          "example": [
+            "sm86_adapted_l1_067_flash_gqa_sm120",
+            0.0,
+            512.0
+          ]
+        },
+        {
+          "path": "launches.25.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 11,
+          "example": [
+            "sm86_adapted_l1_075_gqa_rope_sm120",
+            0,
+            768
+          ]
+        },
+        {
+          "path": "launches.25.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 11,
+          "example": [
+            "sm86_adapted_l1_075_gqa_rope_sm120",
+            0.0,
+            768.0
+          ]
+        },
+        {
+          "path": "launches.26.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 11,
+          "example": [
+            "sm86_adapted_l1_086_sam_iou_hypernetwork_sm120",
+            32,
+            192
+          ]
+        },
+        {
+          "path": "launches.26.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 11,
+          "example": [
+            "sm86_adapted_l1_086_sam_iou_hypernetwork_sm120",
+            32.0,
+            192.0
+          ]
+        },
+        {
+          "path": "launches.47.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 11,
+          "example": [
+            "sm86_adapted_l2_009_decoder_moe_sm120",
+            0,
+            32
+          ]
+        },
+        {
+          "path": "launches.47.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 11,
+          "example": [
+            "sm86_adapted_l2_009_decoder_moe_sm120",
+            0.0,
+            32.0
+          ]
+        },
+        {
+          "path": "launches.21.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 10,
+          "example": [
+            "sm86_adapted_l1_017_moe_swiglu_backward_sm120",
+            0,
+            544
+          ]
+        },
+        {
+          "path": "launches.21.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 10,
+          "example": [
+            "sm86_adapted_l1_017_moe_swiglu_backward_sm120",
+            0.0,
+            544.0
+          ]
+        },
+        {
+          "path": "launches.16.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 10,
+          "example": [
+            "sm86_adapted_l1_021_vision_varlen_attention_sm120",
+            32,
+            288
+          ]
+        },
+        {
+          "path": "launches.16.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 10,
+          "example": [
+            "sm86_adapted_l1_021_vision_varlen_attention_sm120",
+            32.0,
+            288.0
+          ]
+        },
+        {
+          "path": "launches.12.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 10,
+          "example": [
+            "sm86_adapted_l1_036_flux_output_norm_sm120",
+            64,
+            2112
+          ]
+        },
+        {
+          "path": "launches.12.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 10,
+          "example": [
+            "sm86_adapted_l1_036_flux_output_norm_sm120",
+            64.0,
+            2112.0
+          ]
+        },
+        {
+          "path": "launches.8.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 10,
+          "example": [
+            "sm86_adapted_l1_086_sam_iou_hypernetwork_sm120",
+            32,
+            192
+          ]
+        },
+        {
+          "path": "launches.8.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 10,
+          "example": [
+            "sm86_adapted_l1_086_sam_iou_hypernetwork_sm120",
+            32.0,
+            192.0
+          ]
+        },
+        {
+          "path": "launches.13.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 10,
+          "example": [
+            "sm86_adapted_l1_089_vae_attention_groupnorm_sm120",
+            0,
+            128
+          ]
+        },
+        {
+          "path": "launches.13.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 10,
+          "example": [
+            "sm86_adapted_l1_089_vae_attention_groupnorm_sm120",
+            0.0,
+            128.0
+          ]
+        },
+        {
+          "path": "launches.131.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 10,
+          "example": [
+            "sm86_sub_quant_009_nvfp4_vision_temporal_patch_merge_with_projection",
+            0,
+            384
+          ]
+        },
+        {
+          "path": "launches.131.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 10,
+          "example": [
+            "sm86_sub_quant_009_nvfp4_vision_temporal_patch_merge_with_projection",
+            0.0,
+            384.0
+          ]
+        },
+        {
+          "path": "launches.9.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 9,
+          "example": [
+            "sm86_adapted_l1_072_cross_attention_gqa_backward_sm120",
+            0,
+            80
+          ]
+        },
+        {
+          "path": "launches.9.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 9,
+          "example": [
+            "sm86_adapted_l1_072_cross_attention_gqa_backward_sm120",
+            0.0,
+            80.0
+          ]
+        },
+        {
+          "path": "launches.33.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 9,
+          "example": [
+            "sm86_adapted_l2_009_decoder_moe_sm120",
+            0,
+            32
+          ]
+        },
+        {
+          "path": "launches.33.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 9,
+          "example": [
+            "sm86_adapted_l2_009_decoder_moe_sm120",
+            0.0,
+            32.0
+          ]
+        },
+        {
+          "path": "launches.31.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 9,
+          "example": [
+            "sm86_adapted_l2_019_decoder_fused_mlp_sm120",
+            0,
+            768
+          ]
+        },
+        {
+          "path": "launches.31.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 9,
+          "example": [
+            "sm86_adapted_l2_019_decoder_fused_mlp_sm120",
+            0.0,
+            768.0
+          ]
+        },
+        {
+          "path": "launches.6.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 8,
+          "example": [
+            "simbench_l3_vit_encoder_block_bf16",
+            0,
+            51
+          ]
+        },
+        {
+          "path": "launches.6.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 8,
+          "example": [
+            "simbench_l3_vit_encoder_block_bf16",
+            0.0,
+            51.0
+          ]
+        },
+        {
+          "path": "launches.7.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 8,
+          "example": [
+            "simbench_l3_whisper_encoder_block_bf16",
+            0,
+            51
+          ]
+        },
+        {
+          "path": "launches.7.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 8,
+          "example": [
+            "simbench_l3_whisper_encoder_block_bf16",
+            0.0,
+            51.0
+          ]
+        },
+        {
+          "path": "launches.18.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 8,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            0,
+            576
+          ]
+        },
+        {
+          "path": "launches.18.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 8,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            0.0,
+            576.0
+          ]
+        },
+        {
+          "path": "launches.23.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 8,
+          "example": [
+            "sm86_adapted_l1_067_flash_gqa_sm120",
+            0,
+            8192
+          ]
+        },
+        {
+          "path": "launches.23.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 8,
+          "example": [
+            "sm86_adapted_l1_067_flash_gqa_sm120",
+            0.0,
+            8192.0
+          ]
+        },
+        {
+          "path": "launches.24.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 8,
+          "example": [
+            "sm86_adapted_l2_017_vision_cu_attention_sm120",
+            0,
+            288
+          ]
+        },
+        {
+          "path": "launches.24.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 8,
+          "example": [
+            "sm86_adapted_l2_017_vision_cu_attention_sm120",
+            0.0,
+            288.0
+          ]
+        },
+        {
+          "path": "launches.30.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 7,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            0,
+            544
+          ]
+        },
+        {
+          "path": "launches.30.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 7,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            0.0,
+            544.0
+          ]
+        },
+        {
+          "path": "launches.27.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 7,
+          "example": [
+            "sm86_adapted_l1_075_gqa_rope_sm120",
+            0,
+            8192
+          ]
+        },
+        {
+          "path": "launches.27.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 7,
+          "example": [
+            "sm86_adapted_l1_075_gqa_rope_sm120",
+            0.0,
+            8192.0
+          ]
+        },
+        {
+          "path": "launches.10.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 7,
+          "example": [
+            "sm86_adapted_l1_076_batched_expert_sm120",
+            0,
+            576
+          ]
+        },
+        {
+          "path": "launches.10.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 7,
+          "example": [
+            "sm86_adapted_l1_076_batched_expert_sm120",
+            0.0,
+            576.0
+          ]
+        },
+        {
+          "path": "launches.19.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 7,
+          "example": [
+            "sm86_adapted_l1_089_vae_attention_groupnorm_sm120",
+            0,
+            128
+          ]
+        },
+        {
+          "path": "launches.19.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 7,
+          "example": [
+            "sm86_adapted_l1_089_vae_attention_groupnorm_sm120",
+            0.0,
+            128.0
+          ]
+        },
+        {
+          "path": "launches.72.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 7,
+          "example": [
+            "sm86_adapted_l2_024_moe_parallel_sm120",
+            0,
+            176
+          ]
+        },
+        {
+          "path": "launches.72.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 7,
+          "example": [
+            "sm86_adapted_l2_024_moe_parallel_sm120",
+            0.0,
+            176.0
+          ]
+        },
+        {
+          "path": "launches.17.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 6,
+          "example": [
+            "sm86_adapted_l1_086_sam_iou_hypernetwork_sm120",
+            0,
+            160
+          ]
+        },
+        {
+          "path": "launches.17.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 6,
+          "example": [
+            "sm86_adapted_l1_086_sam_iou_hypernetwork_sm120",
+            0.0,
+            160.0
+          ]
+        },
+        {
+          "path": "launches.39.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 6,
+          "example": [
+            "sm86_adapted_l2_002_decoder_full_sm120",
+            0,
+            1536
+          ]
+        },
+        {
+          "path": "launches.39.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 6,
+          "example": [
+            "sm86_adapted_l2_002_decoder_full_sm120",
+            0.0,
+            1536.0
+          ]
+        },
+        {
+          "path": "launches.42.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 6,
+          "example": [
+            "sm86_adapted_l2_014_audio_varlen_attention",
+            0,
+            96
+          ]
+        },
+        {
+          "path": "launches.42.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 6,
+          "example": [
+            "sm86_adapted_l2_014_audio_varlen_attention",
+            0.0,
+            96.0
+          ]
+        },
+        {
+          "path": "launches.36.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 6,
+          "example": [
+            "sm86_adapted_l2_022_video_denoising_sm120",
+            64,
+            448
+          ]
+        },
+        {
+          "path": "launches.36.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 6,
+          "example": [
+            "sm86_adapted_l2_022_video_denoising_sm120",
+            64.0,
+            448.0
+          ]
+        },
+        {
+          "path": "launches.48.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 6,
+          "example": [
+            "sm86_adapted_l2_043_mamba_chunk_sm120",
+            0,
+            1024
+          ]
+        },
+        {
+          "path": "launches.48.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 6,
+          "example": [
+            "sm86_adapted_l2_043_mamba_chunk_sm120",
+            0.0,
+            1024.0
+          ]
+        },
+        {
+          "path": "launches.5.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 5,
+          "example": [
+            "simbench_l3_vit_encoder_block_bf16",
+            0,
+            48
+          ]
+        },
+        {
+          "path": "launches.5.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 5,
+          "example": [
+            "simbench_l3_vit_encoder_block_bf16",
+            0.0,
+            48.0
+          ]
+        },
+        {
+          "path": "launches.37.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 5,
+          "example": [
+            "sm86_adapted_l2_002_decoder_full_sm120",
+            0,
+            1536
+          ]
+        },
+        {
+          "path": "launches.37.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 5,
+          "example": [
+            "sm86_adapted_l2_002_decoder_full_sm120",
+            0.0,
+            1536.0
+          ]
+        },
+        {
+          "path": "launches.66.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 5,
+          "example": [
+            "sm86_adapted_l2_010_moe_weighted_accumulation_sm120",
+            0,
+            192
+          ]
+        },
+        {
+          "path": "launches.66.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 5,
+          "example": [
+            "sm86_adapted_l2_010_moe_weighted_accumulation_sm120",
+            0.0,
+            192.0
+          ]
+        },
+        {
+          "path": "launches.69.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 5,
+          "example": [
+            "sm86_adapted_l2_010_moe_weighted_accumulation_sm120",
+            0,
+            192
+          ]
+        },
+        {
+          "path": "launches.69.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 5,
+          "example": [
+            "sm86_adapted_l2_010_moe_weighted_accumulation_sm120",
+            0.0,
+            192.0
+          ]
+        },
+        {
+          "path": "launches.32.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 5,
+          "example": [
+            "sm86_adapted_l2_017_vision_cu_attention_sm120",
+            0,
+            80
+          ]
+        },
+        {
+          "path": "launches.32.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 5,
+          "example": [
+            "sm86_adapted_l2_017_vision_cu_attention_sm120",
+            0.0,
+            80.0
+          ]
+        },
+        {
+          "path": "launches.34.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 5,
+          "example": [
+            "sm86_adapted_l2_017_vision_cu_attention_sm120",
+            0,
+            24
+          ]
+        },
+        {
+          "path": "launches.34.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 5,
+          "example": [
+            "sm86_adapted_l2_017_vision_cu_attention_sm120",
+            0.0,
+            24.0
+          ]
+        },
+        {
+          "path": "launches.38.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 5,
+          "example": [
+            "sm86_adapted_l2_022_video_denoising_sm120",
+            32,
+            416
+          ]
+        },
+        {
+          "path": "launches.38.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 5,
+          "example": [
+            "sm86_adapted_l2_022_video_denoising_sm120",
+            32.0,
+            416.0
+          ]
+        },
+        {
+          "path": "launches.74.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 5,
+          "example": [
+            "sm86_adapted_l2_024_moe_parallel_sm120",
+            0,
+            176
+          ]
+        },
+        {
+          "path": "launches.74.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 5,
+          "example": [
+            "sm86_adapted_l2_024_moe_parallel_sm120",
+            0.0,
+            176.0
+          ]
+        },
+        {
+          "path": "launches.28.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 4,
+          "example": [
+            "sm86_adapted_l1_086_sam_iou_hypernetwork_sm120",
+            4,
+            24
+          ]
+        },
+        {
+          "path": "launches.28.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 4,
+          "example": [
+            "sm86_adapted_l1_086_sam_iou_hypernetwork_sm120",
+            4.0,
+            24.0
+          ]
+        },
+        {
+          "path": "launches.35.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 4,
+          "example": [
+            "sm86_adapted_l2_002_decoder_full_sm120",
+            0,
+            1536
+          ]
+        },
+        {
+          "path": "launches.35.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 4,
+          "example": [
+            "sm86_adapted_l2_002_decoder_full_sm120",
+            0.0,
+            1536.0
+          ]
+        },
+        {
+          "path": "launches.29.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 4,
+          "example": [
+            "sm86_adapted_l2_019_decoder_fused_mlp_sm120",
+            0,
+            80
+          ]
+        },
+        {
+          "path": "launches.29.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 4,
+          "example": [
+            "sm86_adapted_l2_019_decoder_fused_mlp_sm120",
+            0.0,
+            80.0
+          ]
+        },
+        {
+          "path": "launches.40.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 4,
+          "example": [
+            "sm86_adapted_l2_019_decoder_fused_mlp_sm120",
+            0,
+            1536
+          ]
+        },
+        {
+          "path": "launches.40.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 4,
+          "example": [
+            "sm86_adapted_l2_019_decoder_fused_mlp_sm120",
+            0.0,
+            1536.0
+          ]
+        },
+        {
+          "path": "launches.53.native_metrics.metrics.global_load_opcode_count.numerator",
+          "count": 4,
+          "example": [
+            "sm86_adapted_l2_024_moe_parallel_sm120",
+            0,
+            208
+          ]
+        },
+        {
+          "path": "launches.53.native_metrics.metrics.global_load_opcode_count.value",
+          "count": 4,
+          "example": [
+            "sm86_adapted_l2_024_moe_parallel_sm120",
+            0.0,
+            208.0
+          ]
+        }
+      ],
+      "ok": false
+    }
+  ],
+  "ok": false
+}
