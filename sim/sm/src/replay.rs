@@ -4303,6 +4303,11 @@ fn extract_per_sm_blocks(
                     &sectors,
                     schedule.arch,
                 )?;
+                // Passive reuse-interval evidence is collected from the same
+                // decoded, coalesced span but never feeds cache state, DRAM,
+                // or issue timing. The observer resets at each warp because
+                // cross-warp arrival order is not present in the trace.
+                trace_metrics.observe_reuse_memory(kind, &sectors)?;
                 trace_metrics.observe_local_interleaved(
                     kind,
                     local_interleaved_sectors,

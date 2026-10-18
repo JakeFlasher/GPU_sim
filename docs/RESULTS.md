@@ -74,3 +74,22 @@ operation-read/client scope and resident-state differences remain. See
 Gemini consultation context. These limitations prevent an honest claim that
 every major NCU metric is below 10% APE yet; no NCU value is used as a replay
 or model-selection input.
+
+## Reuse-interval observer (shadow-only)
+
+Following the Gemini/Chen-Ding consultation, the unified replay now emits a
+`trace_metrics.reuse_interval` object on each full-replay launch. It coalesces
+decoded 32-byte sectors into 128-byte line keys with four-bit sector masks and
+tracks cold/reused lines, sector intervals, bounded histograms, and a
+monotone record-gap survival proxy. The observer is reset at each warp and
+uses only the trace's within-warp order; lines in one memory record share a
+logical tick, and cross-warp/SM arrival order is explicitly unavailable.
+
+This first phase is diagnostic only. It does not change L1/L2 state, DRAM
+demand, issue timing, completion frontiers, or scored NCU projections. The
+proxy capacities are logical record-gap points, not physical cache geometry.
+SM120 set/hash/replacement and per-launch carveout fields remain research
+gaps, so no hardware MRC or <10% accuracy claim is made from this observer.
+The standalone full-only invariant checker is
+`tools/validate_reuse_mrc.py`; it checks conservation, histogram mass,
+monotonicity, and zero-capacity behavior without reading NCU data.

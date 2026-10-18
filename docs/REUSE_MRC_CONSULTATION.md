@@ -162,6 +162,32 @@ independent code/evidence audit of those seams, followed by a minimal report
 field and a smoke/full replay comparison. No active cache/timing change is
 authorized by this consultation record.
 
+## Focused gate consultation and implementation boundary
+
+A second focused `agy` consultation was requested before implementation. Its
+partial memo is `/tmp/gemini_reuse_gate.txt`. It sharpened the boundary:
+
+* `TraceMetrics::observe_with_mask_presence_arch` runs while extraction walks
+  warp streams and therefore cannot provide true inter-warp or cross-SM arrival
+  order. A physically meaningful L1 observer would need a read-only hook in
+  the cycle-interleaved SM issue path, and a physically meaningful L2 observer
+  would need the timestamp-ordered system event path.
+* The first safe implementation is consequently a per-warp, report-only RI
+  census. It must not be promoted to L1/L2 predictions merely because its
+  proxy curve is monotone. Lines within one memory record share a logical tick;
+  their order is unavailable.
+* Any RI-derived curve must be labelled an interval/sensitivity proxy. Exact
+  fully-associative LRU MRC requires reuse distance; set-associative/non-LRU
+  and SM120 geometry/hash/replacement behavior remain unidentifiable from the
+  current contract. Right-censored final intervals and missing/empty spans
+  are explicit counters rather than fabricated misses.
+
+The executioner implemented only this shadow phase in `TraceMetrics`, added
+focused unit tests, and added `tools/validate_reuse_mrc.py`. The observer does
+not alter existing predictions. Full enabled-SM120 and SM86 replay validation
+with twelve workers is required before considering any later, separately
+consulted cycle-interleaved design.
+
 ## Raw consultation artifacts
 
 - `/tmp/gemini_mrc_consultation_retry.txt` — concise successful memo.

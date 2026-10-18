@@ -116,7 +116,8 @@ pub use issue::{
 };
 pub use metrics::{
     ClassCountInterval, ControlFlowGraph, InstructionActivity, MemoryTraffic, OperandBankPressure,
-    PhysicalPipelineAttribution, PipelineClassEnvelope, SmActivity, TraceMetrics, WarpLifetime,
+    PhysicalPipelineAttribution, PipelineClassEnvelope, ReuseClassObservation,
+    ReuseIntervalObservation, SmActivity, TraceMetrics, WarpLifetime,
 };
 pub use program::{
     FunctionSchedule, IssueSlot, OpClass, PipelineClass, ProgramError, ProtocolOp, build_schedules,

@@ -125,6 +125,135 @@ pub struct MemoryTraffic {
     pub bank_conflict_excess_wavefronts: u64,
 }
 
+/// Trace-derived reuse-interval observations for one launch.
+///
+/// This is deliberately a passive locality diagnostic.  It does not claim a
+/// hardware cache hit, does not change the live L1/L2 state, and does not
+/// feed issue timing or DRAM service.  The stream scope is explicitly
+/// warp-local because the trace contract does not provide a total dynamic
+/// order across warps or SMs.  A reuse interval is therefore the number of
+/// *memory records in the same warp stream* between two references to a line.
+/// All lines in one record share one logical tick because their relative order
+/// is not present in the trace.  The capacity arrays are survival proxies
+/// based on that interval, not set-associative hardware MRCs; reuse distance
+/// is not reconstructed from reuse time alone.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ReuseClassObservation {
+    pub line_references: u64,
+    pub sector_references: u64,
+    pub cold_line_references: u64,
+    pub cold_sector_references: u64,
+    pub reused_line_references: u64,
+    pub reused_sector_references: u64,
+}
+
+impl Default for ReuseClassObservation {
+    fn default() -> Self {
+        Self {
+            line_references: 0,
+            sector_references: 0,
+            cold_line_references: 0,
+            cold_sector_references: 0,
+            reused_line_references: 0,
+            reused_sector_references: 0,
+        }
+    }
+}
+
+pub const REUSE_PROXY_CAPACITY_RECORDS: [u64; 8] = [0, 1, 2, 4, 8, 16, 32, 64];
+const REUSE_INTERVAL_HISTOGRAM_BINS: usize = 32;
+
+/// Report-only reuse interval and MRC-proxy counters.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ReuseIntervalObservation {
+    /// Stable schema label so downstream consumers cannot mistake this for a
+    /// physical cache counter.
+    pub schema: &'static str,
+    /// The only ordering used by this observer.  Cross-warp and cross-SM
+    /// arrival order is unavailable in the native trace contract.
+    pub ordering_scope: &'static str,
+    /// Lines within one memory record share one tick; no order is fabricated.
+    pub within_record_order: &'static str,
+    /// Number of nonempty warp streams observed in this launch.
+    pub streams: u64,
+    pub line_references: u64,
+    pub sector_references: u64,
+    /// Sum of unique lines within each independent warp stream. The same
+    /// physical line in two warps is intentionally counted twice.
+    pub stream_unique_lines: u64,
+    pub maximum_stream_working_set_lines: u64,
+    pub cold_line_references: u64,
+    pub reused_line_references: u64,
+    pub cold_sector_references: u64,
+    pub reused_sector_references: u64,
+    pub line_reuse_interval_sum: u64,
+    pub sector_reuse_interval_sum: u64,
+    pub line_reuse_interval_histogram: [u64; REUSE_INTERVAL_HISTOGRAM_BINS],
+    pub sector_reuse_interval_histogram: [u64; REUSE_INTERVAL_HISTOGRAM_BINS],
+    pub line_reuse_interval_overflow: u64,
+    pub sector_reuse_interval_overflow: u64,
+    pub records_without_decoded_span: u64,
+    pub records_with_empty_span: u64,
+    /// Fixed, architecture-neutral capacities used only for a monotone
+    /// reuse-interval survival proxy.  They are not SM86 or SM120 geometry.
+    /// These points are in logical record-gap units, not physical cache-line
+    /// capacities. They are retained as a bounded RI sensitivity curve.
+    pub proxy_capacity_records: [u64; 8],
+    pub line_proxy_miss_references: [u64; 8],
+    pub sector_proxy_miss_references: [u64; 8],
+    /// Broad trace classes are kept separate so stores/atomics/async copies
+    /// cannot silently contaminate a load-only interpretation. These counters
+    /// are attributions over the unified warp stream, not independent
+    /// class-specific MRCs.
+    pub by_class: BTreeMap<String, ReuseClassObservation>,
+    pub class_accounting_scope: &'static str,
+}
+
+impl Default for ReuseIntervalObservation {
+    fn default() -> Self {
+        Self {
+            schema: "reuse_interval_observer_v1",
+            ordering_scope: "within_warp_trace_order_only",
+            within_record_order: "same_logical_tick_no_order_available",
+            streams: 0,
+            line_references: 0,
+            sector_references: 0,
+            stream_unique_lines: 0,
+            maximum_stream_working_set_lines: 0,
+            cold_line_references: 0,
+            reused_line_references: 0,
+            cold_sector_references: 0,
+            reused_sector_references: 0,
+            line_reuse_interval_sum: 0,
+            sector_reuse_interval_sum: 0,
+            line_reuse_interval_histogram: [0; REUSE_INTERVAL_HISTOGRAM_BINS],
+            sector_reuse_interval_histogram: [0; REUSE_INTERVAL_HISTOGRAM_BINS],
+            line_reuse_interval_overflow: 0,
+            sector_reuse_interval_overflow: 0,
+            records_without_decoded_span: 0,
+            records_with_empty_span: 0,
+            proxy_capacity_records: REUSE_PROXY_CAPACITY_RECORDS,
+            line_proxy_miss_references: [0; 8],
+            sector_proxy_miss_references: [0; 8],
+            by_class: BTreeMap::new(),
+            class_accounting_scope: "unified_warp_stream_attribution",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ReuseLineState {
+    last_record_tick: u64,
+    last_sector_tick: [Option<u64>; 4],
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct ReuseWarpStream {
+    record_tick: u64,
+    lines: BTreeMap<i64, ReuseLineState>,
+    active: bool,
+}
+
 /// Trace-local physical-pipeline candidate domains. A dynamic SASS record
 /// identifies the opcode and participants, but not the hardware pipe chosen
 /// when an instruction has multiple legal paths. `candidate_instructions` is
@@ -361,6 +490,11 @@ pub struct TraceMetrics {
     pub instructions: InstructionActivity,
     pub by_opcode: BTreeMap<String, InstructionActivity>,
     pub memory: BTreeMap<String, MemoryTraffic>,
+    /// Passive Chen-Ding-style reuse-interval evidence. This is intentionally
+    /// separate from `memory` and from all scored cache/timing counters.
+    pub reuse_interval: ReuseIntervalObservation,
+    #[serde(skip)]
+    pub(crate) reuse_warp_stream: ReuseWarpStream,
     pub local_interleaved_load_requests: u64,
     pub local_interleaved_load_sectors: u64,
     pub local_interleaved_store_requests: u64,
@@ -934,6 +1068,81 @@ fn memory_scope_key(opcode: &str, kind: AccessKind) -> Option<&'static str> {
     }
 }
 
+fn reuse_kind_class(kind: AccessKind) -> Option<&'static str> {
+    match kind {
+        AccessKind::GlobalEligible { .. }
+        | AccessKind::GlobalUntagged { .. }
+        | AccessKind::GlobalBypass {
+            token:
+                CacheOpToken::Other
+                | CacheOpToken::LdgECg
+                | CacheOpToken::LdgECs
+                | CacheOpToken::LdgEStrongSm
+                | CacheOpToken::LdgEStrongGpu
+                | CacheOpToken::LdgEEf
+                | CacheOpToken::LdgENa
+                | CacheOpToken::LdgECa,
+            ..
+        } => Some("global_load"),
+        AccessKind::GlobalStore { .. } => Some("global_store"),
+        AccessKind::GlobalBypass {
+            token: CacheOpToken::Atom,
+            ..
+        }
+        | AccessKind::GlobalReduction { .. } => Some("atomic_or_reduction"),
+        AccessKind::GlobalAsyncCopy { .. } => Some("async_copy"),
+        AccessKind::LocalLoad { .. } | AccessKind::LocalStore { .. } => Some("local"),
+        AccessKind::NonMemory
+        | AccessKind::PredicatedOffMemory
+        | AccessKind::Shared { .. }
+        // Keep any future/unknown bypass token out of the stream rather than
+        // silently assigning it a read or write meaning.
+        | AccessKind::GlobalBypass { .. } => None,
+    }
+}
+
+fn reuse_span(kind: AccessKind, sector_arena: &[i64]) -> Option<&[i64]> {
+    let (off, len) = match kind {
+        AccessKind::LocalLoad { off, len }
+        | AccessKind::LocalStore { off, len }
+        | AccessKind::GlobalEligible { off, len, .. }
+        | AccessKind::GlobalAsyncCopy { off, len, .. }
+        | AccessKind::GlobalBypass { off, len, .. }
+        | AccessKind::GlobalUntagged { off, len }
+        | AccessKind::GlobalStore { off, len }
+        | AccessKind::GlobalReduction { off, len, .. } => (off, usize::from(len)),
+        AccessKind::Shared { .. } | AccessKind::NonMemory | AccessKind::PredicatedOffMemory => {
+            return None;
+        }
+    };
+    let end = off.checked_add(len)?;
+    sector_arena.get(off..end)
+}
+
+fn add_reuse_interval(
+    histogram: &mut [u64; REUSE_INTERVAL_HISTOGRAM_BINS],
+    overflow: &mut u64,
+    interval: u64,
+) -> Result<(), crate::IssueError> {
+    if interval < REUSE_INTERVAL_HISTOGRAM_BINS as u64 {
+        add(&mut histogram[interval as usize], 1)
+    } else {
+        add(overflow, 1)
+    }
+}
+
+fn add_proxy_misses(misses: &mut [u64; 8], interval: Option<u64>) -> Result<(), crate::IssueError> {
+    for (index, &capacity) in REUSE_PROXY_CAPACITY_RECORDS.iter().enumerate() {
+        // A cold reference has no finite reuse interval and is a miss at
+        // every finite capacity. A finite interval is only a reuse-time
+        // survival proxy; it is intentionally not called exact RD.
+        if capacity == 0 || interval.map_or(true, |value| value >= capacity) {
+            add(&mut misses[index], 1)?;
+        }
+    }
+    Ok(())
+}
+
 fn constant_global_load_form_index(opcode_text: &str) -> usize {
     let opcode = opcode_text.split_ascii_whitespace().next().unwrap_or("");
     if opcode.split('.').any(|modifier| modifier == "LTC128B") {
@@ -946,7 +1155,209 @@ fn constant_global_load_form_index(opcode_text: &str) -> usize {
 }
 
 impl TraceMetrics {
+    /// Start a new independent reuse stream.  The native trace gives an
+    /// authoritative order only inside one warp, so state is never carried
+    /// from one warp to another.
+    pub(crate) fn begin_reuse_warp_stream(&mut self) {
+        self.reuse_warp_stream = ReuseWarpStream::default();
+    }
+
+    /// Observe one decoded memory record in the passive reuse observer.
+    ///
+    /// Sectors are deduplicated before line/sector state is updated.  This is
+    /// important for atomics/reductions whose compact span may preserve alias
+    /// multiplicity for the timing model.  The observer deliberately uses one
+    /// unified decoded-memory stream per warp; `by_class` is a classification
+    /// of that stream, not an independent class-specific ordering claim.
+    pub(crate) fn observe_reuse_memory(
+        &mut self,
+        kind: AccessKind,
+        sector_arena: &[i64],
+    ) -> Result<(), crate::IssueError> {
+        let Some(class) = reuse_kind_class(kind) else {
+            return Ok(());
+        };
+        let Some(span) = reuse_span(kind, sector_arena) else {
+            add(&mut self.reuse_interval.records_without_decoded_span, 1)?;
+            return Ok(());
+        };
+        if span.is_empty() {
+            add(&mut self.reuse_interval.records_with_empty_span, 1)?;
+            return Ok(());
+        }
+
+        // A compact span can contain duplicate sector ids for alias-expanded
+        // atomics/reductions.  A BTreeMap gives deterministic line ordering
+        // and produces one four-bit sector mask per coalesced line.
+        let mut lines = BTreeMap::<i64, u8>::new();
+        for &sector in span {
+            let line = sector.div_euclid(4);
+            let lane = sector.rem_euclid(4) as u8;
+            lines
+                .entry(line)
+                .and_modify(|mask| *mask |= 1_u8 << lane)
+                .or_insert(1_u8 << lane);
+        }
+        if lines.is_empty() {
+            return Ok(());
+        }
+
+        if !self.reuse_warp_stream.active {
+            self.reuse_warp_stream.active = true;
+            add(&mut self.reuse_interval.streams, 1)?;
+        }
+
+        let class_observation = self
+            .reuse_interval
+            .by_class
+            .entry(class.to_owned())
+            .or_default();
+        add(
+            &mut class_observation.line_references,
+            u64::try_from(lines.len()).map_err(|_| crate::IssueError::CounterOverflow {
+                counter: "reuse line reference count",
+            })?,
+        )?;
+        let sector_count = lines
+            .values()
+            .map(|mask| u64::from(mask.count_ones()))
+            .sum::<u64>();
+        add(&mut class_observation.sector_references, sector_count)?;
+
+        let tick = self.reuse_warp_stream.record_tick;
+        self.reuse_warp_stream.record_tick =
+            tick.checked_add(1)
+                .ok_or(crate::IssueError::CounterOverflow {
+                    counter: "reuse record tick",
+                })?;
+        for (line, mask) in lines {
+            let requested_sectors = u64::from(mask.count_ones());
+            let mut line_interval = None;
+            let mut sector_intervals = [None; 4];
+            let mut sector_reused_mask = 0_u8;
+            let is_new_line = if let Some(state) = self.reuse_warp_stream.lines.get_mut(&line) {
+                line_interval = Some(
+                    tick.checked_sub(state.last_record_tick)
+                        .ok_or(crate::IssueError::CounterOverflow {
+                            counter: "reuse line interval",
+                        })?
+                        .saturating_sub(1),
+                );
+                for sector in 0..4 {
+                    let bit = 1_u8 << sector;
+                    if mask & bit == 0 {
+                        continue;
+                    }
+                    if let Some(previous) = state.last_sector_tick[sector] {
+                        sector_intervals[sector] = Some(
+                            tick.checked_sub(previous)
+                                .ok_or(crate::IssueError::CounterOverflow {
+                                    counter: "reuse sector interval",
+                                })?
+                                .saturating_sub(1),
+                        );
+                        sector_reused_mask |= bit;
+                    }
+                    state.last_sector_tick[sector] = Some(tick);
+                }
+                state.last_record_tick = tick;
+                false
+            } else {
+                let mut state = ReuseLineState {
+                    last_record_tick: tick,
+                    last_sector_tick: [None; 4],
+                };
+                for sector in 0..4 {
+                    if mask & (1_u8 << sector) != 0 {
+                        state.last_sector_tick[sector] = Some(tick);
+                    }
+                }
+                self.reuse_warp_stream.lines.insert(line, state);
+                true
+            };
+
+            add(&mut self.reuse_interval.line_references, 1)?;
+            add(
+                &mut self.reuse_interval.sector_references,
+                requested_sectors,
+            )?;
+            if is_new_line {
+                add(&mut self.reuse_interval.stream_unique_lines, 1)?;
+                add(&mut self.reuse_interval.cold_line_references, 1)?;
+                add(&mut class_observation.cold_line_references, 1)?;
+                add_proxy_misses(&mut self.reuse_interval.line_proxy_miss_references, None)?;
+            } else {
+                add(&mut self.reuse_interval.reused_line_references, 1)?;
+                add(&mut class_observation.reused_line_references, 1)?;
+                let interval = line_interval.expect("existing line has interval");
+                add(&mut self.reuse_interval.line_reuse_interval_sum, interval)?;
+                add_reuse_interval(
+                    &mut self.reuse_interval.line_reuse_interval_histogram,
+                    &mut self.reuse_interval.line_reuse_interval_overflow,
+                    interval,
+                )?;
+                add_proxy_misses(
+                    &mut self.reuse_interval.line_proxy_miss_references,
+                    Some(interval),
+                )?;
+            }
+
+            let mut cold_sectors =
+                requested_sectors.saturating_sub(u64::from(sector_reused_mask.count_ones()));
+            if is_new_line {
+                cold_sectors = requested_sectors;
+            }
+            let reused_sectors = requested_sectors.saturating_sub(cold_sectors);
+            add(
+                &mut self.reuse_interval.cold_sector_references,
+                cold_sectors,
+            )?;
+            add(
+                &mut self.reuse_interval.reused_sector_references,
+                reused_sectors,
+            )?;
+            add(&mut class_observation.cold_sector_references, cold_sectors)?;
+            add(
+                &mut class_observation.reused_sector_references,
+                reused_sectors,
+            )?;
+            for sector in 0..4 {
+                if mask & (1_u8 << sector) == 0 {
+                    continue;
+                }
+                match sector_intervals[sector] {
+                    Some(interval) => {
+                        add(&mut self.reuse_interval.sector_reuse_interval_sum, interval)?;
+                        add_reuse_interval(
+                            &mut self.reuse_interval.sector_reuse_interval_histogram,
+                            &mut self.reuse_interval.sector_reuse_interval_overflow,
+                            interval,
+                        )?;
+                        add_proxy_misses(
+                            &mut self.reuse_interval.sector_proxy_miss_references,
+                            Some(interval),
+                        )?;
+                    }
+                    None => add_proxy_misses(
+                        &mut self.reuse_interval.sector_proxy_miss_references,
+                        None,
+                    )?,
+                }
+            }
+            self.reuse_interval.maximum_stream_working_set_lines =
+                self.reuse_interval.maximum_stream_working_set_lines.max(
+                    u64::try_from(self.reuse_warp_stream.lines.len()).map_err(|_| {
+                        crate::IssueError::CounterOverflow {
+                            counter: "reuse stream working set",
+                        }
+                    })?,
+                );
+        }
+        Ok(())
+    }
+
     pub(crate) fn begin_warp_memory_stream(&mut self) {
+        self.begin_reuse_warp_stream();
         self.global_store_previous_sectors.clear();
         self.global_store_previous_effective_lanes = 0;
     }
@@ -2753,5 +3164,79 @@ impl SmActivity {
             front_end_instruction_read_sectors: 0,
             warp_lifetimes,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn load(off: usize, len: u16) -> AccessKind {
+        AccessKind::GlobalEligible {
+            off,
+            len,
+            token: CacheOpToken::LdgECa,
+        }
+    }
+
+    #[test]
+    fn reuse_observer_deduplicates_sectors_and_tracks_proxy_monotonicity() {
+        let mut metrics = TraceMetrics::default();
+        metrics.begin_reuse_warp_stream();
+        let sectors = [0_i64, 4, 0, 0, 1];
+        metrics.observe_reuse_memory(load(0, 1), &sectors).unwrap();
+        metrics.observe_reuse_memory(load(1, 1), &sectors).unwrap();
+        metrics.observe_reuse_memory(load(2, 1), &sectors).unwrap();
+        metrics
+            .observe_reuse_memory(
+                AccessKind::GlobalBypass {
+                    off: 3,
+                    len: 2,
+                    token: CacheOpToken::Atom,
+                    l2_requests: 1,
+                },
+                &sectors,
+            )
+            .unwrap();
+
+        let reuse = &metrics.reuse_interval;
+        assert_eq!(reuse.streams, 1);
+        assert_eq!(reuse.line_references, 4);
+        assert_eq!(reuse.stream_unique_lines, 2);
+        assert_eq!(reuse.cold_line_references, 2);
+        assert_eq!(reuse.reused_line_references, 2);
+        assert_eq!(reuse.sector_references, 5);
+        assert_eq!(reuse.cold_sector_references, 3);
+        assert_eq!(reuse.reused_sector_references, 2);
+        assert_eq!(reuse.line_reuse_interval_histogram[0], 1);
+        assert_eq!(reuse.line_reuse_interval_histogram[1], 1);
+        assert_eq!(reuse.sector_reuse_interval_histogram[0], 1);
+        assert_eq!(reuse.sector_reuse_interval_histogram[1], 1);
+        assert_eq!(reuse.line_proxy_miss_references[0], 4);
+        assert_eq!(reuse.line_proxy_miss_references[1], 3);
+        assert_eq!(reuse.line_proxy_miss_references[2], 2);
+        assert!(
+            reuse
+                .line_proxy_miss_references
+                .windows(2)
+                .all(|window| window[0] >= window[1])
+        );
+        assert_eq!(reuse.by_class["global_load"].line_references, 3);
+        assert_eq!(reuse.by_class["atomic_or_reduction"].sector_references, 2);
+    }
+
+    #[test]
+    fn reuse_observer_resets_cold_state_at_warp_boundary() {
+        let mut metrics = TraceMetrics::default();
+        let sectors = [7_i64];
+        metrics.begin_reuse_warp_stream();
+        metrics.observe_reuse_memory(load(0, 1), &sectors).unwrap();
+        metrics.begin_reuse_warp_stream();
+        metrics.observe_reuse_memory(load(0, 1), &sectors).unwrap();
+        assert_eq!(metrics.reuse_interval.streams, 2);
+        assert_eq!(metrics.reuse_interval.line_references, 2);
+        assert_eq!(metrics.reuse_interval.stream_unique_lines, 2);
+        assert_eq!(metrics.reuse_interval.cold_line_references, 2);
+        assert_eq!(metrics.reuse_interval.reused_line_references, 0);
     }
 }

@@ -343,3 +343,27 @@ algorithm and equations, (D) set-associative and GPU concurrency treatment,
 acceptance/rejection gates, (G) adversarial risks and missing metadata, and
 (H) a ranked list of the first three experiments. Do not write code or edit
 files. The executioner will implement only after reviewing this memo.
+
+FOCUSED GATE FOLLOW-UP — IMPLEMENTATION SEAM
+============================================
+Before implementing the first observer, Gemini was consulted again through
+the same read-only command. Its partial memo is `/tmp/gemini_reuse_gate.txt`.
+The relevant finding is an explicit boundary, not a new hardware fact:
+
+`TraceMetrics::observe_with_mask_presence_arch` is called while extraction
+walks warp streams and cannot reconstruct a true inter-warp or cross-SM arrival
+order. A physically meaningful L1 observer would need a passive hook in the
+cycle-interleaved SM issue path; a physically meaningful L2 observer would
+need the timestamp-ordered system event path. Therefore the first safe step
+is a per-warp report-only reuse-interval census. It must not be promoted to
+L1/L2 predictions because its curve is monotone. Lines within one memory
+record share a logical tick, and their relative order is unavailable.
+
+The implementation must label any RI curve an interval/sensitivity proxy:
+exact fully-associative LRU MRC requires reuse distance; set-associative and
+non-LRU behavior, SM120 geometry/hash/replacement, and right-censored final
+intervals are not identified by this trace contract. Missing/empty spans are
+explicit diagnostics. The executioner is authorized only to implement this
+shadow phase, add invariant tests, validate it on full enabled-SM120 and SM86
+replays with twelve workers, and stop before any active cache/timing change
+unless a new Gemini consultation and evidence support promotion.
