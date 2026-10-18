@@ -1012,11 +1012,11 @@ pub(crate) fn async_global_l1_hit_exclusion(
     if !metrics.memory_scope.contains_key("ldgsts_async_copy") {
         return 0;
     }
-    let async_scope = metrics
-        .l1_async_global_hits
-        .saturating_add(metrics.l1_async_global_same_request_merges)
-        .saturating_add(metrics.l1_async_older_pending_merges_global)
-        .saturating_add(metrics.l1_async_global_older_sector_pending_merges);
+    // Same-request merges and settled async hits are not a stable external
+    // `op_ld` scope witness: they can overlap the ordinary effective lookup
+    // projection. The older-pending merge domain is the only disjoint
+    // trace-qualified async miss/merge class retained here.
+    let async_scope = metrics.l1_async_older_pending_merges_global;
     async_scope.min(
         l1.origin(MemoryOrigin::Global)
             .effective_lookup_hits_for_arch(arch),
