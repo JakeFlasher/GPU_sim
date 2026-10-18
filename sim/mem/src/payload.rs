@@ -437,7 +437,7 @@ fn decode_native_payload_record(
     if record.generation == 0 || record.byte_offset >= SECTOR_BYTES as u8 {
         return Err(PayloadError::SidecarGeneration { index });
     }
-    if record.bytes_hex.len() % 2 != 0 {
+    if !record.bytes_hex.len().is_multiple_of(2) {
         return Err(PayloadError::SidecarBytes { index });
     }
     let mut bytes = Vec::with_capacity(record.bytes_hex.len() / 2);

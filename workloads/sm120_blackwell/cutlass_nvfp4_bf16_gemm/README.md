@@ -12,7 +12,7 @@ Build uses CUDA 13.2 and `/usr/bin/g++-14` explicitly:
 
 ```bash
 make CUDA_INSTALL_PATH=/usr/local/cuda-13.2 CXX=/usr/bin/g++-14 \
-  CUTLASS_ROOT=/root/GPU_simulator_rebase/third_party/cutlass
+  CUTLASS_ROOT=<repo-root>/third_party/cutlass
 ```
 
 The source is a production-style CUTLASS control for the custom NVFP4

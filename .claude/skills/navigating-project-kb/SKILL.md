@@ -5,10 +5,10 @@ description: Route GPU/CUDA/PTX/SASS/NVBit/simulator questions to the smallest t
 
 # Project knowledge router
 
-Read root `AGENTS.md`, then `docs/PROJECT_MEMORY.md` and `docs/STATUS.md` for
-the current dual-lane project state (SM86 baseline and SM120/RTX 5090 alpha). The optional `.claude/knowledge/` corpus is not
-present in this checkout; do not loop on missing cards. Use tracked source,
-`docs/`, `plans/`, `references/`, and owner runbooks instead.
+Read root `AGENTS.md`, then `docs/PROJECT_MEMORY.md`, `docs/CONTRACT.md`, and
+`docs/STATUS.md` for the current dual-lane project state. The optional
+`.claude/knowledge/` corpus is not present in this checkout; do not loop on
+missing cards. Use tracked source, `docs/`, and `references/` instead.
 
 ## Route by question
 

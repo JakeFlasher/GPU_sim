@@ -24,8 +24,8 @@ use std::path::{Path, PathBuf};
 use sim_arch::card::ArchCard;
 use sim_mem::{L2Config, PchaseCard};
 use sim_sm::{
-    CoResidency, ControlSidecar, IssueModelParams, KernelReplayOutcome, ReplayConfiguration,
-    ReplayMemMode, build_schedules, replay_trace_kernel,
+    ControlSidecar, IssueModelParams, KernelReplayOutcome, ReplayConfiguration, ReplayMemMode,
+    build_schedules, replay_trace_kernel,
 };
 use sim_trace::{ExecInfo, TraceDir};
 
@@ -42,42 +42,6 @@ fn sm86_pchase_card() -> PchaseCard {
     // default when typed).
     let path = PathBuf::from("../../data/pchase/sm_86_static_card.json");
     PchaseCard::load(&path).expect("committed pchase card loads")
-}
-
-fn l1_config_json(config: sim_mem::L1Config) -> serde_json::Value {
-    serde_json::json!({
-        "arch": config.arch.token(),
-        "line_capacity": config.line_capacity,
-        "mshr_count": config.mshr_count,
-        "hit_latency": config.hit_latency,
-        "miss_latency": config.miss_latency,
-    })
-}
-
-fn l2_config_json(config: sim_mem::L2Config) -> serde_json::Value {
-    let replacement = match config.replacement {
-        sim_mem::L2Replacement::Lru => "lru",
-        sim_mem::L2Replacement::Srrip => "srrip",
-        sim_mem::L2Replacement::Bip => "bip",
-    };
-    let slice_hash = match config.slice_hash {
-        sim_mem::SliceHash::LineMod => "line_mod",
-        sim_mem::SliceHash::SectorMod => "sector_mod",
-        sim_mem::SliceHash::XorFolded => "xor_folded",
-        sim_mem::SliceHash::KnuthMult => "knuth_mult",
-        sim_mem::SliceHash::ShiftMod => "shift_mod",
-        sim_mem::SliceHash::BitReverse => "bit_reverse",
-    };
-    serde_json::json!({
-        "arch": config.arch.token(),
-        "capacity_bytes": config.capacity_bytes,
-        "line_bytes": config.line_bytes,
-        "sector_bytes": config.sector_bytes,
-        "num_slices": config.num_slices,
-        "associativity": config.associativity,
-        "replacement": replacement,
-        "slice_hash": slice_hash,
-    })
 }
 
 #[test]

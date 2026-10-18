@@ -16,11 +16,14 @@ import math
 import os
 import re
 import shlex
+import stat
 from pathlib import Path
 from typing import Any, Iterable
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_WORK_ROOT = Path("/root/sm120_rtx_5090_capture")
+# Capture roots are supplied by the caller; no workstation-specific default is
+# embedded in the adapter.
+DEFAULT_WORK_ROOT = Path(".")
 DEFAULT_SIM = REPO_ROOT / "sim/target/release/sim-run"
 DEFAULT_CARD = REPO_ROOT / "arch_profiles/cards/sm_120-rtx-5090.json"
 
@@ -116,25 +119,40 @@ def discover_captures(work_root: Path, selected: Iterable[str] | None) -> list[P
     return sorted(found)
 
 
-def load_static_metadata(capture: Path) -> dict[str, Any] | None:
-    # Native v3 captures carry the sidecar under the historical filename.
-    # Enhanced-execution-info captures (including the repaired SM86 NVBit
-    # transport) intentionally omit that file and publish the same kernel
-    # instruction/control records under the producer-owned filename.  Keep
-    # the fallback narrow: only try the enhanced document when the native
-    # sidecar is absent/unreadable, and still require a JSON object here so
-    # the caller's strict schema/architecture checks remain authoritative.
-    for path in (
-        capture / "extra_info/native_static_metadata.json",
-        capture / "extra_info/enhanced_execution_info.json",
-    ):
+def load_static_metadata(capture: Path) -> tuple[dict[str, Any], Path] | None:
+    """Load the one declared static sidecar and return its source path.
+
+    The enhanced document is a compatibility fallback only when the native
+    file is absent.  A present-but-corrupt preferred sidecar must fail closed;
+    silently switching producers can change opcode/control provenance.
+    """
+    native = capture / "extra_info/native_static_metadata.json"
+    enhanced = capture / "extra_info/enhanced_execution_info.json"
+    path: Path | None = None
+    for candidate in (native, enhanced):
         try:
-            value = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            candidate.lstat()
+        except FileNotFoundError:
             continue
-        if isinstance(value, dict):
-            return value
-    return None
+        except OSError as error:
+            raise ValueError(f"cannot inspect static metadata {candidate}: {error}") from error
+        try:
+            mode = candidate.stat().st_mode
+        except OSError as error:
+            raise ValueError(f"cannot read static metadata {candidate}: {error}") from error
+        if not stat.S_ISREG(mode):
+            raise ValueError(f"static metadata path is not a regular file: {candidate}")
+        path = candidate
+        break
+    if path is None:
+        return None
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError(f"static metadata {path} is malformed: {error}") from error
+    if not isinstance(value, dict):
+        raise ValueError(f"static metadata {path} is not an object")
+    return value, path
 
 
 def _wire_control(high_word: int) -> dict[str, int]:
@@ -174,8 +192,11 @@ def _parse_hex_word(value: Any, field: str, *, bits: int = 64) -> tuple[int, str
 
 
 def synthesize_static_sidecar(
-    capture: Path, metadata: dict[str, Any], output: Path,
+    capture: Path,
+    metadata: dict[str, Any],
+    output: Path,
     expected_arch: str | None = None,
+    metadata_source: Path | None = None,
 ) -> dict[str, Any]:
     command_path = capture / "command.txt"
     command = command_path.read_text(encoding="utf-8").strip() if command_path.is_file() else ""
@@ -204,13 +225,11 @@ def synthesize_static_sidecar(
         raise ValueError("unsupported native static exporter version")
     source_arches = metadata_architectures(metadata)
     if expected_arch is not None:
-        if expected_arch == "sm_86" and source_arches <= {"sm_80", "sm_86"}:
-            arch = expected_arch
-        elif source_arches == {expected_arch}:
+        if source_arches == {expected_arch}:
             arch = expected_arch
         else:
             raise ValueError(
-                f"capture metadata targets {sorted(source_arches)}, expected {expected_arch}"
+                f"capture metadata targets {sorted(source_arches)}, expected homogeneous {expected_arch}"
             )
     elif len(source_arches) == 1:
         arch = next(iter(source_arches))
@@ -332,7 +351,11 @@ def synthesize_static_sidecar(
             if enhanced_execution_info
             else f"NVBit-native-{arch.replace('_', '')}-static-v3"
         ),
-        "binary_source": "extra_info/native_static_metadata.json",
+        "binary_source": (
+            metadata_source.relative_to(capture).as_posix()
+            if metadata_source is not None
+            else "unknown"
+        ),
         "metadata_provenance": {
             "metadata_kind": metadata.get("metadata_kind", metadata_kind),
             "static_exporter_version": metadata.get("static_exporter_version"),

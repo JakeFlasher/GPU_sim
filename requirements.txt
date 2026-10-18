@@ -1,5 +1,5 @@
 # Runtime dependencies for the retained trace, sidecar, and whole-workload
-# observation tools. The alpha simulator lane does not install or invoke a
+# observation tools. The simulator does not install or invoke a
 # synthetic test harness.
 
 numpy==2.4.5

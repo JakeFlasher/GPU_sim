@@ -1,12 +1,22 @@
-# Simulator documentation map
+# Documentation map
 
-* `PROJECT_MEMORY.md` — unified architecture/lane contract.
-* `STATUS.md` — current SM86 and SM120 capabilities and boundaries.
-* `SM86_PROJECT_MEMORY.md` / `SM120_PROJECT_MEMORY.md` — retained lane-specific
-  continuation evidence.
-* `runbook_host.md` — architecture-aware replay/runbook entry point.
-* `archprofile.md`, `ARCHITECTURE.md`, and `COMPONENTS.md` — implementation
-  seams and card/schema contracts.
+The active documentation surface is intentionally small:
 
-The repository intentionally keeps capture/profile evidence outside the source
-checkout. NCU remains an independent post-replay comparison surface.
+* [`CONTRACT.md`](CONTRACT.md) — architecture lanes, scientific boundaries,
+  and supported runtime behavior.
+* [`ARCHITECTURE.md`](ARCHITECTURE.md) and [`COMPONENTS.md`](COMPONENTS.md) —
+  execution flow and crate/tool ownership.
+* [`REPLAY.md`](REPLAY.md) — architecture-neutral full-replay commands and
+  the twelve-worker policy.
+* [`RESULTS.md`](RESULTS.md) — retained full-corpus counts and comparison
+  interpretation.
+* [`HISTORY.md`](HISTORY.md) — concise merge provenance and resolved conflicts.
+
+`SESSION_RULES.md` and `LONG_TERM_NOTES.md` at the repository root are the
+session contract and current continuation memory. The source checkout,
+captures, and baseline result trees are external inputs; this repository never
+modifies them.
+
+Older experiment diaries and branch-specific planning files were removed from
+the active tree. Their Git history remains available for archaeology, but they
+are not execution instructions.

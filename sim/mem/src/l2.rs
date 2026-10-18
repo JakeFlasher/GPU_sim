@@ -369,6 +369,7 @@ impl L2Config {
     /// SM120 scenario while retaining its assumptions as `origin=Effective`.
     /// The current model supports the documented 128-byte/32-byte granularity,
     /// LRU replacement, and line-mod slice hypothesis only.
+    #[allow(clippy::too_many_arguments)]
     pub fn from_effective_geometry_for_arch(
         arch: ArchId,
         capacity_bytes: u64,
@@ -1276,8 +1277,8 @@ impl L2Counters {
             )?,
             slice_accesses: {
                 let mut values = [0_u64; 16];
-                for index in 0..values.len() {
-                    values[index] = checked_counter_sub(
+                for (index, value) in values.iter_mut().enumerate() {
+                    *value = checked_counter_sub(
                         L2CounterField::SliceAccesses,
                         self.slice_accesses[index],
                         baseline.slice_accesses[index],

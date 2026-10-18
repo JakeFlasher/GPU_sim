@@ -189,7 +189,7 @@ def main():
     parser.add_argument("--profiles", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--capture-root", type=Path,
-                        default=Path("/root/sm120_rtx_5090_capture"),
+                        default=Path("."),
                         help="capture/profiles root; output is forbidden anywhere beneath it")
     parser.add_argument("--overwrite", action="store_true",
                         help="replace an existing comparison artifact explicitly")

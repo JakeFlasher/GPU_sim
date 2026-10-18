@@ -26,7 +26,7 @@ model timing and host performance separate.
 
 Use `--manifest-path sim/Cargo.toml` from the repository root. Build the
 affected executable and exercise it with a real captured trace; the complete
-replay workflow is in `docs/runbook_host.md`. The workspace no longer carries
+replay workflow is in `docs/REPLAY.md`. The workspace no longer carries
 synthetic inline simulator test modules, so do not recreate a small-fixture
 test lane. For prior art use the cited primary sources in active research notes
 only when needed.

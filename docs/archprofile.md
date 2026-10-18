@@ -9,7 +9,7 @@ fact.
 ## Input classes
 
 1. **Native cards:** `sm_86.json` is the retained compatibility baseline;
-   `sm_120-rtx-5090.json` is the active RTX 5090 exploratory/alpha card.
+   `sm_120-rtx-5090.json` is the RTX 5090 effective/conditional card.
    Research gaps stay explicit and do not inherit SM86 values.
 2. **Hypothetical resources:** `ArchitectureSpec` under `arch_profiles/specs`
    feeds bounded custom execution. It is not native SASS timing.
@@ -25,8 +25,8 @@ fields. A card identifies the input source, not scientific certification.
 
 - Rust components and dependencies: `rust-toolchain.toml`, `sim/Cargo.lock`.
 - NVBit producer environment: `tools/nvbit_tracer/pinned_build_env.sh`.
-- Runbook: `docs/runbook_host.md`.
-- Continuation entrypoints: `docs/PROJECT_MEMORY.md`, `docs/STATUS.md`, and the
-  external active plan.
+- Runbook: `docs/REPLAY.md`.
+- Continuation entrypoints: `docs/PROJECT_MEMORY.md`, `docs/CONTRACT.md`, and
+  `docs/STATUS.md`.
 - Local captures/builds/toolchains are ignored by `.gitignore`; no lifecycle
   hook or mandatory gate is part of the project contract.

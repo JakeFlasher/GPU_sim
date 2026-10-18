@@ -61,8 +61,8 @@ captures are retained.
 
 ## ISA research materials
 
-The user's `/root/nvidia_gpu_ISA_reverse_engineering.md` is the local research
-index. `isa_tools/collect_nvdisasm_metadata.sh OUTPUT_DIR` compiles a tiny
+The local ISA notes and the committed tracer tools are the research index.
+`isa_tools/collect_nvdisasm_metadata.sh OUTPUT_DIR` compiles a tiny
 SM120 cubin with CUDA13.2/G++14, compiles the retained DocumentSASS shim with
 GCC14, and captures **binary** memcpy payloads from nvdisasm. The accompanying
 parser reconstructs scheduling tables without assuming an ARCHITECTURE header.

@@ -180,11 +180,11 @@ pub enum NativeBoundaryExecutionPath {
 #[serde(rename_all = "snake_case", tag = "execution")]
 pub enum NativeBoundaryExecutionResult {
     TypedMacro {
-        contract: TypedRegionContract,
+        contract: Box<TypedRegionContract>,
     },
     ExactReplay {
         reason: NativeBoundaryReifyReason,
-        detailed_exit: TypedEventBoundaryRecord,
+        detailed_exit: Box<TypedEventBoundaryRecord>,
     },
 }
 
@@ -285,15 +285,14 @@ pub fn derive_typed_scalar_macro_region(
         });
     }
     let witness_issue_times = spec.issue_times.as_ref();
-    if let Some(times) = witness_issue_times {
-        if times.len() != usize::try_from(spec.instruction_count).unwrap_or(usize::MAX)
+    if let Some(times) = witness_issue_times
+        && (times.len() != usize::try_from(spec.instruction_count).unwrap_or(usize::MAX)
             || times.windows(2).any(|window| window[1] < window[0])
-            || times.first().is_some_and(|&time| time < entry.event.time)
-        {
-            return Err(RegionContractError::UnsupportedScalarMacro {
-                reason: "detailed_issue_times_shape_or_order_invalid".to_owned(),
-            });
-        }
+            || times.first().is_some_and(|&time| time < entry.event.time))
+    {
+        return Err(RegionContractError::UnsupportedScalarMacro {
+            reason: "detailed_issue_times_shape_or_order_invalid".to_owned(),
+        });
     }
     let first_issue = witness_issue_times
         .and_then(|times| times.first().copied())
@@ -600,13 +599,13 @@ pub fn execute_typed_scalar_macro(
         detailed_exit,
     );
     Ok(match decision {
-        NativeBoundaryRefinementDecision::Preserve => {
-            NativeBoundaryExecutionResult::TypedMacro { contract: summary }
-        }
+        NativeBoundaryRefinementDecision::Preserve => NativeBoundaryExecutionResult::TypedMacro {
+            contract: Box::new(summary),
+        },
         NativeBoundaryRefinementDecision::Reify { reason } => {
             NativeBoundaryExecutionResult::ExactReplay {
                 reason,
-                detailed_exit: detailed_exit.clone(),
+                detailed_exit: Box::new(detailed_exit.clone()),
             }
         }
     })

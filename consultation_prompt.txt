@@ -1,241 +1,37 @@
-UNIFIED GPU SIMULATOR MERGE — ARCHITECTURAL CONSULTATION REQUEST
+RESOLVED MERGE CONSULTATION RECORD
 
-Purpose
--------
-I must merge two divergent GPU simulator repositories into one repository that
-supports both RTX 3090 Ti / SM86 and RTX 5090 / SM120 replay flows. The source
-checkout `/home/jakeshea/5090_branch/` is strictly read-only. Research was
-restricted to these directories: `final_results/`, `GPU_simulator/`,
-`GPU_simulator_5090/`, `sm86_rtx_3090_capture/`, and
-`sm120_rtx_5090_capture/`. The new writable repository is
-`/home/jakeshea/5090_branch_1016/unified_gpu_simulator/`.
+Status: no open architectural question remains for the unified replay path.
+This compact record replaces the temporary branch-comparison bundle; it is
+kept because SESSION_RULES.md requires a plain-text consultation file whenever
+an ambiguity is escalated.
 
-Repository identities and evidence
-----------------------------------
-* `GPU_simulator` HEAD: `0c8791f5d2b87c45d409f23ce6f0ad67b708e50b`
-  branch `3090ti_full_replay`; it is nine commits ahead of origin and has
-  uncommitted deletions in its out-of-scope `paper/` tree. The branch-specific
-  development starts at common commit
-  `f3ca5b2f0d3b12ec9c720df408de7908810d8617` and adds SM86 replay/memory
-  modeling plus SM86 capture/workload/control material.
-* `GPU_simulator_5090` HEAD:
-  `818a1dbd7583c273ee1996caa75a18c3a4ac90a5`, branch `GPUSim_main`, 83
-  commits ahead of the same common commit. It adds the newer effective SM120
-  model, TMA/async sidecars, bounded observers, and carded DRAM prototype.
-* Both worktrees have the same 101 tracked `sim/` paths at the common commit,
-  but the branch tips modify overlapping core paths. The relevant branch-tip
-  changes are summarized below; generated build products and the out-of-scope
-  paper/manuscript material are not merge inputs.
+Scope
+-----
+The merge combines the SM86 / RTX 3090 Ti lane and the SM120 / RTX 5090 lane
+from the strictly read-only source checkout. The common pipeline is:
 
-Capture/replay interfaces
--------------------------
-* `sm86_rtx_3090_capture/config/target.json` identifies `sm_86`, SKU
-  `rtx_3090_ti`, CC 8.6, 84 SMs, GA102, and native features FP16/BF16/TF32/INT8,
-  cp.async, barriers, ordinary global/shared/local/atomic. FP8/FP6/FP4/NVFP4,
-  TMA, cluster/DSMEM, WGMMA, OMMA and TMEM are explicit controls/substitutes,
-  never native labels. SM86 controls live in `controls/*.control_bits.json`,
-  replay metadata in `replay/*.json`; the corpus has 356 capture directories,
-  286 successful full replay rows, and 58 explicitly adapted controls.
-* `sm120_rtx_5090_capture/config/target.json` identifies `sm_120`, SKU
-  `rtx_5090`, CC 12.0, GB202, 170 SMs, and Blackwell feature build families
-  `sm_120`, `sm_120f`, and `sm_120a`. It intentionally leaves L1/L2 geometry,
-  issue topology, latencies, and clock crosswalk as typed gaps. Its capture
-  corpus has 339 successful workload/profile pairs with TMA, FP8/FP6/FP4 and
-  other Blackwell-specific controls. The SM120 capture tree has no top-level
-  `controls/` or `replay/`; dynamic traces and sidecars are under
-  `captures/`/`profiles/` and source metadata is consumed by
-  `tools/sm120_replay_bench.py`.
-* `final_results/3090ti*` records the SM86 full/fast replay baselines and
-  `final_results/5090*` records the SM120 full replay baseline. The notes state
-  that NCU is an independent comparison surface, not a simulator input. The
-  SM86 full baseline is 286 successful rows (356 attempted) and the SM120 full
-  baseline is 339/339. SM120 final defaults include integrated `l1-l2`, an
-  effective L1/L2, latent envelope, and carded DRAM enabled as an explicitly
-  unvalidated prototype; `--no-carded-dram` is the conservative baseline.
+    trace + static/control sidecars -> sim-trace -> sim-sm/sim-mem
+    -> sim-engine -> sim-run -> compressed replay JSONL
 
-Core architectural conflict
----------------------------
-The branches are not simple additive changes. They modify the same Rust
-modules in different ways:
+Resolved questions
+------------------
+1. Architecture selection: cards and validated capture metadata are the
+   authority. Directory names and stale producer labels are not.
+2. SM86 versus SM120 hypotheses: keep L1/store/branch/shared/global-load
+   projections architecture-scoped. Do not copy SM86 values into SM120 gaps.
+3. Full replay: use integrated l1-l2, compressed .jsonl.zst output, and a
+   twelve-worker process pool. Fast replay is a separate trace-derived mode.
+4. NCU: join observations after replay; never use them as replay/model inputs.
+5. Candidate inputs: current memory candidate documents are SM86-only and are
+   rejected for SM120 until their schema carries an explicit architecture.
+6. Sidecars: a malformed preferred native static sidecar fails closed; the
+   enhanced document is a fallback only when the preferred file is absent.
 
-SM86 branch (A) adds card-backed/effective SM86 behavior:
-* `sim/mem/src/l1.rs`: optional set/way/index scenarios (`L1SetIndex`), richer
-  static-client merge/hit/sector counters, fixed-register/readiness observers,
-  and SM86 L1 cache state arms.
-* `sim/mem/src/l2.rs`: SM86 operation/client/packet counters, DRAM demand and
-  dirty-tail fields.
-* `sim/sm/src/issue.rs`, `issue/candidates.rs`, `issue/config.rs`,
-  `issue/readiness.rs`: fixed RF/front-end/readiness and memory-admission
-  candidate behavior.
-* `sim/sm/src/system.rs`: SM86 carded DRAM service-rate and pressure/route
-  observers, plus store/fence completion candidates.
-* `sim/sm/src/metrics.rs`, `sim/direct_run/src/{emit,metrics,lib}.rs`:
-  extensive SM86 NCU-shaped metric projections and report fields.
-* `sim/trace/src/reader.rs`: sector/address/coalescing projections needed for
-  SM86 controls.
-* `tools/sm120_corpus_replay.py` was generalized to choose `sm_86` or `sm_120`,
-  discover SM86 defaults/P-chase card, pass an optional DRAM service rate and
-  memory-admission candidate, and permit `--workers 1` or `12`.
-
-SM120 branch (B) adds newer effective SM120 behavior:
-* `sim/mem/src/l1.rs`: bounded `L1RequestMaskAudit`, client-indexed request and
-  merge-mask histograms, and observer-only static request-mask provenance.
-* `sim/mem/src/access.rs`/`cache_op.rs`: explicit async/Blackwell access and
-  cache-op classification.
-* `sim/trace/src/async_sidecars.rs`, `obligations.rs`, and `reader.rs`:
-  TMA generation/coordinate/source relations, shared-bank and local-sector
-  projections, and typed sidecar validation.
-* `sim/sm/src/replay.rs`, `system.rs`, `issue.rs`, `metrics.rs`, and
-  `program.rs`: TMA shadow L2 demand, SM120 memory-role/service arms, effective
-  L1/L2/DRAM observers, and the latest conditional active-IPC model.
-* `arch_profiles/cards/sm_120-rtx-5090.json` changes DRAM from a typed gap to an
-  explicit prototype (`1792000000000 B/s`, 2407 MHz SM, 14000 MHz memory) while
-  retaining provenance that this is not a measured service rate.
-* CLI removes legacy `--sm120-alpha` and `--ncu-shaped-metrics` switches but
-  preserves their internal fields as false/always-emitted behavior; the
-  replay runner defaults carded DRAM on and allows workers 1 or 12.
-
-Representative conflicting snippets
-------------------------------------
-1) `sim/direct_run/src/main.rs`, same common base:
-
-A / SM86 adds an explicit DRAM rate argument:
-
-    [--carded-dram] \\
-    [--dram-service-rate-bytes-per-sec N] \\
-    [--dirty-writeback-capacity-sectors N]
-
-    let mut carded_dram_bandwidth = false;
-    let mut dram_service_rate_bytes_per_sec = None;
-    ...
-    value if value == OsStr::new("--dram-service-rate-bytes-per-sec") => {
-        let raw = take_value(&mut args, "--dram-service-rate-bytes-per-sec")?;
-        let rate = raw.parse::<u64>()...;
-        if rate == 0 { return Err(...); }
-        dram_service_rate_bytes_per_sec = Some(rate);
-    }
-
-B / SM120 removes legacy switches:
-
-    [--fast-frontier-only] \\
-    [--sm120-effective-l1 ...] \\
-    [--sm120-effective-l2 ...] \\
-    [--latent-envelope] \\
-    ...
-
-    // `--sm120-alpha` and `--ncu-shaped-metrics` are no longer parsed;
-    // RunConfig receives `ncu_shaped_metrics: false` and `sm120_alpha: false`.
-
-Question: should the unified CLI retain both legacy switches as hidden aliases
-for old SM120 artifacts, or remove them and make architecture-specific behavior
-purely card/target driven? How should `--carded-dram` and the explicit SM86
-service-rate override interact with SM120's prototype card default?
-
-2) `sim/mem/src/l1.rs` configuration conflict:
-
-A adds physical-sensitivity scenario fields:
-
-    pub set_count: Option<u32>,
-    pub ways: Option<u32>,
-    pub set_index: L1SetIndex,
-
-    pub enum L1SetIndex {
-        FullyAssociative,
-        Modulo,
-        XorFold,
-        ModuloXorFallback,
-    }
-
-B adds a bounded observer audit to the same structs:
-
-    #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
-    pub struct L1RequestMaskAudit {
-        pub request_count: [u64; 5],
-        pub request_line_count: [u64; 5],
-        pub request_masks: [[u64; 16]; 5],
-        pub same_request_merge_masks: [[u64; 16]; 5],
-        pub older_pending_merge_masks: [[u64; 16]; 5],
-        pub request_mask_overflow: [u64; 5],
-    }
-
-Question: keep both as independent configuration/state and diagnostic layers,
-or refactor into a single `L1Geometry`/`L1Observer` abstraction? Which fields
-must remain timing-neutral so that SM120 mask audits cannot alter SM86 cache
-replacement or timing?
-
-3) Metric projection conflict:
-
-A's SM86 `sim/direct_run/src/metrics.rs` grows SM86-specific counter rows for
-constant-client, L0C/L1TEX/L2/DRAM, store-fence and readiness residuals. B's
-same file grows SM120 TMA/active-IPC/L1/L2 observer rows and changes row
-selection/defaults. Existing output consumers in `final_results/*` expect stable
-JSONL schemas.
-
-Question: should the unified output schema namespace rows by `arch_id` (for
-example `sm86_*` and `sm120_*`) while preserving old names as aliases, or should
-one common row name carry an `arch_scope`/`status` field? Give a backward
-compatibility policy for old `3090ti/*.jsonl.zst` and `5090/*.jsonl.zst`.
-
-4) Trace reader conflict:
-
-A adds SM86 sector-plan/coalescing and local/global address validation. B adds
-SM120 TMA coordinate/sidecar relationships and shared-bank ideal-vs-observed
-wavefront projections. Both extend `ValidatedWarp` and `ValidatedMemoryInstruction`.
-
-Question: what is the safest merge ordering and invariant set? In particular,
-which validation failures should be fatal for native traces, which should be
-recorded as typed unavailable diagnostics, and how can SM86 traces without TMA
-sidecars remain byte/behavior compatible?
-
-5) Replay-runner defaults conflict:
-
-A's generalized runner chooses defaults from the architecture card, uses the
-SM86 P-chase card and optional store/fence candidate, and defaults SM86 carded
-DRAM/service hypotheses. B's runner targets SM120, defaults carded DRAM on, and
-requires the standard full corpus worker policy (12, with sequential 1 now
-allowed for timing baselines).
-
-Question: design a single runner contract such as
-`--target-arch auto|sm_86|sm_120`, architecture-specific default cards, explicit
-`--no-carded-dram`, `--memory-mode`, and corpus-root validation. How should
-capture roots be discovered and how should mixed-architecture corpus runs be
-prevented?
-
-6) Architecture-card semantics:
-
-A retains SM86 measured/card-backed L1/L2/P-chase values and typed candidates.
-B changes only SM120 `dram_bandwidth` from a typed research gap to an
-unvalidated prototype hypothesis. The two `sm_120-rtx-5090.json` files differ
-only in that block (plus documentation wording).
-
-Question: retain the SM120 prototype as opt-in for scientific conservatism, or
-keep B's default-enabled prototype while clearly recording `validated=false`?
-How should card loading reject a mismatched SKU/arch and avoid silently using
-SM86 facts for SM120 gaps?
-
-Non-negotiable scientific constraints
---------------------------------------
-* NCU measurements remain independent comparison targets, never replay/model
-  inputs or tuning selectors.
-* SM86 feature substitutions must never be labeled native SM120/FP8/FP4/TMA.
-* SM120 unmeasured physical geometry stays typed/effective/conditional; do not
-  invent proprietary topology.
-* Preserve separate issue, modeled-event, completion, launch-envelope and
-  typed-tail frontiers.
-* Do not import paper/thesis/manuscript files or generated capture binaries
-  into the unified source tree merely to make tests pass.
-* Must retain old baseline behavior: SM86 representative controls/full replay
-  and SM120 339-capture full replay should build/run with architecture-specific
-  cards and outputs.
-
-Requested advice
-----------------
-Please propose:
-1. A concrete merge topology and module ownership plan.
-2. Which branch wins for each conflict class and how to preserve the losing
-   behavior behind a typed architecture/configuration dispatch.
-3. A backwards-compatible CLI and JSONL/report schema.
-4. Minimal representative verification commands that can run without a GPU,
-   plus the first real-trace checks to run once the repository is built.
-5. Any assumptions that must be recorded as explicit research gaps instead of
-   silently resolved.
+Verification
+------------
+The complete SM120 (339 + 339) and SM86 (356 attempted, 286 successful)
+campaigns match their retained baselines with zero common numeric differences.
+See docs/RESULTS.md, FULL_REPLAY_AUDIT.md, and
+FULL_NUMERIC_COMPARISON.json. If a future change creates a non-random
+discrepancy or an architectural ambiguity, append a new self-contained
+question set here before changing model behavior.

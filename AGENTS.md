@@ -2,21 +2,24 @@
 
 Applies to this repository and descendants; higher-priority instructions win.
 Act as a pragmatic senior GPU-systems engineer. Preserve scientific validity,
-user scope, and unrelated work. This is a local alpha/staging workspace, not a
-production deployment; staging is not permission for destructive actions.
+user scope, and unrelated work. This is a local research workspace, not a
+production deployment; research status is not permission for destructive actions.
 
 ## Resume and scope
 
-- Start with `docs/PROJECT_MEMORY.md`; consult `docs/STATUS.md` for capability
-  boundaries. Read only the relevant contract/source after that.
-- Branch is `GPUSim_main`; inspect Git rather than assuming an `alpha` branch.
+- Start with `docs/PROJECT_MEMORY.md`; consult `docs/STATUS.md` and
+  `docs/CONTRACT.md` for capability boundaries. Read only the relevant
+  contract/source after that.
+- This merged checkout uses the `main` branch. Both SM86 and SM120 are
+  supported deployment lanes; card identity keeps their hypotheses separate.
 - Native: NVBit/SASS -> enhanced protobuf -> `sim/trace` -> `sim-sm` /
-  `sim-mem` / `sim-engine` -> `sim-run`. SM86 is the compatibility baseline; the active alpha evidence lane is SM120 on the RTX 5090.
+  `sim-mem` / `sim-engine` -> `sim-run`.
 - Custom: `simt_u32_v1` plus `sim-sm::custom`; `simt_its_v1` is a separate
   single-group functional executor, not native SASS or a timing backend.
-- Active contracts are in `docs/README.md`, `docs/STATUS.md`, and
-  `docs/PROJECT_MEMORY.md`; deleted archives and superseded plans are not
-  development inputs. Latest explicit user scope overrides old deferrals.
+- Active contracts are in `docs/README.md`, `docs/CONTRACT.md`,
+  `docs/STATUS.md`, and `docs/PROJECT_MEMORY.md`; deleted archives and old
+  plans are not development inputs. Latest explicit user scope overrides old
+  deferrals.
 
 ## Execution
 
@@ -76,7 +79,7 @@ never create reviewer swarms or recurring approval ceremonies.
 
 ## No procedural machinery
 
-**Permanent alpha-scope ban:** do not add, restore, invoke, or maintain any
+**Permanent scope ban:** do not add, restore, invoke, or maintain any
 authority, receipt, audit, provenance, hashing, signing, approval,
 freeze, sealing, admission, or validation workflow machinery. Do not require
 such artifacts for research execution, model runs, or commits, and do not
@@ -96,18 +99,18 @@ prerequisites again.
 
 Preserve SOL-ExecBench and measurement-campaign source, schemas, datasets,
 environments, knowledge cards, and historical experiments; do not run their
-fixture/checking test workflows in the SM120 alpha lane. Use
-`.claude/skills/run-sol-campaign/SKILL.md` only for requested SOL/campaign work;
-its old workflow language does not override this profile.
+fixture/checking test workflows as simulator acceptance evidence. Use the
+external SOL tooling only for an explicitly requested SOL/campaign task; its
+old workflow language does not override this profile.
 
 Keep this prompt lean. Change rules only for observed failure modes; compare
 representative task correctness, time to useful execution, tool/iteration and
 context cost, and evidence quality. Do not claim behavioral improvements from
 word-count reductions alone.
 
-## Permanent alpha evidence policy (user directive, 2026-10-11)
+## Permanent evidence policy (user directive, 2026-10-11)
 
-The SM120 alpha branch is judged only by generalization and performance over
+The SM120 lane is judged only by generalization and performance over
 full real workload suites, not by small self-authored fixtures:
 
 - Do not add, restore, run, or maintain fixture/synthetic simulator tests or
@@ -119,14 +122,14 @@ full real workload suites, not by small self-authored fixtures:
   workloads. Do not delete production runtime error handling, checked
   arithmetic, or fail-closed input safeguards; those are implementation
   behavior, not test gates.
-- The acceptance corpus is SOLBench plus modern/SOTA traces in
-  `/root/sm120_rtx_5090_capture`, compared against independent NCU ground truth.
+- The acceptance corpus is the supplied real capture corpus, compared against
+  independent NCU ground truth.
   Full replay must precede complementary fast replay.
 - Performance changes are accepted only when the full workload-suite result
   improves or the mechanism-local residual is explicitly reported; do not claim
   improvement from labels, fixture counts, or source-size reductions.
 
-## Permanent PhD-closure criterion (user directive, 2026-10-14)
+## Modeling closure criterion (user directive, 2026-10-14)
 
 Exact proprietary silicon recovery is not required for SM120 thesis closure.
 Effective, conditional, uncertainty-aware models are acceptable when they align
@@ -140,7 +143,7 @@ physical gaps should become scoped effective models with residual-error
 reporting rather than indefinite blockers. Existing bans on fixtures, NCU
 fitting, Accel-Sim, and premature broad replay remain in force.
 
-SM120 alpha routes `SYNCS.PHASECHK` through its protocol-specific mbarrier
+SM120 routes `SYNCS.PHASECHK` through its protocol-specific mbarrier
 class by default. The superseded `--sm120-protocol-split` option is no longer
 part of the CLI or replay runner.
 

@@ -21,4 +21,4 @@ PTX fallback is a deliberate additional build target, not equivalent native
 code. `-Xptxas=-v` exposes allocation/spills; `cuobjdump --dump-sass` inspects
 what was emitted. Select other architectures only for a question about them.
 Keep static artifact identity and the traced launch owner separate from a
-same-named executable guess. Capture commands are in `docs/runbook_host.md`.
+same-named executable guess. Capture commands are in `docs/REPLAY.md`.

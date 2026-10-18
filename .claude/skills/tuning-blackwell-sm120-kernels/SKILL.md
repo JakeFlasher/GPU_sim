@@ -1,6 +1,6 @@
 ---
 name: tuning-blackwell-sm120-kernels
-description: Handle an explicitly Blackwell-targeted CUDA capability or tuning question using exact target documentation. The active target for the SM120/RTX 5090 alpha lane; do not use it to reinterpret the SM86 baseline.
+description: Handle an explicitly Blackwell-targeted CUDA capability or tuning question using exact target documentation. The target is the SM120/RTX 5090 deployment lane; do not use it to reinterpret the SM86 lane.
 ---
 
 # Blackwell-targeted work

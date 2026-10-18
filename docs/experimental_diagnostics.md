@@ -20,6 +20,6 @@ Keep these timing domains separate:
 4. independent NCU duration and counters.
 
 When a domain is unavailable, report it as unavailable rather than substituting
-another clock. The complete SOLBench plus modern/SOTA corpus under
-`/root/sm120_rtx_5090_capture` is the performance population. NCU is joined after
-replay and never becomes a simulator parameter.
+another clock. The complete real capture corpus supplied to a run is the
+performance population. NCU is joined after replay and never becomes a
+simulator parameter.

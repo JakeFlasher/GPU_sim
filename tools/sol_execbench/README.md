@@ -3,7 +3,7 @@
 <div align="center" id="top">
 
 [![Docs](https://img.shields.io/badge/docs-latest-brightgreen.svg)](/docs/)
-[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](https://www.apache.org/licenses/LICENSE-2.0)
 
 [HuggingFace Dataset](https://huggingface.co/datasets/nvidia/SOL-ExecBench) | [Leaderboard](https://research.nvidia.com/benchmarks/sol-execbench)
 | [Technical Report](https://arxiv.org/abs/2603.19173) </div>
@@ -15,7 +15,7 @@ Kernels are:
 * Tested against a reference solution for numerical correctness
 * Timed under reproducible conditions
 
-Leaderboard submissions are ranked based on [SOL-Score](/src/sol_execbench/sol_score.py): a metric that grades custom kernel performance based on the theoretical roofline of a NVIDIA B200 GPU (obtained analytically with [SOLAR](https://github.com/NVlabs/SOLAR)).  
+Leaderboard submissions are ranked based on [SOL-Score](src/sol_execbench/sol_score.py): a metric that grades custom kernel performance based on the theoretical roofline of a NVIDIA B200 GPU (obtained analytically with [SOLAR](https://github.com/NVlabs/SOLAR)).
 
 Supported kernel languages: PyTorch, Triton, CUTLASS, cuDNN, CuTe DSL, cuTile, CUDA C++.
 

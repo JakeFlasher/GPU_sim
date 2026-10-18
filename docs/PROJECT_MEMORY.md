@@ -1,26 +1,24 @@
-# Unified GPU simulator continuation memory
+# Current project memory
 
-This repository contains two explicit deployment lanes sharing one trace/issue/
-memory/replay engine:
+This is a two-lane simulator, not two independent executables:
 
-* **SM86 / RTX 3090 Ti** (`arch_id=sm_86`, `sku=rtx_3090_ti`): validated local
-  compatibility lane. Its card-backed L1/L2/P-chase and observer candidates
-  remain architecture-scoped and are selected only for SM86 traces.
-* **SM120 / RTX 5090** (`arch_id=sm_120`, `sku=rtx_5090`): effective/conditional
-  Blackwell lane. Unmeasured physical geometry remains typed as a research gap;
-  effective L1/L2/TMA/IPC and the optional carded-DRAM prototype are explicit
-  hypotheses, not recovered proprietary topology.
+* **SM86 / RTX 3090 Ti** uses `arch_profiles/cards/sm_86.json`, the P-chase
+  card, and SM86-scoped candidates/observers.
+* **SM120 / RTX 5090** uses `arch_profiles/cards/sm_120-rtx-5090.json`, TMA and
+  async sidecars, and effective conditional L1/L2 models.
 
-The common execution path is:
+The common path is:
 
-    NVBit/SASS + sidecars -> sim-trace -> sim-sm/sim-mem/sim-engine -> sim-run
+```text
+trace + sidecars -> sim-trace -> sim-sm/sim-mem/sim-engine -> sim-run
+```
 
-Architecture identity is resolved from the architecture card, never inferred
-from a bare capture directory. NCU observations are independent comparison
-targets, never replay/model inputs. Issue, modeled-event, completion,
-launch-envelope and typed-tail frontiers remain separate.
+Architecture identity comes from the card and must agree with capture metadata.
+NCU values are post-replay comparison data only. Full replay is integrated
+`l1-l2`, emits compressed JSONL, and uses twelve workers for complete corpora;
+fast replay is a separate trace-derived mode.
 
-The original lane-specific continuation notes are retained in
-`SM86_PROJECT_MEMORY.md` (when supplied by the SM86 branch) and
-`SM120_PROJECT_MEMORY.md`. Use them as evidence records, not as cross-architecture
-parameter defaults.
+Read [`CONTRACT.md`](CONTRACT.md), [`ARCHITECTURE.md`](ARCHITECTURE.md), and
+[`REPLAY.md`](REPLAY.md) before changing the model. Current verification is
+summarized in [`RESULTS.md`](RESULTS.md). Do not treat old branch plans or
+dated experiment diaries as active instructions.

@@ -1,31 +1,26 @@
 # Unified simulator status
 
-## Architecture lanes
+## Supported lanes
 
-| Lane | Card | Capture root | Status |
-|---|---|---|---|
-| SM86 / RTX 3090 Ti | `arch_profiles/cards/sm_86.json` | `sm86_rtx_3090_capture` | Compatibility lane with card-backed L1/L2/P-chase and SM86 observer candidates. |
-| SM120 / RTX 5090 | `arch_profiles/cards/sm_120-rtx-5090.json` | `sm120_rtx_5090_capture` | Effective/conditional lane with typed geometry gaps, TMA sidecars, and optional prototype DRAM service. |
+| Lane | Card | Runtime status |
+| --- | --- | --- |
+| SM86 / RTX 3090 Ti | `arch_profiles/cards/sm_86.json` | Full compatibility replay with card-backed memory inputs and scoped SM86 candidates. |
+| SM120 / RTX 5090 | `arch_profiles/cards/sm_120-rtx-5090.json` | Full effective replay with typed geometry gaps, TMA/async sidecars, and optional carded DRAM. |
 
-## Runtime contract
+Both lanes use the architecture-neutral `tools/sm120_corpus_replay.py` entry
+point and the same Rust workspace. Full-corpus results and expected
+dispositions are in [`RESULTS.md`](RESULTS.md).
 
-`sim-run` resolves architecture-scoped behavior from `--arch-card`. SM86 may
-use `--pchase-card`, an explicit DRAM service-rate hypothesis, and bounded
-store/fence admission candidates. SM120 may use effective L1/L2, latent
-frontier, TMA sidecars, and the explicitly marked unvalidated carded-DRAM
-prototype. No SM86 value is silently used for an SM120 research gap.
+## Boundaries
 
-`tools/sm120_corpus_replay.py` is retained as the historical entry point but
-is architecture-neutral: use `--target-arch auto|sm_86|sm_120`, matching card
-and capture root, and either the standard twelve-worker replay or the explicit
-sequential one-worker timing baseline.
+NCU data is joined after replay and never selects a model. SM86 controls and
+substitutes are not relabeled as SM120 features. Effective SM120 values are
+conditional scenarios, not proprietary topology recovery. Unsupported behavior
+remains a typed gap. Full replay must use `l1-l2`, compressed `.jsonl.zst`
+outputs, and twelve workers; the fast frontier is separate.
 
-## Scientific boundaries
+## Maintenance
 
-NCU data is post-replay comparison only. Native SM86 controls and explicitly
-labeled SM86 substitutes are not relabeled as native SM120 features. Effective
-models report residuals and typed unavailable fields instead of inventing
-proprietary topology.
-
-Detailed historical evidence remains in `docs/SM86_PROJECT_MEMORY.md`,
-`docs/SM120_PROJECT_MEMORY.md`, and the lane-specific `sm86_*` report files.
+Build/test commands and the portable replay recipe are in the root
+[`README.md`](../README.md) and [`REPLAY.md`](REPLAY.md). This page is the
+current status contract; historical experiment notes are not execution policy.

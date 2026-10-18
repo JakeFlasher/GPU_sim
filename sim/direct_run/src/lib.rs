@@ -3019,6 +3019,12 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
     let candidate_inputs = usize::from(config.memory_service_candidates.is_some())
         + usize::from(config.memory_admission_candidates.is_some())
         + usize::from(config.memory_admission_feedback.is_some());
+    if candidate_inputs != 0 && arch != sim_arch::ArchId::Sm86 {
+        return Err(RunError::new(
+            "arguments",
+            "memory candidate documents are currently scoped to the sm_86 lane; an architecture-qualified candidate schema is required before applying one to sm_120",
+        ));
+    }
     if config.native_payload_events.is_some() && config.native_payload_events_path.is_some() {
         return Err(RunError::new(
             "arguments",

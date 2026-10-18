@@ -851,24 +851,13 @@ impl EndpointDescriptor {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LatentFactors {
     pub route: CandidateDomain,
     pub compiler: CandidateDomain,
     pub cache: CandidateDomain,
     pub timing: CandidateDomain,
-}
-
-impl Default for LatentFactors {
-    fn default() -> Self {
-        Self {
-            route: CandidateDomain::default(),
-            compiler: CandidateDomain::default(),
-            cache: CandidateDomain::default(),
-            timing: CandidateDomain::default(),
-        }
-    }
 }
 
 impl LatentFactors {
@@ -1525,12 +1514,16 @@ impl ResourceDemandEnvelope {
             // A pool with no mandatory work contributes no mandatory startup
             // latency.  This keeps optional/zero-demand pools from inflating
             // the lower bound merely because the profile contains them.
-            let lower_latency = (lower_service != 0)
-                .then_some(rate.latency_lower_cycles)
-                .unwrap_or(0);
-            let upper_latency = (upper_service != 0)
-                .then_some(rate.latency_upper_cycles)
-                .unwrap_or(0);
+            let lower_latency = if lower_service != 0 {
+                rate.latency_lower_cycles
+            } else {
+                0
+            };
+            let upper_latency = if upper_service != 0 {
+                rate.latency_upper_cycles
+            } else {
+                0
+            };
             let lower = lower_service
                 .checked_add(lower_latency)
                 .ok_or_else(|| LatentModelError::ResourceDemandOverflow { pool: pool.clone() })?;

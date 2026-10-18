@@ -5,7 +5,7 @@ description: "Inspect SASS/cubin and NVBit enhanced traces, diagnose capture or 
 
 # SASS and NVBit
 
-Start with `tools/nvbit_tracer/README.md` and `docs/runbook_host.md`.
+Start with `tools/nvbit_tracer/README.md` and `docs/REPLAY.md`.
 Use `cuobjdump --dump-sass BINARY`, `nvdisasm CUBIN`, or
 `tools/nvbit_tracer/tracer_tool/trace_printer TRACE_DIR` as applicable.
 Pinned producer environment: `tools/nvbit_tracer/pinned_build_env.sh`.

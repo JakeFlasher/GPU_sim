@@ -5371,6 +5371,17 @@ fn replay_kernel_with_schedule_and_l2_and_candidates_with_payload_events(
     memory_admission_feedback: Option<MemoryAdmissionCandidate>,
     payload_events: &[L1PayloadAdmissionEvent],
 ) -> Result<KernelReplayOutcome, ReplayError> {
+    if (!memory_service_candidates.is_empty()
+        || !memory_admission_candidates.is_empty()
+        || memory_admission_feedback.is_some())
+        && schedule.arch != ArchId::Sm86
+    {
+        return Err(ReplayError::ArchitectureMismatch {
+            component: "SM86 memory candidate lane",
+            expected: ArchId::Sm86,
+            got: schedule.arch,
+        });
+    }
     if !payload_events.is_empty() && !matches!(mode, ReplayMemMode::L1SharedL2 { .. }) {
         return Err(ReplayError::PayloadAdmissionRequiresSharedL2);
     }
