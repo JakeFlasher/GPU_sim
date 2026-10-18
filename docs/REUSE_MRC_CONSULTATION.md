@@ -230,6 +230,28 @@ TMA chronology, and client-scope metadata are hard ceilings; the recommended
 action is to stop locality-model promotion and report those limitations unless
 new metadata resolves them.
 
+## Post-async accuracy frontier (Gemini follow-up)
+
+The latest brain memo is `/tmp/gemini_next_seam.txt` (the `agy` command timed
+out only after returning its structured partial memo). It ranks stopping with
+typed scope/metadata limitations as the primary disposition. A typed L2 client
+scope shadow at the committed transactional event seam is the only remaining
+defensible code experiment; it must stay diagnostic until the full corpus shows
+sign-consistent, conserved scope evidence. IPC and DRAM changes are rejected
+without new hardware/sidecar evidence because their residuals are dominated by
+profiler endpoint tails, missing SM86 carveout, TMA chronology, and non-SM
+clients.
+
+The memo explicitly rejects active LTC128B sibling promotion: existing trace
+request masks are already full four-sector lines, SM120 geometry is unresolved,
+and forcing a four-sector physical mask would inflate misses/DRAM. LDGSTS
+remains a separate client. Any future L2 shadow must tag static client scope
+on requests, partition resident/pending/fill sectors, invalidate shadow state
+on observed physical eviction, and leave `L2Counters`, `DramStats`, timestamps,
+and cache state untouched. The async L1 scope exclusion is the only new
+projection promoted in the current iteration; its full-replay evidence is in
+`docs/RESULTS.md`.
+
 ## Raw consultation artifacts
 
 - `/tmp/gemini_mrc_consultation_retry.txt` — concise successful memo.

@@ -469,3 +469,22 @@ Questions for Gemini (brain only; no code/files):
 
 No NCU target may fit model constants or select per-workload rules. Full replay
 only, 12 workers; no fast replay and no SM120 DRAM-disabled replay.
+
+GEMINI RESPONSE SUMMARY — POST-ASYNC FRONTIER
+=============================================
+The complete/partial answer is `/tmp/gemini_next_seam.txt`. Gemini ranks typed
+scope/metadata limitations and stopping as the primary disposition. A typed
+L2 client-scope shadow at the committed transactional event seam is the only
+remaining defensible code experiment, and must remain diagnostic until the
+full corpus shows conserved, sign-consistent evidence. IPC/DRAM changes are
+not defensible without new hardware/sidecar evidence because profiler tails,
+missing SM86 carveout, TMA chronology, and non-SM clients dominate.
+
+Gemini explicitly rejects active LTC128B sibling promotion: current request
+masks already represent full four-sector lines, SM120 geometry is unresolved,
+and forcing full physical masks would inflate misses/DRAM. LDGSTS is a separate
+client. A future L2 shadow may tag static client scope on requests, partition
+resident/pending/fill sectors, and invalidate only on observed physical
+evictions; it must leave L2Counters, DramStats, timestamps, and cache state
+untouched. The async L1 older-pending exclusion is the only new projection
+promoted in this iteration and has completed both required full lanes.
