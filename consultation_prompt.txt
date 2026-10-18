@@ -404,3 +404,68 @@ with zero endpoint regressions and no NCU fitting. Missing carveout, SM120
 geometry/hash/replacement, TMA chronology, and client-scope metadata are hard
 ceilings. The recommended action is to stop locality-model promotion and
 report those limitations unless new metadata resolves them.
+
+NEW ACCURACY ESCALATION — SM120 LTC128B / LDGSTS SCOPE
+=====================================================
+Date: 2026-10-18. This is a new unresolved question; do not change model
+behavior until the brain reviews it.
+
+Current full-replay residual evidence (SM120, 339 captures/11,558 launches,
+workers=12; NCU is post-replay only):
+
+* Mean generic `lts__t_sectors_srcunit_tex_lookup_hit.sum` APE is ~24.3% and
+  operation-read hit APE ~14.9%.
+* Largest underprediction: `sol_l1_064_latent_kv_expansion_sm120`, launch 9,
+  trace scope contains only `global_load_ltc128b`: model generic L2 hit 86,528
+  versus independent NCU target 418,924; operation-read model 86,528 versus
+  target 401,132. Model L2 miss is 1,081,856; NCU operation-read miss is
+  1,049,088. The L1 global lookup model is 961,536 hits/1,135,616 misses,
+  while NCU target is 658,224 hits/1,438,928 misses.
+* Other underprediction rows are `ldgsts_async_copy` (for example
+  `quant_004_fp8_moe_expert_linear_sm120adapted_small` launches 23/51).
+  Conversely, overprediction rows include `sol_l2_066_resnet_time_sm120adapted`
+  launch 7 (model 73,728 generic hits versus NCU 50,688) and
+  `sol_l2_033_feature_pyramid_sm120` launch 42 (27,648 versus 15,808).
+
+Trace/code evidence already available without using NCU as model input:
+
+* `TraceMetrics::memory_scope` preserves `global_load_ltc128b` and
+  `ldgsts_async_copy` static/dynamic form partitions. The LTC case has
+  2,097,152 requested sectors and 524,288 unique 128-byte lines (four sectors
+  per line). Alpha static routing in `sim/sm/src/program.rs::alpha_mem_role`
+  currently routes any SM120 LDG form not explicitly `.CG/.CS/.NA/STRONG.GPU`
+  through `MemRole::EligibleLoad(LdgECa)`, so LTC128B remains L1-eligible.
+* `sim/sm/src/replay.rs` preserves decoded sector spans; `sim/sm/src/system.rs`
+  has the committed L2 event path. Current source-TEX projection uses physical
+  non-store L2 hits plus trace-semantic store-packet candidates and TMA-store
+  cold misses; no LTC sibling-sector promotion is modeled.
+* Independent SM86 probe documentation in the strictly read-only allowed
+  source branch (`/home/jakeshea/5090_branch/GPU_simulator/docs/
+  sm86_ltc128b_ptx_probe_slice_20261016.md`) reports that
+  `.L2::128B`/`LDG.E.LTC128B.STRONG.SM` promotes three additional sectors per
+  one-sector L2 miss in that control (L2 miss sectors 172,032, promoted
+  sectors 129,024, DRAM sectors 172,672 versus plain 43,008/0/43,176).
+  The same document explicitly says timing-active promotion was not promoted
+  because the form matrix and capture crosswalk were incomplete. Do not assume
+  SM86 behavior transfers to SM120 without evidence.
+
+Questions for Gemini (brain only; no code/files):
+
+1. Is this evidence sufficient to implement an observer-only or active
+   trace-semantic LTC128B full-line/sibling-sector L2 promotion for SM120, or
+   is it still a client-scope mismatch? How should L1 scope and L2/DRAM
+   promotion be coupled without count balancing?
+2. What exact trace-only algorithm/invariants should compute promotion at the
+   committed L2 event seam (or report a scope candidate) for mixed LTC/LDG,
+   LTC-only, and LDGSTS async forms? How should line masks, first fills,
+   pending merges, stores, and TMA be handled?
+3. What minimum real evidence (existing trace protobuf/sidecars, controlled
+   probe, or NCU crosswalk) is required before any active promotion? Which
+   slice experiments should be run first, with rollback gates for L1, L2,
+   DRAM, and IPC?
+4. Is there a safer next fix for these residuals than modifying cache state,
+   e.g. a typed client-scope projection that improves the NCU endpoint while
+   preserving all physical counters/timing? State exact acceptance criteria.
+
+No NCU target may fit model constants or select per-workload rules. Full replay
+only, 12 workers; no fast replay and no SM120 DRAM-disabled replay.

@@ -20,7 +20,8 @@ use std::time::Instant;
 
 use crate::emit::{
     EmitOutcome, EmittedMetricKey, FullLaunchPredictions, MetricValue, Unavailable, Unit,
-    emit_launch, global_read_resident_hit_adjustment, global_resident_hit_adjustment,
+    async_global_l1_hit_exclusion, emit_launch, global_read_resident_hit_adjustment,
+    global_resident_hit_adjustment,
 };
 use serde::{Deserialize, Serialize};
 use sim_arch::ArchId;
@@ -2190,14 +2191,12 @@ fn cache_lookup_prediction_reports(
             "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum",
             "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_miss.sum",
             l1.map(|counters| {
+                let arch = counters.arch().unwrap_or(ArchId::Sm86);
                 counters
                     .origin(MemoryOrigin::Global)
-                    .effective_lookup_hits_for_arch(counters.arch().unwrap_or(ArchId::Sm86))
-                    .saturating_add(global_read_resident_hit_adjustment(
-                        counters.arch().unwrap_or(ArchId::Sm86),
-                        counters,
-                        trace,
-                    ))
+                    .effective_lookup_hits_for_arch(arch)
+                    .saturating_add(global_read_resident_hit_adjustment(arch, counters, trace))
+                    .saturating_sub(async_global_l1_hit_exclusion(arch, counters, trace))
             }),
         ),
         (
@@ -2214,28 +2213,42 @@ fn cache_lookup_prediction_reports(
                 });
                 let read_hits = observer.map_or_else(
                     || {
-                        counters
-                            .origin(MemoryOrigin::Global)
-                            .effective_lookup_hits_for_arch(counters.arch().unwrap_or(ArchId::Sm86))
-                            .saturating_add(global_resident_hit_adjustment(
+                        {
+                            let arch = counters.arch().unwrap_or(ArchId::Sm86);
+                            counters
+                                .origin(MemoryOrigin::Global)
+                                .effective_lookup_hits_for_arch(arch)
+                                .saturating_add(global_resident_hit_adjustment(
+                                    arch, counters, trace,
+                                ))
+                                .saturating_sub(async_global_l1_hit_exclusion(
+                                    arch, counters, trace,
+                                ))
+                        }
+                        .saturating_add(
+                            local.effective_lookup_hits_for_arch(
                                 counters.arch().unwrap_or(ArchId::Sm86),
-                                counters,
-                                trace,
-                            ))
-                            .saturating_add(local.effective_lookup_hits_for_arch(
-                                counters.arch().unwrap_or(ArchId::Sm86),
-                            ))
+                            ),
+                        )
                     },
                     |metrics| {
-                        counters
-                            .origin(MemoryOrigin::Global)
-                            .effective_lookup_hits_for_arch(counters.arch().unwrap_or(ArchId::Sm86))
-                            .saturating_add(global_resident_hit_adjustment(
-                                counters.arch().unwrap_or(ArchId::Sm86),
-                                counters,
-                                Some(metrics),
-                            ))
-                            .saturating_add(metrics.local_interleaved_l1_load_hits)
+                        {
+                            let arch = counters.arch().unwrap_or(ArchId::Sm86);
+                            counters
+                                .origin(MemoryOrigin::Global)
+                                .effective_lookup_hits_for_arch(arch)
+                                .saturating_add(global_resident_hit_adjustment(
+                                    arch,
+                                    counters,
+                                    Some(metrics),
+                                ))
+                                .saturating_sub(async_global_l1_hit_exclusion(
+                                    arch,
+                                    counters,
+                                    Some(metrics),
+                                ))
+                        }
+                        .saturating_add(metrics.local_interleaved_l1_load_hits)
                     },
                 );
                 let store_hits = observer.map_or(counters.store_hits, |metrics| {

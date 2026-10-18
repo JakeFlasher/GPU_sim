@@ -992,6 +992,37 @@ pub(crate) fn global_read_resident_hit_adjustment(
         .unwrap_or(0)
 }
 
+/// SM120's LDGSTS async source is a distinct client scope. The trace merge
+/// audit can prove that its pending/same-request merges are not ordinary
+/// global-load L1 tag hits for the external `op_ld` endpoint, while the
+/// physical L1 state and timing still retain those merges. Keep this as a
+/// report-only subtraction and clamp it to the effective observer hits; no
+/// ordinary or constant-client pending merges are touched.
+pub(crate) fn async_global_l1_hit_exclusion(
+    arch: ArchId,
+    l1: &L1Counters,
+    trace: Option<&TraceMetrics>,
+) -> u64 {
+    if arch != ArchId::Sm120 {
+        return 0;
+    }
+    let Some(metrics) = trace else {
+        return 0;
+    };
+    if !metrics.memory_scope.contains_key("ldgsts_async_copy") {
+        return 0;
+    }
+    let async_scope = metrics
+        .l1_async_global_hits
+        .saturating_add(metrics.l1_async_global_same_request_merges)
+        .saturating_add(metrics.l1_async_older_pending_merges_global)
+        .saturating_add(metrics.l1_async_global_older_sector_pending_merges);
+    async_scope.min(
+        l1.origin(MemoryOrigin::Global)
+            .effective_lookup_hits_for_arch(arch),
+    )
+}
+
 // ---- per-metric emit fns (the rate accounting, moved out of the counters) ----
 
 /// `gpc__cycles_elapsed.max` — mandatory publication-binding output. The
@@ -1122,6 +1153,11 @@ fn emit_l1tex_read_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitE
             l1,
             snap.trace_metrics,
         ));
+    let num = num.saturating_sub(async_global_l1_hit_exclusion(
+        snap.arch,
+        l1,
+        snap.trace_metrics,
+    ));
     let bypass = bypass_read_sectors(key, &global)?;
     let den = checked_sum(
         key,
@@ -1208,6 +1244,11 @@ fn emit_l1tex_unified_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, Em
     let effective_read_hits = global
         .effective_lookup_hits_for_arch(snap.arch)
         .saturating_add(global_resident_hit_adjustment(
+            snap.arch,
+            l1,
+            snap.trace_metrics,
+        ))
+        .saturating_sub(async_global_l1_hit_exclusion(
             snap.arch,
             l1,
             snap.trace_metrics,
