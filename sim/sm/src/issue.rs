@@ -1935,7 +1935,13 @@ impl MemRequest {
             source: L2Source::Store,
             operation,
             observer_operation: None,
-            client_scope: L2ClientScope::Unknown,
+            client_scope: match (origin, operation) {
+                (MemoryOrigin::Local, MemoryOperation::Store) => L2ClientScope::Local,
+                (MemoryOrigin::Global, MemoryOperation::Store) => L2ClientScope::Store,
+                (_, MemoryOperation::Atomic) => L2ClientScope::Atomic,
+                (_, MemoryOperation::Reduction) => L2ClientScope::Reduction,
+                _ => L2ClientScope::Unknown,
+            },
             constant_load: false,
             constant_deep: false,
             reply: ReplyTo::None,
@@ -9095,6 +9101,18 @@ impl<'a> SmCore<'a> {
                 } else {
                     None
                 };
+                let client_scope = match kind {
+                    AccessKind::GlobalAsyncCopy { .. } => L2ClientScope::AsyncLdgstsBypass,
+                    AccessKind::GlobalBypass {
+                        token: CacheOpToken::Atom,
+                        ..
+                    } => L2ClientScope::Atomic,
+                    AccessKind::GlobalBypass {
+                        token: CacheOpToken::Ldgsts,
+                        ..
+                    } => L2ClientScope::AsyncLdgstsBypass,
+                    _ => L2ClientScope::Unknown,
+                };
                 if operation == MemoryOperation::Atomic && st.l1_visibility_requester.is_some() {
                     return Err(IssueError::VisibilityAtomicUnsupported);
                 }
@@ -9202,7 +9220,7 @@ impl<'a> SmCore<'a> {
                         source,
                         operation,
                         observer_operation,
-                        client_scope: L2ClientScope::Unknown,
+                        client_scope,
                         constant_load: false,
                         constant_deep: false,
                         reply,

@@ -81,6 +81,13 @@ scope limitations pending a crosswalk.
 
 The typed L2 client-scope shadow is now implemented at the transactional event
 seam. It reports conserved resident/pending/fill masks by static client class
-and potential LTC128B sibling volume only; it does not alter scored L2/DRAM or
-timing outputs. See `docs/L2_SCOPE_SHADOW.md` and
-`FULL_NUMERIC_COMPARISON_L2_SHADOW.json`.
+and potential LTC128B sibling volume only; write, atomic, reduction, and async
+bypass requests are tagged at emission while unqualified bypasses remain
+`Unknown`. It does not alter scored L2/DRAM or timing outputs. The final
+twelve-worker full comparison is in `FULL_NUMERIC_COMPARISON_L2_SHADOW2.json`;
+read-scope masks conserve request sectors, while write-class pending/fill arms
+are zero by the `WriteAtomic` event class. Same-cycle folded sectors use the
+lead request's diagnostic scope. Gemini's closure gate freezes active L2/DRAM
+changes because the remaining residuals require trace-unobservable geometry,
+fill-buffer/TMA/carveout, or endpoint-scope evidence; no NCU fitting or count
+balancing is permitted. See `docs/L2_SCOPE_SHADOW.md`.

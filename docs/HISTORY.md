@@ -26,6 +26,14 @@ direct replay paths, and refuses malformed/non-regular preferred sidecars.
 The comparator detects duplicate/missing IDs, missing status-specific schema
 fields, non-finite values, and baseline numeric fields dropped by a unified row.
 
+The final typed L2 client-scope observer is deliberately a report-only seam.
+Its refinement tags write/atomic/reduction and async-bypass requests where
+their static request kind is known, while preserving `Unknown` for
+unqualified bypasses. The twelve-worker full replay comparison records no
+SM86 common numeric differences and only the already-approved SM120 async-L1
+projection differences; no physical hierarchy, DRAM, or timing path was
+changed.
+
 ## Repository cleanup
 
 The active tree no longer treats branch-specific plans, H/S milestone diaries,

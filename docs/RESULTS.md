@@ -141,13 +141,28 @@ The committed L2 event seam now emits passive client-scope accounting for
 ordinary LDG, constant LDG, LTC128B, LDGSTS cache/bypass, local, store,
 atomic, reduction, and unknown requests. Read requests are partitioned into
 resident, pending-merge, and fill-miss masks; write-class requests retain
-resident/pending observations without a read fill-miss arm. LTC128B potential sibling
+request/resident observations without read pending/fill arms. LTC128B potential sibling
 promotion is reported only as diagnostic volume; no sibling sector is inserted
 into physical cache or DRAM state.
 
-Full-only validation with twelve workers passed for both lanes (SM120 339/339
-`ok`, 11,558 launches; SM86 286/62/8, 12,392 launches), and the reuse
-invariant checker passed. `FULL_NUMERIC_COMPARISON_L2_SHADOW.json` shows no
-physical-cache/timing regressions; the only SM120 numeric differences are the
-already-promoted async L1 scope projection. The client-scope arrays are
+The resident/pending/fill partition is a read-scope identity. Write-class
+requests still contribute request and resident counts, while their pending and
+fill arms are structurally zero under the `WriteAtomic` event class.
+
+The final scope-tag refinement assigns write, atomic, reduction, and async
+bypass classes at the request-emission seam (ordinary unqualified bypasses
+remain `Unknown`). Full-only validation with twelve workers passed for both
+lanes: SM120 339/339 `ok` and 11,558 launches; SM86 286/62/8 and 12,392
+launches. The reuse invariant checker passed. The machine-readable
+`FULL_NUMERIC_COMPARISON_L2_SHADOW2.json` shows no physical-cache, DRAM, or
+timing regression: its 896 SM120 numeric differences are only the already
+approved async L1 scope projection, and SM86 has zero common numeric
+differences. The client-scope arrays and LTC128B sibling volume remain
 diagnostic only and do not claim a new <10% L2 prediction.
+
+Gemini's final closure gate therefore freezes active L2/DRAM changes. The
+remaining major-metric residuals require trace-unobservable SM120 slice/set
+geometry, replacement/fill-buffer behavior, TMA chronology, carveout/runtime
+state, or NCU endpoint scope; fitting or count-balancing those values would
+not be a defensible replay improvement. The <10% objective remains open, but
+this shadow phase has no safe trace-only promotion left.
