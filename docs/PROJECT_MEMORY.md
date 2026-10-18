@@ -47,3 +47,5 @@ card maximum.
 For future replay work, run **full replay only**. Do not spend time producing
 fast-mode artifacts; use the complete integrated `l1-l2` path with all
 supported features enabled by default and twelve workers.
+The SM120 DRAM-disabled full-replay variant is also out of scope; use the
+DRAM-enabled/card-feature SM120 full lane and the SM86 full lane.
