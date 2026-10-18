@@ -126,3 +126,220 @@ from 14.9% to 96.4% (and worsened generic hit APE), while SM86 was unchanged.
 The change was reverted and the required full replays were rerun successfully.
 Pending merges therefore remain part of the operation-read observer; the
 earlier L2 classifier gate is not promoted into that endpoint.
+
+NEW ESCALATION: REUSE-DISTANCE / REUSE-INTERVAL MRC DESIGN
+============================================================
+Date: 2026-10-18
+This is a new, unresolved accuracy question. Do not treat the prior
+"resolved" header as closing this question. The external brain must return a
+plan only; it must not edit files, write code, choose NCU-fit constants, or
+run replay.
+
+Execution contract
+------------------
+The executioner/orchestrator is GPT-6 Astra. Gemini 4 Argon High is the
+read-only brain for research, algorithm design, and adversarial review. The
+source checkout `/home/jakeshea/5090_branch/` is strictly read-only and the
+only permitted source subfolders are `final_results/`, `GPU_simulator/`,
+`GPU_simulator_5090/`, `sm86_rtx_3090_capture/`, and
+`sm120_rtx_5090_capture/`. All edits/builds/tests happen in
+`/home/jakeshea/5090_branch_1016/unified_gpu_simulator/`.
+Only full replay with all features enabled counts: SM120 DRAM-enabled/card
+lane, 339 captures/11,558 launches; SM86, 356 attempted captures with 286
+successful/12,392 launches. Use `--workers 12`. Do not run fast replay or
+SM120 DRAM-disabled replay. Preserve replay state, timing, and status
+profiles unless a new design is independently justified and survives the
+full lanes.
+
+Current evidence (independent NCU post-replay joins)
+----------------------------------------------------
+Latest complete enabled-SM120 and SM86 campaigns use the release binary,
+`twelve` workers, integrated `l1-l2`, compressed JSONL, and no NCU input to
+the replay. Representative mean APE is:
+
+SM120 (339/339 `ok`):
+  unified L1 sector hit                         ~58.4%
+  global-L1 lookup hit                          ~39.4%
+  generic L2 TEX lookup hit                     ~24.3%
+  operation-qualified L2 read lookup hit       ~14.9%
+  DRAM-read sectors                             ~49.8%
+  active IPC                                     ~9.45%
+  elapsed IPC                                   ~13.6%
+
+SM86 (286 successful; 62 control_error, 8 replay_error retained):
+  unified L1 sector hit                         ~49.3%
+  global-L1 hit                                 ~27.6%
+  generic L2 TEX lookup hit                      ~8.5%
+  operation-qualified L2 read lookup hit         ~4.3%
+  DRAM-read sectors                             ~24.8%
+  active IPC                                    ~18.6%
+  elapsed IPC                                   ~11.9%
+
+The goal remains <10% APE for major IPC and L1/L2 metrics over the complete
+successful lanes. A prior SM86 form-qualified `LDG.CONSTANT` scope correction
+reduced one opcode endpoint from ~44.8% to ~1.36%, but the cache/timing
+residuals above remain. Numeric comparison artifacts are in
+`FULL_NUMERIC_COMPARISON_ACCURACY.json`; current intended observer scope
+changes are documented in `docs/RESULTS.md` and `FULL_REPLAY_AUDIT.md`.
+
+What is already implemented and must be preserved
+--------------------------------------------------
+* `sim/sm/src/metrics.rs::TraceMetrics` is the observer/report state. It
+  already stores ordinary memory traffic, `memory_scope`, local interleaving,
+  TMA shadow counters, launch-level TMA reuse diagnostics, global-store packet
+  diagnostics, and L1 merge/coalescing diagnostics. It is serialized into
+  replay results; most observer maps are explicitly `serde(skip)` state.
+* `sim/sm/src/replay.rs` validates every warp record, builds a shared sector
+  arena, calls `classify_compact_*`, then calls
+  `TraceMetrics::observe_with_mask_presence_arch(...)` for each instruction.
+  Each dynamic memory kind carries an offset/length into the sector arena.
+  The current code therefore has an ordered sequence *within each warp* and
+  per-record deduplicated 32-byte sector IDs/128-byte line IDs, but not a
+  total order across warps or SMs.
+* `AccessKind` in `sim/mem` distinguishes global eligible/bypass/untagged,
+  global store/reduction/atomic, local load/store, shared, async-copy/TMA,
+  non-memory, and predicated-off records. The observer currently excludes
+  non-memory/predicated-off events from memory demand.
+* `L2SourceSplit` in `sim/sm/src/system.rs` keeps source lanes and separate
+  operation-qualified read/store lookup requests/hits. The existing trace
+  semantic store-packet observer counts launch-local resident hits among
+  coalesced per-SM line/sector candidates without mutating L2 state, DRAM, or
+  timing. A complete TMA shadow observer counts TMA-load hits and treats TMA
+  store payloads as cold misses for the generic source-TEX endpoint.
+* TMA sidecars carry source/destination sector IDs and load/store direction.
+  They are not guaranteed to carry a global temporal order; the existing
+  ordered shadow is diagnostic only. Instrumentation-order tokens are often
+  absent across warps.
+* Cache cards: `arch_profiles/cards/sm_86.json` documents SM86 L1 (128 KiB
+  L1TEX, 4 ways, 256 sets, 32 KiB default) and L2 (6 MiB, 32-byte sectors,
+  128-byte lines, 6 slices); `arch_profiles/cards/sm_120-rtx-5090.json`
+  explicitly marks SM120 L1 geometry, replacement/hash, slice mapping, and
+  timing as research gaps (vendor L2 capacity is 96 MiB but not a replay-ready
+  geometry). Do not silently turn research-gap fields into measured facts.
+* A pending-read-sector exclusion was attempted as a trace-only observer and
+  rejected after full enabled-SM120 + SM86 reruns: SM120 operation-read APE
+  regressed from ~14.9% to ~96.4%, so pending merge sectors remain in the
+  operation-read endpoint. Do not revive that idea without new evidence.
+* The representative `sol_l2_032_dual_stream_sm120` launch-66 trace has 128
+  global-store records and 256 active address entries across four z-blocks,
+  only 32 launch-wide distinct 32-byte sectors; the packet observer reports
+  32 and NCU's matching generic-store scope reports 32. This supports packet
+  coalescing but does not establish a global cross-warp temporal order.
+
+Relevant code locations/snippets
+--------------------------------
+`sim/sm/src/metrics.rs`:
+  * `TraceMetrics` declaration around line 358: ordinary `memory`,
+    `memory_scope`, local interleaved fields, TMA shadow/reuse fields, and
+    `serde(skip)` maps for bounded observer state.
+  * `decoded_sector_stats` around lines 868-898 computes per-record distinct
+    sectors and 128-byte lines (`line = sector.div_euclid(4)`).
+  * `observe_with_mask_presence_arch` around lines 2293-2690 receives
+    opcode, active/effective lanes, `AccessKind`, pipeline, sector arena and
+    architecture; it currently updates counters/observers only.
+  * `observe_local_interleaved` around lines 976-1060 demonstrates the
+    existing bounded LRU-like map, but it is local-stack-specific and must not
+    be copied as a universal cache model.
+`sim/sm/src/replay.rs`:
+  * around lines 3990-4320: per-warp record validation/classification and
+    observer call; no total cross-warp order is fabricated.
+  * around lines 3875-3915 and 4536: TMA sidecar/reuse/shadow joins and their
+    explicit unavailable/order counters.
+`sim/sm/src/system.rs`:
+  * `L2SourceSplit` around lines 333-560: source and operation-qualified
+    observer lanes, with hit<=request validation.
+`sim/direct_run/src/lib.rs`:
+  * `cache_lookup_prediction_reports` around lines 2179-2360 is the report
+    selector/crosswalk; NCU rows are joined after replay and must never fit
+    the observer.
+`sim/direct_run/src/emit.rs`: emitted metric keys and diagnostics.
+`arch_profiles/cards/sm_86.json`, `arch_profiles/cards/sm_120-rtx-5090.json`:
+  geometry and explicit research-gap/provenance fields.
+
+Chen Ding / locality literature findings to use, not overclaim
+---------------------------------------------------------------
+These are primary or official sources and should inform the plan:
+* Chen Ding & Yutao Zhong, “Predicting whole-program locality through reuse
+  distance analysis,” PLDI 2003, DOI
+  https://doi.org/10.1145/780822.781159. The work uses approximate reuse
+  distance (LRU stack distance), pattern recognition, and distance-based
+  sampling to make whole-program locality predictions while controlling
+  cost. It is not permission to fit this simulator to NCU rows.
+* Dong Chen, PhD thesis advised by Chen Ding, “Program locality analysis
+  based on reuse intervals,” University of Rochester (2019),
+  http://hdl.handle.net/1802/35043. The abstract states that reuse intervals
+  can be measured efficiently with dependence distance and can predict
+  cache-line-granularity MRCs for complex loops/branches; it also models
+  writebacks. Our dynamic GPU trace has no compiler dependence graph, so any
+  reuse-interval use must be explicitly trace-derived and approximate.
+* Liang Yuan, Chen Ding, Peter Denning, Yunquan Zhang, “A Measurement Theory
+  of Locality,” https://arxiv.org/abs/1802.01254. It formalizes reuse time,
+  reuse distance, working set, footprint, and miss ratio; an RD histogram
+  directly gives the fully-associative LRU MRC, whereas reuse time alone does
+  not generally determine reuse distance. Footprint differentiation gives
+  bounds/approximations; finite traces and cold starts must be handled
+  explicitly. Shared/interleaved caches need a defined reference stream.
+* Chen Ding's official research pages:
+  https://cs.rochester.edu/~cding/Research/ and
+  https://cs.rochester.edu/people/faculty/ding_chen/index.html. They list
+  reuse-distance prediction, locality phases, shared-cache metrics, spatial
+  granularity, and write-locality work. The related “Fast Modeling L2 Cache
+  Reuse Distance Histograms Using Combined Locality Information from Software
+  Traces,” https://arxiv.org/abs/1907.05068, is relevant to multi-level L2
+  approximation but must not be treated as validated for this GPU without
+  evidence.
+
+Open design questions for Gemini (must answer as a concrete plan)
+------------------------------------------------------------------
+1. Define the exact observable reference streams for SM86 and SM120. Should
+   the primary key be 32-byte sector or 128-byte line, and should there be
+   separate per-warp/per-SM streams plus a shared-L2 stream? How can a shared
+   L2 stream be constructed without inventing a cross-warp order? How should
+   launch boundaries, stream-L2 persistence, CTA/block identity, SM placement,
+   TMA load/store, stores, atomics, reductions, local/private traffic, and
+   pending merges be represented?
+2. Give one bounded algorithm (or a staged algorithm) for exact or sampled
+   reuse distance/reuse interval. State data structures, memory/time bounds,
+   sampling probability, histogram bins/overflow, cold-start encoding, and
+   deterministic behavior. Explain why it is tractable over 11,558 + 12,392
+   launches with full replay and workers=12.
+3. Derive the MRC from the histogram/intervals at the actual hierarchy
+   granularity. Explicitly distinguish fully associative LRU MRC from the
+   set-associative L1/L2 caches used here. If a set hash/replacement policy is
+   unavailable (especially SM120), specify a principled interval/range or
+   sensitivity estimate rather than a hidden constant. Explain how pending
+   fill/coalescing and write allocation alter the effective request stream.
+4. State how to use a report-only MRC observer first and what invariant-safe
+   promotion into L1/L2 lookup/DRAM projections would be allowed. The model
+   must never mutate physical cache/timing state until full-corpus evidence
+   justifies it, and must not use NCU values in fitting, selection, or
+   per-workload lookup tables.
+5. Define validation and rejection gates: sector conservation; hits+misses =
+   requests; cold misses; no negative/overflow counters; deterministic
+   replay;
+   no changes to current status profile; held-out workload/capture split;
+   median/P90 and signed bias as well as mean APE/WAPE; separate scope joins
+   and zero-target handling; full SM120 enabled + SM86 replays with 12 workers.
+   Specify a promotion threshold that is stricter than “one aggregate got
+   better” and requires no major metric regression.
+6. Identify adversarial failure modes: address-space aliasing, unknown SM120
+   set/hash/replacement, incomplete TMA order, launch-local versus stream-L2
+   persistence, interleaved SM/CTA concurrency, duplicate sector references
+   within one instruction, stores that should not count as ordinary read
+   reuse, atomics/reductions, pending fill merges, NCU client-scope mismatch,
+   and false confidence from reuse time alone. State which new trace metadata
+   would be required if current traces cannot identify a quantity.
+7. Tie the plan to the goal: which L1/L2/DRAM/IPC metrics can plausibly be
+   improved by an RD/RI observer, which residuals are scope/metadata
+   unidentifiable, and when the correct action is to report a typed limitation
+   rather than force a <10% number.
+
+Required response format from Gemini
+-------------------------------------
+Return a structured, read-only consultation memo with: (A) literature-grounded
+principles, (B) proposed reference-stream contract, (C) bounded RD/RI/MRC
+algorithm and equations, (D) set-associative and GPU concurrency treatment,
+(E) phased implementation/promotion plan, (F) invariants and full-replay
+acceptance/rejection gates, (G) adversarial risks and missing metadata, and
+(H) a ranked list of the first three experiments. Do not write code or edit
+files. The executioner will implement only after reviewing this memo.
