@@ -488,3 +488,64 @@ resident/pending/fill sectors, and invalidate only on observed physical
 evictions; it must leave L2Counters, DramStats, timestamps, and cache state
 untouched. The async L1 older-pending exclusion is the only new projection
 promoted in this iteration and has completed both required full lanes.
+
+FINAL TYPED-L2 SHADOW CLOSURE REVIEW — 2026-10-18
+==================================================
+This prompt records the last ambiguity before freezing the diagnostic seam.
+Workspace: `/home/jakeshea/5090_branch_1016/unified_gpu_simulator`.
+Source checkout remains read-only at `/home/jakeshea/5090_branch/`.
+Required replay is full-only with twelve workers: SM120 DRAM-enabled, 339
+captures; SM86, 356 attempted with 286 successful rows. No fast replay or new
+SM120-disabled replay is in scope.
+
+Implemented diagnostic seam (no code change was requested from the consultant):
+
+* `sim/sm/src/issue.rs::L2ClientScope` tags ordinary/constant/LTC128B LDG,
+  LDGSTS cache/bypass, local, store, atomic, reduction, and unknown requests.
+  `MemRequest::write` maps local/global stores and RMW operations; bypass/async
+  emission maps async and ATOM; genuinely unqualified bypasses stay unknown.
+* `sim/sm/src/system.rs` accumulates `client_scope_requests`,
+  `client_scope_resident_hits`, `client_scope_pending_merges`, and
+  `client_scope_fill_misses` inside the callback of
+  `access_mask_event_coalesced_transactional`. It also reports potential
+  LTC128B sibling-sector volume without inserting siblings into the cache or
+  DRAM stream.
+* `sim/mem/src/l2.rs::prepare_event_mask` sets `fill_mask` and
+  `pending_merge_mask` only in the `L2OpClass::Read` branch. Store/atomic/
+  reduction use `WriteAtomic`; their read fill/pending arms are therefore zero.
+* The observer does not alter `L2Counters`, `DramStats`, physical tags/masks,
+  replacement state, event timestamps, response frontiers, or IPC timing.
+  Same-cycle L1 line-folding is request-granular: a folded sector inherits the
+  lead request's static scope, which is explicitly a diagnostic attribution,
+  not exact hardware client provenance.
+
+Evidence from final full replay:
+
+* `full_replay_runs/l2_scope2_sm120_enabled/full.jsonl.zst`: 339/339 `ok`,
+  11,558 launches, reuse validator passed.
+* `full_replay_runs/l2_scope2_sm86/full.jsonl.zst`: 286 `ok`, 62
+  `control_error`, 8 `replay_error`, 12,392 launches, reuse validator passed.
+* `FULL_NUMERIC_COMPARISON_L2_SHADOW2.json`: SM86 has zero common numeric
+  differences. SM120 has 896 differences in 30 rows, all approved async-L1
+  projection fields; no physical L2/DRAM/timing fields differ.
+
+Questions for Gemini/consultant (brain only; do not edit code):
+
+1. Is this static taxonomy and transactional shadow scientifically defensible
+   enough to finalize, including request-granular attribution under same-cycle
+   line folding?
+2. Does assigning `client_scope_fill_misses = preview.fill_mask()` violate the
+   no-read-fill arm for writes, given the `WriteAtomic` gate above? Should the
+   docs state that request/resident counts exist for writes while pending/fill
+   are structurally zero?
+3. With the <10% APE objective still unmet because of missing SM120 geometry,
+   fill-buffer/TMA chronology, carveout/runtime metadata, and endpoint scope,
+   should active L2/DRAM changes stop? Reject NCU fitting, count balancing,
+   unknown geometry assumptions, and any change that alters physical state or
+   timing without new trace/hardware evidence. Identify any safe trace-only
+   diagnostic seam if one truly remains.
+
+Gemini's disposition: finalize the typed shadow as diagnostic-only; the
+`WriteAtomic` gate makes the fill/pending arrays zero for write classes; stop
+active L2/DRAM promotion and document the metadata/scope ceiling. Do not
+promote LTC128B siblings, subtract pending merges globally, or fit NCU values.
