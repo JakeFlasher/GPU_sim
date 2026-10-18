@@ -2111,15 +2111,19 @@ impl L2Model {
             let sector_present = line_present && valid_mask & bit != 0;
             let sector_pending = line_present && preexisting_pending_mask & bit != 0;
             let counted_hit = sector_present || (line_present && class == L2OpClass::WriteAtomic);
-            // L2's tag-stage lookup observer counts a pending allocation as a
-            // hit.  This is distinct from `counted_hit`: the latter drives
-            // data presence/response pricing, while the former mirrors the
-            // operation-level NCU lookup counter (including same-mask sector
-            // coalescing).
-            // A pending read allocation can satisfy a lookup observer hit,
-            // but operation class and write-tag accounting cannot turn an
-            // absent sector into a lookup hit.
-            let lookup_hit = sector_present || sector_pending;
+            // Pending read allocations remain lookup misses: they coalesce
+            // onto an existing fill, but the requested sector is not yet
+            // resident at tag lookup.  SM86 retains the historical effective
+            // observer that credits pending sectors, while SM120's
+            // operation-read observer is resident-sector scoped.  The generic
+            // mixed-client endpoint remains a separate typed residual. Keep
+            // this architecture gate local to the observer; `counted_hit`,
+            // fill ownership, and cache state remain unchanged.
+            let lookup_hit = if self.cfg.arch == ArchId::Sm120 {
+                sector_present
+            } else {
+                sector_present || sector_pending
+            };
             if !line_present {
                 let next_bip_counter =
                     if self.cfg.replacement == L2Replacement::Bip {

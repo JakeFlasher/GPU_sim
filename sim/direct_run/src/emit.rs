@@ -912,6 +912,21 @@ pub(crate) fn global_resident_hit_adjustment(
     l1: &L1Counters,
     trace: Option<&TraceMetrics>,
 ) -> u64 {
+    // A mixed CONSTANT+plain-LDG launch has two client domains.  The
+    // trace-resident sidecar is not form-qualified there and can attribute
+    // CONSTANT reuse to the global-op-ld endpoint even when timed L1 only
+    // observed in-flight merges.  Do not add that broad correction to this
+    // mixed-client projection; pure-form launches retain the established
+    // effective observer.
+    if arch == ArchId::Sm120
+        && trace.is_some_and(|metrics| {
+            metrics.memory_scope.contains_key("global_load_constant")
+                && metrics.memory_scope.contains_key("global_load_ldg")
+                && l1.origin(MemoryOrigin::Global).hits == 0
+        })
+    {
+        return 0;
+    }
     let store_sectors = trace
         .and_then(|metrics| metrics.memory.get("global_store"))
         .map(|traffic| traffic.sectors)
@@ -937,6 +952,18 @@ pub(crate) fn global_read_resident_hit_adjustment(
     l1: &L1Counters,
     trace: Option<&TraceMetrics>,
 ) -> u64 {
+    // Keep the global-op-ld surface form-qualified for the same mixed-client
+    // case as the unified projection.  The timed cache's resident hits remain
+    // authoritative for pure plain-LDG or pure CONSTANT launches.
+    if arch == ArchId::Sm120
+        && trace.is_some_and(|metrics| {
+            metrics.memory_scope.contains_key("global_load_constant")
+                && metrics.memory_scope.contains_key("global_load_ldg")
+                && l1.origin(MemoryOrigin::Global).hits == 0
+        })
+    {
+        return 0;
+    }
     let store_sectors = trace
         .and_then(|metrics| metrics.memory.get("global_store"))
         .map(|traffic| traffic.sectors)

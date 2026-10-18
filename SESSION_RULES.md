@@ -13,3 +13,5 @@
 3. **ESCALATION / CONSULTATION PROMPT RULE**: Whenever stuck, ambiguous, or facing a non-obvious architectural trade-off while merging, stop and compile exact questions/problems, complete background context and file paths, and relevant code snippets from both branches into one self-contained plain-text `consultation_prompt.txt` before proceeding.
 
 4. **THOROUGHNESS OVER SPEED**: Do not take shortcuts or make superficial assumptions. Perform exhaustive, file-by-file comparison and analysis before structural changes.
+
+5. **MANDATORY GEMINI CONSULTATION ON UNCERTAINTY:** The GPT-6 Astra executioner/orchestrator must not rely on instinct when stuck, blocked, or facing ambiguity. Invoke `agy --dangerously-skip-permissions --model gemini-4-argon-high --effort high --mode plan` for read-only brain/insight consultation, record the advice, and resolve the issue using evidence. Gemini is the brain for ideas, algorithm design, and adversarial insight; GPT-6 Astra remains the hands and performs all coding, code review, and execution.

@@ -22,3 +22,24 @@ Read [`CONTRACT.md`](CONTRACT.md), [`ARCHITECTURE.md`](ARCHITECTURE.md), and
 [`REPLAY.md`](REPLAY.md) before changing the model. Current verification is
 summarized in [`RESULTS.md`](RESULTS.md). Do not treat old branch plans or
 dated experiment diaries as active instructions.
+
+## Operating split for accuracy work
+
+GPT-6 Astra is the executioner: it edits code, runs experiments, and performs
+code review. Gemini 4 Argon High is the read-only insight reviewer, invoked via
+`agy --dangerously-skip-permissions --model gemini-4-argon-high --effort high --mode plan`;
+it supplies algorithm design and adversarial reasoning but must not code. Any
+blocker, ambiguity, or uncertainty must be consulted with Gemini before action.
+The active accuracy target is <10% APE for major IPC and L1/L2-related NCU
+metrics across all 339 SM120 captures and 286 successful SM86 captures in full
+replay.
+
+The latest 12-worker accuracy campaign is complete and reproducible. SM86's
+form-qualified `LDG.CONSTANT` opcode projection now agrees closely with NCU
+(1.36% full-report APE), while unified-L1, generic-L2, DRAM-client, and timing
+endpoints remain explicit scope/effective-model residuals. Do not hide the
+generic-L2 store-traffic discrepancy with a count-balancing observer or fit
+against NCU labels; the current evidence points to an upstream write
+coalescing/cross-launch semantic gap. Per-launch SM86 shared-memory carveout
+is not present in trace sidecars and cannot be inferred honestly from the
+card maximum.

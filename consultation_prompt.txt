@@ -35,3 +35,51 @@ See docs/RESULTS.md, FULL_REPLAY_AUDIT.md, and
 FULL_NUMERIC_COMPARISON.json. If a future change creates a non-random
 discrepancy or an architectural ambiguity, append a new self-contained
 question set here before changing model behavior.
+
+Accuracy consultation — 2026-10-18
+-----------------------------------
+The latest complete-corpus accuracy campaigns used the release binary and
+twelve workers. SM120 covered 339 captures and 11,558 launches, all `ok`.
+SM86 covered 356 attempted captures with 286 `ok`, 62 `control_error`, and 8
+`replay_error`, totaling 12,392 launches. Independent NCU profiles are at
+`/home/jakeshea/5090_branch/sm120_rtx_5090_capture/profiles` (339 profiles) and
+`/home/jakeshea/5090_branch/sm86_rtx_3090_capture/profiles` (356 profiles).
+
+The post-replay report still shows approximately 58.4% unified-L1-hit APE,
+39.4% global-L1 lookup-hit APE, 57.0% generic-L2-TEX lookup-hit APE, 14.9%
+L2 operation-read lookup-hit APE, 49.8% DRAM-read APE, 9.45% active-IPC APE,
+and 13.6% elapsed-IPC APE on SM120. SM86 is approximately 49.3% unified L1,
+27.6% global-L1 hit, 8.5% generic L2 hit, 24.8% DRAM, 18.6% active IPC, and
+11.9% elapsed IPC over the report joins. The SM86 form-qualified LDG opcode
+fix (including `global_load_constant`, excluding LTC128B and LDGSTS) reduced
+that endpoint from 44.8% to 1.36% APE.
+
+The representative SM120 `sol_l2_032_dual_stream_sm120` launch 66 exposes a
+generic-store scope discrepancy: NCU reports 224 generic sectors with 3 hits
+and 220 misses, while the simulator's timed store path emits 128 store
+lookups (96 hits and 32 misses) plus 192 reads. The operation-split observer
+therefore reproduces the same 96 hits; changing the report selector or
+clamping the count would be count balancing rather than a model. The current
+decision is to retain the physical generic endpoint and investigate the
+upstream L1/TEX-to-L2 coalescer and cross-launch residency only when trace
+semantics establish the rule. SM86 per-launch shared-memory carveout is absent
+from the trace sidecars; NCU values vary among 8/16/32/64/102.4 KiB, so this is
+an unidentifiable input gap rather than a fit-able constant.
+
+Questions escalated to the insight reviewer
+---------------------------------------------
+1. What trace-only, architecture-semantic evidence distinguishes genuinely
+   uncoalesced SM120 L1/TEX stores from an NCU client-scope mismatch without
+   selecting a model from the NCU count?
+2. Which invariant-preserving timing change can reduce IPC residuals when the
+   extreme SM120 case is dominated by L1TEX dependence and CTA-barrier
+   exposure rather than the front-end envelope?
+3. How should unified-L1 and DRAM endpoints be presented when NCU includes
+   clients absent from the trace contract: effective extension, typed
+   unavailable endpoint, or separately scored scope-qualified metric?
+
+Gemini 4 Argon High was invoked through `agy --dangerously-skip-permissions`
+with `--model gemini-4-argon-high --effort high --mode plan`. Its guidance was
+to reject generic count balancing, inspect upstream write coalescing and
+cross-launch state, preserve the operation-read endpoint, and retain missing
+carveout metadata as an explicit limitation.

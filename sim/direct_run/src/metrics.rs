@@ -1360,24 +1360,33 @@ pub(super) fn project(
         });
     }
     let trace = result.trace_metrics();
-    // SM86 opcode endpoints are narrower than the broad logical global-load
-    // traffic class. Publish the static-SASS scope partitions so downstream
-    // reports can compare plain LDG and LDGSTS independently without moving
+    // SM86's NCU global-load opcode endpoint includes LDG.CONSTANT, while
+    // LDGSTS remains a separate async-copy endpoint.  Publish the
+    // form-qualified LDG union as the target row; retain LTC128B and LDGSTS
+    // as separate scope observers because mixed LTC128B captures demonstrate
+    // a client-scope mismatch rather than a universal inclusion rule.
+    let global_load_opcode_count = ["global_load_ldg", "global_load_constant"]
+        .iter()
+        .filter_map(|scope| trace.memory_scope.get(*scope))
+        .map(|row| row.requests)
+        .fold(0_u64, u64::saturating_add);
+    add_count_row(
+        &mut m,
+        "global_load_opcode_count",
+        Some("smsp__sass_inst_executed_op_global_ld.sum"),
+        "inst",
+        global_load_opcode_count,
+        "form-qualified LDG SASS scope candidate; includes CONSTANT forms, excludes LTC128B/LDGSTS until client crosswalk evidence exists",
+    );
+    // Keep the static-SASS scope partitions so downstream reports can compare
+    // plain LDG, CONSTANT, LTC128B, and LDGSTS independently without moving
     // any L1/L2 sectors or selecting a timing route.
-    for (key, ncu_metric, scope, semantics) in [
-        (
-            "global_load_opcode_count",
-            "smsp__sass_inst_executed_op_global_ld.sum",
-            "global_load_ldg",
-            "plain LDG SASS-form scope candidate; CONSTANT/LTC128B/STRONG.GPU/LDGSTS forms remain separate",
-        ),
-        (
-            "ldgsts_opcode_count",
-            "smsp__inst_executed_op_ldgsts.sum",
-            "ldgsts_async_copy",
-            "trace-derived LDGSTS opcode scope candidate; source-cache route remains separate",
-        ),
-    ] {
+    for (key, ncu_metric, scope, semantics) in [(
+        "ldgsts_opcode_count",
+        "smsp__inst_executed_op_ldgsts.sum",
+        "ldgsts_async_copy",
+        "trace-derived LDGSTS opcode scope candidate; source-cache route remains separate",
+    )] {
         let count = trace.memory_scope.get(scope).map_or(0, |row| row.requests);
         add_count_row(&mut m, key, Some(ncu_metric), "inst", count, semantics);
     }
