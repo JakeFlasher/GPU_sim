@@ -44,6 +44,14 @@ coalescing/cross-launch semantic gap. Per-launch SM86 shared-memory carveout
 is not present in trace sidecars and cannot be inferred honestly from the
 card maximum.
 
+The latest full-enabled-only observer slice completed both required corpora
+with twelve workers. SM120 generic source-TEX L2 hit APE fell to about 24.3%
+by using decoded store-packet identity and treating complete TMA-store payload
+sectors as cold misses; replay timing, cache state, and DRAM demand were not
+changed. This is a real full-replay improvement, but the <10% objective is not
+yet met because ordinary operation-read/client scope, unified-L1 scope, DRAM
+clients, and IPC frontiers remain unresolved.
+
 For future replay work, run **full replay only**. Do not spend time producing
 fast-mode artifacts; use the complete integrated `l1-l2` path with all
 supported features enabled by default and twelve workers.
