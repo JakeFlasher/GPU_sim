@@ -45,6 +45,11 @@ The complete artifacts are `full_replay_runs/priority4_sm120_disabled/`,
 `full_replay_runs/priority5_sm120_enabled/`, and
 `full_replay_runs/priority4_sm86/`.
 
+`FULL_NUMERIC_COMPARISON_ACCURACY.json` compares these rows with the retained
+baseline trees: both SM120 cases have zero row/metadata/numeric differences;
+SM86 has the expected opcode-field differences from the LDG.CONSTANT fix and
+no status, row-identity, or dropped-field differences.
+
 The report joins NCU only after replay. The current residuals are not all
 replay correctness failures:
 
