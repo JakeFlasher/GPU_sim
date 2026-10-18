@@ -93,3 +93,10 @@ gaps, so no hardware MRC or <10% accuracy claim is made from this observer.
 The standalone full-only invariant checker is
 `tools/validate_reuse_mrc.py`; it checks conservation, histogram mass,
 monotonicity, and zero-capacity behavior without reading NCU data.
+
+The complete shadow campaign is recorded in
+`FULL_NUMERIC_COMPARISON_REUSE_SHADOW.json`: SM120 has 339/339 `ok` captures
+and 11,558 launches; SM86 has 286 `ok`, 62 `control_error`, and 8
+`replay_error` captures across 12,392 launches. Both lanes have zero missing
+or extra rows, zero required-metadata differences, and zero common numeric
+differences versus the retained full-replay baselines.

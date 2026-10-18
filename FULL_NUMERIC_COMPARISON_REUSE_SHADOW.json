@@ -1,0 +1,74 @@
+{
+  "comparison_schema_version": 2,
+  "normalization": {
+    "canonical_capture": "replace('/', '__') for the historical SM120 capture-id separator only; collisions fail",
+    "numeric_fields": "all common finite numeric fields, excluding documented wall-clock and observer-only additive fields",
+    "required_metadata": [
+      "status",
+      "architecture",
+      "memory_mode",
+      "cache_scope",
+      "launch_count",
+      "returncode"
+    ]
+  },
+  "cases": [
+    {
+      "label": "reuse_shadow_sm120",
+      "baseline_path": "full_replay_runs/revert_pending_sm120_enabled/full.jsonl.zst",
+      "unified_path": "full_replay_runs/reuse_shadow_sm120_enabled/full.jsonl.zst",
+      "rows": 339,
+      "unified_rows": 339,
+      "common_rows": 339,
+      "missing_rows": [],
+      "extra_rows": [],
+      "duplicate_baseline_rows": [],
+      "duplicate_unified_rows": [],
+      "nonfinite_baseline_rows": [],
+      "nonfinite_unified_rows": [],
+      "status_counts_baseline": {
+        "ok": 339
+      },
+      "status_counts_unified": {
+        "ok": 339
+      },
+      "required_metadata_diffs": [],
+      "missing_baseline_numeric_fields": [],
+      "rows_with_numeric_diffs": 0,
+      "numeric_diff_count": 0,
+      "top_numeric_diffs": [],
+      "ok": true
+    },
+    {
+      "label": "reuse_shadow_sm86",
+      "baseline_path": "full_replay_runs/revert_pending_sm86/full.jsonl.zst",
+      "unified_path": "full_replay_runs/reuse_shadow_sm86/full.jsonl.zst",
+      "rows": 356,
+      "unified_rows": 356,
+      "common_rows": 356,
+      "missing_rows": [],
+      "extra_rows": [],
+      "duplicate_baseline_rows": [],
+      "duplicate_unified_rows": [],
+      "nonfinite_baseline_rows": [],
+      "nonfinite_unified_rows": [],
+      "status_counts_baseline": {
+        "control_error": 62,
+        "ok": 286,
+        "replay_error": 8
+      },
+      "status_counts_unified": {
+        "control_error": 62,
+        "ok": 286,
+        "replay_error": 8
+      },
+      "required_metadata_diffs": [],
+      "missing_baseline_numeric_fields": [],
+      "rows_with_numeric_diffs": 0,
+      "numeric_diff_count": 0,
+      "top_numeric_diffs": [],
+      "ok": true
+    }
+  ],
+  "ok": true
+}
