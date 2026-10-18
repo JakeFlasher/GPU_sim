@@ -71,3 +71,10 @@ sampled fully-associative RD curve) into scored L1/L2 predictions or timing:
 the live cycle-interleaved L1 and event-driven L2 models are more faithful.
 Future SHARDS/Fenwick work is capacity-bound diagnostic only until cross-warp
 chronology, TMA timing, carveout, and set/hash/replacement metadata are proven.
+
+The subsequent SM120 async-client slice excludes only the trace-qualified
+`l1_async_older_pending_merges_global` class from external global-op_ld L1 hit
+projections. It passed complete full replays at twelve workers for both lanes,
+slightly improving SM120 L1 hit APE without changing physical state, timing,
+L2, DRAM, IPC, or SM86. LTC128B/LDGSTS L2 hit-volume gaps remain observer-only
+scope limitations pending a crosswalk.

@@ -22,7 +22,13 @@ This file is deliberately a current-state note rather than a duplicate.
   independent post-replay target.
 * Operating split (user directive): GPT-6 Astra is executioner/orchestrator only—implements, runs, and code-reviews; Gemini 4 Argon High invoked through `agy --dangerously-skip-permissions --model gemini-4-argon-high` is the read-only brain for algorithms, ideas, and insight/adversarial review. Gemini must not code. Any blocker, ambiguity, or uncertainty requires consultation with Gemini before proceeding; do not rely on instinct.
 * Active objective: reduce APE below 10% for major IPC and L1/L2-related NCU metrics across complete SM120 (339 captures) and successful SM86 (286 captures) full replays, preserving independent-target separation and twelve-worker replay.
-* Latest evidence: full replay remains green at 12 workers (SM120 339/339 `ok` in both DRAM modes; SM86 286 `ok`/62 control/8 replay errors). The SM86 LDG.CONSTANT opcode scope fix reduced that endpoint from 44.8% to 1.36% APE. Unified-L1, generic-L2, DRAM-client, and timing residuals remain above 10% because their NCU endpoints include scope or runtime state absent from the trace contract.
+* Latest evidence: the required DRAM-enabled SM120 full lane remains green at
+  339/339 `ok` with twelve workers; historical disabled-mode artifacts are
+  retained but no new disabled replay is run. SM86 remains 286 `ok`/62
+  control/8 replay errors. The SM86 LDG.CONSTANT opcode scope fix reduced that
+  endpoint from 44.8% to 1.36% APE. Unified-L1, generic-L2, DRAM-client, and
+  timing residuals remain above 10% because their NCU endpoints include scope
+  or runtime state absent from the trace contract.
 * Do not promote a generic-L2 source-lane sum or clamp: Gemini's read-only review and the launch-66 accounting identity show the 96 excess store hits originate upstream in simulated L1/TEX-to-L2 store traffic, not in the report selector. Missing SM86 shared-memory carveout metadata is an explicit unidentifiable input gap.
 * Latest full-enabled progress: trace-semantic SM120 store-packet and TMA-store-cold-miss observers completed 339-capture and 286-successful-SM86 full replays with 12 workers. Generic SM120 L2 hit APE improved from ~57% to ~24.3%; operation-read, unified-L1, DRAM, and IPC residuals remain above 10%.
 * Replay scope directive: do not run fast replay. Accuracy and correctness work uses only complete full replay with all supported features enabled by default (integrated `l1-l2`, card-selected architecture behavior, and twelve workers); fast-mode artifacts are not required.
@@ -41,3 +47,10 @@ This file is deliberately a current-state note rather than a duplicate.
   cycle-interleaved L1 and event-driven L2 models are more faithful; a future
   SHARDS/Fenwick observer is capacity-bound diagnostic only until chronology,
   TMA timing, carveout, and set/hash/replacement metadata are proven.
+* 2026-10-18 async-client scope slice: a trace-qualified SM120 report-only
+  exclusion of `l1_async_older_pending_merges_global` from external global-op_ld
+  L1 hit projections passed complete 12-worker full replays (SM120 339/339;
+  SM86 286/62/8). It slightly improved SM120 unified/global L1 APE while
+  leaving L2/DRAM/IPC unchanged; physical state/timing and SM86 were untouched.
+  Do not broaden it to ordinary pending merges or promote LTC128B/LDGSTS L2
+  sibling/volume corrections without a new Gemini-reviewed crosswalk.

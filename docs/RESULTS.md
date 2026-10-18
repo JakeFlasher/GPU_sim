@@ -114,3 +114,23 @@ while cross-warp chronology, TMA timing, carveout metadata, and SM120
 set/hash/replacement behavior remain unresolved. Thus this locality phase is
 complete as a validated diagnostic, but it does not claim to close the global
 <10% APE objective or alter existing NCU accuracy projections.
+
+## Async-client L1 scope refinement
+
+The full-replay audit found a trace-proven SM120 `ldgsts_async_copy` scope
+distinction: older-pending async merges are not ordinary global-load `op_ld`
+tag hits, although physical L1 state and timing retain them. A report-only
+exclusion of that older-pending class was added; ordinary pending merges,
+constant loads, and all SM86 paths are unchanged.
+
+The required full-only validation completed with twelve workers: SM120
+339/339 `ok` captures and 11,558 launches; SM86 286 `ok`, 62 `control_error`,
+8 `replay_error`, and 12,392 launches. Reuse invariants passed in both lanes;
+SM86 had zero common numeric differences versus baseline. SM120 differences
+are limited to the intentional async L1 observer fields in
+`FULL_NUMERIC_COMPARISON_ASYNC_SCOPE.json`.
+
+The full SM120 evaluation shows a small improvement in unified/global L1 hit
+APE (approximately 58.40%→58.01% and 39.36%→39.32%); L2, DRAM, and IPC are
+unchanged. LTC128B and L2 additive hit-volume residuals remain observer-only
+research gaps; Gemini rejected active sibling-sector promotion.
