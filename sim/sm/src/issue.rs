@@ -114,6 +114,13 @@ use crate::sass_operands::{
     SassSourceOperand,
 };
 
+pub(crate) fn opcode_has_qualifier(opcode_text: &str, qualifier: &str) -> bool {
+    opcode_text
+        .split_ascii_whitespace()
+        .next()
+        .is_some_and(|opcode| opcode.split('.').any(|part| part == qualifier))
+}
+
 pub use sim_mem::AccessKind;
 
 pub(crate) const MAX_ASYNC_DECISION_SNAPSHOTS: usize = 1_024;
@@ -1605,6 +1612,39 @@ pub(crate) struct MemoryWriteAck {
     pub(crate) fence_visible_at: u64,
 }
 
+/// Static client-scope tag for the passive L2 scope observer. It never
+/// changes the physical hierarchy route, cache state, DRAM, or timing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum L2ClientScope {
+    OrdinaryLdg,
+    ConstantLdg,
+    Ltc128b,
+    AsyncLdgstsCache,
+    AsyncLdgstsBypass,
+    Local,
+    Store,
+    Atomic,
+    Reduction,
+    Unknown,
+}
+
+impl L2ClientScope {
+    pub(crate) const fn index(self) -> usize {
+        match self {
+            Self::OrdinaryLdg => 0,
+            Self::ConstantLdg => 1,
+            Self::Ltc128b => 2,
+            Self::AsyncLdgstsCache => 3,
+            Self::AsyncLdgstsBypass => 4,
+            Self::Local => 5,
+            Self::Store => 6,
+            Self::Atomic => 7,
+            Self::Reduction => 8,
+            Self::Unknown => 9,
+        }
+    }
+}
+
 /// A memory request the SM emits in L1Shared mode. The system layer
 /// schedules the L2 access at `issue_time` (the engine's global
 /// `(time, seq)` order supplies the cross-SM interleaving) and routes the
@@ -1647,6 +1687,7 @@ pub struct MemRequest {
     /// it only lets static generic-store forms use the operation-qualified
     /// lookup counters without changing their established read route.
     pub(crate) observer_operation: Option<MemoryOperation>,
+    pub(crate) client_scope: L2ClientScope,
     /// Static SASS marker for a regular-register constant load.  Constant
     /// loads still use the normal global allocation/cache state, but their
     /// response may cross a distinct SM-side return path on SM86.
@@ -1807,6 +1848,7 @@ impl MemRequest {
         response_id: ResponseId,
         constant_load: bool,
         constant_deep: bool,
+        client_scope: L2ClientScope,
     ) -> Self {
         let sector_bit = 1 << (sector_id & 3) as u8;
         Self {
@@ -1818,6 +1860,7 @@ impl MemRequest {
             source: L2Source::L1Fill,
             operation: MemoryOperation::Read,
             observer_operation: None,
+            client_scope,
             constant_load,
             constant_deep,
             reply: ReplyTo::L1Fill { fill, response_id },
@@ -1837,6 +1880,7 @@ impl MemRequest {
         response_id: ResponseId,
         constant_load: bool,
         constant_deep: bool,
+        client_scope: L2ClientScope,
     ) -> Self {
         let sector_bit = 1 << (sector_id & 3) as u8;
         Self {
@@ -1848,6 +1892,7 @@ impl MemRequest {
             source: L2Source::L1Fill,
             operation: MemoryOperation::Read,
             observer_operation: None,
+            client_scope,
             constant_load,
             constant_deep,
             reply: ReplyTo::L1Fill { fill, response_id },
@@ -1890,6 +1935,7 @@ impl MemRequest {
             source: L2Source::Store,
             operation,
             observer_operation: None,
+            client_scope: L2ClientScope::Unknown,
             constant_load: false,
             constant_deep: false,
             reply: ReplyTo::None,
@@ -5714,6 +5760,7 @@ struct Retry {
     /// Whether this constant load uses the measured multi-site operand path.
     /// This remains separate from the broad constant marker above.
     constant_deep: bool,
+    client_scope: L2ClientScope,
     /// Completion identity of the stalled instruction. A present ordinary
     /// barrier holds one pending replacement unit until the entry drains;
     /// asynchronous-copy source units were counted at original issue and retain
@@ -8765,6 +8812,7 @@ impl<'a> SmCore<'a> {
         kind: AccessKind,
         constant_load: bool,
         constant_deep: bool,
+        client_scope: L2ClientScope,
         observer_store: bool,
         sectors: &'a [i64],
         write_barrier: Option<DepBarrier>,
@@ -8843,6 +8891,7 @@ impl<'a> SmCore<'a> {
                         origin,
                         constant_load,
                         constant_deep,
+                        client_scope,
                         sectors[i],
                         ResponseId::new(st.response_owner, wix, instruction, i),
                         t,
@@ -8870,6 +8919,7 @@ impl<'a> SmCore<'a> {
                                 origin,
                                 constant_load,
                                 constant_deep,
+                                client_scope,
                                 target,
                                 mshr_floor: None,
                                 lookup_batch,
@@ -8948,6 +8998,7 @@ impl<'a> SmCore<'a> {
                         MemoryOrigin::Global,
                         false,
                         false,
+                        L2ClientScope::AsyncLdgstsCache,
                         sectors[i],
                         ResponseId::new(st.response_owner, wix, instruction, i),
                         t,
@@ -8988,6 +9039,7 @@ impl<'a> SmCore<'a> {
                                 origin: MemoryOrigin::Global,
                                 constant_load: false,
                                 constant_deep: false,
+                                client_scope: L2ClientScope::AsyncLdgstsCache,
                                 target,
                                 mshr_floor: Some(p.ldgsts_l1_mshr_floor),
                                 lookup_batch,
@@ -9150,6 +9202,7 @@ impl<'a> SmCore<'a> {
                         source,
                         operation,
                         observer_operation,
+                        client_scope: L2ClientScope::Unknown,
                         constant_load: false,
                         constant_deep: false,
                         reply,
@@ -13910,6 +13963,38 @@ impl<'a> SmCore<'a> {
                     inst.kind,
                     constant_load,
                     constant_deep,
+                    match inst.kind {
+                        AccessKind::GlobalEligible { .. }
+                            if opcode_has_qualifier(
+                                self.schedule
+                                    .issue_slot(u64::from(inst.pc))
+                                    .map(|slot| slot.opcode_text())
+                                    .unwrap_or(""),
+                                "LTC128B",
+                            ) =>
+                        {
+                            L2ClientScope::Ltc128b
+                        }
+                        AccessKind::GlobalEligible { .. } if constant_load => {
+                            L2ClientScope::ConstantLdg
+                        }
+                        AccessKind::GlobalEligible { .. } => L2ClientScope::OrdinaryLdg,
+                        AccessKind::LocalLoad { .. } => L2ClientScope::Local,
+                        AccessKind::GlobalAsyncCopy {
+                            l1_policy: LdgstsL1Policy::CacheAtAllLevels,
+                            ..
+                        } => L2ClientScope::AsyncLdgstsCache,
+                        AccessKind::GlobalAsyncCopy { .. } => L2ClientScope::AsyncLdgstsBypass,
+                        AccessKind::GlobalStore { .. } | AccessKind::LocalStore { .. } => {
+                            L2ClientScope::Store
+                        }
+                        AccessKind::GlobalReduction { .. } => L2ClientScope::Reduction,
+                        AccessKind::GlobalBypass {
+                            token: CacheOpToken::Atom,
+                            ..
+                        } => L2ClientScope::Atomic,
+                        _ => L2ClientScope::Unknown,
+                    },
                     self.schedule
                         .issue_slot(u64::from(inst.pc))
                         .is_some_and(|slot| {
@@ -14700,6 +14785,7 @@ fn access_shared(
     origin: MemoryOrigin,
     constant_load: bool,
     constant_deep: bool,
+    client_scope: L2ClientScope,
     sector_id: i64,
     response_id: ResponseId,
     now: u64,
@@ -14745,6 +14831,7 @@ fn access_shared(
                 response_id,
                 constant_load,
                 constant_deep,
+                client_scope,
             );
             register_response(st, request.reply)?;
             st.response_masks.insert(response_id, sbit);
@@ -14804,6 +14891,7 @@ fn access_shared(
                             response_id,
                             constant_load,
                             constant_deep,
+                            client_scope,
                         );
                         register_response(st, request.reply)?;
                         st.response_masks.insert(response_id, sbit);
@@ -14854,6 +14942,7 @@ fn drain_retries(
                 r.origin,
                 r.constant_load,
                 r.constant_deep,
+                r.client_scope,
                 sectors[r.lo],
                 ResponseId::new(st.response_owner, r.warp, r.instruction, r.lo),
                 now,

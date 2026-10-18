@@ -1897,6 +1897,11 @@ pub struct L2SourceCounterReport {
     pub read_lookup_hits_without_pending_merges: u64,
     pub read_pending_merge_hits: u64,
     pub store_packet_candidate_sectors: u64,
+    pub client_scope_requests: [u64; 10],
+    pub client_scope_resident_hits: [u64; 10],
+    pub client_scope_pending_merges: [u64; 10],
+    pub client_scope_fill_misses: [u64; 10],
+    pub ltc128b_shadow_promoted_sectors: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -1928,6 +1933,11 @@ fn l2_source_counter_report(value: &L2SourceSplit) -> L2SourceCounterReport {
             .saturating_sub(value.read_pending_merge_hits),
         read_pending_merge_hits: value.read_pending_merge_hits,
         store_packet_candidate_sectors: value.store_packet_candidate_sectors,
+        client_scope_requests: value.client_scope_requests,
+        client_scope_resident_hits: value.client_scope_resident_hits,
+        client_scope_pending_merges: value.client_scope_pending_merges,
+        client_scope_fill_misses: value.client_scope_fill_misses,
+        ltc128b_shadow_promoted_sectors: value.ltc128b_shadow_promoted_sectors,
     }
 }
 

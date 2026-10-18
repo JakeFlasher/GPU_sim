@@ -356,6 +356,13 @@ pub struct L2SourceSplit {
     /// retained as one candidate packet; this never changes the L2 state,
     /// source-sector baseline, DRAM demand, or timing.
     pub store_packet_candidate_sectors: u64,
+    /// Passive client-scope shadow counters. They never enter physical
+    /// L2/DRAM/timing state or scored hit/miss totals.
+    pub client_scope_requests: [u64; 10],
+    pub client_scope_resident_hits: [u64; 10],
+    pub client_scope_pending_merges: [u64; 10],
+    pub client_scope_fill_misses: [u64; 10],
+    pub ltc128b_shadow_promoted_sectors: u64,
     pub atomic_lookup_requests: u64,
     pub atomic_lookup_hits: u64,
     pub reduction_lookup_requests: u64,
@@ -547,6 +554,10 @@ impl L2SourceSplit {
         let mut hits = [0; 4];
         let mut pending_pressure_samples = [0; 4];
         let mut pending_pressure_sum = [0; 4];
+        let mut client_scope_requests = [0; 10];
+        let mut client_scope_resident_hits = [0; 10];
+        let mut client_scope_pending_merges = [0; 10];
+        let mut client_scope_fill_misses = [0; 10];
         for i in 0..4 {
             sectors[i] = self.sectors[i].checked_add(other.sectors[i]).ok_or(
                 SystemCounterError::Overflow {
@@ -568,6 +579,28 @@ impl L2SourceSplit {
                 .checked_add(other.pending_pressure_sum[i])
                 .ok_or(SystemCounterError::Overflow {
                     counter: "L2 source pending-pressure sum",
+                })?;
+        }
+        for i in 0..10 {
+            client_scope_requests[i] = self.client_scope_requests[i]
+                .checked_add(other.client_scope_requests[i])
+                .ok_or(SystemCounterError::Overflow {
+                    counter: "L2 client-scope requests",
+                })?;
+            client_scope_resident_hits[i] = self.client_scope_resident_hits[i]
+                .checked_add(other.client_scope_resident_hits[i])
+                .ok_or(SystemCounterError::Overflow {
+                    counter: "L2 client-scope resident hits",
+                })?;
+            client_scope_pending_merges[i] = self.client_scope_pending_merges[i]
+                .checked_add(other.client_scope_pending_merges[i])
+                .ok_or(SystemCounterError::Overflow {
+                    counter: "L2 client-scope pending merges",
+                })?;
+            client_scope_fill_misses[i] = self.client_scope_fill_misses[i]
+                .checked_add(other.client_scope_fill_misses[i])
+                .ok_or(SystemCounterError::Overflow {
+                    counter: "L2 client-scope fill misses",
                 })?;
         }
         let mut origin_sectors = [[0; 4]; 2];
@@ -659,6 +692,16 @@ impl L2SourceSplit {
                 })?,
             pending_pressure_samples,
             pending_pressure_sum,
+            client_scope_requests,
+            client_scope_resident_hits,
+            client_scope_pending_merges,
+            client_scope_fill_misses,
+            ltc128b_shadow_promoted_sectors: self
+                .ltc128b_shadow_promoted_sectors
+                .checked_add(other.ltc128b_shadow_promoted_sectors)
+                .ok_or(SystemCounterError::Overflow {
+                    counter: "L2 LTC128B shadow promoted sectors",
+                })?,
             origin_sectors,
             origin_hits,
         };
@@ -673,8 +716,8 @@ impl L2SourceSplit {
 #[cfg(feature = "reference")]
 use crate::issue::AdvanceDiagnostics;
 use crate::issue::{
-    AdmissionRequestWitness, Advance, BlockReplay, IssueError, IssueModelParams, MemRequest,
-    MemoryAdmissionCandidate, MemoryAdmissionCandidateState, MemoryOperation,
+    AdmissionRequestWitness, Advance, BlockReplay, IssueError, IssueModelParams, L2ClientScope,
+    MemRequest, MemoryAdmissionCandidate, MemoryAdmissionCandidateState, MemoryOperation,
     MemoryServiceCandidate, MemoryServiceCandidateOperation, MemoryWriteAck, PayloadStoreSite,
     ReplayHorizon, ReplyTo, SharedMemoryResidency, SmCore, SmMemMode, SmSimResult, TailFlags,
     checked_cycle_add, stateful_write_lookup_observer_enabled,
@@ -2694,6 +2737,12 @@ struct L2SystemCommit {
     l2_issue_to_response_cycles_max: u64,
     l2_service_delay_cycles_sum: u64,
     l2_service_delay_cycles_max: u64,
+    client_scope_ix: usize,
+    client_scope_requests: u64,
+    client_scope_resident_hits: u64,
+    client_scope_pending_merges: u64,
+    client_scope_fill_misses: u64,
+    ltc128b_shadow_promoted_sectors: u64,
 }
 
 /// Aggregate DRAM read-bandwidth model (the §6.3 "DRAM
@@ -4200,6 +4249,19 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                             let pending_merge_sectors =
                                 u64::from(preview.pending_merge_mask().count_ones());
                             let new_fill_sectors = u64::from(preview.fill_mask().count_ones());
+                            let client_scope_ix = req.client_scope.index();
+                            let client_scope_resident_hits =
+                                u64::from((lookup.present_mask & req.sector_mask).count_ones());
+                            let client_scope_fill_misses = new_fill_sectors;
+                            let client_scope_pending_merges = pending_merge_sectors;
+                            let ltc128b_shadow_promoted_sectors = if req.client_scope
+                                == L2ClientScope::Ltc128b
+                                && preview.fill_mask() != 0
+                            {
+                                u64::from(((!req.sector_mask) & 0x0f).count_ones())
+                            } else {
+                                0
+                            };
                             let store_packet_lookup_hits = if req.origin == MemoryOrigin::Global
                                 && req.operation == MemoryOperation::Store
                             {
@@ -4705,9 +4767,46 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                                 l2_issue_to_response_cycles_max: issue_to_response_cycles,
                                 l2_service_delay_cycles_sum: service_delay_cycles,
                                 l2_service_delay_cycles_max: service_delay_cycles,
+                                client_scope_ix,
+                                client_scope_requests: requested_sectors,
+                                client_scope_resident_hits,
+                                client_scope_pending_merges,
+                                client_scope_fill_misses,
+                                ltc128b_shadow_promoted_sectors,
                             })
                         },
                     )?;
+
+                    l2_by_source.client_scope_requests[commit.client_scope_ix] = l2_by_source
+                        .client_scope_requests[commit.client_scope_ix]
+                        .checked_add(commit.client_scope_requests)
+                        .ok_or(SystemError::CounterOverflow {
+                            counter: "L2 client-scope requests",
+                        })?;
+                    l2_by_source.client_scope_resident_hits[commit.client_scope_ix] = l2_by_source
+                        .client_scope_resident_hits[commit.client_scope_ix]
+                        .checked_add(commit.client_scope_resident_hits)
+                        .ok_or(SystemError::CounterOverflow {
+                            counter: "L2 client-scope resident hits",
+                        })?;
+                    l2_by_source.client_scope_pending_merges[commit.client_scope_ix] = l2_by_source
+                        .client_scope_pending_merges[commit.client_scope_ix]
+                        .checked_add(commit.client_scope_pending_merges)
+                        .ok_or(SystemError::CounterOverflow {
+                            counter: "L2 client-scope pending merges",
+                        })?;
+                    l2_by_source.client_scope_fill_misses[commit.client_scope_ix] = l2_by_source
+                        .client_scope_fill_misses[commit.client_scope_ix]
+                        .checked_add(commit.client_scope_fill_misses)
+                        .ok_or(SystemError::CounterOverflow {
+                            counter: "L2 client-scope fill misses",
+                        })?;
+                    l2_by_source.ltc128b_shadow_promoted_sectors = l2_by_source
+                        .ltc128b_shadow_promoted_sectors
+                        .checked_add(commit.ltc128b_shadow_promoted_sectors)
+                        .ok_or(SystemError::CounterOverflow {
+                            counter: "L2 LTC128B shadow promoted sectors",
+                        })?;
 
                     for key in &store_packet_keys {
                         store_packet_last.insert(*key, req.issue_time);
