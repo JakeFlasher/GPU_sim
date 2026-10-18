@@ -100,3 +100,9 @@ and 11,558 launches; SM86 has 286 `ok`, 62 `control_error`, and 8
 `replay_error` captures across 12,392 launches. Both lanes have zero missing
 or extra rows, zero required-metadata differences, and zero common numeric
 differences versus the retained full-replay baselines.
+
+The recorded driver wall time was 59.21 s for the shadow SM120 lane versus
+58.02 s for its baseline (about 2.1% overhead), and 45.17 s for SM86 versus
+44.44 s (about 1.6%). Compressed output grew by about 3% in each lane. These
+measurements remain below the consultation's provisional 5% replay-overhead
+budget, while no resident cache/timing state was changed.
