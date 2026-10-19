@@ -158,6 +158,10 @@ lower curve is batch-first; the upper curve conservatively includes legal
 same-tick tie-order effects. Across both corpora the maximum observed batch
 width is 32 lines and the maximum line-distance envelope width is 37 lines
 (the theoretical two-batch bound is larger). No NCU value is used.
+The weighted sector-envelope width stays below 5.20 percentage points in both
+corpora (SM120 global 3.07 pp; SM86 global 2.52 pp; the largest observed
+local-origin value is 5.20 pp), which is an uncertainty-width result rather
+than a hardware APE claim.
 
 ## Async-client L1 scope refinement
 
