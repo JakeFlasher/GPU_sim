@@ -213,6 +213,12 @@ the SM120 alpha native-metrics branch exits before the later SM86-only L2
 native block, so no SM120 rank-0 native-L2 override exists. Adding TMA-shadow
 hits directly to retained SM120 L2 estimates also worsened mean APE.
 
+The current residual frontier and the NCU-independent occupancy-cap falsification
+are recorded in [`RESIDUAL_FRONTIER.md`](RESIDUAL_FRONTIER.md). In particular,
+the trace's driver occupancy limit is already respected by every observed
+per-SM peak in the baseline replay, so applying it as a hard admission cap is
+an exact no-op rather than an IPC improvement.
+
 Gemini's definitive stop gate freezes further active IPC/L1/L2 projection or
 model changes. Resuming accuracy work requires TMA descriptor/coordinate and
 launch-cache metadata, disaggregated tag/MSHR/fill/stall PMU counters, or
