@@ -57,6 +57,17 @@ exact joins, and 88.42%→45.61% on ordered fallback joins. A repeated full lane
 was numerically identical apart from wall-clock fields, and a fresh SM120
 339/339 DRAM-enabled lane was unchanged. The residual objective remains open.
 
+The 2026-10-19 locality phase adds a report-only exact sector-aware MRC
+observer. A dynamic Fenwick/Mattson index computes line reuse distance per
+within-warp origin stream; same-tick batches are queried before insertion, and
+sector validity follows line-tag eviction rather than an independent sector
+recency. Full replay completed with twelve workers for SM120 (339/339,
+11,558 launches) and SM86 (286/62/8, 12,392 launches). The new invariant
+checker passed every launch, and the numeric comparator found zero common
+field differences against the accepted pre-MRC lanes. The MRC is scored only
+against its exact trace-locality reference; no universal NCU MRC claim is
+made.
+
 ## Repository cleanup
 
 The active tree no longer treats branch-specific plans, H/S milestone diaries,
