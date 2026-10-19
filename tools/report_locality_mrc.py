@@ -140,6 +140,23 @@ def _aggregate(path: Path) -> dict[str, Any]:
             value / sector_refs if sector_refs else None
             for value in row["sector_miss_references_upper"]
         ]
+        row["sector_envelope_width_percentage_points"] = [
+            (upper - lower) * 100.0 / sector_refs if sector_refs else None
+            for lower, upper in zip(
+                row["sector_miss_references"], row["sector_miss_references_upper"]
+            )
+        ]
+        finite_widths = [
+            value
+            for value in row["sector_envelope_width_percentage_points"]
+            if value is not None
+        ]
+        row["maximum_sector_envelope_width_percentage_points"] = (
+            max(finite_widths) if finite_widths else None
+        )
+        row["mean_sector_envelope_width_percentage_points"] = (
+            sum(finite_widths) / len(finite_widths) if finite_widths else None
+        )
         row["cold_sector_fraction"] = (
             row["cold_sector_references"] / sector_refs if sector_refs else None
         )
