@@ -34,6 +34,14 @@ SM86 common numeric differences and only the already-approved SM120 async-L1
 projection differences; no physical hierarchy, DRAM, or timing path was
 changed.
 
+The 2026-10-19 Blackwell deep-research review is recorded in
+[`BLACKWELL_RESEARCH.md`](BLACKWELL_RESEARCH.md). It confirms that the TMA
+sidecars already contain decoded descriptor/coordinate/address evidence, but
+adjudicates all proposed new active projections against full-corpus results:
+TMA-shadow DRAM substitution, unconditional write hits, LTC128B promotion,
+default 96-slice/carveout changes, and post-hoc IPC scaling remain rejected or
+experiment-only. The validated replay state is unchanged.
+
 ## Repository cleanup
 
 The active tree no longer treats branch-specific plans, H/S milestone diaries,

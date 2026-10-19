@@ -656,3 +656,40 @@ Until these arrive, do not tune cache geometry, scheduler weights, latencies,
 or scored projections against NCU. Preserve the complete twelve-worker
 339/339 SM120 and 286/356 SM86 artifacts and report all residuals and the 70
 SM86 non-convergent rows separately.
+
+BLACKWELL DEEP-RESEARCH FOLLOW-UP — 2026-10-19
+===============================================
+The user requested use of existing reverse-engineered Blackwell/TMA knowledge
+without new microbenchmarks. Gemini inspected local manuals, NCU attributes,
+TMA sidecars, patents, PTX/CUDA/CUTLASS documentation, and published
+Blackwell microbenchmark papers (arXiv:2512.02189 and arXiv:2507.10789). The
+full hand-facing research digest is `docs/BLACKWELL_RESEARCH.md`.
+
+The SM120 captures already contain schema-2 `sm120_tma_sidecar_v1` records
+with decoded `CUtensorMap` fields, runtime coordinates, transfer size/count,
+swizzle/interleave, raw handle bytes, and expanded source/destination
+addresses; the simulator parser already reduces these to 32-byte sectors.
+Captured RTX 5090 attributes report 170 SMs, 8 FBPs, 96 L2 slices, 96 MiB L2,
+512-bit memory bus, 102400 B shared memory per SM, and 1024 B reserved block
+header. These are physical facts, but the current effective geometry remains a
+conditional model with unknown slice hash/replacement/chronology.
+
+Final conflict adjudication:
+
+* TMA shadow L2 misses must not replace raw TMA DRAM payload demand; the full
+  corpus empirically worsened when tested.
+* Physical `counted_hit` for WriteAtomic is not SM120 `lookup_hit`; keep the
+  resident store-packet/cold TMA-store observer that already improved generic
+  L2 APE.
+* Do not transfer SM86 H65 LTC128B behavior to SM120 or activate sibling
+  promotion; the full shadow contains ~300 zero-target rows and two false
+  positives.
+* Default L1 carveout, fixed coalescing windows, cache-hint subtraction,
+  constant-pipeline re-scoping, and IPC scaling remain unsupported.
+
+Final research disposition: zero new active IPC/L1/L2/DRAM changes are
+defensible from the current trace contract. Preserve validated full replays
+and diagnostic shadows; resume only with independently cross-walked TMA
+persistence/cache metadata, disaggregated PMU counters, or existing isolated
+LTC128B/TMA evidence. Do not run new microbenchmarks, fast replay, or
+SM120-disabled replay.
