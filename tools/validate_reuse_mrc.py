@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Validate the report-only reuse-interval observer in full replay output.
+"""Validate report-only reuse-interval and exact locality-MRC observers.
 
 This validator intentionally consumes one ``full.jsonl.zst`` artifact.  It
 does not read NCU profiles, does not run fast replay, and does not select any
-simulator parameter.  The observed curve is a bounded reuse-interval proxy,
-not a claim about undocumented set-associative hardware.
+simulator parameter.  The reuse curve is a bounded interval proxy and the MRC
+is an exact fully-associative trace-locality reference, not a claim about
+undocumented set-associative hardware.
 """
 
 from __future__ import annotations
@@ -16,6 +17,38 @@ from pathlib import Path
 from typing import Any
 
 from jsonl_io import open_jsonl_reader
+
+
+MRC_CAPACITY_LINES = [
+    0,
+    1,
+    2,
+    4,
+    8,
+    16,
+    32,
+    64,
+    128,
+    224,
+    256,
+    512,
+    768,
+    896,
+    960,
+    1024,
+    2048,
+    4096,
+    8192,
+    16384,
+    32768,
+    49152,
+    65536,
+    131072,
+    262144,
+    524288,
+    786432,
+    1048576,
+]
 
 
 def _int(row: dict[str, Any], key: str, errors: list[str], context: str) -> int:
@@ -104,6 +137,105 @@ def _check_launch(launch: dict[str, Any], context: str, errors: list[str]) -> bo
     return True
 
 
+def _check_locality_mrc(
+    launch: dict[str, Any], context: str, errors: list[str]
+) -> bool:
+    mrc = launch.get("trace_metrics", {}).get("locality_mrc")
+    if not isinstance(mrc, dict):
+        errors.append(f"{context}: missing trace_metrics.locality_mrc")
+        return False
+    if mrc.get("schema") != "sector_mrc_observer_v1":
+        errors.append(f"{context}: unexpected locality MRC schema")
+    if mrc.get("ordering_scope") != "within_warp_trace_order_only":
+        errors.append(f"{context}: unexpected locality MRC ordering scope")
+    if mrc.get("same_tick_semantics") != "batch_query_before_insert":
+        errors.append(f"{context}: unexpected locality MRC same-tick semantics")
+    if mrc.get("capacity_unit") != "distinct_128B_lines":
+        errors.append(f"{context}: unexpected locality MRC capacity unit")
+    if mrc.get("sector_unit") != "32B_sectors":
+        errors.append(f"{context}: unexpected locality MRC sector unit")
+    capacities = mrc.get("capacity_lines")
+    if capacities != MRC_CAPACITY_LINES:
+        errors.append(f"{context}: locality MRC capacity grid mismatch")
+        return False
+    origins = mrc.get("by_origin")
+    if not isinstance(origins, dict):
+        errors.append(f"{context}: locality MRC by_origin must be an object")
+        return False
+    ok = True
+    for origin, row in origins.items():
+        origin_context = f"{context}.locality_mrc.by_origin[{origin!r}]"
+        if not isinstance(row, dict):
+            errors.append(f"{origin_context}: row must be an object")
+            ok = False
+            continue
+        line_refs = _int(row, "line_references", errors, origin_context)
+        sector_refs = _int(row, "sector_references", errors, origin_context)
+        cold_lines = _int(row, "cold_line_references", errors, origin_context)
+        cold_sectors = _int(row, "cold_sector_references", errors, origin_context)
+        if cold_lines > line_refs or cold_sectors > sector_refs:
+            errors.append(f"{origin_context}: cold references exceed totals")
+            ok = False
+        arrays: dict[str, list[int]] = {}
+        for field in (
+            "line_miss_references",
+            "sector_miss_references",
+            "sector_line_tag_miss_references",
+            "sector_resident_fill_miss_references",
+        ):
+            values = row.get(field)
+            if not isinstance(values, list) or len(values) != len(MRC_CAPACITY_LINES):
+                errors.append(f"{origin_context}: {field} length mismatch")
+                ok = False
+                continue
+            parsed: list[int] = []
+            for index, value in enumerate(values):
+                if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                    errors.append(f"{origin_context}: {field}[{index}] invalid")
+                    ok = False
+                    parsed.append(0)
+                else:
+                    parsed.append(value)
+            arrays[field] = parsed
+        line_misses = arrays.get("line_miss_references", [])
+        sector_misses = arrays.get("sector_miss_references", [])
+        tag_misses = arrays.get("sector_line_tag_miss_references", [])
+        fill_misses = arrays.get("sector_resident_fill_miss_references", [])
+        if line_misses:
+            if line_misses[0] != line_refs:
+                errors.append(f"{origin_context}: MRC(0) line endpoint is not one")
+                ok = False
+            if any(a < b for a, b in zip(line_misses, line_misses[1:])):
+                errors.append(f"{origin_context}: line MRC is not monotone")
+                ok = False
+            if any(value > line_refs for value in line_misses):
+                errors.append(f"{origin_context}: line MRC exceeds references")
+                ok = False
+        if sector_misses:
+            if sector_misses[0] != sector_refs:
+                errors.append(f"{origin_context}: MRC(0) sector endpoint is not one")
+                ok = False
+            if any(a < b for a, b in zip(sector_misses, sector_misses[1:])):
+                errors.append(f"{origin_context}: sector MRC is not monotone")
+                ok = False
+            if any(value > sector_refs for value in sector_misses):
+                errors.append(f"{origin_context}: sector MRC exceeds references")
+                ok = False
+        if sector_misses and tag_misses and fill_misses:
+            for index, (miss, tag, fill) in enumerate(
+                zip(sector_misses, tag_misses, fill_misses)
+            ):
+                if miss != tag + fill:
+                    errors.append(
+                        f"{origin_context}: sector decomposition failed at capacity {MRC_CAPACITY_LINES[index]}"
+                    )
+                    ok = False
+                if tag > miss or fill > miss:
+                    errors.append(f"{origin_context}: sector miss component exceeds total")
+                    ok = False
+    return ok
+
+
 def validate(path: Path, expected_statuses: dict[str, int] | None) -> dict[str, Any]:
     statuses: dict[str, int] = {}
     launches = 0
@@ -127,10 +259,12 @@ def validate(path: Path, expected_statuses: dict[str, int] | None) -> dict[str, 
                 continue
             for launch_index, launch in enumerate(launch_rows):
                 launches += 1
-                if isinstance(launch, dict) and _check_launch(
-                    launch, f"capture[{index}].launch[{launch_index}]", errors
-                ):
-                    checked += 1
+                if isinstance(launch, dict):
+                    context = f"capture[{index}].launch[{launch_index}]"
+                    reuse_ok = _check_launch(launch, context, errors)
+                    locality_ok = _check_locality_mrc(launch, context, errors)
+                    if reuse_ok and locality_ok:
+                        checked += 1
     if expected_statuses is not None and statuses != expected_statuses:
         errors.append(f"status profile mismatch: expected {expected_statuses}, got {statuses}")
     return {

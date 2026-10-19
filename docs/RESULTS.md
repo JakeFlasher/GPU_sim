@@ -115,6 +115,26 @@ set/hash/replacement behavior remain unresolved. Thus this locality phase is
 complete as a validated diagnostic, but it does not claim to close the global
 <10% APE objective or alter existing NCU accuracy projections.
 
+## Exact trace-locality MRC observer (shadow-only)
+
+The next locality phase adds `trace_metrics.locality_mrc` with schema
+`sector_mrc_observer_v1`. It is an exact Mattson/Fenwick reference over each
+warp's declared trace order, with a two-phase same-tick update so coalesced
+lines cannot acquire fabricated address-order distance. Global and local
+address origins are separate curves. The sector curve couples four 32-byte
+valid bits to a 128-byte line tag: any line touch refreshes the tag and a line
+eviction invalidates all sectors. It reports line/sector MRC counts and the
+line-tag versus resident-sector-fill decomposition on a declared logical
+capacity grid (including SM86/SM120 envelope points).
+
+This is a Class-A trace-locality metric, not a silicon MRC and not an NCU
+fitting input. NCU has no capacity-indexed MRC target, and the observer does
+not model pending fills, set/slice hashing, replacement policy, TMA completion,
+or cross-warp arrival order. `tools/validate_reuse_mrc.py` checks the MRC
+schema, conservation, monotonicity, zero-capacity endpoint, and sector-miss
+decomposition. The observer is report-only; existing cache/timing fields must
+remain numerically unchanged.
+
 ## Async-client L1 scope refinement
 
 The full-replay audit found a trace-proven SM120 `ldgsts_async_copy` scope

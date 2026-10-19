@@ -83,6 +83,16 @@ the live cycle-interleaved L1 and event-driven L2 models are more faithful.
 Future SHARDS/Fenwick work is capacity-bound diagnostic only until cross-warp
 chronology, TMA timing, carveout, and set/hash/replacement metadata are proven.
 
+The exact Class-A observer is now implemented as `trace_metrics.locality_mrc`
+(`sector_mrc_observer_v1`). It uses a dynamic Fenwick/Mattson index per
+within-warp, origin-qualified stream, queries same-tick coalesced lines before
+inserting them, and couples sector validity to line-tag eviction. Its logical
+capacity grid includes SM86/SM120 envelope points; it reports line/sector
+misses plus line-tag versus resident-sector-fill decomposition. It is still
+shadow-only and must be validated against its exact trace reference, never
+fit to NCU. Pending fills, set/slice geometry, TMA completion, and cross-warp
+arrival order remain outside this metric.
+
 The subsequent SM120 async-client slice excludes only the trace-qualified
 `l1_async_older_pending_merges_global` class from external global-op_ld L1 hit
 projections. It passed complete full replays at twelve workers for both lanes,

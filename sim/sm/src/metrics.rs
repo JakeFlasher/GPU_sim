@@ -209,6 +209,75 @@ pub struct ReuseIntervalObservation {
     pub class_accounting_scope: &'static str,
 }
 
+/// Capacity points for the report-only exact locality curve.  Capacities are
+/// logical 128-byte lines, not a claim that every point is a physical cache
+/// configuration.  The explicit 224/256/512/768/896/960/1024/49152/786432
+/// points cover the documented SM86/SM120 L1/L2 operating envelopes.
+pub const LOCALITY_MRC_CAPACITY_LINES: [u64; 28] = [
+    0, 1, 2, 4, 8, 16, 32, 64, 128, 224, 256, 512, 768, 896, 960, 1024, 2048, 4096, 8192, 16384,
+    32768, 49152, 65536, 131072, 262144, 524288, 786432, 1048576,
+];
+const LOCALITY_MRC_INF: u64 = u64::MAX;
+
+/// Exact Class-A MRC counters for one origin-qualified stream.  These are
+/// analytical zero-latency line-LRU results and never replace live L1/L2
+/// counters or timing state.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LocalityMrcClassObservation {
+    pub line_references: u64,
+    pub sector_references: u64,
+    pub cold_line_references: u64,
+    pub cold_sector_references: u64,
+    pub line_miss_references: [u64; 28],
+    pub sector_miss_references: [u64; 28],
+    /// Sector misses for which the line tag is also absent at the capacity.
+    pub sector_line_tag_miss_references: [u64; 28],
+    /// Sector misses on a resident line (first touch or post-eviction refill).
+    pub sector_resident_fill_miss_references: [u64; 28],
+}
+
+impl Default for LocalityMrcClassObservation {
+    fn default() -> Self {
+        Self {
+            line_references: 0,
+            sector_references: 0,
+            cold_line_references: 0,
+            cold_sector_references: 0,
+            line_miss_references: [0; 28],
+            sector_miss_references: [0; 28],
+            sector_line_tag_miss_references: [0; 28],
+            sector_resident_fill_miss_references: [0; 28],
+        }
+    }
+}
+
+/// Exact, shadow-only locality/MRC report.  Origin streams stay separate so
+/// numerically equal global and local line IDs cannot alias in the reference.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LocalityMrcObservation {
+    pub schema: &'static str,
+    pub ordering_scope: &'static str,
+    pub same_tick_semantics: &'static str,
+    pub capacity_unit: &'static str,
+    pub sector_unit: &'static str,
+    pub capacity_lines: [u64; 28],
+    pub by_origin: BTreeMap<String, LocalityMrcClassObservation>,
+}
+
+impl Default for LocalityMrcObservation {
+    fn default() -> Self {
+        Self {
+            schema: "sector_mrc_observer_v1",
+            ordering_scope: "within_warp_trace_order_only",
+            same_tick_semantics: "batch_query_before_insert",
+            capacity_unit: "distinct_128B_lines",
+            sector_unit: "32B_sectors",
+            capacity_lines: LOCALITY_MRC_CAPACITY_LINES,
+            by_origin: BTreeMap::new(),
+        }
+    }
+}
+
 impl Default for ReuseIntervalObservation {
     fn default() -> Self {
         Self {
@@ -252,6 +321,305 @@ pub(crate) struct ReuseWarpStream {
     record_tick: u64,
     lines: BTreeMap<i64, ReuseLineState>,
     active: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct LocalityMrcLineState {
+    last_position: u64,
+    /// End position of the logical tick containing the previous line touch.
+    /// All lines in one tick share this boundary even though Fenwick storage
+    /// gives them unique positions for updates.
+    last_tick_end_position: u64,
+    /// `None` means the sector has never been requested in this stream;
+    /// `Some(threshold)` is the largest line-RD gap that could have evicted
+    /// it since its last request.  A request resets its threshold to zero.
+    sector_eviction_threshold: [Option<u64>; 4],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LocalityMrcFenwick {
+    /// Position zero is unused.  Each live line contributes one at its most
+    /// recent position, giving an exact Mattson stack query.
+    tree: Vec<u64>,
+    active_lines: u64,
+    next_position: u64,
+}
+
+impl LocalityMrcFenwick {
+    fn new() -> Self {
+        Self {
+            tree: vec![0; 2],
+            active_lines: 0,
+            next_position: 1,
+        }
+    }
+
+    fn add_raw(&mut self, position: u64, delta: i8) -> Result<(), crate::IssueError> {
+        let mut index =
+            usize::try_from(position).map_err(|_| crate::IssueError::CounterOverflow {
+                counter: "locality MRC Fenwick position",
+            })?;
+        if index == 0 || index >= self.tree.len() {
+            return Err(crate::IssueError::CounterOverflow {
+                counter: "locality MRC Fenwick bound",
+            });
+        }
+        while index < self.tree.len() {
+            if delta > 0 {
+                self.tree[index] = self.tree[index].checked_add(u64::from(delta as u8)).ok_or(
+                    crate::IssueError::CounterOverflow {
+                        counter: "locality MRC Fenwick cell",
+                    },
+                )?;
+            } else {
+                self.tree[index] = self.tree[index]
+                    .checked_sub(u64::from((-delta) as u8))
+                    .ok_or(crate::IssueError::CounterOverflow {
+                        counter: "locality MRC Fenwick cell",
+                    })?;
+            }
+            index += index & index.wrapping_neg();
+        }
+        Ok(())
+    }
+
+    fn ensure_capacity(
+        &mut self,
+        last_position: u64,
+        existing_positions: &[u64],
+    ) -> Result<(), crate::IssueError> {
+        let required = usize::try_from(last_position.checked_add(1).ok_or(
+            crate::IssueError::CounterOverflow {
+                counter: "locality MRC Fenwick position",
+            },
+        )?)
+        .map_err(|_| crate::IssueError::CounterOverflow {
+            counter: "locality MRC Fenwick capacity",
+        })?;
+        if required <= self.tree.len() {
+            return Ok(());
+        }
+        let mut length = self.tree.len().max(2);
+        while length < required {
+            length = length
+                .checked_mul(2)
+                .ok_or(crate::IssueError::CounterOverflow {
+                    counter: "locality MRC Fenwick capacity",
+                })?;
+        }
+        self.tree = vec![0; length];
+        for &position in existing_positions {
+            self.add_raw(position, 1)?;
+        }
+        Ok(())
+    }
+
+    fn prefix(&self, mut position: u64) -> Result<u64, crate::IssueError> {
+        let max_position = u64::try_from(self.tree.len().saturating_sub(1)).map_err(|_| {
+            crate::IssueError::CounterOverflow {
+                counter: "locality MRC Fenwick prefix",
+            }
+        })?;
+        position = position.min(max_position);
+        let mut index =
+            usize::try_from(position).map_err(|_| crate::IssueError::CounterOverflow {
+                counter: "locality MRC Fenwick prefix",
+            })?;
+        let mut total = 0_u64;
+        while index != 0 {
+            total =
+                total
+                    .checked_add(self.tree[index])
+                    .ok_or(crate::IssueError::CounterOverflow {
+                        counter: "locality MRC Fenwick prefix sum",
+                    })?;
+            index &= index - 1;
+        }
+        Ok(total)
+    }
+
+    fn distinct_after(&self, previous_position: u64) -> Result<u64, crate::IssueError> {
+        self.active_lines
+            .checked_sub(self.prefix(previous_position)?)
+            .ok_or(crate::IssueError::CounterOverflow {
+                counter: "locality MRC reuse distance",
+            })
+    }
+}
+
+impl Default for LocalityMrcFenwick {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct LocalityMrcOriginStream {
+    fenwick: LocalityMrcFenwick,
+    lines: BTreeMap<i64, LocalityMrcLineState>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct LocalityMrcWarpStream {
+    origins: BTreeMap<u8, LocalityMrcOriginStream>,
+}
+
+impl LocalityMrcOriginStream {
+    fn observe(
+        &mut self,
+        lines: &BTreeMap<i64, u8>,
+        report: &mut LocalityMrcClassObservation,
+    ) -> Result<(), crate::IssueError> {
+        let line_count =
+            u64::try_from(lines.len()).map_err(|_| crate::IssueError::CounterOverflow {
+                counter: "locality MRC line batch",
+            })?;
+        if line_count == 0 {
+            return Ok(());
+        }
+
+        // Query every line before inserting any line from this logical tick.
+        // This is the critical same-tick rule: coalesced lines have no order
+        // in the trace and must not manufacture distance for one another.
+        let mut observations = Vec::with_capacity(lines.len());
+        for (&line, &mask) in lines {
+            let line_rd = if let Some(previous) = self.lines.get(&line) {
+                self.fenwick
+                    .distinct_after(previous.last_tick_end_position)?
+            } else {
+                LOCALITY_MRC_INF
+            };
+
+            let mut sector_rd = [LOCALITY_MRC_INF; 4];
+            if let Some(previous) = self.lines.get_mut(&line) {
+                for threshold in &mut previous.sector_eviction_threshold {
+                    if let Some(value) = threshold {
+                        *value = (*value).max(line_rd);
+                    }
+                }
+                for sector in 0..4 {
+                    if mask & (1_u8 << sector) == 0 {
+                        continue;
+                    }
+                    sector_rd[sector] =
+                        previous.sector_eviction_threshold[sector].unwrap_or(LOCALITY_MRC_INF);
+                    // The current request validates this sector after the
+                    // query; future line gaps start from a clean threshold.
+                    previous.sector_eviction_threshold[sector] = Some(0);
+                }
+            }
+            observations.push((line, mask, line_rd, sector_rd));
+        }
+
+        for &(_, mask, line_rd, sector_rd) in &observations {
+            add(&mut report.line_references, 1)?;
+            let sectors = u64::from(mask.count_ones());
+            add(&mut report.sector_references, sectors)?;
+            if line_rd == LOCALITY_MRC_INF {
+                add(&mut report.cold_line_references, 1)?;
+            }
+            for capacity_index in 0..LOCALITY_MRC_CAPACITY_LINES.len() {
+                let capacity = LOCALITY_MRC_CAPACITY_LINES[capacity_index];
+                if line_rd >= capacity {
+                    add(&mut report.line_miss_references[capacity_index], 1)?;
+                }
+                for sector in 0..4 {
+                    if mask & (1_u8 << sector) == 0 {
+                        continue;
+                    }
+                    let sector_distance = sector_rd[sector];
+                    if sector_distance >= capacity {
+                        add(&mut report.sector_miss_references[capacity_index], 1)?;
+                        if line_rd >= capacity {
+                            add(
+                                &mut report.sector_line_tag_miss_references[capacity_index],
+                                1,
+                            )?;
+                        } else {
+                            add(
+                                &mut report.sector_resident_fill_miss_references[capacity_index],
+                                1,
+                            )?;
+                        }
+                    }
+                }
+            }
+            for sector in 0..4 {
+                if mask & (1_u8 << sector) != 0 && sector_rd[sector] == LOCALITY_MRC_INF {
+                    add(&mut report.cold_sector_references, 1)?;
+                }
+            }
+        }
+
+        let first_position = self.fenwick.next_position;
+        let last_position = first_position.checked_add(line_count - 1).ok_or(
+            crate::IssueError::CounterOverflow {
+                counter: "locality MRC next position",
+            },
+        )?;
+        let existing_positions = self
+            .lines
+            .values()
+            .map(|state| state.last_position)
+            .collect::<Vec<_>>();
+        self.fenwick
+            .ensure_capacity(last_position, &existing_positions)?;
+
+        for (offset, &(line, mask, _, _)) in observations.iter().enumerate() {
+            let position = first_position
+                .checked_add(u64::try_from(offset).map_err(|_| {
+                    crate::IssueError::CounterOverflow {
+                        counter: "locality MRC batch offset",
+                    }
+                })?)
+                .ok_or(crate::IssueError::CounterOverflow {
+                    counter: "locality MRC next position",
+                })?;
+            if let Some(previous) = self.lines.get(&line) {
+                self.fenwick.add_raw(previous.last_position, -1)?;
+            } else {
+                self.fenwick.active_lines = self.fenwick.active_lines.checked_add(1).ok_or(
+                    crate::IssueError::CounterOverflow {
+                        counter: "locality MRC active lines",
+                    },
+                )?;
+            }
+            self.fenwick.add_raw(position, 1)?;
+            self.lines
+                .entry(line)
+                .and_modify(|state| state.last_position = position)
+                .or_insert_with(|| {
+                    let mut state = LocalityMrcLineState {
+                        last_position: position,
+                        last_tick_end_position: last_position,
+                        sector_eviction_threshold: [None; 4],
+                    };
+                    for sector in 0..4 {
+                        if mask & (1_u8 << sector) != 0 {
+                            state.sector_eviction_threshold[sector] = Some(0);
+                        }
+                    }
+                    state
+                });
+            if let Some(state) = self.lines.get_mut(&line) {
+                state.last_tick_end_position = last_position;
+                // Existing lines were updated only for requested sectors in
+                // the query pass.  Keep unrequested sector state intact.
+                for sector in 0..4 {
+                    if mask & (1_u8 << sector) != 0 {
+                        state.sector_eviction_threshold[sector] = Some(0);
+                    }
+                }
+            }
+        }
+        self.fenwick.next_position =
+            last_position
+                .checked_add(1)
+                .ok_or(crate::IssueError::CounterOverflow {
+                    counter: "locality MRC next position",
+                })?;
+        Ok(())
+    }
 }
 
 /// Trace-local physical-pipeline candidate domains. A dynamic SASS record
@@ -498,8 +866,13 @@ pub struct TraceMetrics {
     /// Passive Chen-Ding-style reuse-interval evidence. This is intentionally
     /// separate from `memory` and from all scored cache/timing counters.
     pub reuse_interval: ReuseIntervalObservation,
+    /// Exact, origin-qualified Class-A locality/MRC evidence. This remains a
+    /// report-only shadow observer and never feeds the live cache or scheduler.
+    pub locality_mrc: LocalityMrcObservation,
     #[serde(skip)]
     pub(crate) reuse_warp_stream: ReuseWarpStream,
+    #[serde(skip)]
+    pub(crate) locality_mrc_warp_stream: LocalityMrcWarpStream,
     pub local_interleaved_load_requests: u64,
     pub local_interleaved_load_sectors: u64,
     pub local_interleaved_store_requests: u64,
@@ -1106,6 +1479,19 @@ fn reuse_kind_class(kind: AccessKind) -> Option<&'static str> {
     }
 }
 
+fn locality_mrc_origin(kind: AccessKind) -> Option<(u8, &'static str)> {
+    match kind {
+        AccessKind::LocalLoad { .. } | AccessKind::LocalStore { .. } => Some((1, "local")),
+        AccessKind::GlobalEligible { .. }
+        | AccessKind::GlobalBypass { .. }
+        | AccessKind::GlobalUntagged { .. }
+        | AccessKind::GlobalStore { .. }
+        | AccessKind::GlobalReduction { .. }
+        | AccessKind::GlobalAsyncCopy { .. } => Some((0, "global")),
+        AccessKind::NonMemory | AccessKind::PredicatedOffMemory | AccessKind::Shared { .. } => None,
+    }
+}
+
 fn reuse_span(kind: AccessKind, sector_arena: &[i64]) -> Option<&[i64]> {
     let (off, len) = match kind {
         AccessKind::LocalLoad { off, len }
@@ -1165,6 +1551,7 @@ impl TraceMetrics {
     /// from one warp to another.
     pub(crate) fn begin_reuse_warp_stream(&mut self) {
         self.reuse_warp_stream = ReuseWarpStream::default();
+        self.locality_mrc_warp_stream = LocalityMrcWarpStream::default();
     }
 
     /// Observe one decoded memory record in the passive reuse observer.
@@ -1205,6 +1592,22 @@ impl TraceMetrics {
         }
         if lines.is_empty() {
             return Ok(());
+        }
+
+        if let Some((origin, origin_name)) = locality_mrc_origin(kind) {
+            let class_observation = self
+                .locality_mrc
+                .by_origin
+                .entry(origin_name.to_owned())
+                .or_default();
+            self.locality_mrc_warp_stream
+                .origins
+                .entry(origin)
+                .or_insert_with(|| LocalityMrcOriginStream {
+                    fenwick: LocalityMrcFenwick::new(),
+                    lines: BTreeMap::new(),
+                })
+                .observe(&lines, class_observation)?;
         }
 
         if !self.reuse_warp_stream.active {
@@ -3243,5 +3646,61 @@ mod tests {
         assert_eq!(metrics.reuse_interval.stream_unique_lines, 2);
         assert_eq!(metrics.reuse_interval.cold_line_references, 2);
         assert_eq!(metrics.reuse_interval.reused_line_references, 0);
+    }
+
+    #[test]
+    fn exact_mrc_respects_same_tick_batch_and_sector_refill() {
+        let mut metrics = TraceMetrics::default();
+        metrics.begin_reuse_warp_stream();
+        let sectors = [0_i64, 4, 0];
+        // Two lines in one logical tick are both cold, but neither line is an
+        // intervening reference for the next tick's reuse of line zero.
+        metrics.observe_reuse_memory(load(0, 2), &sectors).unwrap();
+        metrics.observe_reuse_memory(load(2, 1), &sectors).unwrap();
+        let mrc = &metrics.locality_mrc.by_origin["global"];
+        assert_eq!(mrc.line_references, 3);
+        assert_eq!(mrc.cold_line_references, 2);
+        assert_eq!(mrc.sector_references, 3);
+        assert_eq!(mrc.cold_sector_references, 2);
+
+        let capacity_one = LOCALITY_MRC_CAPACITY_LINES
+            .iter()
+            .position(|&capacity| capacity == 1)
+            .unwrap();
+        let capacity_two = LOCALITY_MRC_CAPACITY_LINES
+            .iter()
+            .position(|&capacity| capacity == 2)
+            .unwrap();
+        // The line-zero reuse has RD=0 because line one was in the same prior
+        // tick. It therefore hits at capacity one and two.
+        assert_eq!(mrc.line_miss_references[capacity_one], 2);
+        assert_eq!(mrc.line_miss_references[capacity_two], 2);
+        assert_eq!(mrc.sector_miss_references[capacity_one], 2);
+        assert_eq!(mrc.sector_miss_references[capacity_two], 2);
+    }
+
+    #[test]
+    fn exact_mrc_tracks_sector_validity_under_line_eviction() {
+        let mut metrics = TraceMetrics::default();
+        metrics.begin_reuse_warp_stream();
+        let sectors = [0_i64, 4, 8, 1];
+        // Tick 1: line zero sector zero; tick 2: line one; tick 3: line two;
+        // tick 4: line zero sector one. At C=2 the line is evicted (two
+        // intervening distinct lines), so the final reference is a line-tag
+        // miss rather than a resident-line sector fill.
+        metrics.observe_reuse_memory(load(0, 1), &sectors).unwrap();
+        metrics.observe_reuse_memory(load(1, 1), &sectors).unwrap();
+        metrics.observe_reuse_memory(load(2, 1), &sectors).unwrap();
+        metrics.observe_reuse_memory(load(3, 1), &sectors).unwrap();
+        let mrc = &metrics.locality_mrc.by_origin["global"];
+        let capacity_two = LOCALITY_MRC_CAPACITY_LINES
+            .iter()
+            .position(|&capacity| capacity == 2)
+            .unwrap();
+        assert_eq!(mrc.line_miss_references[capacity_two], 4);
+        assert_eq!(
+            mrc.sector_line_tag_miss_references[capacity_two],
+            mrc.sector_miss_references[capacity_two]
+        );
     }
 }

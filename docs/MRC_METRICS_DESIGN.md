@@ -21,7 +21,10 @@ does not use NCU:
 
 1. **Sector-aware reuse-distance distribution** `RD(line, sector_mask)`:
    distinct intervening 128-byte lines, with four 32-byte sector-validity bits.
-   A line reuse is not automatically a sector hit.
+   A line reuse is not automatically a sector hit. The line tag is refreshed
+   by a touch to any sector, while eviction invalidates all four sector bits;
+   the sector curve therefore needs a line-LRU eviction-bottleneck state, not
+   an independently tracked sector recency.
 2. **Fully-associative LRU MRC** `M_LRU(C) = P(RD >= C)` over a declared
    capacity grid `C`. Cold references and right-censored final references are
    counted explicitly.
@@ -35,6 +38,23 @@ scored against this reference, not against NCU. Report sector-weighted WAPE,
 MAE in percentage points, mean/median/P90 error, signed bias, coverage, and
 monotonicity violations. The initial promotion bar is `<2%` WAPE/MAE on held-
 out trace streams, not a fabricated hardware-accuracy claim.
+
+#### Class-A stream semantics
+
+Each logical tick is a non-empty batch of origin-qualified 128-byte line keys
+and four-bit 32-byte sector masks. All queries for a tick occur before any
+line is inserted into the recency structure (two-phase batch update); sorting
+same-tick lines by address would create artificial distance. A first line or
+sector is `cold`; final references are finite observations, while an
+unobserved future reuse is right-censored rather than imputed. Capacity is
+always expressed in `lines_128B` and sector volumes in `sectors_32B`.
+
+The fully-associative curve is a zero-latency locality reference. It does not
+silently include MSHR/pending-fill merges, fill latency, set/slice hashing, or
+replacement policy details. Those are reported by the live cache model or by
+separate conditional diagnostics. The existing record-gap survival metric is
+an RI curve, not a footprint: a footprint maps a window length to expected
+working-set size and requires explicit cold-prefix and right-censored terms.
 
 ### Class B: conditional effective hardware bounds
 
@@ -65,13 +85,18 @@ silently discarded.
   `L2ClientScope`; TMA payloads remain separate unless completion linkage is
   present.
 
+Tier-2 and Tier-3 streams are only promoted to hardware-proxy diagnostics when
+their ordering contract is deterministic and recorded. Pending-fill merges
+must be emitted separately from resident hits and capacity misses.
+
 The live cycle-interleaved L1 and event-driven L2 models remain the source of
 timing/cache state. MRC observers are shadow-only until promotion gates pass.
 
 ## Algorithm and gates
 
 Phase 1 is a bounded exact/reference implementation: deterministic sector
-coalescing, Fenwick/Mattson RD, cold/censored counters, and a capacity grid.
+coalescing, same-tick batch semantics, line-LRU-coupled sector validity,
+Fenwick/Mattson RD, cold/censored counters, and a declared capacity grid.
 Phase 2 evaluates Ding reuse-interval and SHARDS-style bounded sampling against
 the exact reference with a memory/RSS budget. Phase 3 considers conditional
 hardware bounds only on held-out, scope-compatible strata.
