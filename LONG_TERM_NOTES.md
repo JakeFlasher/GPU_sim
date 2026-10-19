@@ -83,3 +83,7 @@ This file is deliberately a current-state note rather than a duplicate.
   endpoint, leaves SM120 unchanged, passed both full status profiles, and
   reduced joined SM86 unified-L1 mean APE from 29.04% to 12.15%. The <10%
   objective remains open.
+* Novel candidate-2 review: SM120 native metrics return from the alpha branch
+  before the later SM86-only L2 native block, so the claimed SM120 rank-0 L2
+  precedence bug is inapplicable. TMA-shadow-hit addition worsened retained
+  SM120 L2 APE and was rejected.

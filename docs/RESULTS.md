@@ -185,6 +185,11 @@ Full status profiles passed; on 107 joined SM86 NCU rows, unified-L1 mean APE
 improved from 29.04% to 12.15%, with no other joined metric changing. It
 remains above 10%, so the goal is not complete.
 
+The proposed SM120 native-L2 precedence correction was separately rejected:
+the SM120 alpha native-metrics branch exits before the later SM86-only L2
+native block, so no SM120 rank-0 native-L2 override exists. Adding TMA-shadow
+hits directly to retained SM120 L2 estimates also worsened mean APE.
+
 Gemini's definitive stop gate freezes further active IPC/L1/L2 projection or
 model changes. Resuming accuracy work requires TMA descriptor/coordinate and
 launch-cache metadata, disaggregated tag/MSHR/fill/stall PMU counters, or

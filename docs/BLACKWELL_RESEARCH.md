@@ -132,3 +132,12 @@ state, disaggregated tag/MSHR/fill/stall PMU counters, or existing isolated
 LTC128B/TMA hardware evidence that is independently cross-walked to these
 endpoints. No fast replay, new SM120-disabled replay, NCU fitting, count
 balancing, or new microbenchmark was used here.
+
+## Follow-up correction
+
+The novel report also proposed reconciling SM120 native-L2 metrics with cache
+lookup predictions. Code review found that `metrics::project` returns from the
+SM120 alpha branch before the later SM86-only L2 native block; current SM120
+rows do not contain those native L2 keys. There is therefore no SM120 rank-0
+native-L2 override to repair. Directly adding TMA-shadow hits to retained
+SM120 L2 estimates worsened mean APE, so this candidate was not promoted.
