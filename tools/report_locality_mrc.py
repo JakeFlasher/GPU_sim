@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+"""Summarize exact shadow locality/MRC metrics from a full replay artifact.
+
+The report is deliberately NCU-independent.  It aggregates the exact
+trace-locality reference emitted by ``sector_mrc_observer_v1`` and checks the
+same structural invariants as the launch validator.  It never treats an MRC
+point as a silicon or NCU target.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+from typing import Any
+
+from jsonl_io import open_jsonl_reader
+
+
+def _load(path: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    with open_jsonl_reader(path) as stream:
+        for line_number, line in enumerate(stream, 1):
+            value = json.loads(line)
+            if not isinstance(value, dict):
+                raise ValueError(f"{path}:{line_number}: root must be an object")
+            rows.append(value)
+    return rows
+
+
+def _aggregate(path: Path) -> dict[str, Any]:
+    rows = _load(path)
+    statuses: dict[str, int] = {}
+    successful_captures = 0
+    launches = 0
+    origins: dict[str, dict[str, Any]] = {}
+    capacity_lines: list[int] | None = None
+    monotonic_violations = 0
+    checked_launches = 0
+    for capture in rows:
+        status = str(capture.get("status", "missing"))
+        statuses[status] = statuses.get(status, 0) + 1
+        if status != "ok":
+            continue
+        successful_captures += 1
+        for launch in capture.get("launches", []):
+            if not isinstance(launch, dict):
+                continue
+            launches += 1
+            trace = launch.get("trace_metrics", {})
+            mrc = trace.get("locality_mrc") if isinstance(trace, dict) else None
+            if not isinstance(mrc, dict):
+                continue
+            checked_launches += 1
+            grid = mrc.get("capacity_lines")
+            if not isinstance(grid, list) or any(
+                isinstance(x, bool) or not isinstance(x, int) or x < 0 for x in grid
+            ):
+                raise ValueError(f"{path}: invalid locality MRC capacity grid")
+            if capacity_lines is None:
+                capacity_lines = grid
+            elif capacity_lines != grid:
+                raise ValueError(f"{path}: capacity grid changed between launches")
+            for origin, row in mrc.get("by_origin", {}).items():
+                if not isinstance(row, dict):
+                    raise ValueError(f"{path}: invalid MRC row for {origin!r}")
+                n = len(grid)
+                total = origins.setdefault(
+                    str(origin),
+                    {
+                        "launches": 0,
+                        "line_references": 0,
+                        "sector_references": 0,
+                        "cold_line_references": 0,
+                        "cold_sector_references": 0,
+                        "line_miss_references": [0] * n,
+                        "sector_miss_references": [0] * n,
+                        "sector_line_tag_miss_references": [0] * n,
+                        "sector_resident_fill_miss_references": [0] * n,
+                    },
+                )
+                total["launches"] += 1
+                for field in (
+                    "line_references",
+                    "sector_references",
+                    "cold_line_references",
+                    "cold_sector_references",
+                ):
+                    total[field] += int(row[field])
+                for field in (
+                    "line_miss_references",
+                    "sector_miss_references",
+                    "sector_line_tag_miss_references",
+                    "sector_resident_fill_miss_references",
+                ):
+                    for index, value in enumerate(row[field]):
+                        total[field][index] += int(value)
+                line_misses = row["line_miss_references"]
+                sector_misses = row["sector_miss_references"]
+                if any(a < b for a, b in zip(line_misses, line_misses[1:])):
+                    monotonic_violations += 1
+                if any(a < b for a, b in zip(sector_misses, sector_misses[1:])):
+                    monotonic_violations += 1
+
+    if capacity_lines is None:
+        capacity_lines = []
+    for row in origins.values():
+        line_refs = row["line_references"]
+        sector_refs = row["sector_references"]
+        row["line_miss_ratio"] = [
+            value / line_refs if line_refs else None for value in row["line_miss_references"]
+        ]
+        row["sector_miss_ratio"] = [
+            value / sector_refs if sector_refs else None
+            for value in row["sector_miss_references"]
+        ]
+        row["cold_sector_fraction"] = (
+            row["cold_sector_references"] / sector_refs if sector_refs else None
+        )
+    return {
+        "path": str(path),
+        "captures": len(rows),
+        "statuses": statuses,
+        "successful_captures": successful_captures,
+        "launches": launches,
+        "launches_with_locality_mrc": checked_launches,
+        "capacity_lines": capacity_lines,
+        "origins": origins,
+        "monotonicity_violations": monotonic_violations,
+        "ncu_used": False,
+        "hardware_mrc_claim": False,
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("full_jsonl", type=Path)
+    parser.add_argument("--output", type=Path)
+    args = parser.parse_args()
+    report = _aggregate(args.full_jsonl)
+    encoded = json.dumps(report, indent=2, sort_keys=True) + "\n"
+    if args.output:
+        args.output.write_text(encoded, encoding="utf-8")
+    else:
+        sys.stdout.write(encoded)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
