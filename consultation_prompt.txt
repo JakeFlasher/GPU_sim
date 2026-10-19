@@ -737,3 +737,34 @@ if the observer remains per-SM/per-launch, is indexed 1:1 with the engine's
 traced-SM roster, aggregates checked integer counters deterministically, and
 never feeds timing. Remaining fallback-L1, SM86 IPC/DRAM, and SM120 residuals
 remain open; this does not claim global <10% closure.
+
+NEW MRC METRICS GOAL — GEMINI DEFINITION (2026-10-19)
+========================================================
+The new active goal is to design a valid reuse-distance/reuse-interval
+component and conditional MRC metrics without claiming unavailable hardware
+truth. Gemini's deep plan defines two metric classes:
+
+Class A is intrinsic trace locality with an exact NCU-independent reference:
+sector-aware reuse distance over 128B lines/four 32B sectors, fully-associative
+LRU MRC M_LRU(C), and footprint/survival curves. The exact reference is a
+deterministic Mattson/Fenwick order-statistics pass over a declared stream.
+Ding reuse-interval and SHARDS-style bounded samples are scored against that
+reference. The promotion bar is <2% WAPE/MAE on held-out streams, plus
+conservation, monotonicity, cold/censored endpoint, deterministic replay, and
+memory/RSS gates.
+
+Class B compares conditional effective-cache bounds to NCU only on
+trace-identifiable, scope-compatible strata (architecture, client/form,
+coverage/order, and launch scope). It reports M_cond(C_min/C_max) intervals,
+coverage/width, and percentage-point error; zero-target rows are exact-zero
+classification, not silently discarded. No NCU value may select a model or
+populate a lookup table.
+
+Three scopes are explicit: Tier 1 within-warp stream (always exact but not a
+hardware arrival stream), Tier 2 per-SM cycle-interleaved L1 acceptance seam at
+SmCore, and Tier 3 timestamp/sequence-ordered transactional L2 event seam
+partitioned by L2ClientScope. TMA remains separate without completion linkage.
+The live cache/timing models remain authoritative; MRC observers are shadow-only
+until gates pass. The current reuse_interval observer is only a within-warp
+record-gap survival proxy and emits no exact RD/MRC; it must not be presented as
+hardware MRC. Full plan is in docs/MRC_METRICS_DESIGN.md.
