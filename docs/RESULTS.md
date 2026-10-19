@@ -163,6 +163,11 @@ corpora (SM120 global 3.07 pp; SM86 global 2.52 pp; the largest observed
 local-origin value is 5.20 pp), which is an uncertainty-width result rather
 than a hardware APE claim.
 
+The independent-target audit is in
+[`MRC_NCU_VALIDITY_AUDIT.md`](MRC_NCU_VALIDITY_AUDIT.md): the retained NCU
+surfaces contain no capacity-indexed MRC target, and the trace lacks the
+cross-warp chronology and proprietary geometry needed to manufacture one.
+
 ## Async-client L1 scope refinement
 
 The full-replay audit found a trace-proven SM120 `ldgsts_async_copy` scope

@@ -99,6 +99,9 @@ includes legal previous/current-batch tie effects. Do not collapse this
 envelope to an address-ordered point estimate. The final envelope2 full
 replays passed 339/339 SM120 and 286/62/8 SM86 status gates with zero common
 numeric differences in existing metrics.
+The Class-B hardware-MRC boundary is documented in
+`docs/MRC_NCU_VALIDITY_AUDIT.md`: retained NCU outputs have no capacity sweep,
+and the trace lacks total arrival chronology and proprietary cache geometry.
 
 The subsequent SM120 async-client slice excludes only the trace-qualified
 `l1_async_older_pending_merges_global` class from external global-op_ld L1 hit
