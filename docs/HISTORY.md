@@ -68,6 +68,12 @@ field differences against the accepted pre-MRC lanes. The MRC is scored only
 against its exact trace-locality reference; no universal NCU MRC claim is
 made.
 
+Gemini's follow-up same-tick review required an interval envelope rather than
+an implicit address-order tie-break. The observer now emits batch-first lower
+and conservative upper line/sector MRC curves, including the line-tag versus
+resident-fill decomposition at both endpoints. The final envelope2 corpora
+passed all MRC invariants and preserved every existing common numeric field.
+
 ## Repository cleanup
 
 The active tree no longer treats branch-specific plans, H/S milestone diaries,

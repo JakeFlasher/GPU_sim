@@ -148,7 +148,7 @@ def _check_locality_mrc(
         errors.append(f"{context}: unexpected locality MRC schema")
     if mrc.get("ordering_scope") != "within_warp_trace_order_only":
         errors.append(f"{context}: unexpected locality MRC ordering scope")
-    if mrc.get("same_tick_semantics") != "batch_query_before_insert":
+    if mrc.get("same_tick_semantics") != "batch_query_before_insert_with_interval_envelope":
         errors.append(f"{context}: unexpected locality MRC same-tick semantics")
     if mrc.get("capacity_unit") != "distinct_128B_lines":
         errors.append(f"{context}: unexpected locality MRC capacity unit")
@@ -179,9 +179,13 @@ def _check_locality_mrc(
         arrays: dict[str, list[int]] = {}
         for field in (
             "line_miss_references",
+            "line_miss_references_upper",
             "sector_miss_references",
+            "sector_miss_references_upper",
             "sector_line_tag_miss_references",
             "sector_resident_fill_miss_references",
+            "sector_line_tag_miss_references_upper",
+            "sector_resident_fill_miss_references_upper",
         ):
             values = row.get(field)
             if not isinstance(values, list) or len(values) != len(MRC_CAPACITY_LINES):
@@ -198,9 +202,13 @@ def _check_locality_mrc(
                     parsed.append(value)
             arrays[field] = parsed
         line_misses = arrays.get("line_miss_references", [])
+        line_misses_upper = arrays.get("line_miss_references_upper", [])
         sector_misses = arrays.get("sector_miss_references", [])
+        sector_misses_upper = arrays.get("sector_miss_references_upper", [])
         tag_misses = arrays.get("sector_line_tag_miss_references", [])
         fill_misses = arrays.get("sector_resident_fill_miss_references", [])
+        tag_misses_upper = arrays.get("sector_line_tag_miss_references_upper", [])
+        fill_misses_upper = arrays.get("sector_resident_fill_miss_references_upper", [])
         if line_misses:
             if line_misses[0] != line_refs:
                 errors.append(f"{origin_context}: MRC(0) line endpoint is not one")
@@ -211,6 +219,21 @@ def _check_locality_mrc(
             if any(value > line_refs for value in line_misses):
                 errors.append(f"{origin_context}: line MRC exceeds references")
                 ok = False
+        if line_misses_upper:
+            if line_misses_upper[0] != line_refs:
+                errors.append(f"{origin_context}: upper MRC(0) line endpoint is not one")
+                ok = False
+            if any(a < b for a, b in zip(line_misses_upper, line_misses_upper[1:])):
+                errors.append(f"{origin_context}: upper line MRC is not monotone")
+                ok = False
+            if any(value > line_refs for value in line_misses_upper):
+                errors.append(f"{origin_context}: upper line MRC exceeds references")
+                ok = False
+            if line_misses and any(
+                lower > upper for lower, upper in zip(line_misses, line_misses_upper)
+            ):
+                errors.append(f"{origin_context}: upper line MRC is below lower curve")
+                ok = False
         if sector_misses:
             if sector_misses[0] != sector_refs:
                 errors.append(f"{origin_context}: MRC(0) sector endpoint is not one")
@@ -220,6 +243,21 @@ def _check_locality_mrc(
                 ok = False
             if any(value > sector_refs for value in sector_misses):
                 errors.append(f"{origin_context}: sector MRC exceeds references")
+                ok = False
+        if sector_misses_upper:
+            if sector_misses_upper[0] != sector_refs:
+                errors.append(f"{origin_context}: upper MRC(0) sector endpoint is not one")
+                ok = False
+            if any(a < b for a, b in zip(sector_misses_upper, sector_misses_upper[1:])):
+                errors.append(f"{origin_context}: upper sector MRC is not monotone")
+                ok = False
+            if any(value > sector_refs for value in sector_misses_upper):
+                errors.append(f"{origin_context}: upper sector MRC exceeds references")
+                ok = False
+            if sector_misses and any(
+                lower > upper for lower, upper in zip(sector_misses, sector_misses_upper)
+            ):
+                errors.append(f"{origin_context}: upper sector MRC is below lower curve")
                 ok = False
         if sector_misses and tag_misses and fill_misses:
             for index, (miss, tag, fill) in enumerate(
@@ -233,6 +271,20 @@ def _check_locality_mrc(
                 if tag > miss or fill > miss:
                     errors.append(f"{origin_context}: sector miss component exceeds total")
                     ok = False
+        if sector_misses_upper and tag_misses_upper and fill_misses_upper:
+            for index, (miss, tag, fill) in enumerate(
+                zip(sector_misses_upper, tag_misses_upper, fill_misses_upper)
+            ):
+                if miss != tag + fill:
+                    errors.append(
+                        f"{origin_context}: upper sector decomposition failed at capacity {MRC_CAPACITY_LINES[index]}"
+                    )
+                    ok = False
+                if tag > miss or fill > miss:
+                    errors.append(f"{origin_context}: upper sector miss component exceeds total")
+                    ok = False
+        for field in ("same_tick_max_batch_lines", "maximum_line_rd_envelope_width"):
+            _int(row, field, errors, origin_context)
     return ok
 
 

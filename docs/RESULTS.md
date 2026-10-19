@@ -120,8 +120,10 @@ complete as a validated diagnostic, but it does not claim to close the global
 The next locality phase adds `trace_metrics.locality_mrc` with schema
 `sector_mrc_observer_v1`. It is an exact Mattson/Fenwick reference over each
 warp's declared trace order, with a two-phase same-tick update so coalesced
-lines cannot acquire fabricated address-order distance. Global and local
-address origins are separate curves. The sector curve couples four 32-byte
+lines cannot acquire fabricated address-order distance. It now emits a
+batch-first lower curve and conservative upper interval envelope for legal
+same-tick tie orders. Global and local address origins are separate curves.
+The sector curve couples four 32-byte
 valid bits to a 128-byte line tag: any line touch refreshes the tag and a line
 eviction invalidates all sectors. It reports line/sector MRC counts and the
 line-tag versus resident-sector-fill decomposition on a declared logical
@@ -145,6 +147,17 @@ violations. Compared with the accepted pre-MRC lanes,
 zero metadata differences, and zero common numeric differences for both
 architectures. The observer added no timing/cache behavior and its compressed
 output growth was about one percent.
+
+Gemini's same-tick adversarial review then required an order-independent
+interval envelope rather than a silently serialized point curve. The final
+envelope artifacts are `full_replay_runs/mrc_envelope2_sm120_enabled/` and
+`full_replay_runs/mrc_envelope2_sm86/`. They again pass every launch invariant
+with the same 339/339 and 286/62/8 status profiles; the comparator reports
+zero common numeric differences against the accepted pre-MRC lanes. The
+lower curve is batch-first; the upper curve conservatively includes legal
+same-tick tie-order effects. Across both corpora the maximum observed batch
+width is 32 lines and the maximum line-distance envelope width is 37 lines
+(the theoretical two-batch bound is larger). No NCU value is used.
 
 ## Async-client L1 scope refinement
 

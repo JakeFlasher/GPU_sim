@@ -27,8 +27,10 @@ valid, so all claims remain subject to the contracts in
   footprint/survival; and reuse interval as a separately named diagnostic.
 * Same-tick coalesced lines must be queried as a batch before any are inserted
   into the recency structure. Address-order insertion would manufacture
-  distance. Tier-1 streams are within-warp trace order; Tier-2 and Tier-3
-  streams require an explicitly deterministic SM/cycle or transaction order.
+  distance. The implementation reports a batch-first lower curve plus a
+  conservative interval upper curve for legal intra-tick tie orders. Tier-1
+  streams are within-warp trace order; Tier-2 and Tier-3 streams require an
+  explicitly deterministic SM/cycle or transaction order.
 * A fully-associative MRC is a zero-latency LRU locality reference. It does not
   model MSHR/pending-fill merges, sector-fill latency, set hashing, or slice
   placement. Those effects remain in the live cache model or explicit Class-B

@@ -93,6 +93,13 @@ shadow-only and must be validated against its exact trace reference, never
 fit to NCU. Pending fills, set/slice geometry, TMA completion, and cross-warp
 arrival order remain outside this metric.
 
+Same-tick references now emit an order-independent interval envelope: the
+batch-first curve is the lower endpoint and a conservative upper endpoint
+includes legal previous/current-batch tie effects. Do not collapse this
+envelope to an address-ordered point estimate. The final envelope2 full
+replays passed 339/339 SM120 and 286/62/8 SM86 status gates with zero common
+numeric differences in existing metrics.
+
 The subsequent SM120 async-client slice excludes only the trace-qualified
 `l1_async_older_pending_merges_global` class from external global-op_ld L1 hit
 projections. It passed complete full replays at twelve workers for both lanes,

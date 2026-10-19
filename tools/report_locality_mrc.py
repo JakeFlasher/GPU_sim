@@ -75,9 +75,15 @@ def _aggregate(path: Path) -> dict[str, Any]:
                         "cold_line_references": 0,
                         "cold_sector_references": 0,
                         "line_miss_references": [0] * n,
+                        "line_miss_references_upper": [0] * n,
                         "sector_miss_references": [0] * n,
+                        "sector_miss_references_upper": [0] * n,
                         "sector_line_tag_miss_references": [0] * n,
                         "sector_resident_fill_miss_references": [0] * n,
+                        "sector_line_tag_miss_references_upper": [0] * n,
+                        "sector_resident_fill_miss_references_upper": [0] * n,
+                        "same_tick_max_batch_lines": 0,
+                        "maximum_line_rd_envelope_width": 0,
                     },
                 )
                 total["launches"] += 1
@@ -93,9 +99,20 @@ def _aggregate(path: Path) -> dict[str, Any]:
                     "sector_miss_references",
                     "sector_line_tag_miss_references",
                     "sector_resident_fill_miss_references",
+                    "line_miss_references_upper",
+                    "sector_miss_references_upper",
+                    "sector_line_tag_miss_references_upper",
+                    "sector_resident_fill_miss_references_upper",
                 ):
                     for index, value in enumerate(row[field]):
                         total[field][index] += int(value)
+                total["same_tick_max_batch_lines"] = max(
+                    total["same_tick_max_batch_lines"], int(row["same_tick_max_batch_lines"])
+                )
+                total["maximum_line_rd_envelope_width"] = max(
+                    total["maximum_line_rd_envelope_width"],
+                    int(row["maximum_line_rd_envelope_width"]),
+                )
                 line_misses = row["line_miss_references"]
                 sector_misses = row["sector_miss_references"]
                 if any(a < b for a, b in zip(line_misses, line_misses[1:])):
@@ -114,6 +131,14 @@ def _aggregate(path: Path) -> dict[str, Any]:
         row["sector_miss_ratio"] = [
             value / sector_refs if sector_refs else None
             for value in row["sector_miss_references"]
+        ]
+        row["line_miss_ratio_upper"] = [
+            value / line_refs if line_refs else None
+            for value in row["line_miss_references_upper"]
+        ]
+        row["sector_miss_ratio_upper"] = [
+            value / sector_refs if sector_refs else None
+            for value in row["sector_miss_references_upper"]
         ]
         row["cold_sector_fraction"] = (
             row["cold_sector_references"] / sector_refs if sector_refs else None

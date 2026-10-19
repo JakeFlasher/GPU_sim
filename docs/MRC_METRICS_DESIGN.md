@@ -43,11 +43,20 @@ out trace streams, not a fabricated hardware-accuracy claim.
 
 Each logical tick is a non-empty batch of origin-qualified 128-byte line keys
 and four-bit 32-byte sector masks. All queries for a tick occur before any
-line is inserted into the recency structure (two-phase batch update); sorting
-same-tick lines by address would create artificial distance. A first line or
-sector is `cold`; final references are finite observations, while an
-unobserved future reuse is right-censored rather than imputed. Capacity is
-always expressed in `lines_128B` and sector volumes in `sectors_32B`.
+line is inserted into the recency structure (two-phase batch update). The
+emitted batch-first curve is the optimistic lower endpoint; a conservative
+upper endpoint adds distinct lines from the previous and current same-tick
+batches that could fall inside the interval under another legal tie order.
+This interval envelope avoids inventing an address-order serialization. A
+first line or sector is `cold`; final references are finite observations,
+while an unobserved future reuse is right-censored rather than imputed.
+Capacity is always expressed in `lines_128B` and sector volumes in
+`sectors_32B`.
+
+The observer emits `*_miss_references` as the batch-first lower endpoint and
+`*_miss_references_upper` as a conservative tie-order upper endpoint. Their
+difference is an uncertainty envelope caused by missing intra-tick order, not
+measurement noise and not a fitted hardware parameter.
 
 The fully-associative curve is a zero-latency locality reference. It does not
 silently include MSHR/pending-fill merges, fill latency, set/slice hashing, or
