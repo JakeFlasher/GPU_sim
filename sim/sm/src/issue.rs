@@ -2832,44 +2832,22 @@ fn deep_constant_load(
         && ((!is_u16_opcode(slot.opcode_text()) && stream_pressure) || halfword_pressure)
 }
 
-fn is_u16_global_store_opcode(opcode_text: &str) -> bool {
-    opcode_head(opcode_text) == "STG"
-        && opcode_text
-            .split_ascii_whitespace()
-            .next()
-            .is_some_and(|opcode| opcode.split('.').any(|modifier| modifier == "U16"))
-}
-
-/// Select the observer-only write-tag window for the narrow memory shape for
-/// which it is defined: a global U16 store stream paired with constant-space
-/// global loads and no shared-memory traffic.  Other kernels retain the
-/// topology-only write observer until their own independent cache policy is
-/// characterized; this prevents a partial policy from silently changing
-/// unrelated read/write rows.
+/// Select the observer-only write-tag window for SM86 global stores.  The
+/// 256-set/2-tag-slot window is an architecture-level report-only capability;
+/// it must be instantiated for every cacheable global-store stream so the
+/// consumer cannot silently read a disabled counter on ordinary STG launches.
+/// Bypass/untagged forms never reach this `GlobalStore` path and therefore do
+/// not allocate observer tags.
 pub(crate) fn stateful_write_lookup_observer_enabled(schedule: &FunctionSchedule) -> bool {
-    // The stateful tag-window observer is an SM86-specific, independently
-    // characterized accounting path. SM120 does not yet have a measured
-    // L1TEX write-lookup geometry. Do not instantiate an Ampere observer on
-    // Blackwell merely because the same SASS shape occurs. Flat replay has
-    // no L1 lookup counters at all; its store timing still follows the normal
-    // traced service path. This does not supply an SM120 cache hypothesis.
     if schedule.arch != ArchId::Sm86 {
         return false;
     }
-    let mut has_constant_load = false;
-    let mut has_u16_store = false;
-    let mut has_other_global_store = false;
-    let mut has_shared_memory = false;
+    let mut has_global_store = false;
     for slot in schedule.by_pc.values() {
         let head = opcode_head(slot.opcode_text());
-        has_constant_load |= is_constant_load_opcode(slot.opcode_text());
-        has_u16_store |= is_u16_global_store_opcode(slot.opcode_text());
-        if matches!(head, "STG" | "STL") && !is_u16_global_store_opcode(slot.opcode_text()) {
-            has_other_global_store = true;
-        }
-        has_shared_memory |= matches!(head, "LDS" | "LDSM" | "STS" | "STSM");
+        has_global_store |= head == "STG";
     }
-    has_constant_load && has_u16_store && !has_other_global_store && !has_shared_memory
+    has_global_store
 }
 
 #[derive(Debug, Clone, Copy)]

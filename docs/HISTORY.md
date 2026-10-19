@@ -47,6 +47,16 @@ it reuses the validated form-qualified global lookup endpoint, leaves SM120's
 alpha path unchanged, and reduced joined SM86 unified-L1 APE from 29.04% to
 12.15%. It does not yet satisfy the <10% objective.
 
+The accepted follow-up after that correction fixes the observer topology rather
+than tuning a score: SM86 report-only write-tag state is now private per traced
+SM (256 sets × 2 slots), with explicit producer/consumer activation metadata
+and physical store-tag fallback when disabled. Complete twelve-worker replay
+preserved the 286/62/8 status profile and bit-identical IPC, L2, DRAM, and
+timing; unified-L1 mean APE moved 43.71%→24.66% overall, 12.15%→9.87% on
+exact joins, and 88.42%→45.61% on ordered fallback joins. A repeated full lane
+was numerically identical apart from wall-clock fields, and a fresh SM120
+339/339 DRAM-enabled lane was unchanged. The residual objective remains open.
+
 ## Repository cleanup
 
 The active tree no longer treats branch-specific plans, H/S milestone diaries,

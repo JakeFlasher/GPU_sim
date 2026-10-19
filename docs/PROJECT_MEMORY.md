@@ -52,6 +52,17 @@ changed. This is a real full-replay improvement, but the <10% objective is not
 yet met because ordinary operation-read/client scope, unified-L1 scope, DRAM
 clients, and IPC frontiers remain unresolved.
 
+The current SM86 write-tag observer correction is per-SM rather than GPU-wide:
+each traced SM actor owns an independent 256-set/2-slot report-only table,
+matching private L1TEX residency. When the observer is disabled, native
+unified-L1 projection uses physical store line-tag hits instead of a structural
+zero. A complete twelve-worker replay preserved the required 286/62/8 status
+profile and bit-identical IPC/L2/DRAM/timing while improving SM86 unified-L1
+mean APE 43.71%→24.66% overall, 12.15%→9.87% on exact joins, and
+88.42%→45.61% on ordered fallback joins. A repeat full replay was numerically
+identical apart from wall clocks; SM120 was rerun 339/339 and unchanged. This
+is an accepted SM86 report-only scope correction, not full target closure.
+
 For future replay work, run **full replay only**. Do not spend time producing
 fast-mode artifacts; use the complete integrated `l1-l2` path with all
 supported features enabled by default and twelve workers.

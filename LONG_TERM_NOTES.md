@@ -83,6 +83,16 @@ This file is deliberately a current-state note rather than a duplicate.
   endpoint, leaves SM120 unchanged, passed both full status profiles, and
   reduced joined SM86 unified-L1 mean APE from 29.04% to 12.15%. The <10%
   objective remains open.
+* Accepted SM86 private-observer correction: the report-only write-tag table
+  is now one independent 256-set/2-slot table per traced SM actor, not one
+  GPU-wide shared table. The producer/consumer activation flag prevents
+  disabled launches from reading a structural zero and falls back to physical
+  store line-tag hits. Twelve-worker full replay preserved 286/62/8 statuses
+  and bit-identical IPC/L2/DRAM/timing; unified-L1 mean APE improved
+  43.71%→24.66% overall, 12.15%→9.87% exact joins, and 88.42%→45.61%
+  ordered fallback. A repeat full replay was numerically identical apart from
+  wall clocks; the required SM120 339/339 DRAM-enabled replay was unchanged.
+  This is report-only topology correction, not full objective closure.
 * Novel candidate-2 review: SM120 native metrics return from the alpha branch
   before the later SM86-only L2 native block, so the claimed SM120 rank-0 L2
   precedence bug is inapplicable. TMA-shadow-hit addition worsened retained

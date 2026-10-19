@@ -78,8 +78,8 @@ use crate::issue::{
     AsyncInstrumentationOrderDiagnostics, BlockReplay, InstrumentationOrderAnchor, IssueError,
     IssueModelParams, IssueResourceSource, MAX_ASYNC_DECISION_SNAPSHOTS, MemoryAdmissionCandidate,
     MemoryServiceCandidate, PayloadStoreSite, ReplayInst, SharedMemoryResidency, SmSimResult,
-    TailFlags, WarpReplay, simulate_sm_with_residency, validate_memory_admission_candidates,
-    validate_memory_service_candidates,
+    TailFlags, WarpReplay, simulate_sm_with_residency, stateful_write_lookup_observer_enabled,
+    validate_memory_admission_candidates, validate_memory_service_candidates,
 };
 
 fn append_bounded_async_decision_snapshots(
@@ -5446,6 +5446,11 @@ fn replay_kernel_with_schedule_and_l2_and_candidates_with_payload_events(
             _ => None,
         },
     )?;
+    // Keep the producer/consumer contract explicit for the report-only SM86
+    // write-tag observer. The emitter must not consume `write_lookup_hits`
+    // when the issue model did not instantiate the observer for this launch.
+    trace_metrics.l1_write_lookup_observer_active =
+        stateful_write_lookup_observer_enabled(schedule);
     let instrumentation_order = observe_async_instrumentation_order(&per_sm_blocks, schedule)?;
     #[cfg(feature = "campaign")]
     if matches!(

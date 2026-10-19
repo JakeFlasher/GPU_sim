@@ -3790,12 +3790,25 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
     if let Some(candidate) = memory_admission_feedback {
         candidate.validate_feedback(params.read_barrier_latency)?;
     }
-    let shared_write_lookup_observer = stateful_write_lookup_observer_enabled(schedule)
-        .then(|| L1WriteLookupObserver::for_arch(arch))
-        .transpose()
-        .map_err(IssueError::from)?
-        .map(|observer| Rc::new(RefCell::new(observer)));
     let sm_ids: Vec<i32> = per_sm_blocks.keys().copied().collect();
+    // L1TEX tags are private to each SM. Keep one report-only write-lookup
+    // observer per SM rather than sharing a tag window across all actors;
+    // cross-SM sharing fabricates hits when the same line index is reused on
+    // another SM.
+    let write_lookup_observers = if stateful_write_lookup_observer_enabled(schedule) {
+        Some(
+            sm_ids
+                .iter()
+                .map(|_| {
+                    L1WriteLookupObserver::for_arch(arch)
+                        .map(|observer| Rc::new(RefCell::new(observer)))
+                        .map_err(IssueError::from)
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        )
+    } else {
+        None
+    };
     let l1_visibility_protocol =
         coherence_config.is_some_and(CoherenceConfig::l1_visibility_protocol);
     let l1_resident_writeback =
@@ -3825,7 +3838,9 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                 params,
                 shared_memory_residency,
                 SmMemMode::L1Shared(l1_config),
-                shared_write_lookup_observer.clone(),
+                write_lookup_observers
+                    .as_ref()
+                    .and_then(|observers| observers.get(sm_ix).cloned()),
             )?;
             if l1_visibility_protocol {
                 let requester =

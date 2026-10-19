@@ -185,6 +185,29 @@ Full status profiles passed; on 107 joined SM86 NCU rows, unified-L1 mean APE
 improved from 29.04% to 12.15%, with no other joined metric changing. It
 remains above 10%, so the goal is not complete.
 
+### SM86 per-SM write-tag observer correction
+
+The SM86 report-only write-tag observer was then corrected from one
+GPU-wide table to one independent 256-set/2-slot table per traced SM. The
+previous sharing crossed private-L1 boundaries and fabricated cross-SM tag
+interference. The observer remains diagnostic/report-only: it does not mutate
+the timing L1, MSHRs, L2, DRAM, or any issue/completion frontier. Disabled
+observer launches now fall back to the physical store line-tag counter rather
+than silently consuming a structural zero.
+
+The complete full replay used twelve workers and preserved the required SM86
+status profile (286 `ok`, 62 `control_error`, 8 `replay_error`; 12,392
+launches). Compared with the prior full replay, SM86 unified-L1 mean APE
+improved **43.71% → 24.66%** over all 286 successful captures; exact joins
+improved **12.15% → 9.87%**, and ordered fallback joins improved **88.42% →
+45.61%**. IPC, L2, DRAM, issue counts, and timing frontiers were bit-identical.
+A second complete twelve-worker replay matched all non-wall-clock numeric
+fields exactly (`FULL_NUMERIC_COMPARISON_PER_SM.json`). The separately rerun
+SM120 DRAM-enabled lane completed 339/339 `ok` captures and 11,558 launches;
+its outputs were unchanged. This is an accepted SM86-only accuracy correction,
+but the global <10% objective remains open because fallback L1, SM86 IPC/DRAM,
+and several SM120 metrics still exceed the target.
+
 The proposed SM120 native-L2 precedence correction was separately rejected:
 the SM120 alpha native-metrics branch exits before the later SM86-only L2
 native block, so no SM120 rank-0 native-L2 override exists. Adding TMA-shadow

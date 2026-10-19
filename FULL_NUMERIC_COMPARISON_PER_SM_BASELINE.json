@@ -1,0 +1,975 @@
+{
+  "comparison_schema_version": 2,
+  "normalization": {
+    "canonical_capture": "replace('/', '__') for the historical SM120 capture-id separator only; collisions fail",
+    "numeric_fields": "all common finite numeric fields, excluding documented wall-clock and observer-only additive fields",
+    "required_metadata": [
+      "status",
+      "architecture",
+      "memory_mode",
+      "cache_scope",
+      "launch_count",
+      "returncode"
+    ]
+  },
+  "cases": [
+    {
+      "label": "sm86_per_sm",
+      "baseline_path": "full_replay_runs/l2_scope3_sm86/full.jsonl.zst",
+      "unified_path": "full_replay_runs/cand_write_per_sm_sm86/full.jsonl.zst",
+      "rows": 356,
+      "unified_rows": 356,
+      "common_rows": 356,
+      "missing_rows": [],
+      "extra_rows": [],
+      "duplicate_baseline_rows": [],
+      "duplicate_unified_rows": [],
+      "nonfinite_baseline_rows": [],
+      "nonfinite_unified_rows": [],
+      "status_counts_baseline": {
+        "control_error": 62,
+        "ok": 286,
+        "replay_error": 8
+      },
+      "status_counts_unified": {
+        "control_error": 62,
+        "ok": 286,
+        "replay_error": 8
+      },
+      "required_metadata_diffs": [],
+      "missing_baseline_numeric_fields": [],
+      "rows_with_numeric_diffs": 266,
+      "numeric_diff_count": 132139,
+      "top_numeric_diffs": [
+        {
+          "path": "launches.0.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 241,
+          "example": [
+            "cp_async_shared_tile_copy",
+            6400,
+            0
+          ]
+        },
+        {
+          "path": "launches.0.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 241,
+          "example": [
+            "cp_async_shared_tile_copy",
+            25.0,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.0.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.numerator",
+          "count": 203,
+          "example": [
+            "cp_async_shared_tile_copy",
+            128,
+            64
+          ]
+        },
+        {
+          "path": "launches.0.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.value",
+          "count": 203,
+          "example": [
+            "cp_async_shared_tile_copy",
+            0.5,
+            0.25
+          ]
+        },
+        {
+          "path": "launches.0.cache_lookup_predictions.1.observer.hits",
+          "count": 203,
+          "example": [
+            "cp_async_shared_tile_copy",
+            128,
+            64
+          ]
+        },
+        {
+          "path": "launches.0.cache_lookup_predictions.1.observer.misses",
+          "count": 203,
+          "example": [
+            "cp_async_shared_tile_copy",
+            128,
+            192
+          ]
+        },
+        {
+          "path": "launches.0.cache_lookup_predictions.1.timing_state.remaining_lookups",
+          "count": 203,
+          "example": [
+            "cp_async_shared_tile_copy",
+            128,
+            192
+          ]
+        },
+        {
+          "path": "launches.0.native_metrics.metrics.l1_unified_write_lookup_hits.numerator",
+          "count": 202,
+          "example": [
+            "cp_async_shared_tile_copy",
+            64,
+            0
+          ]
+        },
+        {
+          "path": "launches.0.native_metrics.metrics.l1_unified_write_lookup_hits.value",
+          "count": 202,
+          "example": [
+            "cp_async_shared_tile_copy",
+            64.0,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.0.native_metrics.metrics.l1_global_write_lookup_hits.numerator",
+          "count": 202,
+          "example": [
+            "cp_async_shared_tile_copy",
+            64,
+            0
+          ]
+        },
+        {
+          "path": "launches.0.native_metrics.metrics.l1_global_write_lookup_hits.value",
+          "count": 202,
+          "example": [
+            "cp_async_shared_tile_copy",
+            64.0,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.0.counters.l1.write_lookup_hits",
+          "count": 202,
+          "example": [
+            "cp_async_shared_tile_copy",
+            64,
+            0
+          ]
+        },
+        {
+          "path": "launches.0.cache_lookup_predictions.1.timing_state.observer_reclassified_lookups",
+          "count": 198,
+          "example": [
+            "cp_async_shared_tile_copy",
+            64,
+            0
+          ]
+        },
+        {
+          "path": "launches.1.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 151,
+          "example": [
+            "simbench_l1_warm_cold_pair_relaunch",
+            32000,
+            25600
+          ]
+        },
+        {
+          "path": "launches.1.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 151,
+          "example": [
+            "simbench_l1_warm_cold_pair_relaunch",
+            62.37816764132553,
+            49.902534113060426
+          ]
+        },
+        {
+          "path": "launches.1.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.numerator",
+          "count": 149,
+          "example": [
+            "simbench_l1_warm_cold_pair_relaunch",
+            384,
+            320
+          ]
+        },
+        {
+          "path": "launches.1.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.value",
+          "count": 149,
+          "example": [
+            "simbench_l1_warm_cold_pair_relaunch",
+            0.7485380116959064,
+            0.6237816764132553
+          ]
+        },
+        {
+          "path": "launches.1.cache_lookup_predictions.1.observer.hits",
+          "count": 149,
+          "example": [
+            "simbench_l1_warm_cold_pair_relaunch",
+            384,
+            320
+          ]
+        },
+        {
+          "path": "launches.1.cache_lookup_predictions.1.observer.misses",
+          "count": 149,
+          "example": [
+            "simbench_l1_warm_cold_pair_relaunch",
+            129,
+            193
+          ]
+        },
+        {
+          "path": "launches.1.cache_lookup_predictions.1.timing_state.remaining_lookups",
+          "count": 149,
+          "example": [
+            "simbench_l1_warm_cold_pair_relaunch",
+            129,
+            193
+          ]
+        },
+        {
+          "path": "launches.1.native_metrics.metrics.l1_unified_write_lookup_hits.numerator",
+          "count": 149,
+          "example": [
+            "simbench_l1_warm_cold_pair_relaunch",
+            64,
+            0
+          ]
+        },
+        {
+          "path": "launches.1.native_metrics.metrics.l1_unified_write_lookup_hits.value",
+          "count": 149,
+          "example": [
+            "simbench_l1_warm_cold_pair_relaunch",
+            64.0,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.1.native_metrics.metrics.l1_global_write_lookup_hits.numerator",
+          "count": 149,
+          "example": [
+            "simbench_l1_warm_cold_pair_relaunch",
+            64,
+            0
+          ]
+        },
+        {
+          "path": "launches.1.native_metrics.metrics.l1_global_write_lookup_hits.value",
+          "count": 149,
+          "example": [
+            "simbench_l1_warm_cold_pair_relaunch",
+            64.0,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.1.counters.l1.write_lookup_hits",
+          "count": 149,
+          "example": [
+            "simbench_l1_warm_cold_pair_relaunch",
+            64,
+            0
+          ]
+        },
+        {
+          "path": "launches.1.cache_lookup_predictions.1.timing_state.observer_reclassified_lookups",
+          "count": 143,
+          "example": [
+            "simbench_l1_warm_cold_pair_relaunch",
+            64,
+            0
+          ]
+        },
+        {
+          "path": "launches.8.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 133,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            51200,
+            12800
+          ]
+        },
+        {
+          "path": "launches.8.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 133,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            33.333333333333336,
+            8.333333333333334
+          ]
+        },
+        {
+          "path": "launches.2.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 132,
+          "example": [
+            "simbench_l3_diffusion_resnet_time_block_bf16",
+            2000,
+            1600
+          ]
+        },
+        {
+          "path": "launches.2.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 132,
+          "example": [
+            "simbench_l3_diffusion_resnet_time_block_bf16",
+            58.8235294117647,
+            47.05882352941177
+          ]
+        },
+        {
+          "path": "launches.9.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 130,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            51200,
+            12800
+          ]
+        },
+        {
+          "path": "launches.9.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 130,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            33.333333333333336,
+            8.333333333333334
+          ]
+        },
+        {
+          "path": "launches.3.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 129,
+          "example": [
+            "simbench_l3_diffusion_resnet_time_block_bf16",
+            31300,
+            37400
+          ]
+        },
+        {
+          "path": "launches.3.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 129,
+          "example": [
+            "simbench_l3_diffusion_resnet_time_block_bf16",
+            71.13636363636364,
+            85.0
+          ]
+        },
+        {
+          "path": "launches.8.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.numerator",
+          "count": 128,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            768,
+            256
+          ]
+        },
+        {
+          "path": "launches.8.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.value",
+          "count": 128,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            0.5,
+            0.16666666666666666
+          ]
+        },
+        {
+          "path": "launches.8.cache_lookup_predictions.1.observer.hits",
+          "count": 128,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            768,
+            256
+          ]
+        },
+        {
+          "path": "launches.8.cache_lookup_predictions.1.observer.misses",
+          "count": 128,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            768,
+            1280
+          ]
+        },
+        {
+          "path": "launches.8.cache_lookup_predictions.1.timing_state.remaining_lookups",
+          "count": 128,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            768,
+            1280
+          ]
+        },
+        {
+          "path": "launches.8.native_metrics.metrics.l1_unified_write_lookup_hits.numerator",
+          "count": 128,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            512,
+            0
+          ]
+        },
+        {
+          "path": "launches.8.native_metrics.metrics.l1_unified_write_lookup_hits.value",
+          "count": 128,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            512.0,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.8.native_metrics.metrics.l1_global_write_lookup_hits.numerator",
+          "count": 128,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            512,
+            0
+          ]
+        },
+        {
+          "path": "launches.8.native_metrics.metrics.l1_global_write_lookup_hits.value",
+          "count": 128,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            512.0,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.8.counters.l1.write_lookup_hits",
+          "count": 128,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            512,
+            0
+          ]
+        },
+        {
+          "path": "launches.2.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.numerator",
+          "count": 126,
+          "example": [
+            "simbench_l3_diffusion_resnet_time_block_bf16",
+            24,
+            20
+          ]
+        },
+        {
+          "path": "launches.2.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.value",
+          "count": 126,
+          "example": [
+            "simbench_l3_diffusion_resnet_time_block_bf16",
+            0.7058823529411765,
+            0.5882352941176471
+          ]
+        },
+        {
+          "path": "launches.2.cache_lookup_predictions.1.observer.hits",
+          "count": 126,
+          "example": [
+            "simbench_l3_diffusion_resnet_time_block_bf16",
+            24,
+            20
+          ]
+        },
+        {
+          "path": "launches.2.cache_lookup_predictions.1.observer.misses",
+          "count": 126,
+          "example": [
+            "simbench_l3_diffusion_resnet_time_block_bf16",
+            10,
+            14
+          ]
+        },
+        {
+          "path": "launches.2.cache_lookup_predictions.1.timing_state.remaining_lookups",
+          "count": 126,
+          "example": [
+            "simbench_l3_diffusion_resnet_time_block_bf16",
+            10,
+            14
+          ]
+        },
+        {
+          "path": "launches.9.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.numerator",
+          "count": 126,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            768,
+            256
+          ]
+        },
+        {
+          "path": "launches.9.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.value",
+          "count": 126,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            0.5,
+            0.16666666666666666
+          ]
+        },
+        {
+          "path": "launches.9.cache_lookup_predictions.1.observer.hits",
+          "count": 126,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            768,
+            256
+          ]
+        },
+        {
+          "path": "launches.9.cache_lookup_predictions.1.observer.misses",
+          "count": 126,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            768,
+            1280
+          ]
+        },
+        {
+          "path": "launches.9.cache_lookup_predictions.1.timing_state.remaining_lookups",
+          "count": 126,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            768,
+            1280
+          ]
+        },
+        {
+          "path": "launches.2.cache_lookup_predictions.1.timing_state.observer_reclassified_lookups",
+          "count": 125,
+          "example": [
+            "simbench_l3_diffusion_resnet_time_block_bf16",
+            4,
+            0
+          ]
+        },
+        {
+          "path": "launches.2.native_metrics.metrics.l1_unified_write_lookup_hits.numerator",
+          "count": 125,
+          "example": [
+            "simbench_l3_diffusion_resnet_time_block_bf16",
+            4,
+            0
+          ]
+        },
+        {
+          "path": "launches.2.native_metrics.metrics.l1_unified_write_lookup_hits.value",
+          "count": 125,
+          "example": [
+            "simbench_l3_diffusion_resnet_time_block_bf16",
+            4.0,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.2.native_metrics.metrics.l1_global_write_lookup_hits.numerator",
+          "count": 125,
+          "example": [
+            "simbench_l3_diffusion_resnet_time_block_bf16",
+            4,
+            0
+          ]
+        },
+        {
+          "path": "launches.2.native_metrics.metrics.l1_global_write_lookup_hits.value",
+          "count": 125,
+          "example": [
+            "simbench_l3_diffusion_resnet_time_block_bf16",
+            4.0,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.2.counters.l1.write_lookup_hits",
+          "count": 125,
+          "example": [
+            "simbench_l3_diffusion_resnet_time_block_bf16",
+            4,
+            0
+          ]
+        },
+        {
+          "path": "launches.8.cache_lookup_predictions.1.timing_state.observer_reclassified_lookups",
+          "count": 125,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            512,
+            0
+          ]
+        },
+        {
+          "path": "launches.9.native_metrics.metrics.l1_unified_write_lookup_hits.numerator",
+          "count": 125,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            512,
+            0
+          ]
+        },
+        {
+          "path": "launches.9.native_metrics.metrics.l1_unified_write_lookup_hits.value",
+          "count": 125,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            512.0,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.9.native_metrics.metrics.l1_global_write_lookup_hits.numerator",
+          "count": 125,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            512,
+            0
+          ]
+        },
+        {
+          "path": "launches.9.native_metrics.metrics.l1_global_write_lookup_hits.value",
+          "count": 125,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            512.0,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.9.counters.l1.write_lookup_hits",
+          "count": 125,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            512,
+            0
+          ]
+        },
+        {
+          "path": "launches.9.cache_lookup_predictions.1.timing_state.observer_reclassified_lookups",
+          "count": 123,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            512,
+            0
+          ]
+        },
+        {
+          "path": "launches.3.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.numerator",
+          "count": 122,
+          "example": [
+            "simbench_l3_diffusion_resnet_time_block_bf16",
+            386,
+            382
+          ]
+        },
+        {
+          "path": "launches.3.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.value",
+          "count": 122,
+          "example": [
+            "simbench_l3_diffusion_resnet_time_block_bf16",
+            0.8772727272727273,
+            0.8681818181818182
+          ]
+        },
+        {
+          "path": "launches.3.cache_lookup_predictions.1.observer.hits",
+          "count": 122,
+          "example": [
+            "simbench_l3_diffusion_resnet_time_block_bf16",
+            386,
+            382
+          ]
+        },
+        {
+          "path": "launches.3.cache_lookup_predictions.1.observer.misses",
+          "count": 122,
+          "example": [
+            "simbench_l3_diffusion_resnet_time_block_bf16",
+            54,
+            58
+          ]
+        },
+        {
+          "path": "launches.3.cache_lookup_predictions.1.timing_state.remaining_lookups",
+          "count": 122,
+          "example": [
+            "simbench_l3_diffusion_resnet_time_block_bf16",
+            54,
+            58
+          ]
+        },
+        {
+          "path": "launches.3.native_metrics.metrics.l1_unified_write_lookup_hits.numerator",
+          "count": 121,
+          "example": [
+            "simbench_l3_diffusion_resnet_time_block_bf16",
+            4,
+            0
+          ]
+        },
+        {
+          "path": "launches.3.native_metrics.metrics.l1_unified_write_lookup_hits.value",
+          "count": 121,
+          "example": [
+            "simbench_l3_diffusion_resnet_time_block_bf16",
+            4.0,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.3.native_metrics.metrics.l1_global_write_lookup_hits.numerator",
+          "count": 121,
+          "example": [
+            "simbench_l3_diffusion_resnet_time_block_bf16",
+            4,
+            0
+          ]
+        },
+        {
+          "path": "launches.3.native_metrics.metrics.l1_global_write_lookup_hits.value",
+          "count": 121,
+          "example": [
+            "simbench_l3_diffusion_resnet_time_block_bf16",
+            4.0,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.3.counters.l1.write_lookup_hits",
+          "count": 121,
+          "example": [
+            "simbench_l3_diffusion_resnet_time_block_bf16",
+            4,
+            0
+          ]
+        },
+        {
+          "path": "launches.3.cache_lookup_predictions.1.timing_state.observer_reclassified_lookups",
+          "count": 119,
+          "example": [
+            "simbench_l3_diffusion_resnet_time_block_bf16",
+            4,
+            0
+          ]
+        },
+        {
+          "path": "launches.6.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 119,
+          "example": [
+            "simbench_l3_vit_encoder_block_bf16",
+            200,
+            3300
+          ]
+        },
+        {
+          "path": "launches.6.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 119,
+          "example": [
+            "simbench_l3_vit_encoder_block_bf16",
+            3.7037037037037037,
+            61.111111111111114
+          ]
+        },
+        {
+          "path": "launches.5.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 117,
+          "example": [
+            "simbench_l3_vit_encoder_block_bf16",
+            0,
+            3600
+          ]
+        },
+        {
+          "path": "launches.5.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 117,
+          "example": [
+            "simbench_l3_vit_encoder_block_bf16",
+            0.0,
+            70.58823529411765
+          ]
+        },
+        {
+          "path": "launches.6.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.numerator",
+          "count": 116,
+          "example": [
+            "simbench_l3_vit_encoder_block_bf16",
+            35,
+            33
+          ]
+        },
+        {
+          "path": "launches.6.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.value",
+          "count": 116,
+          "example": [
+            "simbench_l3_vit_encoder_block_bf16",
+            0.6481481481481481,
+            0.6111111111111112
+          ]
+        },
+        {
+          "path": "launches.6.cache_lookup_predictions.1.observer.hits",
+          "count": 116,
+          "example": [
+            "simbench_l3_vit_encoder_block_bf16",
+            35,
+            33
+          ]
+        },
+        {
+          "path": "launches.6.cache_lookup_predictions.1.observer.misses",
+          "count": 116,
+          "example": [
+            "simbench_l3_vit_encoder_block_bf16",
+            19,
+            21
+          ]
+        },
+        {
+          "path": "launches.6.cache_lookup_predictions.1.timing_state.remaining_lookups",
+          "count": 116,
+          "example": [
+            "simbench_l3_vit_encoder_block_bf16",
+            19,
+            21
+          ]
+        },
+        {
+          "path": "launches.6.native_metrics.metrics.l1_unified_write_lookup_hits.numerator",
+          "count": 116,
+          "example": [
+            "simbench_l3_vit_encoder_block_bf16",
+            2,
+            0
+          ]
+        },
+        {
+          "path": "launches.6.native_metrics.metrics.l1_unified_write_lookup_hits.value",
+          "count": 116,
+          "example": [
+            "simbench_l3_vit_encoder_block_bf16",
+            2.0,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.6.native_metrics.metrics.l1_global_write_lookup_hits.numerator",
+          "count": 116,
+          "example": [
+            "simbench_l3_vit_encoder_block_bf16",
+            2,
+            0
+          ]
+        },
+        {
+          "path": "launches.6.native_metrics.metrics.l1_global_write_lookup_hits.value",
+          "count": 116,
+          "example": [
+            "simbench_l3_vit_encoder_block_bf16",
+            2.0,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.6.counters.l1.write_lookup_hits",
+          "count": 116,
+          "example": [
+            "simbench_l3_vit_encoder_block_bf16",
+            2,
+            0
+          ]
+        },
+        {
+          "path": "launches.6.cache_lookup_predictions.1.timing_state.observer_reclassified_lookups",
+          "count": 114,
+          "example": [
+            "simbench_l3_vit_encoder_block_bf16",
+            2,
+            0
+          ]
+        },
+        {
+          "path": "launches.11.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 114,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            3200,
+            0
+          ]
+        },
+        {
+          "path": "launches.11.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 114,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            23.529411764705884,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.5.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.numerator",
+          "count": 113,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            96,
+            32
+          ]
+        },
+        {
+          "path": "launches.5.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.value",
+          "count": 113,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            0.5,
+            0.16666666666666666
+          ]
+        },
+        {
+          "path": "launches.5.cache_lookup_predictions.1.observer.hits",
+          "count": 113,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            96,
+            32
+          ]
+        },
+        {
+          "path": "launches.5.cache_lookup_predictions.1.observer.misses",
+          "count": 113,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            96,
+            160
+          ]
+        },
+        {
+          "path": "launches.5.cache_lookup_predictions.1.timing_state.remaining_lookups",
+          "count": 113,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            96,
+            160
+          ]
+        }
+      ],
+      "ok": false
+    },
+    {
+      "label": "sm120_per_sm",
+      "baseline_path": "full_replay_runs/cand1_sm120_enabled/full.jsonl.zst",
+      "unified_path": "full_replay_runs/cand_write_per_sm_sm120_enabled/full.jsonl.zst",
+      "rows": 339,
+      "unified_rows": 339,
+      "common_rows": 339,
+      "missing_rows": [],
+      "extra_rows": [],
+      "duplicate_baseline_rows": [],
+      "duplicate_unified_rows": [],
+      "nonfinite_baseline_rows": [],
+      "nonfinite_unified_rows": [],
+      "status_counts_baseline": {
+        "ok": 339
+      },
+      "status_counts_unified": {
+        "ok": 339
+      },
+      "required_metadata_diffs": [],
+      "missing_baseline_numeric_fields": [],
+      "rows_with_numeric_diffs": 0,
+      "numeric_diff_count": 0,
+      "top_numeric_diffs": [],
+      "ok": true
+    }
+  ],
+  "ok": false
+}

@@ -1179,7 +1179,22 @@ pub(crate) fn l1_write_hit_terms(
     trace: Option<&TraceMetrics>,
 ) -> [u64; 2] {
     match arch {
-        ArchId::Sm86 => [l1.write_lookup_hits, 0],
+        ArchId::Sm86 => {
+            // `write_lookup_hits` belongs to the detached 256-set/2-slot
+            // observer and is valid only when the producer instantiated that
+            // observer for this launch.  Disabled launches must retain the
+            // physical line-tag observation instead of silently reporting a
+            // structural zero.  When both are available, union by max: the
+            // report-only observer must not lose a tag hit already witnessed
+            // by the physical L1 path.
+            let physical = l1.store_tag_hits;
+            let selected = if trace.is_some_and(|metrics| metrics.l1_write_lookup_observer_active) {
+                l1.write_lookup_hits.max(physical)
+            } else {
+                physical
+            };
+            [selected, 0]
+        }
         ArchId::Sm120
             if trace.is_some_and(|metrics| {
                 metrics

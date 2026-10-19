@@ -133,6 +133,25 @@ LTC128B/TMA hardware evidence that is independently cross-walked to these
 endpoints. No fast replay, new SM120-disabled replay, NCU fitting, count
 balancing, or new microbenchmark was used here.
 
+## Accepted SM86 private-observer correction
+
+The later SM86 accuracy review found a structural topology bug in the
+report-only write-tag observer: one table had been shared by all SM actors even
+though L1TEX tags are private per SM. The observer is now allocated as a fixed
+vector aligned with the sorted traced-SM actor roster, one 256-set/2-slot table
+per SM, and is recreated for each launch. Native projection records whether the
+observer was actually enabled and falls back to physical line-tag store hits
+when it was not. No SM120 path is instantiated.
+
+Full SM86 replay with twelve workers preserved 286 `ok`, 62 `control_error`,
+8 `replay_error`, 12,392 launches, and bit-identical IPC/L2/DRAM/timing. Mean
+unified-L1 APE improved from 43.71% to 24.66% over all 286 successful rows,
+12.15% to 9.87% on exact joins, and 88.42% to 45.61% on ordered fallback
+joins. A repeat full replay was identical apart from wall clocks. The required
+SM120 DRAM-enabled lane was rerun at 339/339 `ok` and 11,558 launches and was
+unchanged. This is accepted as an SM86 report-only topology correction, not as
+closure of the remaining IPC, DRAM, fallback-L1, or SM120 accuracy gaps.
+
 ## Follow-up correction
 
 The novel report also proposed reconciling SM120 native-L2 metrics with cache

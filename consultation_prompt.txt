@@ -711,3 +711,29 @@ active only on the SM86 native-metrics path; SM120 exits its alpha projection
 before this code and remains unchanged. On 107 joined SM86 NCU rows, unified-L1
 mean APE improved from 29.04% to 12.15%, with no other joined metric changing.
 It remains above 10%, so this is progress rather than completion.
+
+FOLLOW-UP CANDIDATE 2 AUDIT — SM86 PRIVATE OBSERVER ACCEPTED
+==============================================================
+A subsequent adversarial audit found a structural topology error: the SM86
+report-only 256-set/2-slot write-tag observer was shared by all SM actors even
+though L1TEX tags are private per SM. The implementation now creates one fixed
+observer per sorted traced-SM actor, recreates them per launch, and records an
+explicit producer activation bit. Disabled launches use physical store line-tag
+hits instead of a structural zero. This remains strictly report-only; cache
+state, MSHR ownership, L2, DRAM, issue, completion, and timing frontiers are
+untouched.
+
+The complete SM86 full replay used workers=12 and preserved 286 ok, 62
+control_error, and 8 replay_error rows (12,392 launches). Compared with the
+prior full replay, unified-L1 mean APE improved 43.71% -> 24.66% over all 286
+successful rows, 12.15% -> 9.87% on exact joins, and 88.42% -> 45.61% on
+ordered fallback joins. IPC, L2, DRAM, and timing/frontier outputs were
+bit-identical. A repeat full replay matched every non-wall-clock numeric field.
+The required SM120 DRAM-enabled full replay was rerun at 339/339 ok and 11,558
+launches and was unchanged.
+
+Gemini's gate confirms this is a defensible private-L1 topology correction only
+if the observer remains per-SM/per-launch, is indexed 1:1 with the engine's
+traced-SM roster, aggregates checked integer counters deterministically, and
+never feeds timing. Remaining fallback-L1, SM86 IPC/DRAM, and SM120 residuals
+remain open; this does not claim global <10% closure.

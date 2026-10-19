@@ -487,6 +487,11 @@ pub(crate) struct CoherenceLineState {
 pub struct TraceMetrics {
     /// Captured launch metadata, not inferred from lane activity or NCU.
     pub launch_resources: Option<LaunchResources>,
+    /// True when the SM86 report-only write-tag observer was instantiated for
+    /// this launch.  Metric projection must never read its counter when the
+    /// producer was disabled; disabled launches fall back to the physical
+    /// line-tag store observation instead.
+    pub l1_write_lookup_observer_active: bool,
     pub instructions: InstructionActivity,
     pub by_opcode: BTreeMap<String, InstructionActivity>,
     pub memory: BTreeMap<String, MemoryTraffic>,
