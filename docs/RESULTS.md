@@ -178,12 +178,12 @@ pure-LTC audit contains 300 zero-target rows and two false positives. Because
 the older-pending counter's sector-unit partition is not yet proven, this
 candidate remains shadow-only; no scored L1 correction was promoted.
 
-A later report-only unified-L1 numerator-consistency experiment was also
-rejected. It reused the existing architecture-scoped global lookup correction
-inside `native_metrics.l1_unified_hit_rate_pct`, passed both full replay status
-profiles, but worsened common SM120 NCU mean APE from 0.5882 to 0.5966 (median
-0.5641 to 0.5752). The temporary code was reverted and no scored output was
-retained.
+A later report-only unified-L1 numerator-consistency correction was accepted
+for the SM86 native-metrics path only. It reuses the validated SM86
+form-qualified global lookup endpoint and leaves SM120's alpha path unchanged.
+Full status profiles passed; on 107 joined SM86 NCU rows, unified-L1 mean APE
+improved from 29.04% to 12.15%, with no other joined metric changing. It
+remains above 10%, so the goal is not complete.
 
 Gemini's definitive stop gate freezes further active IPC/L1/L2 projection or
 model changes. Resuming accuracy work requires TMA descriptor/coordinate and

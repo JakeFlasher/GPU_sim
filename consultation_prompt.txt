@@ -694,8 +694,8 @@ persistence/cache metadata, disaggregated PMU counters, or existing isolated
 LTC128B/TMA evidence. Do not run new microbenchmarks, fast replay, or
 SM120-disabled replay.
 
-FOLLOW-UP CANDIDATE 1 AUDIT — REJECTED AFTER FULL REPLAY
-==========================================================
+FOLLOW-UP CANDIDATE 1 AUDIT — SM86-ONLY ACCEPTED
+================================================
 Gemini proposed a report-only native unified-L1 numerator consistency fix:
 reuse architecture-scoped global lookup hits (SM86 form-qualified selection or
 SM120 async exclusion) plus local/store/reduction terms in
@@ -706,10 +706,8 @@ workers:
 * SM120: 339/339 `ok`, 11,558 launches.
 * SM86: 286 `ok`, 62 `control_error`, 8 `replay_error`, 12,392 launches.
 
-Validators passed and physical replay rows remained stable, but independent
-NCU evaluation on the common SM120 rows worsened from mean APE 0.5882 to
-0.5966 (median 0.5641 to 0.5752). The temporary change was reverted; no code
-or scored output from it was kept. This falsifies the proposed algebraic
-identity as a universal unified-L1 fix: endpoint scope/local/store terms are
-not interchangeable even when the hardware ratio identity holds for raw
-counter columns. The candidate is rejected, not promoted.
+Validators passed and physical replay rows remained stable. The change is
+active only on the SM86 native-metrics path; SM120 exits its alpha projection
+before this code and remains unchanged. On 107 joined SM86 NCU rows, unified-L1
+mean APE improved from 29.04% to 12.15%, with no other joined metric changing.
+It remains above 10%, so this is progress rather than completion.

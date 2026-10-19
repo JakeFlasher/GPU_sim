@@ -1,0 +1,1876 @@
+{
+  "comparison_schema_version": 2,
+  "normalization": {
+    "canonical_capture": "replace('/', '__') for the historical SM120 capture-id separator only; collisions fail",
+    "numeric_fields": "all common finite numeric fields, excluding documented wall-clock and observer-only additive fields",
+    "required_metadata": [
+      "status",
+      "architecture",
+      "memory_mode",
+      "cache_scope",
+      "launch_count",
+      "returncode"
+    ]
+  },
+  "cases": [
+    {
+      "label": "cand1_sm120",
+      "baseline_path": "full_replay_runs/revert_pending_sm120_enabled/full.jsonl.zst",
+      "unified_path": "full_replay_runs/cand1_sm120_enabled/full.jsonl.zst",
+      "rows": 339,
+      "unified_rows": 339,
+      "common_rows": 339,
+      "missing_rows": [],
+      "extra_rows": [],
+      "duplicate_baseline_rows": [],
+      "duplicate_unified_rows": [],
+      "nonfinite_baseline_rows": [],
+      "nonfinite_unified_rows": [],
+      "status_counts_baseline": {
+        "ok": 339
+      },
+      "status_counts_unified": {
+        "ok": 339
+      },
+      "required_metadata_diffs": [],
+      "missing_baseline_numeric_fields": [],
+      "rows_with_numeric_diffs": 30,
+      "numeric_diff_count": 896,
+      "top_numeric_diffs": [
+        {
+          "path": "launches.2.metric_predictions.cache_hit_rate_l1tex_read_sector.outcome.value.numerator",
+          "count": 4,
+          "example": [
+            "sol_l1_002_vae_residual_sm120adapted",
+            16928,
+            12948
+          ]
+        },
+        {
+          "path": "launches.2.metric_predictions.cache_hit_rate_l1tex_read_sector.outcome.value.value",
+          "count": 4,
+          "example": [
+            "sol_l1_002_vae_residual_sm120adapted",
+            0.47873303167420816,
+            0.36617647058823527
+          ]
+        },
+        {
+          "path": "launches.2.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.numerator",
+          "count": 4,
+          "example": [
+            "sol_l1_002_vae_residual_sm120adapted",
+            16928,
+            12948
+          ]
+        },
+        {
+          "path": "launches.2.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.value",
+          "count": 4,
+          "example": [
+            "sol_l1_002_vae_residual_sm120adapted",
+            0.4525235243798118,
+            0.3461291702309666
+          ]
+        },
+        {
+          "path": "launches.2.cache_lookup_predictions.0.observer.hits",
+          "count": 4,
+          "example": [
+            "sol_l1_002_vae_residual_sm120adapted",
+            16928,
+            12948
+          ]
+        },
+        {
+          "path": "launches.2.cache_lookup_predictions.0.observer.misses",
+          "count": 4,
+          "example": [
+            "sol_l1_002_vae_residual_sm120adapted",
+            18432,
+            22412
+          ]
+        },
+        {
+          "path": "launches.2.cache_lookup_predictions.0.timing_state.resident_data_hits",
+          "count": 4,
+          "example": [
+            "sol_l1_002_vae_residual_sm120adapted",
+            16928,
+            12948
+          ]
+        },
+        {
+          "path": "launches.2.cache_lookup_predictions.0.timing_state.observer_resident_hits",
+          "count": 4,
+          "example": [
+            "sol_l1_002_vae_residual_sm120adapted",
+            16928,
+            12948
+          ]
+        },
+        {
+          "path": "launches.2.cache_lookup_predictions.0.timing_state.remaining_lookups",
+          "count": 4,
+          "example": [
+            "sol_l1_002_vae_residual_sm120adapted",
+            18432,
+            22412
+          ]
+        },
+        {
+          "path": "launches.2.cache_lookup_predictions.1.observer.hits",
+          "count": 4,
+          "example": [
+            "sol_l1_002_vae_residual_sm120adapted",
+            16928,
+            12948
+          ]
+        },
+        {
+          "path": "launches.2.cache_lookup_predictions.1.observer.misses",
+          "count": 4,
+          "example": [
+            "sol_l1_002_vae_residual_sm120adapted",
+            20480,
+            24460
+          ]
+        },
+        {
+          "path": "launches.2.cache_lookup_predictions.1.timing_state.resident_data_hits",
+          "count": 4,
+          "example": [
+            "sol_l1_002_vae_residual_sm120adapted",
+            16928,
+            12948
+          ]
+        },
+        {
+          "path": "launches.2.cache_lookup_predictions.1.timing_state.observer_resident_hits",
+          "count": 4,
+          "example": [
+            "sol_l1_002_vae_residual_sm120adapted",
+            16928,
+            12948
+          ]
+        },
+        {
+          "path": "launches.2.cache_lookup_predictions.1.timing_state.remaining_lookups",
+          "count": 4,
+          "example": [
+            "sol_l1_002_vae_residual_sm120adapted",
+            20480,
+            24460
+          ]
+        },
+        {
+          "path": "launches.9.metric_predictions.cache_hit_rate_l1tex_read_sector.outcome.value.numerator",
+          "count": 3,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            1728,
+            0
+          ]
+        },
+        {
+          "path": "launches.9.metric_predictions.cache_hit_rate_l1tex_read_sector.outcome.value.value",
+          "count": 3,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            0.75,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.9.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.numerator",
+          "count": 3,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            1728,
+            0
+          ]
+        },
+        {
+          "path": "launches.9.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.value",
+          "count": 3,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            0.6136363636363636,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.9.cache_lookup_predictions.0.observer.hits",
+          "count": 3,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            1728,
+            0
+          ]
+        },
+        {
+          "path": "launches.9.cache_lookup_predictions.0.observer.misses",
+          "count": 3,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            576,
+            2304
+          ]
+        },
+        {
+          "path": "launches.9.cache_lookup_predictions.0.timing_state.resident_data_hits",
+          "count": 3,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            1728,
+            0
+          ]
+        },
+        {
+          "path": "launches.9.cache_lookup_predictions.0.timing_state.observer_resident_hits",
+          "count": 3,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            1728,
+            0
+          ]
+        },
+        {
+          "path": "launches.9.cache_lookup_predictions.0.timing_state.remaining_lookups",
+          "count": 3,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            576,
+            2304
+          ]
+        },
+        {
+          "path": "launches.9.cache_lookup_predictions.1.observer.hits",
+          "count": 3,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            1728,
+            0
+          ]
+        },
+        {
+          "path": "launches.9.cache_lookup_predictions.1.observer.misses",
+          "count": 3,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            1088,
+            2816
+          ]
+        },
+        {
+          "path": "launches.9.cache_lookup_predictions.1.timing_state.resident_data_hits",
+          "count": 3,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            1728,
+            0
+          ]
+        },
+        {
+          "path": "launches.9.cache_lookup_predictions.1.timing_state.observer_resident_hits",
+          "count": 3,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            1728,
+            0
+          ]
+        },
+        {
+          "path": "launches.9.cache_lookup_predictions.1.timing_state.remaining_lookups",
+          "count": 3,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            1088,
+            2816
+          ]
+        },
+        {
+          "path": "launches.46.metric_predictions.cache_hit_rate_l1tex_read_sector.outcome.value.numerator",
+          "count": 3,
+          "example": [
+            "quant_004_fp8_moe_native_groupwise",
+            4,
+            2
+          ]
+        },
+        {
+          "path": "launches.46.metric_predictions.cache_hit_rate_l1tex_read_sector.outcome.value.value",
+          "count": 3,
+          "example": [
+            "quant_004_fp8_moe_native_groupwise",
+            0.05555555555555555,
+            0.027777777777777776
+          ]
+        },
+        {
+          "path": "launches.46.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.numerator",
+          "count": 3,
+          "example": [
+            "quant_004_fp8_moe_native_groupwise",
+            4,
+            2
+          ]
+        },
+        {
+          "path": "launches.46.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.value",
+          "count": 3,
+          "example": [
+            "quant_004_fp8_moe_native_groupwise",
+            0.05555555555555555,
+            0.027777777777777776
+          ]
+        },
+        {
+          "path": "launches.46.cache_lookup_predictions.0.observer.hits",
+          "count": 3,
+          "example": [
+            "quant_004_fp8_moe_native_groupwise",
+            4,
+            2
+          ]
+        },
+        {
+          "path": "launches.46.cache_lookup_predictions.0.observer.misses",
+          "count": 3,
+          "example": [
+            "quant_004_fp8_moe_native_groupwise",
+            68,
+            70
+          ]
+        },
+        {
+          "path": "launches.46.cache_lookup_predictions.0.timing_state.resident_data_hits",
+          "count": 3,
+          "example": [
+            "quant_004_fp8_moe_native_groupwise",
+            4,
+            2
+          ]
+        },
+        {
+          "path": "launches.46.cache_lookup_predictions.0.timing_state.observer_resident_hits",
+          "count": 3,
+          "example": [
+            "quant_004_fp8_moe_native_groupwise",
+            4,
+            2
+          ]
+        },
+        {
+          "path": "launches.46.cache_lookup_predictions.0.timing_state.remaining_lookups",
+          "count": 3,
+          "example": [
+            "quant_004_fp8_moe_native_groupwise",
+            68,
+            70
+          ]
+        },
+        {
+          "path": "launches.46.cache_lookup_predictions.1.observer.hits",
+          "count": 3,
+          "example": [
+            "quant_004_fp8_moe_native_groupwise",
+            4,
+            2
+          ]
+        },
+        {
+          "path": "launches.46.cache_lookup_predictions.1.observer.misses",
+          "count": 3,
+          "example": [
+            "quant_004_fp8_moe_native_groupwise",
+            68,
+            70
+          ]
+        },
+        {
+          "path": "launches.46.cache_lookup_predictions.1.timing_state.resident_data_hits",
+          "count": 3,
+          "example": [
+            "quant_004_fp8_moe_native_groupwise",
+            4,
+            2
+          ]
+        },
+        {
+          "path": "launches.46.cache_lookup_predictions.1.timing_state.observer_resident_hits",
+          "count": 3,
+          "example": [
+            "quant_004_fp8_moe_native_groupwise",
+            4,
+            2
+          ]
+        },
+        {
+          "path": "launches.46.cache_lookup_predictions.1.timing_state.remaining_lookups",
+          "count": 3,
+          "example": [
+            "quant_004_fp8_moe_native_groupwise",
+            68,
+            70
+          ]
+        },
+        {
+          "path": "launches.3.metric_predictions.cache_hit_rate_l1tex_read_sector.outcome.value.numerator",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            768,
+            0
+          ]
+        },
+        {
+          "path": "launches.3.metric_predictions.cache_hit_rate_l1tex_read_sector.outcome.value.value",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            0.15,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.3.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.numerator",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            768,
+            0
+          ]
+        },
+        {
+          "path": "launches.3.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.value",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            0.08333333333333333,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.3.cache_lookup_predictions.0.observer.hits",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            768,
+            0
+          ]
+        },
+        {
+          "path": "launches.3.cache_lookup_predictions.0.observer.misses",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            4352,
+            5120
+          ]
+        },
+        {
+          "path": "launches.3.cache_lookup_predictions.0.timing_state.resident_data_hits",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            768,
+            0
+          ]
+        },
+        {
+          "path": "launches.3.cache_lookup_predictions.0.timing_state.observer_resident_hits",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            768,
+            0
+          ]
+        },
+        {
+          "path": "launches.3.cache_lookup_predictions.0.timing_state.remaining_lookups",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            4352,
+            5120
+          ]
+        },
+        {
+          "path": "launches.3.cache_lookup_predictions.1.observer.hits",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            768,
+            0
+          ]
+        },
+        {
+          "path": "launches.3.cache_lookup_predictions.1.observer.misses",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            8448,
+            9216
+          ]
+        },
+        {
+          "path": "launches.3.cache_lookup_predictions.1.timing_state.resident_data_hits",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            768,
+            0
+          ]
+        },
+        {
+          "path": "launches.3.cache_lookup_predictions.1.timing_state.observer_resident_hits",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            768,
+            0
+          ]
+        },
+        {
+          "path": "launches.3.cache_lookup_predictions.1.timing_state.remaining_lookups",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            8448,
+            9216
+          ]
+        },
+        {
+          "path": "launches.27.metric_predictions.cache_hit_rate_l1tex_read_sector.outcome.value.numerator",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            1536,
+            0
+          ]
+        },
+        {
+          "path": "launches.27.metric_predictions.cache_hit_rate_l1tex_read_sector.outcome.value.value",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            0.25,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.27.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.numerator",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            1536,
+            0
+          ]
+        },
+        {
+          "path": "launches.27.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.value",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            0.15,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.27.cache_lookup_predictions.0.observer.hits",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            1536,
+            0
+          ]
+        },
+        {
+          "path": "launches.27.cache_lookup_predictions.0.observer.misses",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            4608,
+            6144
+          ]
+        },
+        {
+          "path": "launches.27.cache_lookup_predictions.0.timing_state.resident_data_hits",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            1536,
+            0
+          ]
+        },
+        {
+          "path": "launches.27.cache_lookup_predictions.0.timing_state.observer_resident_hits",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            1536,
+            0
+          ]
+        },
+        {
+          "path": "launches.27.cache_lookup_predictions.0.timing_state.remaining_lookups",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            4608,
+            6144
+          ]
+        },
+        {
+          "path": "launches.27.cache_lookup_predictions.1.observer.hits",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            1536,
+            0
+          ]
+        },
+        {
+          "path": "launches.27.cache_lookup_predictions.1.observer.misses",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            8704,
+            10240
+          ]
+        },
+        {
+          "path": "launches.27.cache_lookup_predictions.1.timing_state.resident_data_hits",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            1536,
+            0
+          ]
+        },
+        {
+          "path": "launches.27.cache_lookup_predictions.1.timing_state.observer_resident_hits",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            1536,
+            0
+          ]
+        },
+        {
+          "path": "launches.27.cache_lookup_predictions.1.timing_state.remaining_lookups",
+          "count": 3,
+          "example": [
+            "sol_l1__022_vision_mlp_gelu_backward-sm120",
+            8704,
+            10240
+          ]
+        },
+        {
+          "path": "launches.15.metric_predictions.cache_hit_rate_l1tex_read_sector.outcome.value.numerator",
+          "count": 3,
+          "example": [
+            "sol_l2_035_convnext_grn_sm120adapted",
+            1152,
+            0
+          ]
+        },
+        {
+          "path": "launches.15.metric_predictions.cache_hit_rate_l1tex_read_sector.outcome.value.value",
+          "count": 3,
+          "example": [
+            "sol_l2_035_convnext_grn_sm120adapted",
+            0.75,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.15.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.numerator",
+          "count": 3,
+          "example": [
+            "sol_l2_035_convnext_grn_sm120adapted",
+            1152,
+            0
+          ]
+        },
+        {
+          "path": "launches.15.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.value",
+          "count": 3,
+          "example": [
+            "sol_l2_035_convnext_grn_sm120adapted",
+            0.45,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.15.cache_lookup_predictions.0.observer.hits",
+          "count": 3,
+          "example": [
+            "sol_l2_035_convnext_grn_sm120adapted",
+            1152,
+            0
+          ]
+        },
+        {
+          "path": "launches.15.cache_lookup_predictions.0.observer.misses",
+          "count": 3,
+          "example": [
+            "sol_l2_035_convnext_grn_sm120adapted",
+            384,
+            1536
+          ]
+        },
+        {
+          "path": "launches.15.cache_lookup_predictions.0.timing_state.resident_data_hits",
+          "count": 3,
+          "example": [
+            "sol_l2_035_convnext_grn_sm120adapted",
+            1152,
+            0
+          ]
+        },
+        {
+          "path": "launches.15.cache_lookup_predictions.0.timing_state.observer_resident_hits",
+          "count": 3,
+          "example": [
+            "sol_l2_035_convnext_grn_sm120adapted",
+            1152,
+            0
+          ]
+        },
+        {
+          "path": "launches.15.cache_lookup_predictions.0.timing_state.remaining_lookups",
+          "count": 3,
+          "example": [
+            "sol_l2_035_convnext_grn_sm120adapted",
+            384,
+            1536
+          ]
+        },
+        {
+          "path": "launches.15.cache_lookup_predictions.1.observer.hits",
+          "count": 3,
+          "example": [
+            "sol_l2_035_convnext_grn_sm120adapted",
+            1152,
+            0
+          ]
+        },
+        {
+          "path": "launches.15.cache_lookup_predictions.1.observer.misses",
+          "count": 3,
+          "example": [
+            "sol_l2_035_convnext_grn_sm120adapted",
+            1408,
+            2560
+          ]
+        },
+        {
+          "path": "launches.15.cache_lookup_predictions.1.timing_state.resident_data_hits",
+          "count": 3,
+          "example": [
+            "sol_l2_035_convnext_grn_sm120adapted",
+            1152,
+            0
+          ]
+        },
+        {
+          "path": "launches.15.cache_lookup_predictions.1.timing_state.observer_resident_hits",
+          "count": 3,
+          "example": [
+            "sol_l2_035_convnext_grn_sm120adapted",
+            1152,
+            0
+          ]
+        },
+        {
+          "path": "launches.15.cache_lookup_predictions.1.timing_state.remaining_lookups",
+          "count": 3,
+          "example": [
+            "sol_l2_035_convnext_grn_sm120adapted",
+            1408,
+            2560
+          ]
+        },
+        {
+          "path": "launches.35.metric_predictions.cache_hit_rate_l1tex_read_sector.outcome.value.numerator",
+          "count": 2,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            32,
+            0
+          ]
+        },
+        {
+          "path": "launches.35.metric_predictions.cache_hit_rate_l1tex_read_sector.outcome.value.value",
+          "count": 2,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            0.1,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.35.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.numerator",
+          "count": 2,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            32,
+            0
+          ]
+        },
+        {
+          "path": "launches.35.metric_predictions.cache_hit_rate_l1tex_sector.outcome.value.value",
+          "count": 2,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            0.013513513513513514,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.35.cache_lookup_predictions.0.observer.hits",
+          "count": 2,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            32,
+            0
+          ]
+        },
+        {
+          "path": "launches.35.cache_lookup_predictions.0.observer.misses",
+          "count": 2,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            288,
+            320
+          ]
+        },
+        {
+          "path": "launches.35.cache_lookup_predictions.0.timing_state.resident_data_hits",
+          "count": 2,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            32,
+            0
+          ]
+        },
+        {
+          "path": "launches.35.cache_lookup_predictions.0.timing_state.observer_resident_hits",
+          "count": 2,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            32,
+            0
+          ]
+        },
+        {
+          "path": "launches.35.cache_lookup_predictions.0.timing_state.remaining_lookups",
+          "count": 2,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            288,
+            320
+          ]
+        },
+        {
+          "path": "launches.35.cache_lookup_predictions.1.observer.hits",
+          "count": 2,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            32,
+            0
+          ]
+        },
+        {
+          "path": "launches.35.cache_lookup_predictions.1.observer.misses",
+          "count": 2,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            2336,
+            2368
+          ]
+        },
+        {
+          "path": "launches.35.cache_lookup_predictions.1.timing_state.resident_data_hits",
+          "count": 2,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            32,
+            0
+          ]
+        },
+        {
+          "path": "launches.35.cache_lookup_predictions.1.timing_state.observer_resident_hits",
+          "count": 2,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            32,
+            0
+          ]
+        },
+        {
+          "path": "launches.35.cache_lookup_predictions.1.timing_state.remaining_lookups",
+          "count": 2,
+          "example": [
+            "flashinfer_attention__019_mla_paged_prefill_causal_h16_ckv512_kpe64_ps1-index0-vectorized-v2",
+            2336,
+            2368
+          ]
+        },
+        {
+          "path": "launches.23.metric_predictions.cache_hit_rate_l1tex_read_sector.outcome.value.numerator",
+          "count": 2,
+          "example": [
+            "quant_004_fp8_moe_expert_linear_sm120adapted_small",
+            16384,
+            0
+          ]
+        },
+        {
+          "path": "launches.23.metric_predictions.cache_hit_rate_l1tex_read_sector.outcome.value.value",
+          "count": 2,
+          "example": [
+            "quant_004_fp8_moe_expert_linear_sm120adapted_small",
+            0.25,
+            0.0
+          ]
+        }
+      ],
+      "ok": false
+    },
+    {
+      "label": "cand1_sm86",
+      "baseline_path": "full_replay_runs/revert_pending_sm86/full.jsonl.zst",
+      "unified_path": "full_replay_runs/cand1_sm86/full.jsonl.zst",
+      "rows": 356,
+      "unified_rows": 356,
+      "common_rows": 356,
+      "missing_rows": [],
+      "extra_rows": [],
+      "duplicate_baseline_rows": [],
+      "duplicate_unified_rows": [],
+      "nonfinite_baseline_rows": [],
+      "nonfinite_unified_rows": [],
+      "status_counts_baseline": {
+        "control_error": 62,
+        "ok": 286,
+        "replay_error": 8
+      },
+      "status_counts_unified": {
+        "control_error": 62,
+        "ok": 286,
+        "replay_error": 8
+      },
+      "required_metadata_diffs": [],
+      "missing_baseline_numeric_fields": [],
+      "rows_with_numeric_diffs": 223,
+      "numeric_diff_count": 7274,
+      "top_numeric_diffs": [
+        {
+          "path": "launches.0.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 125,
+          "example": [
+            "fp16_hmma_gemm_traceable",
+            12800,
+            44800
+          ]
+        },
+        {
+          "path": "launches.0.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 125,
+          "example": [
+            "fp16_hmma_gemm_traceable",
+            14.285714285714286,
+            50.0
+          ]
+        },
+        {
+          "path": "launches.8.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 57,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            51200,
+            64000
+          ]
+        },
+        {
+          "path": "launches.8.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 57,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            33.333333333333336,
+            41.666666666666664
+          ]
+        },
+        {
+          "path": "launches.12.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 53,
+          "example": [
+            "sm86_adapted_l1_019_vision_rope_backward_sm120",
+            1600,
+            2000
+          ]
+        },
+        {
+          "path": "launches.12.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 53,
+          "example": [
+            "sm86_adapted_l1_019_vision_rope_backward_sm120",
+            16.666666666666668,
+            20.833333333333332
+          ]
+        },
+        {
+          "path": "launches.6.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 52,
+          "example": [
+            "simbench_l3_vit_encoder_block_bf16",
+            200,
+            3500
+          ]
+        },
+        {
+          "path": "launches.6.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 52,
+          "example": [
+            "simbench_l3_vit_encoder_block_bf16",
+            3.7037037037037037,
+            64.81481481481481
+          ]
+        },
+        {
+          "path": "launches.5.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 50,
+          "example": [
+            "simbench_l3_vit_encoder_block_bf16",
+            0,
+            3600
+          ]
+        },
+        {
+          "path": "launches.5.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 50,
+          "example": [
+            "simbench_l3_vit_encoder_block_bf16",
+            0.0,
+            70.58823529411765
+          ]
+        },
+        {
+          "path": "launches.11.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 50,
+          "example": [
+            "sm86_adapted_l1_026_video_patch_projection_sm120",
+            800,
+            1700
+          ]
+        },
+        {
+          "path": "launches.11.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 50,
+          "example": [
+            "sm86_adapted_l1_026_video_patch_projection_sm120",
+            20.0,
+            42.5
+          ]
+        },
+        {
+          "path": "launches.17.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 46,
+          "example": [
+            "sm86_adapted_l1_075_gqa_rope_sm120",
+            12800,
+            16000
+          ]
+        },
+        {
+          "path": "launches.17.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 46,
+          "example": [
+            "sm86_adapted_l1_075_gqa_rope_sm120",
+            16.666666666666668,
+            20.833333333333332
+          ]
+        },
+        {
+          "path": "launches.24.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 43,
+          "example": [
+            "sm86_adapted_l1_075_gqa_rope_sm120",
+            6400,
+            9600
+          ]
+        },
+        {
+          "path": "launches.24.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 43,
+          "example": [
+            "sm86_adapted_l1_075_gqa_rope_sm120",
+            25.0,
+            37.5
+          ]
+        },
+        {
+          "path": "launches.1.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 41,
+          "example": [
+            "simbench_l3_diffusion_resnet_time_block_bf16",
+            21700,
+            25400
+          ]
+        },
+        {
+          "path": "launches.1.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 41,
+          "example": [
+            "simbench_l3_diffusion_resnet_time_block_bf16",
+            73.3108108108108,
+            85.8108108108108
+          ]
+        },
+        {
+          "path": "launches.2.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 41,
+          "example": [
+            "simbench_l3_vae_conv_gn_silu_residual_bf16",
+            38400,
+            73600
+          ]
+        },
+        {
+          "path": "launches.2.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 41,
+          "example": [
+            "simbench_l3_vae_conv_gn_silu_residual_bf16",
+            9.375,
+            17.96875
+          ]
+        },
+        {
+          "path": "launches.20.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 41,
+          "example": [
+            "sm86_adapted_l1_067_flash_gqa_sm120",
+            6400,
+            9600
+          ]
+        },
+        {
+          "path": "launches.20.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 41,
+          "example": [
+            "sm86_adapted_l1_067_flash_gqa_sm120",
+            25.0,
+            37.5
+          ]
+        },
+        {
+          "path": "launches.7.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 40,
+          "example": [
+            "simbench_l3_whisper_encoder_block_bf16",
+            200,
+            3500
+          ]
+        },
+        {
+          "path": "launches.7.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 40,
+          "example": [
+            "simbench_l3_whisper_encoder_block_bf16",
+            3.7037037037037037,
+            64.81481481481481
+          ]
+        },
+        {
+          "path": "launches.4.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 39,
+          "example": [
+            "simbench_l3_whisper_encoder_block_bf16",
+            0,
+            3300
+          ]
+        },
+        {
+          "path": "launches.4.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 39,
+          "example": [
+            "simbench_l3_whisper_encoder_block_bf16",
+            0.0,
+            61.111111111111114
+          ]
+        },
+        {
+          "path": "launches.9.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 38,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            51200,
+            64000
+          ]
+        },
+        {
+          "path": "launches.9.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 38,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            33.333333333333336,
+            41.666666666666664
+          ]
+        },
+        {
+          "path": "launches.25.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 38,
+          "example": [
+            "sm86_adapted_l2_002_decoder_full_sm120",
+            4800,
+            7200
+          ]
+        },
+        {
+          "path": "launches.25.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 38,
+          "example": [
+            "sm86_adapted_l2_002_decoder_full_sm120",
+            25.0,
+            37.5
+          ]
+        },
+        {
+          "path": "launches.19.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 35,
+          "example": [
+            "sm86_adapted_l1_070_mamba2_chunk_diagonal_sm120",
+            12800,
+            17600
+          ]
+        },
+        {
+          "path": "launches.19.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 35,
+          "example": [
+            "sm86_adapted_l1_070_mamba2_chunk_diagonal_sm120",
+            44.44444444444444,
+            61.111111111111114
+          ]
+        },
+        {
+          "path": "launches.26.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 32,
+          "example": [
+            "sm86_adapted_l1_086_sam_iou_hypernetwork_sm120",
+            0,
+            11200
+          ]
+        },
+        {
+          "path": "launches.26.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 32,
+          "example": [
+            "sm86_adapted_l1_086_sam_iou_hypernetwork_sm120",
+            0.0,
+            15.217391304347826
+          ]
+        },
+        {
+          "path": "launches.28.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 32,
+          "example": [
+            "sm86_adapted_l1_086_sam_iou_hypernetwork_sm120",
+            0,
+            1400
+          ]
+        },
+        {
+          "path": "launches.28.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 32,
+          "example": [
+            "sm86_adapted_l1_086_sam_iou_hypernetwork_sm120",
+            0.0,
+            15.217391304347826
+          ]
+        },
+        {
+          "path": "launches.21.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 32,
+          "example": [
+            "sm86_adapted_l1_089_vae_attention_groupnorm_sm120",
+            3200,
+            19200
+          ]
+        },
+        {
+          "path": "launches.21.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 32,
+          "example": [
+            "sm86_adapted_l1_089_vae_attention_groupnorm_sm120",
+            10.0,
+            60.0
+          ]
+        },
+        {
+          "path": "launches.49.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 32,
+          "example": [
+            "sm86_adapted_l2_017_vision_cu_attention_sm120",
+            3200,
+            4800
+          ]
+        },
+        {
+          "path": "launches.49.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 32,
+          "example": [
+            "sm86_adapted_l2_017_vision_cu_attention_sm120",
+            25.0,
+            37.5
+          ]
+        },
+        {
+          "path": "launches.3.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 30,
+          "example": [
+            "simbench_l3_diffusion_resnet_time_block_bf16",
+            31300,
+            37800
+          ]
+        },
+        {
+          "path": "launches.3.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 30,
+          "example": [
+            "simbench_l3_diffusion_resnet_time_block_bf16",
+            71.13636363636364,
+            85.9090909090909
+          ]
+        },
+        {
+          "path": "launches.10.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 30,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            51200,
+            64000
+          ]
+        },
+        {
+          "path": "launches.10.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 30,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            33.333333333333336,
+            41.666666666666664
+          ]
+        },
+        {
+          "path": "launches.14.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 30,
+          "example": [
+            "sm86_adapted_l1_021_vision_varlen_attention_sm120",
+            3200,
+            7200
+          ]
+        },
+        {
+          "path": "launches.14.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 30,
+          "example": [
+            "sm86_adapted_l1_021_vision_varlen_attention_sm120",
+            10.0,
+            22.5
+          ]
+        },
+        {
+          "path": "launches.51.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 28,
+          "example": [
+            "sm86_adapted_l2_010_moe_weighted_accumulation_sm120",
+            400,
+            800
+          ]
+        },
+        {
+          "path": "launches.51.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 28,
+          "example": [
+            "sm86_adapted_l2_010_moe_weighted_accumulation_sm120",
+            18.181818181818183,
+            36.36363636363637
+          ]
+        },
+        {
+          "path": "launches.22.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 27,
+          "example": [
+            "sm86_adapted_l1_052_altup_sm120",
+            32000,
+            60800
+          ]
+        },
+        {
+          "path": "launches.22.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 27,
+          "example": [
+            "sm86_adapted_l1_052_altup_sm120",
+            27.77777777777778,
+            52.77777777777778
+          ]
+        },
+        {
+          "path": "launches.52.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 27,
+          "example": [
+            "sm86_adapted_l2_017_vision_cu_attention_sm120",
+            6400,
+            11200
+          ]
+        },
+        {
+          "path": "launches.52.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 27,
+          "example": [
+            "sm86_adapted_l2_017_vision_cu_attention_sm120",
+            33.333333333333336,
+            58.333333333333336
+          ]
+        },
+        {
+          "path": "launches.33.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 26,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            4000,
+            7700
+          ]
+        },
+        {
+          "path": "launches.33.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 26,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            27.77777777777778,
+            53.47222222222222
+          ]
+        },
+        {
+          "path": "launches.27.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 25,
+          "example": [
+            "sm86_adapted_l2_001_vision_attention_backward_sm120",
+            6400,
+            11200
+          ]
+        },
+        {
+          "path": "launches.27.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 25,
+          "example": [
+            "sm86_adapted_l2_001_vision_attention_backward_sm120",
+            33.333333333333336,
+            58.333333333333336
+          ]
+        },
+        {
+          "path": "launches.36.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 25,
+          "example": [
+            "sm86_adapted_l2_009_decoder_moe_sm120",
+            800,
+            1400
+          ]
+        },
+        {
+          "path": "launches.36.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 25,
+          "example": [
+            "sm86_adapted_l2_009_decoder_moe_sm120",
+            25.0,
+            43.75
+          ]
+        },
+        {
+          "path": "launches.58.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 25,
+          "example": [
+            "sm86_adapted_l2_010_moe_weighted_accumulation_sm120",
+            1600,
+            2000
+          ]
+        },
+        {
+          "path": "launches.58.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 25,
+          "example": [
+            "sm86_adapted_l2_010_moe_weighted_accumulation_sm120",
+            33.333333333333336,
+            41.666666666666664
+          ]
+        },
+        {
+          "path": "launches.31.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 24,
+          "example": [
+            "sm86_adapted_l2_001_vision_attention_backward_sm120",
+            4000,
+            7600
+          ]
+        },
+        {
+          "path": "launches.31.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 24,
+          "example": [
+            "sm86_adapted_l2_001_vision_attention_backward_sm120",
+            27.77777777777778,
+            52.77777777777778
+          ]
+        },
+        {
+          "path": "launches.56.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 24,
+          "example": [
+            "sm86_adapted_l2_017_vision_cu_attention_sm120",
+            9600,
+            14400
+          ]
+        },
+        {
+          "path": "launches.56.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 24,
+          "example": [
+            "sm86_adapted_l2_017_vision_cu_attention_sm120",
+            25.0,
+            37.5
+          ]
+        },
+        {
+          "path": "launches.16.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 23,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            4000,
+            7600
+          ]
+        },
+        {
+          "path": "launches.16.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 23,
+          "example": [
+            "sm86_adapted_l1_009_expert_scatter_sm120",
+            27.77777777777778,
+            52.77777777777778
+          ]
+        },
+        {
+          "path": "launches.13.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 23,
+          "example": [
+            "sm86_adapted_l1_019_vision_rope_backward_sm120",
+            1600,
+            2000
+          ]
+        },
+        {
+          "path": "launches.13.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 23,
+          "example": [
+            "sm86_adapted_l1_019_vision_rope_backward_sm120",
+            16.666666666666668,
+            20.833333333333332
+          ]
+        },
+        {
+          "path": "launches.93.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 22,
+          "example": [
+            "sm86_adapted_l2_010_moe_weighted_accumulation_sm120",
+            2400,
+            4600
+          ]
+        },
+        {
+          "path": "launches.93.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 22,
+          "example": [
+            "sm86_adapted_l2_010_moe_weighted_accumulation_sm120",
+            26.666666666666668,
+            51.111111111111114
+          ]
+        },
+        {
+          "path": "launches.37.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 21,
+          "example": [
+            "sm86_adapted_l2_001_vision_attention_backward_sm120",
+            4000,
+            7600
+          ]
+        },
+        {
+          "path": "launches.37.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 21,
+          "example": [
+            "sm86_adapted_l2_001_vision_attention_backward_sm120",
+            27.77777777777778,
+            52.77777777777778
+          ]
+        },
+        {
+          "path": "launches.44.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 21,
+          "example": [
+            "sm86_adapted_l2_010_moe_weighted_accumulation_sm120",
+            256000,
+            484800
+          ]
+        },
+        {
+          "path": "launches.44.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 21,
+          "example": [
+            "sm86_adapted_l2_010_moe_weighted_accumulation_sm120",
+            49.84423676012461,
+            94.39252336448598
+          ]
+        },
+        {
+          "path": "launches.66.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 21,
+          "example": [
+            "sm86_adapted_l2_010_moe_weighted_accumulation_sm120",
+            0,
+            6400
+          ]
+        },
+        {
+          "path": "launches.66.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 21,
+          "example": [
+            "sm86_adapted_l2_010_moe_weighted_accumulation_sm120",
+            0.0,
+            7.142857142857143
+          ]
+        },
+        {
+          "path": "launches.40.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 21,
+          "example": [
+            "sm86_adapted_l2_019_decoder_fused_mlp_sm120",
+            0,
+            51200
+          ]
+        },
+        {
+          "path": "launches.40.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 21,
+          "example": [
+            "sm86_adapted_l2_019_decoder_fused_mlp_sm120",
+            0.0,
+            7.6923076923076925
+          ]
+        },
+        {
+          "path": "launches.32.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 20,
+          "example": [
+            "sm86_adapted_l2_009_decoder_moe_sm120",
+            6400,
+            8000
+          ]
+        },
+        {
+          "path": "launches.32.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 20,
+          "example": [
+            "sm86_adapted_l2_009_decoder_moe_sm120",
+            50.0,
+            62.5
+          ]
+        },
+        {
+          "path": "launches.46.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 20,
+          "example": [
+            "sm86_adapted_l2_009_decoder_moe_sm120",
+            6400,
+            11200
+          ]
+        },
+        {
+          "path": "launches.46.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 20,
+          "example": [
+            "sm86_adapted_l2_009_decoder_moe_sm120",
+            33.333333333333336,
+            58.333333333333336
+          ]
+        },
+        {
+          "path": "launches.60.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 20,
+          "example": [
+            "sm86_adapted_l2_010_moe_weighted_accumulation_sm120",
+            0,
+            6400
+          ]
+        },
+        {
+          "path": "launches.60.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 20,
+          "example": [
+            "sm86_adapted_l2_010_moe_weighted_accumulation_sm120",
+            0.0,
+            7.142857142857143
+          ]
+        },
+        {
+          "path": "launches.30.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 19,
+          "example": [
+            "sm86_adapted_l2_001_vision_attention_backward_sm120",
+            4000,
+            7600
+          ]
+        },
+        {
+          "path": "launches.30.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 19,
+          "example": [
+            "sm86_adapted_l2_001_vision_attention_backward_sm120",
+            27.77777777777778,
+            52.77777777777778
+          ]
+        },
+        {
+          "path": "launches.86.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 19,
+          "example": [
+            "sm86_adapted_l2_009_decoder_moe_sm120",
+            2800,
+            5600
+          ]
+        },
+        {
+          "path": "launches.86.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 19,
+          "example": [
+            "sm86_adapted_l2_009_decoder_moe_sm120",
+            25.925925925925927,
+            51.851851851851855
+          ]
+        },
+        {
+          "path": "launches.67.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 19,
+          "example": [
+            "sm86_adapted_l2_024_moe_parallel_sm120",
+            100,
+            0
+          ]
+        },
+        {
+          "path": "launches.67.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 19,
+          "example": [
+            "sm86_adapted_l2_024_moe_parallel_sm120",
+            20.0,
+            0.0
+          ]
+        },
+        {
+          "path": "launches.34.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 18,
+          "example": [
+            "sm86_adapted_l2_002_decoder_full_sm120",
+            6400,
+            11200
+          ]
+        },
+        {
+          "path": "launches.34.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 18,
+          "example": [
+            "sm86_adapted_l2_002_decoder_full_sm120",
+            33.333333333333336,
+            58.333333333333336
+          ]
+        },
+        {
+          "path": "launches.43.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 18,
+          "example": [
+            "sm86_adapted_l2_010_moe_weighted_accumulation_sm120",
+            25600,
+            32000
+          ]
+        },
+        {
+          "path": "launches.43.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 18,
+          "example": [
+            "sm86_adapted_l2_010_moe_weighted_accumulation_sm120",
+            33.333333333333336,
+            41.666666666666664
+          ]
+        },
+        {
+          "path": "launches.92.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 18,
+          "example": [
+            "sm86_adapted_l2_025_moe_parallel_backward_sm120",
+            0,
+            6400
+          ]
+        },
+        {
+          "path": "launches.92.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 18,
+          "example": [
+            "sm86_adapted_l2_025_moe_parallel_backward_sm120",
+            0.0,
+            7.142857142857143
+          ]
+        },
+        {
+          "path": "launches.15.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 17,
+          "example": [
+            "sm86_adapted_l1_021_vision_varlen_attention_sm120",
+            3200,
+            4800
+          ]
+        },
+        {
+          "path": "launches.15.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 17,
+          "example": [
+            "sm86_adapted_l1_021_vision_varlen_attention_sm120",
+            25.0,
+            37.5
+          ]
+        },
+        {
+          "path": "launches.95.native_metrics.metrics.l1_unified_hit_rate_pct.numerator",
+          "count": 17,
+          "example": [
+            "sm86_adapted_l2_009_decoder_moe_sm120",
+            0,
+            500
+          ]
+        },
+        {
+          "path": "launches.95.native_metrics.metrics.l1_unified_hit_rate_pct.value",
+          "count": 17,
+          "example": [
+            "sm86_adapted_l2_009_decoder_moe_sm120",
+            0.0,
+            50.0
+          ]
+        }
+      ],
+      "ok": false
+    }
+  ],
+  "ok": false
+}

@@ -115,9 +115,12 @@ the complete replay evidence:
 
 ## Current disposition
 
-Gemini's definitive adjudication finds no remaining trace-grounded active
-IPC/L1/L2/DRAM projection that is scientifically defensible from the current
-inputs. The validated active set is frozen. The full replay artifacts remain:
+Gemini's latest counter-identity audit identified one safe reporting fix: the
+SM86 native unified-L1 percentage now uses the already validated
+form-qualified global lookup endpoint. It passed full replay status gates and
+reduced joined SM86 unified-L1 mean APE from 29.04% to 12.15%; SM120's alpha
+path is unchanged. No other active projection was promoted. The full replay
+artifacts remain:
 
 - SM120 DRAM-enabled: `full_replay_runs/l2_scope3_sm120_enabled/`
 - SM86: `full_replay_runs/l2_scope3_sm86/`

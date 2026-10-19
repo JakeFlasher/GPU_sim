@@ -3,6 +3,7 @@
 //! supplies additional ratios and explicitly distinguishes approximations/gaps.
 use super::RunError;
 use super::resources::LaunchResourceObservation;
+use crate::emit::async_global_l1_hit_exclusion;
 use serde::Serialize;
 use sim_arch::ArchId;
 use sim_arch::card::ArchCard;
@@ -3501,10 +3502,31 @@ pub(super) fn project(
         );
         let [store_hits, reduction_hits] =
             crate::emit::l1_write_hit_terms(result.arch(), l1, Some(result.trace_metrics()));
-        let unified_hit_num = u128::from(l1.hits)
-            + u128::from(l1.pending_lookup_hits)
-            + u128::from(store_hits)
-            + u128::from(reduction_hits);
+        // Keep the SM86 unified-L1 native percentage on the same
+        // architecture-scoped lookup basis as the already-approved global
+        // lookup report. SM120 exits this native-metrics path earlier; this
+        // correction therefore preserves its existing output while bringing
+        // SM86 form-qualified LDG.CONSTANT/U16/LTC128B accounting into the
+        // scored unified endpoint. Replay state and timing are untouched.
+        let global = l1.origin(MemoryOrigin::Global);
+        let local = l1.origin(MemoryOrigin::Local);
+        let global_baseline = u128::from(global.effective_lookup_hits_for_arch(result.arch()));
+        let global_lookup_hits = if result.arch() == ArchId::Sm86 {
+            sm86_form_qualified_lookup_hits(trace, global_baseline)
+                .map_or(global_baseline, |(hits, _)| hits)
+        } else {
+            global_baseline.saturating_sub(u128::from(async_global_l1_hit_exclusion(
+                result.arch(),
+                l1,
+                Some(trace),
+            )))
+        };
+        let local_lookup_hits = u128::from(local.effective_lookup_hits_for_arch(result.arch()));
+        let unified_hit_num = global_lookup_hits
+            .checked_add(local_lookup_hits)
+            .and_then(|value| value.checked_add(u128::from(store_hits)))
+            .and_then(|value| value.checked_add(u128::from(reduction_hits)))
+            .ok_or_else(|| RunError::new("native metric L1 unified", "hit numerator overflow"))?;
         let unified_hit_den = u128::from(l1.hits)
             + u128::from(l1.misses)
             + u128::from(l1.store_sectors)
