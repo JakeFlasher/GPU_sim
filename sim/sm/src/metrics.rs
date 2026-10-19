@@ -3703,4 +3703,33 @@ mod tests {
             mrc.sector_miss_references[capacity_two]
         );
     }
+
+    #[test]
+    fn exact_mrc_fenwick_resize_preserves_stack_counts() {
+        let mut stream = LocalityMrcOriginStream {
+            fenwick: LocalityMrcFenwick::new(),
+            lines: BTreeMap::new(),
+        };
+        let mut report = LocalityMrcClassObservation::default();
+        for line in 0_i64..5000 {
+            let mut batch = BTreeMap::new();
+            batch.insert(line, 1_u8);
+            stream.observe(&batch, &mut report).unwrap();
+        }
+        let mut final_batch = BTreeMap::new();
+        final_batch.insert(0_i64, 1_u8);
+        stream.observe(&final_batch, &mut report).unwrap();
+        let c4096 = LOCALITY_MRC_CAPACITY_LINES
+            .iter()
+            .position(|&capacity| capacity == 4096)
+            .unwrap();
+        let c8192 = LOCALITY_MRC_CAPACITY_LINES
+            .iter()
+            .position(|&capacity| capacity == 8192)
+            .unwrap();
+        // The final line-zero reuse has 4,999 distinct intervening lines.
+        assert_eq!(report.line_miss_references[c4096], 5001);
+        assert_eq!(report.line_miss_references[c8192], 5000);
+        assert_eq!(report.cold_line_references, 5000);
+    }
 }

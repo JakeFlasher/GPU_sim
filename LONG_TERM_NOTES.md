@@ -21,6 +21,11 @@ This file is deliberately a current-state note rather than a duplicate.
   typed conditional models, not proprietary RTL recovery; NCU remains an
   independent post-replay target.
 * Operating split (user directive): GPT-6 Astra is executioner/orchestrator only—implements, runs, and code-reviews; Gemini 4 Argon High invoked through `agy --dangerously-skip-permissions --model gemini-4-argon-high` is the read-only brain for algorithms, ideas, and insight/adversarial review. Gemini must not code. Any blocker, ambiguity, or uncertainty requires consultation with Gemini before proceeding; do not rely on instinct.
+* Regression gate (user directive): normally reject changes that regress other
+  metrics. Only accept an exception when the targeted improvement is much,
+  much larger than the regressions and the trade-off is explicitly documented
+  and reviewed; never trade away correctness, status coverage, determinism, or
+  independent-target validity.
 * Active objective: reduce APE below 10% for major IPC and L1/L2-related NCU metrics across complete SM120 (339 captures) and successful SM86 (286 captures) full replays, preserving independent-target separation and twelve-worker replay.
 * Latest evidence: the required DRAM-enabled SM120 full lane remains green at
   339/339 `ok` with twelve workers; historical disabled-mode artifacts are

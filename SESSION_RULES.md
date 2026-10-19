@@ -15,3 +15,9 @@
 4. **THOROUGHNESS OVER SPEED**: Do not take shortcuts or make superficial assumptions. Perform exhaustive, file-by-file comparison and analysis before structural changes.
 
 5. **MANDATORY GEMINI CONSULTATION ON UNCERTAINTY:** The GPT-6 Astra executioner/orchestrator must not rely on instinct when stuck, blocked, or facing ambiguity. Invoke `agy --dangerously-skip-permissions --model gemini-4-argon-high --effort high --mode plan` for read-only brain/insight consultation, record the advice, and resolve the issue using evidence. Gemini is the brain for ideas, algorithm design, and adversarial insight; GPT-6 Astra remains the hands and performs all coding, code review, and execution.
+
+6. **REGRESSION ACCEPTANCE GATE:** Normally reject any change that regresses
+   other metrics. An exception requires evidence that the targeted metric
+   improvement is much, much larger than the regressions, with the trade-off
+   explicitly documented and reviewed; correctness, status, determinism, and
+   independent-target validity may never be sacrificed.
