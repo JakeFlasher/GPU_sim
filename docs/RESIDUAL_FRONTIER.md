@@ -63,3 +63,19 @@ issue-order records, disaggregated tag/MSHR/fill/stall PMU counters, and a
 cross-surface NCU launch identity. Until those exist, the remaining <10%
 objective is not honestly closable without violating the no-fitting and
 report-only boundaries.
+
+## Newly verified SM120 synchronization gap
+
+The permitted SM120 capture metadata contains a detailed synchronization/TMA
+audit (`metadata/adversarial_sync_tma_gap_20261008.md` in the read-only source
+checkout). It confirms that dynamic `SYNCS` records retain only PC, masks, and
+identity: barrier addresses, transaction counts, phase/state values, and
+TRYWAIT results are absent. TMA records likewise lack explicit completion-
+barrier linkage. The audit traces this to the producer's `SYNCS` raw-SASS
+fallback, which clears operand instrumentation. Consequently, the simulator
+cannot reconstruct mbarrier/TMA completion chronology from current inputs;
+changing SM120 elapsed IPC, TMA DRAM demand, or cache state from static opcode
+names would invent timing/state. The minimum unblocker is a typed `sync_trace`
+sidecar carrying runtime barrier address, count/transaction count, phase/state
+encoding, TRYWAIT result, memory scope/order, and deterministic per-launch
+sequence, plus completion linkage in TMA records.
