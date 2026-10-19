@@ -3852,6 +3852,27 @@ mod tests {
     }
 
     #[test]
+    fn exact_mrc_marks_reused_sector_miss_after_intervening_line_eviction() {
+        let mut metrics = TraceMetrics::default();
+        metrics.begin_reuse_warp_stream();
+        let sectors = [0_i64, 4, 8];
+        // A sector zero reference, two intervening distinct lines, then the
+        // same sector. The line-level RD is two, so sector zero is not a hit
+        // at a two-line fully-associative capacity.
+        metrics.observe_reuse_memory(load(0, 1), &sectors).unwrap();
+        metrics.observe_reuse_memory(load(1, 1), &sectors).unwrap();
+        metrics.observe_reuse_memory(load(2, 1), &sectors).unwrap();
+        metrics.observe_reuse_memory(load(0, 1), &sectors).unwrap();
+        let mrc = &metrics.locality_mrc.by_origin["global"];
+        let capacity_two = LOCALITY_MRC_CAPACITY_LINES
+            .iter()
+            .position(|&capacity| capacity == 2)
+            .unwrap();
+        assert_eq!(mrc.sector_miss_references[capacity_two], 4);
+        assert_eq!(mrc.sector_line_tag_miss_references[capacity_two], 4);
+    }
+
+    #[test]
     fn exact_mrc_envelope_uses_the_reused_line_batch_not_only_previous_tick() {
         let mut metrics = TraceMetrics::default();
         metrics.begin_reuse_warp_stream();

@@ -285,6 +285,21 @@ def _check_locality_mrc(
                     ok = False
         for field in ("same_tick_max_batch_lines", "maximum_line_rd_envelope_width"):
             _int(row, field, errors, origin_context)
+        max_batch = row.get("same_tick_max_batch_lines", 0)
+        max_width = row.get("maximum_line_rd_envelope_width", 0)
+        if (
+            isinstance(max_batch, int)
+            and not isinstance(max_batch, bool)
+            and isinstance(max_width, int)
+            and not isinstance(max_width, bool)
+            and max_batch >= 0
+            and max_width >= 0
+            and max_width > 2 * max(max_batch - 1, 0)
+        ):
+            errors.append(
+                f"{origin_context}: same-tick RD envelope exceeds two-batch bound"
+            )
+            ok = False
     return ok
 
 
