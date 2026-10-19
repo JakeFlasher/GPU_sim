@@ -42,6 +42,11 @@ TMA-shadow DRAM substitution, unconditional write hits, LTC128B promotion,
 default 96-slice/carveout changes, and post-hoc IPC scaling remain rejected or
 experiment-only. The validated replay state is unchanged.
 
+The subsequent SM86 native unified-L1 correction is the one accepted follow-up:
+it reuses the validated form-qualified global lookup endpoint, leaves SM120's
+alpha path unchanged, and reduced joined SM86 unified-L1 APE from 29.04% to
+12.15%. It does not yet satisfy the <10% objective.
+
 ## Repository cleanup
 
 The active tree no longer treats branch-specific plans, H/S milestone diaries,
