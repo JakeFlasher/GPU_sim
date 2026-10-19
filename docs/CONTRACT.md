@@ -32,6 +32,14 @@ proprietary topology. SM86 card/P-chase values and candidates remain scoped to
 SM86. Unsupported or unmeasured behavior is represented as a typed gap rather
 than a workload-specific correction.
 
+The SM86 write-tag observer is a report-only effective endpoint. It allocates
+one deterministic 256-set/2-slot table per traced SM actor and per kernel
+launch; it never mutates the timing L1, MSHRs, L2, DRAM, or issue/completion
+frontiers. Its activation bit is carried with `TraceMetrics`; when absent,
+native unified-L1 projection uses physical store line-tag hits and never reads
+a disabled observer counter. This is not a claim that SM86 write policy or
+read-induced tag eviction is fully recovered.
+
 ## Scientific and repository boundaries
 
 * `/home/jakeshea/5090_branch/` is a read-only source/reference checkout.
