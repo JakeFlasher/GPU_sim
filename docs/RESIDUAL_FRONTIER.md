@@ -35,6 +35,10 @@ metrics. This falsifies occupancy-cap admission as an available improvement
 under the current trace placement: the trace already records a schedule whose
 observed peak respects the driver ceiling.
 
+The check is reproducible with `tools/audit_driver_occupancy.py`; the latest
+run reports 12,392 launches, zero observed peaks above the driver limit, and
+`no_op: true`.
+
 ## Remaining information barrier
 
 The residual metrics require state absent from the current contract rather than
