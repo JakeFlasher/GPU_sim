@@ -78,3 +78,7 @@ This file is deliberately a current-state note rather than a duplicate.
   isolated LTC128B/TMA microbenchmarks are obtained. Preserve complete
   twelve-worker replay artifacts and report residuals/SM86 coverage boundaries
   without tuning against NCU.
+* Follow-up unified-L1 numerator-consistency experiment was rejected after
+  full 12-worker replay: common SM120 NCU mean APE worsened 0.5882→0.5966
+  (median 0.5641→0.5752). Code was reverted; the hardware ratio identity does
+  not make mixed endpoint/client terms interchangeable.

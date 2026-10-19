@@ -178,6 +178,13 @@ pure-LTC audit contains 300 zero-target rows and two false positives. Because
 the older-pending counter's sector-unit partition is not yet proven, this
 candidate remains shadow-only; no scored L1 correction was promoted.
 
+A later report-only unified-L1 numerator-consistency experiment was also
+rejected. It reused the existing architecture-scoped global lookup correction
+inside `native_metrics.l1_unified_hit_rate_pct`, passed both full replay status
+profiles, but worsened common SM120 NCU mean APE from 0.5882 to 0.5966 (median
+0.5641 to 0.5752). The temporary code was reverted and no scored output was
+retained.
+
 Gemini's definitive stop gate freezes further active IPC/L1/L2 projection or
 model changes. Resuming accuracy work requires TMA descriptor/coordinate and
 launch-cache metadata, disaggregated tag/MSHR/fill/stall PMU counters, or
