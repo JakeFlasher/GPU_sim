@@ -135,6 +135,17 @@ schema, conservation, monotonicity, zero-capacity endpoint, and sector-miss
 decomposition. The observer is report-only; existing cache/timing fields must
 remain numerically unchanged.
 
+The twelve-worker corpus artifacts are
+`full_replay_runs/mrc_exact_sm120_enabled/` (339/339 `ok`, 11,558 launches)
+and `full_replay_runs/mrc_exact_sm86/` (286 `ok`, 62 `control_error`, 8
+`replay_error`, 12,392 launches). `MRC_VALIDATION.json` passes all launch
+invariants in each lane; `LOCALITY_MRC_REPORT.json` records zero monotonicity
+violations. Compared with the accepted pre-MRC lanes,
+`full_replay_runs/mrc_exact_comparison.json` reports zero missing/extra rows,
+zero metadata differences, and zero common numeric differences for both
+architectures. The observer added no timing/cache behavior and its compressed
+output growth was about one percent.
+
 ## Async-client L1 scope refinement
 
 The full-replay audit found a trace-proven SM120 `ldgsts_async_copy` scope
