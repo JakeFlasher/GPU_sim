@@ -365,6 +365,8 @@ impl L1RequestMaskAudit {
 pub struct L1MergeAudit {
     pub same_request_merges: [u64; 2],
     pub older_pending_merges: [u64; 2],
+    pub already_requested_merges: [u64; 2],
+    pub unrequested_pending_merges: [u64; 2],
     pub ordinary_same_request_merges: [u64; 2],
     pub ordinary_older_pending_merges: [u64; 2],
     pub async_same_request_merges: [u64; 2],
@@ -435,6 +437,11 @@ pub struct L1OriginCounters {
     pub hits: u64,
     pub misses: u64,
     pub merges: u64,
+    /// Pending sectors already present in the active request mask.
+    pub already_requested_merges: u64,
+    /// Pending sectors first introduced by this request while a line fill is
+    /// in flight; these remain lookup misses.
+    pub unrequested_pending_merges: u64,
     /// Misses that merged into a fill allocated by an earlier logical memory
     /// request. Same-request sector coalescing is deliberately excluded.
     pub pending_lookup_hits: u64,
@@ -472,13 +479,7 @@ impl L1OriginCounters {
     /// line-allocation observer. Neither branch changes cache state or timing.
     pub const fn effective_lookup_hits_for_arch(&self, arch: ArchId) -> u64 {
         let projected = if matches!(arch, ArchId::Sm120) {
-            let fresh_line_merge_adjustment = self
-                .line_alloc_misses
-                .saturating_mul(SECTORS_PER_LINE.saturating_sub(1) as u64);
-            self.hits
-                .saturating_add(self.pending_lookup_hits)
-                .saturating_add(self.merges)
-                .saturating_sub(fresh_line_merge_adjustment)
+            self.hits.saturating_add(self.already_requested_merges)
         } else {
             self.hits
                 .saturating_add(self.merges)
@@ -513,6 +514,8 @@ pub struct L1Counters {
     pub hits: u64,
     pub misses: u64,
     pub merges: u64,
+    pub already_requested_merges: u64,
+    pub unrequested_pending_merges: u64,
     pub pending_lookup_hits: u64,
     pub stall_events: u64,
     /// Number of miss attempts observed while the finite L1 MSHR set was
@@ -557,6 +560,8 @@ pub enum L1CounterField {
     Hits,
     Misses,
     Merges,
+    AlreadyRequestedMerges,
+    UnrequestedPendingMerges,
     PendingLookupHits,
     StallEvents,
     LineFills,
@@ -579,6 +584,8 @@ impl std::fmt::Display for L1CounterField {
             Self::Hits => "hits",
             Self::Misses => "misses",
             Self::Merges => "merges",
+            Self::AlreadyRequestedMerges => "already_requested_merges",
+            Self::UnrequestedPendingMerges => "unrequested_pending_merges",
             Self::PendingLookupHits => "pending_lookup_hits",
             Self::StallEvents => "stall_events",
             Self::LineFills => "line_fills",
@@ -641,10 +648,12 @@ fn checked_counter_add(
 // old implementation copied the complete counter snapshot once per budget.
 // Aggregating these deltas by origin preserves the same checked arithmetic and
 // provenance lanes while reducing that work to at most two projections.
-const PREFLIGHT_COUNTER_FIELDS: [L1CounterField; 17] = [
+const PREFLIGHT_COUNTER_FIELDS: [L1CounterField; 19] = [
     L1CounterField::Hits,
     L1CounterField::Misses,
     L1CounterField::Merges,
+    L1CounterField::AlreadyRequestedMerges,
+    L1CounterField::UnrequestedPendingMerges,
     L1CounterField::PendingLookupHits,
     L1CounterField::StallEvents,
     L1CounterField::LineFills,
@@ -663,7 +672,7 @@ const PREFLIGHT_COUNTER_FIELDS: [L1CounterField; 17] = [
 
 fn preflight_budget_deltas(
     budget: &L1MutationBudget,
-) -> Result<[(L1CounterField, u64); 17], L1AccessError> {
+) -> Result<[(L1CounterField, u64); 19], L1AccessError> {
     let write_lookup_hits = budget
         .store_sectors
         .checked_add(budget.reduction_sectors)
@@ -674,6 +683,8 @@ fn preflight_budget_deltas(
         (L1CounterField::Hits, budget.eligible_sectors),
         (L1CounterField::Misses, budget.eligible_sectors),
         (L1CounterField::Merges, budget.eligible_sectors),
+        (L1CounterField::AlreadyRequestedMerges, 0),
+        (L1CounterField::UnrequestedPendingMerges, 0),
         (L1CounterField::PendingLookupHits, budget.eligible_sectors),
         (L1CounterField::StallEvents, budget.eligible_sectors),
         (L1CounterField::LineFills, budget.eligible_sectors),
@@ -697,12 +708,12 @@ fn preflight_budget_deltas(
     ])
 }
 
-fn preflight_values_deltas(values: [u64; 17]) -> [(L1CounterField, u64); 17] {
+fn preflight_values_deltas(values: [u64; 19]) -> [(L1CounterField, u64); 19] {
     std::array::from_fn(|index| (PREFLIGHT_COUNTER_FIELDS[index], values[index]))
 }
 
 fn accumulate_preflight_values(
-    values: &mut [u64; 17],
+    values: &mut [u64; 19],
     budget: &L1MutationBudget,
 ) -> Result<(), L1AccessError> {
     for (index, (field, delta)) in preflight_budget_deltas(budget)?.into_iter().enumerate() {
@@ -718,6 +729,8 @@ fn origin_counter_mut(counters: &mut L1OriginCounters, field: L1CounterField) ->
         L1CounterField::Hits => &mut counters.hits,
         L1CounterField::Misses => &mut counters.misses,
         L1CounterField::Merges => &mut counters.merges,
+        L1CounterField::AlreadyRequestedMerges => &mut counters.already_requested_merges,
+        L1CounterField::UnrequestedPendingMerges => &mut counters.unrequested_pending_merges,
         L1CounterField::PendingLookupHits => &mut counters.pending_lookup_hits,
         L1CounterField::StallEvents => &mut counters.stall_events,
         L1CounterField::LineFills => &mut counters.line_fills,
@@ -750,11 +763,19 @@ fn add_origin_fields_checked(
     Ok(next)
 }
 
-fn origin_deltas(counters: &L1OriginCounters) -> [(L1CounterField, u64); 17] {
+fn origin_deltas(counters: &L1OriginCounters) -> [(L1CounterField, u64); 19] {
     [
         (L1CounterField::Hits, counters.hits),
         (L1CounterField::Misses, counters.misses),
         (L1CounterField::Merges, counters.merges),
+        (
+            L1CounterField::AlreadyRequestedMerges,
+            counters.already_requested_merges,
+        ),
+        (
+            L1CounterField::UnrequestedPendingMerges,
+            counters.unrequested_pending_merges,
+        ),
         (
             L1CounterField::PendingLookupHits,
             counters.pending_lookup_hits,
@@ -781,11 +802,19 @@ fn origin_deltas(counters: &L1OriginCounters) -> [(L1CounterField, u64); 17] {
     ]
 }
 
-fn unified_deltas(counters: &L1Counters) -> [(L1CounterField, u64); 17] {
+fn unified_deltas(counters: &L1Counters) -> [(L1CounterField, u64); 19] {
     [
         (L1CounterField::Hits, counters.hits),
         (L1CounterField::Misses, counters.misses),
         (L1CounterField::Merges, counters.merges),
+        (
+            L1CounterField::AlreadyRequestedMerges,
+            counters.already_requested_merges,
+        ),
+        (
+            L1CounterField::UnrequestedPendingMerges,
+            counters.unrequested_pending_merges,
+        ),
         (
             L1CounterField::PendingLookupHits,
             counters.pending_lookup_hits,
@@ -878,6 +907,8 @@ impl L1Counters {
             hits: self.hits,
             misses: self.misses,
             merges: self.merges,
+            already_requested_merges: self.already_requested_merges,
+            unrequested_pending_merges: self.unrequested_pending_merges,
             pending_lookup_hits: self.pending_lookup_hits,
             stall_events: self.stall_events,
             line_fills: self.line_fills,
@@ -909,6 +940,8 @@ impl L1Counters {
                 L1CounterField::Hits => &mut next.hits,
                 L1CounterField::Misses => &mut next.misses,
                 L1CounterField::Merges => &mut next.merges,
+                L1CounterField::AlreadyRequestedMerges => &mut next.already_requested_merges,
+                L1CounterField::UnrequestedPendingMerges => &mut next.unrequested_pending_merges,
                 L1CounterField::PendingLookupHits => &mut next.pending_lookup_hits,
                 L1CounterField::StallEvents => &mut next.stall_events,
                 L1CounterField::LineFills => &mut next.line_fills,
@@ -954,6 +987,16 @@ impl L1Counters {
         let hits = checked_counter_add(L1CounterField::Hits, self.hits, other.hits)?;
         let misses = checked_counter_add(L1CounterField::Misses, self.misses, other.misses)?;
         let merges = checked_counter_add(L1CounterField::Merges, self.merges, other.merges)?;
+        let already_requested_merges = checked_counter_add(
+            L1CounterField::AlreadyRequestedMerges,
+            self.already_requested_merges,
+            other.already_requested_merges,
+        )?;
+        let unrequested_pending_merges = checked_counter_add(
+            L1CounterField::UnrequestedPendingMerges,
+            self.unrequested_pending_merges,
+            other.unrequested_pending_merges,
+        )?;
         let pending_lookup_hits = checked_counter_add(
             L1CounterField::PendingLookupHits,
             self.pending_lookup_hits,
@@ -1044,6 +1087,8 @@ impl L1Counters {
             hits,
             misses,
             merges,
+            already_requested_merges,
+            unrequested_pending_merges,
             pending_lookup_hits,
             stall_events,
             mshr_stall_occupancy_samples,
@@ -1542,6 +1587,15 @@ impl L1Cache {
         self.merge_audit
     }
 
+    fn record_pending_merge_class(&mut self, origin: MemoryOrigin, already_requested: bool) {
+        let lane = if already_requested {
+            &mut self.merge_audit.already_requested_merges
+        } else {
+            &mut self.merge_audit.unrequested_pending_merges
+        };
+        lane[origin.index()] = lane[origin.index()].saturating_add(1);
+    }
+
     fn record_merge_audit(&mut self, origin: MemoryOrigin, line: i64, sector: u8, sequence: u64) {
         let Some(batch) = self.active_lookup_batch else {
             return;
@@ -1967,6 +2021,8 @@ impl L1Cache {
                 hits: counters.hits,
                 misses: counters.misses,
                 merges: counters.merges,
+                already_requested_merges: counters.already_requested_merges,
+                unrequested_pending_merges: counters.unrequested_pending_merges,
                 pending_lookup_hits: counters.pending_lookup_hits,
                 stall_events: counters.stall_events,
                 line_fills: counters.line_fills,
@@ -2305,7 +2361,7 @@ impl L1Cache {
         &self,
         budgets: &[L1MutationBudget],
     ) -> Result<(), L1AccessError> {
-        let mut aggregated_counter_values = [[0_u64; 17]; 2];
+        let mut aggregated_counter_values = [[0_u64; 19]; 2];
         for budget in budgets {
             accumulate_preflight_values(
                 &mut aggregated_counter_values[budget.origin.index()],
@@ -3109,6 +3165,14 @@ impl L1Cache {
     ) -> Result<CoreAccess, L1AccessError> {
         let line = sector_id >> 2;
         let sector = (sector_id & 3) as u8;
+        let sector_bit = 1_u8 << sector;
+        let sector_already_known_before = self
+            .sectors
+            .get(&line)
+            .copied()
+            .unwrap_or(0)
+            & sector_bit
+            != 0;
         self.record_constant_request(origin);
         self.record_wavefront_mask_lookup(origin, line, sector);
         self.record_unrequested_subline_miss(origin, line, sector);
@@ -3122,6 +3186,10 @@ impl L1Cache {
             Self::preflight_fill_timing(pending, fill_request.timing())?;
             self.record_merge_audit(origin, line, sector, sequence);
             self.record_older_sector_pending_merge(origin, sequence);
+            self.record_pending_merge_class(origin, true);
+            // An explicit sector child exists, so this request is already
+            // represented by the outstanding fill mask.  It remains a timing
+            // merge, but is an observer lookup hit on SM120.
             let counters = if self.active_lookup_batch.is_some_and(|batch| {
                 batch.pending_merges_are_hits && sequence < batch.first_fill_sequence
             }) {
@@ -3129,6 +3197,7 @@ impl L1Cache {
                     origin,
                     &[
                         (L1CounterField::Merges, 1),
+                        (L1CounterField::AlreadyRequestedMerges, 1),
                         (L1CounterField::Misses, 1),
                         (L1CounterField::PendingLookupHits, 1),
                     ],
@@ -3136,7 +3205,11 @@ impl L1Cache {
             } else {
                 self.counters.add_fields_checked(
                     origin,
-                    &[(L1CounterField::Merges, 1), (L1CounterField::Misses, 1)],
+                    &[
+                        (L1CounterField::Merges, 1),
+                        (L1CounterField::AlreadyRequestedMerges, 1),
+                        (L1CounterField::Misses, 1),
+                    ],
                 )?
             };
             self.counters = counters;
@@ -3148,6 +3221,7 @@ impl L1Cache {
         if let Some(&(pending, sequence, generation)) = self.line_fills.get(&line) {
             Self::preflight_fill_timing(pending, fill_request.timing())?;
             self.record_merge_audit(origin, line, sector, sequence);
+            self.record_pending_merge_class(origin, sector_already_known_before);
             let counters = if self.active_lookup_batch.is_some_and(|batch| {
                 batch.pending_merges_are_hits && sequence < batch.first_fill_sequence
             }) {
@@ -3155,6 +3229,14 @@ impl L1Cache {
                     origin,
                     &[
                         (L1CounterField::Merges, 1),
+                        (
+                            L1CounterField::AlreadyRequestedMerges,
+                            u64::from(sector_already_known_before),
+                        ),
+                        (
+                            L1CounterField::UnrequestedPendingMerges,
+                            u64::from(!sector_already_known_before),
+                        ),
                         (L1CounterField::Misses, 1),
                         (L1CounterField::PendingLookupHits, 1),
                     ],
@@ -3162,7 +3244,18 @@ impl L1Cache {
             } else {
                 self.counters.add_fields_checked(
                     origin,
-                    &[(L1CounterField::Merges, 1), (L1CounterField::Misses, 1)],
+                    &[
+                        (L1CounterField::Merges, 1),
+                        (
+                            L1CounterField::AlreadyRequestedMerges,
+                            u64::from(sector_already_known_before),
+                        ),
+                        (
+                            L1CounterField::UnrequestedPendingMerges,
+                            u64::from(!sector_already_known_before),
+                        ),
+                        (L1CounterField::Misses, 1),
+                    ],
                 )?
             };
             self.counters = counters;
@@ -3198,6 +3291,9 @@ impl L1Cache {
             Self::preflight_fill_timing(pending, fill_request.timing())?;
             self.record_merge_audit(origin, line, sector, sequence);
             self.record_older_sector_pending_merge(origin, sequence);
+            self.record_pending_merge_class(origin, true);
+            // The child map is the request mask for this resident-line
+            // sector; count the merge as already requested.
             let counters = if self.active_lookup_batch.is_some_and(|batch| {
                 batch.pending_merges_are_hits && sequence < batch.first_fill_sequence
             }) {
@@ -3205,6 +3301,7 @@ impl L1Cache {
                     origin,
                     &[
                         (L1CounterField::Merges, 1),
+                        (L1CounterField::AlreadyRequestedMerges, 1),
                         (L1CounterField::Misses, 1),
                         (L1CounterField::PendingLookupHits, 1),
                     ],
@@ -3212,7 +3309,11 @@ impl L1Cache {
             } else {
                 self.counters.add_fields_checked(
                     origin,
-                    &[(L1CounterField::Merges, 1), (L1CounterField::Misses, 1)],
+                    &[
+                        (L1CounterField::Merges, 1),
+                        (L1CounterField::AlreadyRequestedMerges, 1),
+                        (L1CounterField::Misses, 1),
+                    ],
                 )?
             };
             self.counters = counters;

@@ -134,6 +134,33 @@ def _check_launch(launch: dict[str, Any], context: str, errors: list[str]) -> bo
         "records_with_empty_span",
     ):
         _int(reuse, field, errors, context)
+    hotl_fields = (
+        "hotl_line_interval_count",
+        "hotl_line_interval_sum",
+        "hotl_sector_interval_count",
+        "hotl_sector_interval_sum",
+        "hotl_line_censored_tail_count",
+        "hotl_line_censored_tail_sum",
+        "hotl_sector_censored_tail_count",
+        "hotl_sector_censored_tail_sum",
+    )
+    for field in hotl_fields:
+        values = reuse.get(field)
+        if not isinstance(values, list) or len(values) != 80:
+            errors.append(f"{context}: {field} must have 80 bins")
+            continue
+        for index, value in enumerate(values):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                errors.append(f"{context}: {field}[{index}] is invalid")
+    for field in ("hotl_line_miss_references", "hotl_sector_miss_references"):
+        values = reuse.get(field)
+        if not isinstance(values, list) or len(values) != len(MRC_CAPACITY_LINES):
+            errors.append(f"{context}: {field} length mismatch")
+            continue
+        if any(isinstance(value, bool) or not isinstance(value, int) or value < 0 for value in values):
+            errors.append(f"{context}: {field} contains an invalid value")
+        if any(a < b for a, b in zip(values, values[1:])):
+            errors.append(f"{context}: {field} is not monotone non-increasing")
     return True
 
 

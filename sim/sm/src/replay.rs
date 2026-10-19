@@ -3843,6 +3843,7 @@ fn extract_per_sm_blocks(
         sectors_decoded: decode_sectors || schedule.arch == ArchId::Sm120,
         ..TraceMetrics::default()
     };
+    trace_metrics.bind_conditional_locality_arch(schedule.arch);
     let sidecar_join_started = Instant::now();
     let observations = if schedule.arch == ArchId::Sm120 {
         td.async_sidecars()?
@@ -5608,6 +5609,12 @@ fn replay_kernel_with_schedule_and_l2_and_candidates_with_payload_events(
                 return Err(ReplayError::RetainedL2NotDrained { pending_sectors });
             }
             let launch_l2 = sys.l2.checked_delta_since(&counters_before)?;
+            trace_metrics.observe_l2_system_locality_summary(
+                launch_l2.lookup_requests,
+                launch_l2.lookup_hits,
+                sys.l2_by_source.read_pending_merge_hits,
+                sys.l2_by_source.store_lookup_requests,
+            );
             for sm in &async_copy_destination_fallback_sms {
                 if let Some(result) = sys.per_sm.get_mut(sm) {
                     result.unmodeled_tails.ldgsts_dst_shared_timing = true;
@@ -5661,6 +5668,8 @@ fn replay_kernel_with_schedule_and_l2_and_candidates_with_payload_events(
             trace_metrics.observe_l1_merge_audit(
                 audit.same_request_merges,
                 audit.older_pending_merges,
+                audit.already_requested_merges,
+                audit.unrequested_pending_merges,
                 audit.ordinary_same_request_merges,
                 audit.ordinary_older_pending_merges,
                 audit.async_same_request_merges,

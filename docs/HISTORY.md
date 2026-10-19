@@ -88,3 +88,15 @@ execution instructions. Those artifacts remain recoverable through Git history
 when historical archaeology is needed. Current behavior is documented only by
 the contract, architecture, replay, results, and session-memory files linked
 from [`README.md`](../README.md).
+
+## Cache-locality plan execution (2026-10-19)
+
+The cache-locality plan was executed through final 12-worker full replay. L1
+pending-merge classes, SM120 write-tag observation, generic-store operation
+attribution, L2 pre-packet store tags, HOTL finite-boundary evidence, and
+Class-B conditional shadow schemas were added as report-only seams. Final
+corpora passed status and exact-MRC invariants with no physical hierarchy or
+timing regression. The interval HOTL WAPE gate remains open because reuse
+interval lacks reuse distance/cross-warp order; the residual and the four
+ordered-fallback zero-target L1 rows are recorded in
+`docs/CACHE_LOCALITY_EXECUTION_REPORT.md` rather than hidden by fitting.

@@ -21,7 +21,7 @@ use std::time::Instant;
 use crate::emit::{
     EmitOutcome, EmittedMetricKey, FullLaunchPredictions, MetricValue, Unavailable, Unit,
     async_global_l1_hit_exclusion, emit_launch, global_read_resident_hit_adjustment,
-    global_resident_hit_adjustment,
+    global_resident_hit_adjustment, l1_write_hit_terms,
 };
 use serde::{Deserialize, Serialize};
 use sim_arch::ArchId;
@@ -2261,7 +2261,9 @@ fn cache_lookup_prediction_reports(
                         .saturating_add(metrics.local_interleaved_l1_load_hits)
                     },
                 );
-                let store_hits = observer.map_or(counters.store_hits, |metrics| {
+                let [default_store_hits, reduction_hits] =
+                    l1_write_hit_terms(counters.arch().unwrap_or(ArchId::Sm86), counters, trace);
+                let store_hits = observer.map_or(default_store_hits, |metrics| {
                     counters
                         .origin(MemoryOrigin::Global)
                         .store_hits
@@ -2269,7 +2271,7 @@ fn cache_lookup_prediction_reports(
                 });
                 read_hits
                     .saturating_add(store_hits)
-                    .saturating_add(counters.reduction_hits)
+                    .saturating_add(reduction_hits)
             }),
         ),
         (
@@ -2314,8 +2316,7 @@ fn cache_lookup_prediction_reports(
                     // DRAM demand, or timing. Keep SM86 on its established
                     // physical/source projection.
                     let (base_lookup_hits, base_lookup_requests) =
-                        if counters.arch() == Some(ArchId::Sm120)
-                            && let Some(split) = l2_by_source
+                        if let Some(split) = l2_by_source
                             && split.store_packet_candidate_sectors != 0
                         {
                             let non_store_hits =

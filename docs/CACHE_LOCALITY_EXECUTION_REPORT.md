@@ -1,0 +1,101 @@
+# Cache-locality execution report (2026-10-19)
+
+This report records the real-capture execution of
+`CACHE_LOCALITY_EXECUTION_PLAN.md`. It does not treat NCU as a simulator
+input, and it keeps trace-native Class-A locality separate from conditional
+Class-B hardware shadows.
+
+## Replay evidence
+
+All replays below are `full`, integrated `l1-l2`, compressed `.jsonl.zst`, and
+use `--workers 12`:
+
+| lane | captures / launches | status profile | artifact |
+| --- | ---: | --- | --- |
+| SM120 / RTX 5090 | 339 / 11,558 | 339 `ok` | `full_replay_runs/cache_locality_final2_sm120/full.jsonl.zst` |
+| SM86 / RTX 3090 Ti | 286 successful / 12,392 | 286 `ok`, 62 `control_error`, 8 `replay_error` | `full_replay_runs/cache_locality_final2_sm86/full.jsonl.zst` |
+
+The five required real-capture probes (three SM120 and two SM86) completed
+before the corpus runs. `tools/validate_reuse_mrc.py` reports zero errors for
+both final artifacts. `cargo test --release --manifest-path sim/Cargo.toml
+--workspace` passes; targeted clippy remains blocked by 16 pre-existing
+`sim-trace` warnings unrelated to this change.
+
+## Implemented slices
+
+### M1: L1 pending-merge decomposition
+
+`L1Cache` now preserves `merges` for timing while exposing
+`already_requested_merges` and `unrequested_pending_merges` in unified and
+origin counters, boundary state, merge audit, and trace metrics. SM120 lookup
+projection credits only resident hits plus already-requested sectors. The
+changes are observer/accounting-only.
+
+### M2A/M2B: SM120 write observer and generic-store attribution
+
+The report-only write-tag window is available on SM120 as a scoped 256-set,
+4-slot effective card capability. Read and write batches share one observer
+view; `GlobalUntagged` stores are routed without the old occupancy cutoff; and
+operation-qualified L2 lookup accounting uses
+`MemRequest::effective_observer_operation()`. Physical L1/L2 state, DRAM, and
+frontiers are unchanged.
+
+### M2C: store-to-load boundary
+
+The live timing cache was not changed. Full-sector store-to-load behavior is
+kept as a shadow/accounting boundary because installing stores in the live L1
+would change response latency and scheduler order without a byte-mask trace
+contract.
+
+### M3: L2 pre-packet store-tag accounting
+
+`L2MaskPreview` now records a pre-packet write-tag mask. Same-(SM, issue-cycle,
+line) store requests share the pre-instruction tag state, preventing cold
+coalesced sectors from self-crediting. Both architectures use the packetized
+observer surface; physical L2/DRAM/timing remain unchanged.
+
+### M4: locality observers
+
+`sector_mrc_observer_v1` remains an exact Fenwick/Mattson Class-A oracle with
+same-tick lower/upper envelopes and line-tag/sector-fill decomposition. The
+reuse observer now emits a line-reference volume clock, 80-bin count/sum
+histograms, right-censored tail intervals, and coupled line/sector finite-boundary
+miss curves. The Tier-2 `sm_l1_locality_observer_v1` is card-bound and
+trace-ordered; Tier-3 `l2_system_locality_observer_v1` reports L2 summary
+bounds and explicitly counts unavailable global timestamp order. Both are
+shadow-only.
+
+## Quantitative results and blockers
+
+The exact Fenwick MRC has 0.00% error against its analytical reference by
+construction and all corpus invariants pass. The finite-boundary interval
+approximation is not within the plan's requested <1.5% WAPE gate:
+
+| lane | line WAPE | sector WAPE |
+| --- | ---: | ---: |
+| SM120 | 20.6283% | 19.1585% |
+| SM86 | 16.7574% | 17.8661% |
+
+The residual is expected from the declared information boundary: within-warp
+reuse interval/volume lacks cross-warp reuse distance, set/slice mapping,
+replacement, MSHR/fill chronology, and shared-memory carveout. No NCU fitting,
+post-hoc correction, or exact-oracle copying was used.
+
+The final SM120 NCU report retains the previously measured endpoint frontier:
+Global L1 hit nonzero-target relative error ≈1.45% (four nonzero predictions
+on zero-target rows); Global L1 miss ≈0.12%; unified L1 ≈39.58%; operation-read
+L2 ≈14.89%; generic source-TEX L2 ≈24.11%. These are endpoint counters, not
+MRC targets. SM86 NCU profiles do not identity-join through the SM120 report
+runner; retained SM86 comparisons remain the accepted full-replay reports in
+`docs/RESULTS.md` and `FULL_NUMERIC_COMPARISON_PER_SM_BASELINE.json`.
+
+The four SM120 zero-target global-L1 rows are ordered-fallback joins with
+trace-paired LDG/STG scope. Their target association is not independently
+identifiable from the trace; applying a workload-specific or NCU-derived rule
+would violate the no-fitting contract. They remain a documented residual,
+not a hidden correction.
+
+`full_replay_runs/cache_locality_final2_numeric_comparison.json` shows the
+expected observer-only differences against the accepted pre-locality lanes.
+After excluding observer fields and wall clocks, no physical cache, DRAM,
+IPC, or timing-frontier difference remains.

@@ -128,3 +128,16 @@ subtraction was empirically rejected. Gemini's definitive gate freezes all
 active IPC/L1/L2 projection changes until TMA descriptor/coordinate and launch
 cache metadata, disaggregated hardware PMU counters, or isolated LTC128B/TMA
 microbenchmarks arrive. See `docs/L2_SCOPE_SHADOW.md`.
+
+The 2026-10-19 `CACHE_LOCALITY_EXECUTION_PLAN.md` execution is recorded in
+`CACHE_LOCALITY_EXECUTION_REPORT.md`. M1/M2A/M2B/M3 report-only seams and the
+M4 locality observers are implemented; final twelve-worker full replay covers
+339 SM120/11,558 launches and 286 successful SM86/12,392 launches. Exact
+Fenwick MRC invariants pass. The interval HOTL observer is intentionally not
+promoted as an exact MRC: its final WAPE is 20.6283%/19.1585% (SM120
+line/sector) and 16.7574%/17.8661% (SM86), reflecting missing cross-warp order
+and stack distance. Four SM120 ordered-fallback zero-target global-L1 rows
+remain a target-association residual; no NCU fitting or workload exception was
+added. Tier-2/Tier-3 conditional shadows are report-only, with Tier-3 marking
+global timestamp order unavailable. Future work must not call these residuals
+closed without new trace/PMU evidence.

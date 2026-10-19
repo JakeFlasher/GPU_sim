@@ -129,9 +129,16 @@ impl ArchId {
                     tag_slots: 2,
                 },
             ),
-            Self::Sm120 => Capability::research_gap(
+            // SM120 uses the same report-only 128-byte tag window shape as
+            // the effective L1 card contract.  This capability is detached
+            // from the timing cache and is therefore safe to expose without
+            // asserting proprietary replacement or set-hash details.
+            Self::Sm120 => Capability::available(
                 Self::Sm120,
-                "sm_120 L1TEX write-lookup allocation window is not modeled",
+                L1WriteLookupWindow {
+                    set_count: 256,
+                    tag_slots: 4,
+                },
             ),
         }
     }

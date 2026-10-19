@@ -4016,6 +4016,11 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
     let mut reduction_lookup_requests = 0_u64;
     const STORE_PACKET_WINDOW_CYCLES: u64 = 8;
     let mut store_packet_last: HashMap<(usize, i64, u8), u64> = HashMap::new();
+    // One traced store instruction can still emit one-sector MemRequests.
+    // Remember whether the line tag was present before the first request at
+    // one (SM, issue-cycle, line) boundary so later sectors cannot self-credit
+    // as write-tag hits on a cold coalesced instruction.
+    let mut store_packet_line_tag_state: HashMap<(usize, u64, i64), bool> = HashMap::new();
     let mut store_packet_candidate_sectors = 0_u64;
     let mut staged_l2 = l2.try_snapshot()?;
     while let Some(ev) = queue.pop()? {
@@ -4222,12 +4227,17 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                     // immediately. If insertion fails, the kernel-private L2
                     // snapshot is discarded and the caller-owned model is unchanged.
                     let line = req.sector_id >> 2;
+                    let effective_observer_operation = req.effective_observer_operation();
+                    let store_packet_group = (req.origin == MemoryOrigin::Global
+                        && effective_observer_operation == MemoryOperation::Store)
+                        .then_some((sm_ix, req.issue_time, line));
                     // Stage an observer-only per-SM line/sector packet
                     // candidate. The source-sector baseline below remains
                     // one sector per request; a failed transactional access
                     // must not leak coalescer state.
                     let mut store_packet_keys = Vec::new();
-                    if req.origin == MemoryOrigin::Global && req.operation == MemoryOperation::Store
+                    if req.origin == MemoryOrigin::Global
+                        && effective_observer_operation == MemoryOperation::Store
                     {
                         store_packet_last.retain(|(owner, _, _), last| {
                             *owner != sm_ix
@@ -4247,6 +4257,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                             }
                         }
                     }
+                    let mut store_packet_tag_was_present = None;
                     let (l2_access, commit) = staged_l2.access_mask_event_coalesced_transactional(
                         line,
                         req.sector_mask,
@@ -4311,20 +4322,30 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                             } else {
                                 0
                             };
-                            let store_packet_lookup_hits = if req.origin == MemoryOrigin::Global
-                                && req.operation == MemoryOperation::Store
-                            {
-                                store_packet_keys
-                                    .iter()
-                                    .filter(|(_, _, sector)| {
-                                        preview.lookup.present_mask & (1_u8 << sector) != 0
-                                    })
-                                    .count() as u64
+                            let store_packet_lookup_hits = if let Some(group) = store_packet_group {
+                                let tag_was_present = store_packet_line_tag_state.get(&group);
+                                let hit_mask = match tag_was_present {
+                                    Some(true) => req.sector_mask,
+                                    Some(false) => 0,
+                                    None => {
+                                        preview.lookup.present_mask
+                                            | preview.lookup.pre_packet_write_tag_hit_mask
+                                    }
+                                };
+                                u64::from((hit_mask & req.sector_mask).count_ones())
                             } else {
                                 0
                             };
-                            let observer_operation =
-                                req.observer_operation.unwrap_or(req.operation);
+                            store_packet_tag_was_present = store_packet_group.map(|group| {
+                                store_packet_line_tag_state
+                                    .get(&group)
+                                    .copied()
+                                    .unwrap_or(
+                                        preview.lookup.present_mask != 0
+                                            || preview.lookup.pre_packet_write_tag_hit_mask != 0,
+                                    )
+                            });
+                            let observer_operation = effective_observer_operation;
                             let lookup_for_operation =
                                 |operation| -> Result<(u64, u64), SystemError> {
                                     Ok(match operation {
@@ -4377,7 +4398,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                             // observer tag only partitions operation-qualified
                             // counters (generic ST.E is the current user).
                             let (lookup_observer_requests, lookup_observer_hits) =
-                                lookup_for_operation(req.operation)?;
+                                lookup_for_operation(effective_observer_operation)?;
                             let (operation_observer_requests, operation_observer_hits) =
                                 lookup_for_operation(observer_operation)?;
                             let source_ix = req.source as usize;
@@ -4859,6 +4880,11 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
 
                     for key in &store_packet_keys {
                         store_packet_last.insert(*key, req.issue_time);
+                    }
+                    if let (Some(group), Some(tag_was_present)) =
+                        (store_packet_group, store_packet_tag_was_present)
+                    {
+                        store_packet_line_tag_state.insert(group, tag_was_present);
                     }
                     store_packet_candidate_sectors = store_packet_candidate_sectors
                         .checked_add(u64::try_from(store_packet_keys.len()).map_err(|_| {

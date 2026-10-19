@@ -162,6 +162,7 @@ impl Default for ReuseClassObservation {
 
 pub const REUSE_PROXY_CAPACITY_RECORDS: [u64; 8] = [0, 1, 2, 4, 8, 16, 32, 64];
 const REUSE_INTERVAL_HISTOGRAM_BINS: usize = 32;
+const HOTL_INTERVAL_HISTOGRAM_BINS: usize = 80;
 
 /// Report-only reuse interval and MRC-proxy counters.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -207,6 +208,17 @@ pub struct ReuseIntervalObservation {
     /// class-specific MRCs.
     pub by_class: BTreeMap<String, ReuseClassObservation>,
     pub class_accounting_scope: &'static str,
+    pub hotl_line_volume_clock: u64,
+    pub hotl_line_interval_count: Vec<u64>,
+    pub hotl_line_interval_sum: Vec<u64>,
+    pub hotl_sector_interval_count: Vec<u64>,
+    pub hotl_sector_interval_sum: Vec<u64>,
+    pub hotl_line_censored_tail_count: Vec<u64>,
+    pub hotl_line_censored_tail_sum: Vec<u64>,
+    pub hotl_sector_censored_tail_count: Vec<u64>,
+    pub hotl_sector_censored_tail_sum: Vec<u64>,
+    pub hotl_line_miss_references: [u64; 28],
+    pub hotl_sector_miss_references: [u64; 28],
 }
 
 /// Capacity points for the report-only exact locality curve.  Capacities are
@@ -278,6 +290,62 @@ pub struct LocalityMrcObservation {
     pub by_origin: BTreeMap<String, LocalityMrcClassObservation>,
 }
 
+/// Conditional Class-B locality envelope.  This is intentionally a shadow
+/// accounting surface: it reports a trace-ordered lower/upper scenario at a
+/// declared capacity and never mutates cache state, MSHRs, L2 traffic, or
+/// timing.  The two endpoint curves are kept separate from Class-A MRC.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ConditionalLocalityObservation {
+    pub schema: &'static str,
+    pub ordering_scope: &'static str,
+    pub capacity_unit: &'static str,
+    pub capacity_lines: Vec<u64>,
+    pub references: u64,
+    pub lower_hits: Vec<u64>,
+    pub upper_hits: Vec<u64>,
+    pub lower_misses: Vec<u64>,
+    pub upper_misses: Vec<u64>,
+    pub constructive_inter_warp_sharing_gain_pct: f64,
+    pub destructive_inter_warp_dilation_loss_pct: f64,
+    pub in_flight_mshr_merges: u64,
+    pub settled_sram_hits: u64,
+    pub lease_zero_store_references: u64,
+    pub ordering_unavailable_references: u64,
+}
+
+impl ConditionalLocalityObservation {
+    fn new(schema: &'static str, capacity_lines: Vec<u64>, ordering_scope: &'static str) -> Self {
+        let n = capacity_lines.len();
+        Self {
+            schema,
+            ordering_scope,
+            capacity_unit: "distinct_128B_lines",
+            capacity_lines,
+            references: 0,
+            lower_hits: vec![0; n],
+            upper_hits: vec![0; n],
+            lower_misses: vec![0; n],
+            upper_misses: vec![0; n],
+            constructive_inter_warp_sharing_gain_pct: 0.0,
+            destructive_inter_warp_dilation_loss_pct: 0.0,
+            in_flight_mshr_merges: 0,
+            settled_sram_hits: 0,
+            lease_zero_store_references: 0,
+            ordering_unavailable_references: 0,
+        }
+    }
+}
+
+impl Default for ConditionalLocalityObservation {
+    fn default() -> Self {
+        Self::new(
+            "conditional_locality_observer_unbound",
+            Vec::new(),
+            "not_bound_to_a_cross_warp_order",
+        )
+    }
+}
+
 impl Default for LocalityMrcObservation {
     fn default() -> Self {
         Self {
@@ -320,6 +388,17 @@ impl Default for ReuseIntervalObservation {
             sector_proxy_miss_references: [0; 8],
             by_class: BTreeMap::new(),
             class_accounting_scope: "unified_warp_stream_attribution",
+            hotl_line_volume_clock: 0,
+            hotl_line_interval_count: vec![0; HOTL_INTERVAL_HISTOGRAM_BINS],
+            hotl_line_interval_sum: vec![0; HOTL_INTERVAL_HISTOGRAM_BINS],
+            hotl_sector_interval_count: vec![0; HOTL_INTERVAL_HISTOGRAM_BINS],
+            hotl_sector_interval_sum: vec![0; HOTL_INTERVAL_HISTOGRAM_BINS],
+            hotl_line_censored_tail_count: vec![0; HOTL_INTERVAL_HISTOGRAM_BINS],
+            hotl_line_censored_tail_sum: vec![0; HOTL_INTERVAL_HISTOGRAM_BINS],
+            hotl_sector_censored_tail_count: vec![0; HOTL_INTERVAL_HISTOGRAM_BINS],
+            hotl_sector_censored_tail_sum: vec![0; HOTL_INTERVAL_HISTOGRAM_BINS],
+            hotl_line_miss_references: [0; 28],
+            hotl_sector_miss_references: [0; 28],
         }
     }
 }
@@ -328,11 +407,14 @@ impl Default for ReuseIntervalObservation {
 struct ReuseLineState {
     last_record_tick: u64,
     last_sector_tick: [Option<u64>; 4],
+    last_line_volume: u64,
+    last_sector_volume: [Option<u64>; 4],
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct ReuseWarpStream {
     record_tick: u64,
+    line_volume: u64,
     lines: BTreeMap<i64, ReuseLineState>,
     active: bool,
 }
@@ -996,7 +1078,7 @@ pub(crate) struct CoherenceLineState {
     sector_write_sm_masks: [u128; 4],
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct TraceMetrics {
     /// Captured launch metadata, not inferred from lane activity or NCU.
     pub launch_resources: Option<LaunchResources>,
@@ -1014,6 +1096,13 @@ pub struct TraceMetrics {
     /// Exact, origin-qualified Class-A locality/MRC evidence. This remains a
     /// report-only shadow observer and never feeds the live cache or scheduler.
     pub locality_mrc: LocalityMrcObservation,
+    /// Tier-2 per-SM cycle-interleaved conditional L1 shadow.  It is bound to
+    /// an architecture card by replay setup and remains report-only.
+    pub sm_l1_locality_observer: ConditionalLocalityObservation,
+    /// Tier-3 global timestamp-ordered conditional L2 shadow.  Cross-SM
+    /// arrival order is unavailable in the trace-local observer, so the
+    /// unavailability count is explicit rather than silently ordering warps.
+    pub l2_system_locality_observer: ConditionalLocalityObservation,
     #[serde(skip)]
     pub(crate) reuse_warp_stream: ReuseWarpStream,
     #[serde(skip)]
@@ -1198,6 +1287,10 @@ pub struct TraceMetrics {
     /// diagnostic; they do not change cache state or lookup projections.
     pub l1_same_request_merges_global: u64,
     pub l1_same_request_merges_local: u64,
+    pub l1_already_requested_merges_global: u64,
+    pub l1_already_requested_merges_local: u64,
+    pub l1_unrequested_pending_merges_global: u64,
+    pub l1_unrequested_pending_merges_local: u64,
     /// Ordinary (non-LDGSTS) request-boundary merges. Keeping this subset
     /// separate prevents the LDGSTS client from contaminating the ordinary
     /// global-LDG packet-aware lookup candidate.
@@ -1667,6 +1760,62 @@ fn add_reuse_interval(
     }
 }
 
+fn hotl_interval_bin(interval: u64) -> usize {
+    if interval < 16 {
+        return interval as usize;
+    }
+    let mut exponent = 4_u32;
+    while exponent < 20 && (1_u64 << (exponent + 1)) <= interval {
+        exponent += 1;
+    }
+    let base = 1_u64 << exponent;
+    let sub_bin = (interval
+        .saturating_sub(base)
+        .saturating_mul(4)
+        / base)
+        .min(3) as usize;
+    (16 + (exponent as usize - 4) * 4 + sub_bin).min(HOTL_INTERVAL_HISTOGRAM_BINS - 1)
+}
+
+fn add_hotl_interval(
+    observation: &mut ReuseIntervalObservation,
+    interval: u64,
+    sector: bool,
+    censored: bool,
+) {
+    let bin = hotl_interval_bin(interval);
+    let (counts, sums) = match (sector, censored) {
+        (false, false) => (
+            &mut observation.hotl_line_interval_count,
+            &mut observation.hotl_line_interval_sum,
+        ),
+        (true, false) => (
+            &mut observation.hotl_sector_interval_count,
+            &mut observation.hotl_sector_interval_sum,
+        ),
+        (false, true) => (
+            &mut observation.hotl_line_censored_tail_count,
+            &mut observation.hotl_line_censored_tail_sum,
+        ),
+        (true, true) => (
+            &mut observation.hotl_sector_censored_tail_count,
+            &mut observation.hotl_sector_censored_tail_sum,
+        ),
+    };
+    counts[bin] = counts[bin].saturating_add(1);
+    sums[bin] = sums[bin].saturating_add(interval);
+    let misses = if sector {
+        &mut observation.hotl_sector_miss_references
+    } else {
+        &mut observation.hotl_line_miss_references
+    };
+    for (index, &capacity) in LOCALITY_MRC_CAPACITY_LINES.iter().enumerate() {
+        if capacity == 0 || interval >= capacity {
+            misses[index] = misses[index].saturating_add(1);
+        }
+    }
+}
+
 fn add_proxy_misses(misses: &mut [u64; 8], interval: Option<u64>) -> Result<(), crate::IssueError> {
     for (index, &capacity) in REUSE_PROXY_CAPACITY_RECORDS.iter().enumerate() {
         // A cold reference has no finite reuse interval and is a miss at
@@ -1691,10 +1840,85 @@ fn constant_global_load_form_index(opcode_text: &str) -> usize {
 }
 
 impl TraceMetrics {
+    pub(crate) fn bind_conditional_locality_arch(&mut self, arch: sim_arch::ArchId) {
+        let (l1_capacities, l2_capacities) = match arch {
+            sim_arch::ArchId::Sm86 => (
+                vec![256, 384, 512, 768, 1024],
+                vec![4096, 8192, 16384, 32768, 49152],
+            ),
+            sim_arch::ArchId::Sm120 => (
+                vec![512, 768, 1024, 2048, 4096],
+                vec![16384, 49152, 131072, 393216, 786432],
+            ),
+        };
+        self.sm_l1_locality_observer = ConditionalLocalityObservation::new(
+            "sm_l1_locality_observer_v1",
+            l1_capacities,
+            "per_warp_trace_order_shadow_at_issue_cycle",
+        );
+        self.l2_system_locality_observer = ConditionalLocalityObservation::new(
+            "l2_system_locality_observer_v1",
+            l2_capacities,
+            "global_timestamp_order_unavailable_in_native_trace",
+        );
+    }
+
+    pub(crate) fn observe_l2_system_locality_summary(
+        &mut self,
+        lookup_requests: u64,
+        lookup_hits: u64,
+        pending_merge_hits: u64,
+        store_lookup_requests: u64,
+    ) {
+        let observer = &mut self.l2_system_locality_observer;
+        if observer.capacity_lines.is_empty() {
+            return;
+        }
+        observer.references = observer.references.saturating_add(lookup_requests);
+        observer.ordering_unavailable_references = observer
+            .ordering_unavailable_references
+            .saturating_add(lookup_requests);
+        observer.in_flight_mshr_merges = observer
+            .in_flight_mshr_merges
+            .saturating_add(pending_merge_hits);
+        observer.lease_zero_store_references = observer
+            .lease_zero_store_references
+            .saturating_add(store_lookup_requests);
+        for index in 0..observer.capacity_lines.len() {
+            observer.lower_hits[index] = observer.lower_hits[index].saturating_add(lookup_hits);
+            observer.upper_hits[index] = observer.upper_hits[index]
+                .saturating_add(lookup_requests);
+            observer.lower_misses[index] = observer.lower_misses[index]
+                .saturating_add(lookup_requests.saturating_sub(lookup_hits));
+        }
+    }
+
     /// Start a new independent reuse stream.  The native trace gives an
     /// authoritative order only inside one warp, so state is never carried
     /// from one warp to another.
     pub(crate) fn begin_reuse_warp_stream(&mut self) {
+        let previous = std::mem::take(&mut self.reuse_warp_stream);
+        if previous.active {
+            let end = previous.line_volume;
+            for state in previous.lines.values() {
+                add_hotl_interval(
+                    &mut self.reuse_interval,
+                    end.saturating_sub(state.last_line_volume),
+                    false,
+                    true,
+                );
+                for sector in 0..4 {
+                    if let Some(last) = state.last_sector_volume[sector] {
+                        add_hotl_interval(
+                            &mut self.reuse_interval,
+                            end.saturating_sub(last),
+                            true,
+                            true,
+                        );
+                    }
+                }
+            }
+        }
         self.reuse_warp_stream = ReuseWarpStream::default();
         self.locality_mrc_warp_stream = LocalityMrcWarpStream::default();
     }
@@ -1775,15 +1999,35 @@ impl TraceMetrics {
         add(&mut class_observation.sector_references, sector_count)?;
 
         let tick = self.reuse_warp_stream.record_tick;
+        let volume = self.reuse_warp_stream.line_volume;
+        let line_count = u64::try_from(lines.len()).map_err(|_| crate::IssueError::CounterOverflow {
+            counter: "reuse line volume clock",
+        })?;
         self.reuse_warp_stream.record_tick =
             tick.checked_add(1)
                 .ok_or(crate::IssueError::CounterOverflow {
                     counter: "reuse record tick",
                 })?;
+        self.reuse_warp_stream.line_volume = volume
+            .checked_add(line_count)
+            .ok_or(crate::IssueError::CounterOverflow {
+                counter: "reuse line volume clock",
+            })?;
+        self.reuse_interval.hotl_line_volume_clock = self
+            .reuse_interval
+            .hotl_line_volume_clock
+            .checked_add(line_count)
+            .ok_or(crate::IssueError::CounterOverflow {
+                counter: "reuse HOTL volume clock",
+            })?;
+        let mut hotl_intervals: Vec<(u64, bool)> = Vec::new();
+        let mut conditional_intervals: Vec<Option<u64>> = Vec::new();
         for (line, mask) in lines {
             let requested_sectors = u64::from(mask.count_ones());
             let mut line_interval = None;
             let mut sector_intervals = [None; 4];
+            let mut line_volume_interval = None;
+            let mut sector_volume_intervals = [None; 4];
             let mut sector_reused_mask = 0_u8;
             let is_new_line = if let Some(state) = self.reuse_warp_stream.lines.get_mut(&line) {
                 line_interval = Some(
@@ -1791,6 +2035,11 @@ impl TraceMetrics {
                         .ok_or(crate::IssueError::CounterOverflow {
                             counter: "reuse line interval",
                         })?
+                        .saturating_sub(1),
+                );
+                line_volume_interval = Some(
+                    volume
+                        .saturating_sub(state.last_line_volume)
                         .saturating_sub(1),
                 );
                 for sector in 0..4 {
@@ -1806,25 +2055,55 @@ impl TraceMetrics {
                                 })?
                                 .saturating_sub(1),
                         );
+                        if let Some(previous_volume) = state.last_sector_volume[sector] {
+                            sector_volume_intervals[sector] = Some(
+                                volume
+                                    .saturating_sub(previous_volume)
+                                    .saturating_sub(1),
+                            );
+                        }
                         sector_reused_mask |= bit;
                     }
                     state.last_sector_tick[sector] = Some(tick);
+                    state.last_sector_volume[sector] = Some(volume);
                 }
                 state.last_record_tick = tick;
+                state.last_line_volume = volume;
                 false
             } else {
                 let mut state = ReuseLineState {
                     last_record_tick: tick,
                     last_sector_tick: [None; 4],
+                    last_line_volume: volume,
+                    last_sector_volume: [None; 4],
                 };
                 for sector in 0..4 {
                     if mask & (1_u8 << sector) != 0 {
                         state.last_sector_tick[sector] = Some(tick);
+                        state.last_sector_volume[sector] = Some(volume);
                     }
                 }
                 self.reuse_warp_stream.lines.insert(line, state);
                 true
             };
+
+            if let Some(interval) = line_volume_interval {
+                hotl_intervals.push((interval, false));
+                conditional_intervals.push(Some(interval));
+            } else {
+                hotl_intervals.push((LOCALITY_MRC_INF, false));
+                conditional_intervals.push(None);
+            }
+            for sector in 0..4 {
+                if mask & (1_u8 << sector) == 0 {
+                    continue;
+                }
+                if let Some(interval) = sector_volume_intervals[sector] {
+                    hotl_intervals.push((interval, true));
+                } else {
+                    hotl_intervals.push((LOCALITY_MRC_INF, true));
+                }
+            }
 
             add(&mut self.reuse_interval.line_references, 1)?;
             add(
@@ -1902,6 +2181,26 @@ impl TraceMetrics {
                         }
                     })?,
                 );
+        }
+        for (interval, sector) in hotl_intervals {
+            add_hotl_interval(&mut self.reuse_interval, interval, sector, false);
+        }
+        for interval in conditional_intervals {
+            let observer = &mut self.sm_l1_locality_observer;
+            if observer.capacity_lines.is_empty() {
+                continue;
+            }
+            observer.references = observer.references.saturating_add(1);
+            for (index, &capacity) in observer.capacity_lines.iter().enumerate() {
+                let hit = interval.is_some_and(|value| value < capacity);
+                if hit {
+                    observer.lower_hits[index] = observer.lower_hits[index].saturating_add(1);
+                    observer.upper_hits[index] = observer.upper_hits[index].saturating_add(1);
+                } else {
+                    observer.lower_misses[index] = observer.lower_misses[index].saturating_add(1);
+                    observer.upper_misses[index] = observer.upper_misses[index].saturating_add(1);
+                }
+            }
         }
         Ok(())
     }
@@ -2348,6 +2647,8 @@ impl TraceMetrics {
         &mut self,
         same_request: [u64; 2],
         older_pending: [u64; 2],
+        already_requested: [u64; 2],
+        unrequested_pending: [u64; 2],
         ordinary_same_request: [u64; 2],
         ordinary_older_pending: [u64; 2],
         async_same_request: [u64; 2],
@@ -2373,6 +2674,22 @@ impl TraceMetrics {
     ) -> Result<(), crate::IssueError> {
         add(&mut self.l1_same_request_merges_global, same_request[0])?;
         add(&mut self.l1_same_request_merges_local, same_request[1])?;
+        add(
+            &mut self.l1_already_requested_merges_global,
+            already_requested[0],
+        )?;
+        add(
+            &mut self.l1_already_requested_merges_local,
+            already_requested[1],
+        )?;
+        add(
+            &mut self.l1_unrequested_pending_merges_global,
+            unrequested_pending[0],
+        )?;
+        add(
+            &mut self.l1_unrequested_pending_merges_local,
+            unrequested_pending[1],
+        )?;
         add(
             &mut self.l1_ordinary_same_request_merges_global,
             ordinary_same_request[0],

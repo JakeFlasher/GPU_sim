@@ -35,6 +35,16 @@ def _aggregate(path: Path) -> dict[str, Any]:
     successful_captures = 0
     launches = 0
     origins: dict[str, dict[str, Any]] = {}
+    hotl: dict[str, Any] = {
+        "launches": 0,
+        "line_miss_references": [0] * 28,
+        "sector_miss_references": [0] * 28,
+        "exact_line_miss_references": [0] * 28,
+        "exact_sector_miss_references": [0] * 28,
+        "line_references": 0,
+        "sector_references": 0,
+    }
+    conditional: dict[str, dict[str, Any]] = {}
     capacity_lines: list[int] | None = None
     monotonic_violations = 0
     checked_launches = 0
@@ -53,6 +63,41 @@ def _aggregate(path: Path) -> dict[str, Any]:
             if not isinstance(mrc, dict):
                 continue
             checked_launches += 1
+            reuse = trace.get("reuse_interval") if isinstance(trace, dict) else None
+            if isinstance(reuse, dict) and isinstance(reuse.get("hotl_sector_miss_references"), list):
+                hotl["launches"] += 1
+                hotl["line_references"] += int(reuse.get("line_references", 0))
+                hotl["sector_references"] += int(reuse.get("sector_references", 0))
+                for index, value in enumerate(reuse["hotl_line_miss_references"]):
+                    hotl["line_miss_references"][index] += int(value)
+                for index, value in enumerate(reuse["hotl_sector_miss_references"]):
+                    hotl["sector_miss_references"][index] += int(value)
+            for key in ("sm_l1_locality_observer", "l2_system_locality_observer"):
+                observer = trace.get(key) if isinstance(trace, dict) else None
+                if not isinstance(observer, dict):
+                    continue
+                row = conditional.setdefault(
+                    key,
+                    {
+                        "schema": observer.get("schema"),
+                        "ordering_scope": observer.get("ordering_scope"),
+                        "capacity_lines": observer.get("capacity_lines", []),
+                        "references": 0,
+                        "lower_hits": [0] * len(observer.get("capacity_lines", [])),
+                        "upper_hits": [0] * len(observer.get("capacity_lines", [])),
+                        "lower_misses": [0] * len(observer.get("capacity_lines", [])),
+                        "upper_misses": [0] * len(observer.get("capacity_lines", [])),
+                        "ordering_unavailable_references": 0,
+                    },
+                )
+                row["references"] += int(observer.get("references", 0))
+                row["ordering_unavailable_references"] += int(
+                    observer.get("ordering_unavailable_references", 0)
+                )
+                for field in ("lower_hits", "upper_hits", "lower_misses", "upper_misses"):
+                    for index, value in enumerate(observer.get(field, [])):
+                        if index < len(row[field]):
+                            row[field][index] += int(value)
             grid = mrc.get("capacity_lines")
             if not isinstance(grid, list) or any(
                 isinstance(x, bool) or not isinstance(x, int) or x < 0 for x in grid
@@ -119,9 +164,39 @@ def _aggregate(path: Path) -> dict[str, Any]:
                     monotonic_violations += 1
                 if any(a < b for a, b in zip(sector_misses, sector_misses[1:])):
                     monotonic_violations += 1
+                for index, value in enumerate(line_misses):
+                    hotl["exact_line_miss_references"][index] += int(value)
+                for index, value in enumerate(sector_misses):
+                    hotl["exact_sector_miss_references"][index] += int(value)
 
     if capacity_lines is None:
         capacity_lines = []
+    line_den = sum(hotl["exact_line_miss_references"])
+    sector_den = sum(hotl["exact_sector_miss_references"])
+    hotl["line_wape_pct"] = (
+        100.0
+        * sum(
+            abs(a - b)
+            for a, b in zip(
+                hotl["line_miss_references"], hotl["exact_line_miss_references"]
+            )
+        )
+        / line_den
+        if line_den
+        else None
+    )
+    hotl["sector_wape_pct"] = (
+        100.0
+        * sum(
+            abs(a - b)
+            for a, b in zip(
+                hotl["sector_miss_references"], hotl["exact_sector_miss_references"]
+            )
+        )
+        / sector_den
+        if sector_den
+        else None
+    )
     for row in origins.values():
         line_refs = row["line_references"]
         sector_refs = row["sector_references"]
@@ -169,6 +244,8 @@ def _aggregate(path: Path) -> dict[str, Any]:
         "launches_with_locality_mrc": checked_launches,
         "capacity_lines": capacity_lines,
         "origins": origins,
+        "reuse_interval_hotl": hotl,
+        "conditional_locality_observers": conditional,
         "monotonicity_violations": monotonic_violations,
         "ncu_used": False,
         "hardware_mrc_claim": False,

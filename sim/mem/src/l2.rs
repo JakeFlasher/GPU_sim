@@ -639,6 +639,9 @@ pub struct L2MaskPreview {
     /// Line-relative requested-sector bits whose data was physically present
     /// before its access.
     pub present_mask: u8,
+    /// Store sectors whose 128-byte line tag was present before this packet.
+    /// Same-packet sectors on a cold line therefore remain zero.
+    pub pre_packet_write_tag_hit_mask: u8,
 }
 
 impl L2MaskPreview {
@@ -1896,6 +1899,7 @@ impl L2Model {
         });
         let mut line_present = resident.is_some();
         let mut valid_mask = resident.map_or(0, |way| ways[way].mask);
+        let line_present_before_packet = line_present;
         let mut clock = self.clock;
         let mut bip_counter = self.bip_counter;
         let mut counters = self.counters;
@@ -1912,6 +1916,7 @@ impl L2Model {
         }
         let mut counted_mask = 0u8;
         let mut present_mask = 0u8;
+        let mut pre_packet_write_tag_hit_mask = 0u8;
 
         for sector in 0..4u8 {
             let bit = 1u8 << sector;
@@ -1996,6 +2001,12 @@ impl L2Model {
 
             if counted_hit {
                 counted_mask |= bit;
+                if class == L2OpClass::WriteAtomic
+                    && line_present_before_packet
+                    && !sector_present
+                {
+                    pre_packet_write_tag_hit_mask |= bit;
+                }
             }
             if sector_present {
                 present_mask |= bit;
@@ -2018,6 +2029,7 @@ impl L2Model {
                 present_sectors: present_mask.count_ones(),
                 counted_hit_mask: counted_mask,
                 present_mask,
+                pre_packet_write_tag_hit_mask,
             },
         })
     }
@@ -2063,6 +2075,7 @@ impl L2Model {
         });
         let mut line_present = resident.is_some();
         let mut valid_mask = resident.map_or(0, |way| ways[way].mask);
+        let line_present_before_packet = line_present;
         // Preserve the age boundary for this request. `pending_mask` is
         // mutated while the ascending sector walk constructs the new line
         // allocation; using that mutable value to classify a later sector
@@ -2099,6 +2112,7 @@ impl L2Model {
         let mut present_mask = 0u8;
         let mut fill_mask = 0u8;
         let mut pending_merge_mask = 0u8;
+        let mut pre_packet_write_tag_hit_mask = 0u8;
 
         for sector in 0..4u8 {
             let bit = 1u8 << sector;
@@ -2202,6 +2216,12 @@ impl L2Model {
 
             if counted_hit {
                 counted_mask |= bit;
+                if class == L2OpClass::WriteAtomic
+                    && line_present_before_packet
+                    && !sector_present
+                {
+                    pre_packet_write_tag_hit_mask |= bit;
+                }
             }
             if sector_present {
                 present_mask |= bit;
@@ -2228,6 +2248,7 @@ impl L2Model {
             present_sectors: present_mask.count_ones(),
             counted_hit_mask: counted_mask,
             present_mask,
+            pre_packet_write_tag_hit_mask,
         };
         let event_preview = L2EventMaskPreview {
             lookup,
@@ -2276,8 +2297,10 @@ impl L2Model {
         let resident = self.sets[set_key].iter().find(|w| w.tag == line_id);
         let mut line_present = resident.is_some();
         let mut valid_mask = resident.map_or(0, |w| w.mask);
+        let line_present_before_packet = line_present;
         let mut counted_mask = 0u8;
         let mut present_mask = 0u8;
+        let mut pre_packet_write_tag_hit_mask = 0u8;
         for sector in 0..4u8 {
             let bit = 1u8 << sector;
             if sector_mask & bit == 0 {
@@ -2290,6 +2313,12 @@ impl L2Model {
             if sector_present || (line_present && class == L2OpClass::WriteAtomic) {
                 counted_mask |= bit;
             }
+            if class == L2OpClass::WriteAtomic
+                && line_present_before_packet
+                && !sector_present
+            {
+                pre_packet_write_tag_hit_mask |= bit;
+            }
             line_present = true;
             valid_mask |= bit;
         }
@@ -2299,6 +2328,7 @@ impl L2Model {
             present_sectors: present_mask.count_ones(),
             counted_hit_mask: counted_mask,
             present_mask,
+            pre_packet_write_tag_hit_mask,
         })
     }
 

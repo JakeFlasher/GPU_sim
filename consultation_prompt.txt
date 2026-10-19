@@ -768,3 +768,23 @@ The live cache/timing models remain authoritative; MRC observers are shadow-only
 until gates pass. The current reuse_interval observer is only a within-warp
 record-gap survival proxy and emits no exact RD/MRC; it must not be presented as
 hardware MRC. Full plan is in docs/MRC_METRICS_DESIGN.md.
+
+## Cache-locality plan follow-up (2026-10-19)
+
+Gemini read-only audit identified M1/M2/M3 seams and traps; its full memo is
+`docs/GEMINI_CACHE_PLAN_REVIEW_20261019.md`. The executor implemented the
+report-only changes and fresh full replay evidence is:
+- SM120: 339/339 captures, 11,558 launches, workers=12.
+- SM86: 286 `ok`, 62 `control_error`, 8 `replay_error`, 12,392 launches,
+  workers=12.
+- Exact Fenwick MRC validation: zero errors in both lanes.
+
+Two follow-up questions remain deliberately unresolved. Four SM120 ordered-
+fallback global-op_ld rows have trace-paired LDG/STG scopes and nonzero
+trace-derived hits but zero joined NCU targets; no NCU-derived or workload
+exception is allowed. The upgraded interval HOTL observer has line/sector
+WAPE 20.6283%/19.1585% (SM120) and 16.7574%/17.8661% (SM86) against the
+exact Fenwick oracle. Determine whether a valid Ding--Denning/Xiang estimator
+can close this without copying the oracle or fitting NCU. Two follow-up agy
+calls timed out; treat this as an explicit scientific blocker unless new
+trace/PMU evidence resolves it.

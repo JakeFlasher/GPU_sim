@@ -273,6 +273,8 @@ pub struct L1CounterState {
     pub hits: u64,
     pub misses: u64,
     pub merges: u64,
+    pub already_requested_merges: u64,
+    pub unrequested_pending_merges: u64,
     pub pending_lookup_hits: u64,
     pub stall_events: u64,
     pub line_fills: u64,

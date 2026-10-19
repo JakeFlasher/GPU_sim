@@ -3801,7 +3801,7 @@ pub(super) fn project(
         // lookup hits (for example cp.async's shared-destination stores).
         // Prefer the conserving source split for the NCU-shaped TEX-sector
         // surface while retaining the raw cache counters elsewhere.
-        let sm86_packetized_store = result.arch() == ArchId::Sm86;
+        let packetized_store = true;
         let source_lookup_requests = result
             .l2_by_source()
             .map(|split| {
@@ -3810,7 +3810,7 @@ pub(super) fn project(
                 // that same bounded candidate in the aggregate TEX rows so
                 // additive operation-class conservation holds. The raw
                 // one-sector-per-request store totals remain diagnostic.
-                let store_requests = if sm86_packetized_store {
+                let store_requests = if packetized_store {
                     split.store_packet_candidate_sectors
                 } else {
                     split.store_lookup_requests
@@ -3826,7 +3826,7 @@ pub(super) fn project(
         let source_lookup_hits = result
             .l2_by_source()
             .map(|split| {
-                let store_hits = if sm86_packetized_store {
+                let store_hits = if packetized_store {
                     split
                         .store_lookup_hits
                         .min(split.store_packet_candidate_sectors)

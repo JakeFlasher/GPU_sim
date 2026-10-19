@@ -24,3 +24,20 @@ outputs, and twelve workers; the fast frontier is separate.
 Build/test commands and the portable replay recipe are in the root
 [`README.md`](../README.md) and [`REPLAY.md`](REPLAY.md). This page is the
 current status contract; historical experiment notes are not execution policy.
+
+## Cache-locality execution plan status (2026-10-19)
+
+The plan was executed through a final fresh full replay. M1, M2A/M2B, M3,
+and the report-only portions of M4 are implemented. Final artifacts are
+`full_replay_runs/cache_locality_final2_sm120/` and
+`full_replay_runs/cache_locality_final2_sm86/`; both use 12 workers and pass
+`tools/validate_reuse_mrc.py`.
+
+The exact `sector_mrc_observer_v1` Class-A oracle remains exact and the new
+Tier-2/Tier-3 observer schemas are emitted without changing physical cache,
+DRAM, IPC, or timing. The interval-derived HOTL approximation is **not** a
+<1.5% oracle substitute (SM120 line/sector WAPE 20.6283%/19.1585%; SM86
+16.7574%/17.8661%). This is an information-boundary residual, not a reason to
+fit NCU or fabricate cross-warp order. The four ordered-fallback SM120
+zero-target global-L1 rows likewise remain explicitly unresolved. Details and
+commands are in [`CACHE_LOCALITY_EXECUTION_REPORT.md`](CACHE_LOCALITY_EXECUTION_REPORT.md).

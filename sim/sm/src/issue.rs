@@ -1702,6 +1702,16 @@ pub struct MemRequest {
     pub(crate) admission_witness: Option<AdmissionRequestWitness>,
 }
 
+impl MemRequest {
+    /// Operation used only by operation-qualified observer counters.  The
+    /// physical hierarchy continues to use `operation`; generic `ST.E` keeps
+    /// its established untagged physical route while the observer sees it as
+    /// a store.
+    pub fn effective_observer_operation(&self) -> MemoryOperation {
+        self.observer_operation.unwrap_or(self.operation)
+    }
+}
+
 /// Process-local identity of one live shared-L2 actor. It is deliberately
 /// opaque and never enters simulator outputs; its only role is to prevent a
 /// response capability emitted by one actor or replay generation from being
@@ -2839,13 +2849,16 @@ fn deep_constant_load(
 /// Bypass/untagged forms never reach this `GlobalStore` path and therefore do
 /// not allocate observer tags.
 pub(crate) fn stateful_write_lookup_observer_enabled(schedule: &FunctionSchedule) -> bool {
-    if schedule.arch != ArchId::Sm86 {
+    if !matches!(
+        schedule.arch.l1_write_lookup_window().status(),
+        sim_arch::CapabilityStatus::Available
+    ) {
         return false;
     }
     let mut has_global_store = false;
     for slot in schedule.by_pc.values() {
         let head = opcode_head(slot.opcode_text());
-        has_global_store |= head == "STG";
+        has_global_store |= matches!(head, "STG" | "ST" | "STL");
     }
     has_global_store
 }
@@ -8857,6 +8870,12 @@ impl<'a> SmCore<'a> {
                     L1LookupClient::OrdinaryGlobal
                 };
                 let request_sectors = &sectors[off..off + usize::from(len)];
+                if let Some(observer) = shared_write_lookup_observer.as_ref() {
+                    // Reads allocate the same report-only tag presence view
+                    // used by stores.  Ignore the returned hit count here;
+                    // only the later store instruction consumes it.
+                    staged_write_lookup_plan = Some(observer.borrow().plan_batch(request_sectors)?);
+                }
                 let lookup_batch = st
                     .l1
                     .begin_lookup_batch_for_client_with_sectors(lookup_client, request_sectors);
@@ -8913,6 +8932,11 @@ impl<'a> SmCore<'a> {
                             break;
                         }
                         Err(SharedAccessError::Issue(source)) => return Err(source),
+                    }
+                }
+                if let Some(plan) = staged_write_lookup_plan.take() {
+                    if let Some(observer) = shared_write_lookup_observer.as_ref() {
+                        observer.borrow_mut().commit_plan(plan);
                     }
                 }
                 Ok(known)
@@ -9035,6 +9059,11 @@ impl<'a> SmCore<'a> {
                         Err(SharedAccessError::Issue(source)) => return Err(source),
                     }
                 }
+                if let Some(plan) = staged_write_lookup_plan.take() {
+                    if let Some(observer) = shared_write_lookup_observer.as_ref() {
+                        observer.borrow_mut().commit_plan(plan);
+                    }
+                }
                 self.shared_write_lookup_runtime.async_l1_hit_service_ready[subcore] =
                     hit_service_ready;
                 Ok(known)
@@ -9106,12 +9135,18 @@ impl<'a> SmCore<'a> {
                 } else {
                     st.l1.count_untagged(origin, u64::from(len))?;
                     if observer_store {
-                        let hits = projected_l1_write_lookup_hits(
+                        if let Some(observer) = shared_write_lookup_observer.as_ref() {
+                            staged_write_lookup_plan = Some(
+                                observer
+                                    .borrow()
+                                    .plan_batch(&sectors[off..off + usize::from(len)])?,
+                            );
+                        } else if let Some(hits) = projected_l1_write_lookup_hits(
                             AccessKind::GlobalStore { off, len },
                             sectors,
-                        )
-                        .unwrap_or(0);
-                        st.l1.count_write_lookup_hits(origin, hits)?;
+                        ) {
+                            st.l1.count_write_lookup_hits(origin, hits)?;
+                        }
                     }
                 }
                 let async_group = if async_copy {
@@ -9204,6 +9239,12 @@ impl<'a> SmCore<'a> {
                         reply,
                         admission_witness: None,
                     });
+                }
+                if let Some(plan) = staged_write_lookup_plan.take() {
+                    st.l1.count_write_lookup_hits(origin, plan.hits())?;
+                    if let Some(observer) = shared_write_lookup_observer.as_ref() {
+                        observer.borrow_mut().commit_plan(plan);
+                    }
                 }
                 Ok(None)
             }
@@ -13996,10 +14037,6 @@ impl<'a> SmCore<'a> {
                         .is_some_and(|slot| {
                             matches!(inst.kind, AccessKind::GlobalUntagged { .. })
                                 && opcode_head(slot.opcode_text()) == "ST"
-                                && self
-                                    .block_states
-                                    .get(self.warps[wix].block)
-                                    .is_some_and(|state| state.admitted_warps <= 8)
                         }),
                     warp_sectors,
                     write_barrier,

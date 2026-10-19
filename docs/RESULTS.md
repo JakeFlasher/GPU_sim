@@ -278,3 +278,28 @@ launch-cache metadata, disaggregated tag/MSHR/fill/stall PMU counters, or
 isolated LTC128B/TMA microbenchmarks; cache-hint subtraction, fixed coalescing
 windows, constant-pipeline re-scoping, IPC scaling, and further TMA/LTC
 projections are not defensible under the current trace contract.
+
+## 2026-10-19 cache-locality execution plan replay
+
+A final fresh full-only campaign ran with twelve workers and `.jsonl.zst`
+outputs: SM120 339/339 `ok` captures (11,558 launches) and SM86 286 `ok`, 62
+`control_error`, 8 `replay_error` (12,392 launches). Required real-capture
+probes completed first. The exact Fenwick MRC validator passed every launch;
+`full_replay_runs/cache_locality_final2_numeric_comparison.json` contains the
+expected observer-only diffs versus the accepted pre-locality lanes, with no
+physical cache/DRAM/IPC/timing-frontier change after observer fields and wall
+clocks are excluded.
+
+The M1 decomposition, SM120 report-only write observer, generic `ST.E`
+operation attribution, and L2 pre-packet store-tag mask are now live. M4
+also emits 80-bin volume-clock/tail HOTL evidence and the conditional
+`sm_l1_locality_observer_v1` / `l2_system_locality_observer_v1` shadows.
+The exact Class-A MRC remains 0.00% oracle error. The interval approximation
+WAPE is 20.6283% line / 19.1585% sector (SM120) and 16.7574% line / 17.8661%
+sector (SM86), so the plan's <1.5% interval gate is not claimed: interval
+volume is not stack distance under the available within-warp trace contract.
+The final SM120 endpoint report remains approximately 1.45% Global-L1
+nonzero-target relative error, 39.58% unified-L1, 14.89% operation-read-L2,
+and 24.11% generic source-TEX-L2; four ordered-fallback global-L1 zero-target
+rows remain a target-association residual. See
+[`CACHE_LOCALITY_EXECUTION_REPORT.md`](CACHE_LOCALITY_EXECUTION_REPORT.md).
