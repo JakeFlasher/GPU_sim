@@ -83,6 +83,19 @@ remain bit-identical. Hardware MRC claims remain out of scope where cross-warp
 arrival order, set/slice/hash/replacement, or TMA completion linkage is not
 observable.
 
+## Follow-up endpoint decision
+
+Gemini's follow-up review rejected adding synthetic SHARDS/reservoir sampling
+solely to manufacture a `<10%` error number against an already operational
+exact `O(N log M)` oracle. Exact reference output is the scientifically correct
+Class-A endpoint while it remains computationally affordable. The review also
+required that missing intra-tick order be represented as an interval envelope:
+the batch-first curve is the lower endpoint, while the upper endpoint admits
+legal previous/current-batch tie effects. A single address-sorted tie-breaker
+would be a hidden serialization and is not used. NCU still has no
+capacity-indexed MRC table; only scope-compatible single-point hardware
+comparisons can carry an endpoint error metric.
+
 ## Raw advisor transcript
 
 The complete output available at timeout is retained in the working-session
