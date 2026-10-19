@@ -74,6 +74,12 @@ and conservative upper line/sector MRC curves, including the line-tag versus
 resident-fill decomposition at both endpoints. The final envelope2 corpora
 passed all MRC invariants and preserved every existing common numeric field.
 
+The final adversarial code review rechecked Fenwick resizing, batch-history
+lifetime, same-tick envelope bounds, sector decomposition, deterministic
+ordering, and the intervening-line eviction case. A regression test now
+covers a reused sector after two intervening lines; all seven `sim-sm` tests
+and the complete workspace test suite pass.
+
 ## Repository cleanup
 
 The active tree no longer treats branch-specific plans, H/S milestone diaries,
