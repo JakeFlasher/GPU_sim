@@ -1,20 +1,49 @@
-# Components
+# Components and invariants
 
-| Component | Responsibility |
-| --- | --- |
-| `sim/trace` | NVBit protobuf reading, trace identity, and semantic sidecars |
-| `sim/arch` | Architecture cards and functional executors |
-| `sim/sm` | Warp/CTA replay, issue/readiness, barriers, and async state |
-| `sim/mem` | Cache, memory request, and completion state |
-| `sim/engine` | Dependency/resource event queue |
-| `sim/direct_run` | Direct `sim-run` binary and prepared replay |
-| `sim/run` | Runner and result emission |
-| `tools/nvbit_tracer` | Real dynamic trace and sidecar producer |
-| `tools/sm120_corpus_replay.py` | Complete-corpus full/fast driver |
-| `tools/sm120_replay_bench.py` | Architecture-neutral static-sidecar adapter and independent NCU parser/join (historical filename) |
-| `tools/sm120_corpus_compare.py` | Post-replay endpoint comparison |
-| `arch_profiles` | Active cards and architecture schemas |
-| `workloads/sol_execbench_baselines` | SOLBench source kernels |
+| Crate / module | Concrete responsibility | State boundary |
+|---|---|---|
+| `sim/trace::reader` | Protobuf/JSON trace loading, lineage, compact memory records | immutable input; fail-closed validation |
+| `sim/trace::reader::snapshot` | Artifact identity and JSON-shape limits | report-only |
+| `sim/trace::reader::compact` | Validated warp/instruction/memory representations | report-only |
+| `sim/arch` | Architecture cards, scheduler resources, functional instruction domains | card-selected assumptions |
+| `sim/sm::issue` | SMSP issue, CGGTY selection, barriers, readiness, async copies | mutates issue/residency timing |
+| `sim/sm::issue::frontend` | I-cache, stream buffer, front-end admission | mutates instruction timing |
+| `sim/sm::issue::pipelines` | Scalar/memory pipeline readiness and fixed latencies | mutates issue timing |
+| `sim/sm::issue::core_mem` | Memory dispatch and observer hooks | mutates request/cache state |
+| `sim/sm::replay` | Launch placement, replay sessions, result records | mutates replay session state |
+| `sim/sm::system` | Interleaved SM/L2/DRAM event loop | mutates event and service state |
+| `sim/sm::system::queues` | Pending responses and due-time queues | mutates event queue state |
+| `sim/sm::system::dram` | Carded DRAM bandwidth/service accounting | mutates DRAM events |
+| `sim/sm::system::observers` | L2 source and admission observer records | report-only accounting |
+| `sim/sm::metrics::locality_mrc` | Fenwick MRC, HOTL footprint inversion, Tier-2/Tier-3 shadows | report-only |
+| `sim/sm::metrics::pipeline_activity` | Warp lifetime and pipeline activity counters | report-only |
+| `sim/mem::l1` | Sectored L1 tags, fills, merges, write lookup | mutates L1 state |
+| `sim/mem::l2` | Shared L2 tags, sector fills, write packets | mutates L2 state |
+| `sim/mem::l1_visibility` | Payload/visibility handoff | event-boundary contract |
+| `sim/semantics::state` | Typed cache/core/event boundary snapshots | report-only |
+| `sim/engine` | Dependency/resource event ordering | event ordering only |
+| `sim/direct_run::emit` | Stable JSON and counter emission | report-only serialization |
+| `sim/direct_run::metrics::l1` | L1/TEX counter attribution | report-only |
+| `sim/direct_run::metrics::l2_dram` | L2/DRAM and readiness attribution | report-only |
+| `sim/direct_run::metrics::pipeline_ipc` | IPC and pipeline projections | report-only |
+| `tools/sm120_corpus_replay.py` | Twelve-worker full-corpus driver | orchestration only |
+| `tools/validate_reuse_mrc.py` | MRC structural/error report | post-replay analysis |
+| `arch_profiles/cards` | SM86/SM120 architecture parameters | immutable configuration |
 
-NCU/CUDA observations remain independent. Unsupported behavior is reported as a
-conservative typed gap; no workload-specific delay is added to force a match.
+## Public interfaces
+
+Parent facades retain the existing crate paths and serde field names. Child
+sections are lexical modules included at the original scope so private fields
+and split `impl` blocks preserve the previous API. Every active mutation is
+still performed by the original owner (`SmCore`, `L1Cache`, `L2Model`, or
+`DramServer`); observer modules cannot write those structures.
+
+## Validation surfaces
+
+* Full replay: integrated `l1-l2`, card-selected architecture, twelve workers,
+  compressed JSONL.
+* Hardware comparison: independent NCU profiles joined after replay.
+* Locality comparison: exact Fenwick MRC versus HOTL estimator on the same
+  within-warp stream.
+* Determinism: compare status, identity, metadata, and common numeric fields;
+  ignore only wall-clock process timings.

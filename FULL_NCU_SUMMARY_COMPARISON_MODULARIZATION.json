@@ -1,0 +1,14 @@
+{
+  "sm120": {
+    "old_metric_count": 52,
+    "new_metric_count": 52,
+    "differences": [],
+    "ok": true
+  },
+  "sm86": {
+    "old_metric_count": 111,
+    "new_metric_count": 111,
+    "differences": [],
+    "ok": true
+  }
+}

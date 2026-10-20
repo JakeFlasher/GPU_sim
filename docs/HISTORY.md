@@ -63,3 +63,19 @@ computer-architecture usage. Internal pending-bound terminology was renamed in
 the event scheduler without changing serialized replay semantics. Full
 12-worker replay parity against the M7 closure artifacts was confirmed for
 both lanes before shipping the release wording.
+
+## Academic documentation and source modularization (2026-10-20)
+
+The large Rust facades were split into named lexical child sections while
+retaining their original parent scope and public paths. The split covers SM
+issue/replay/system state, trace reader state, semantic boundaries, L1/L2
+models, pipeline/locality metrics, and direct-run reports. This layout change
+has no serialized-schema or timing behavior change. The authoritative prose is
+now in `RESULTS.md`, `RESIDUAL_FRONTIER.md`, `STATUS.md`, `ARCHITECTURE.md`,
+and `COMPONENTS.md`; this file retains the chronology and rejected alternatives.
+
+Fresh full 12-worker replays after modularization produced the required SM120
+and SM86 status profiles. `FULL_NUMERIC_COMPARISON_MODULARIZATION.json` reports
+zero missing/extra rows, zero required metadata differences, and zero common
+numeric differences against the M7 closure artifacts. Both locality validators
+reported zero errors.

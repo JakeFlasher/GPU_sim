@@ -1,58 +1,94 @@
-# Architecture
+# Architecture and module map
 
-## Native trace replay
+The simulator follows the event-driven separation used by validated GPU
+simulators: trace input, SM issue state, sectored memory state, deterministic
+events, and post-replay attribution are separate boundaries. The Rust 2021
+parent files are small facades; named child sections are included in the parent
+scope where private fields and split `impl` blocks must remain compatible.
 
-```text
-NVBit -> enhanced protobuf + control sidecars
-      -> sim-trace -> sim-sm <-> sim-mem
-                         \-> sim-engine event ordering
-                         \-> sim-run JSON -> independent NCU comparison
-```
-
-`sim-trace` reads trace evidence; `sim-sm` handles warp scheduling,
-dependencies, barriers, and asynchronous operations; `sim-mem` models cache
-and memory service; and `sim-engine` supplies deterministic event ordering.
-Native replay does not execute the original CUDA program again.
-
-Architecture cards select the supported geometry and timing assumptions.
-Direct and prepared replay consume the card's scheduler-resource blocks.
-Resource-less legacy trace input has an explicit compatibility path; partial
-blocks are rejected. An optional scalar/profile override changes issue width,
-is labeled hypothetical, and cannot alter traced semantics.
-
-Package `sim-run` (`sim/direct_run`) provides the direct CLI and `sim_direct_run`
-library, including the native metric emitter. NCU joins add observations after
-replay, never model inputs. See [components](COMPONENTS.md) and
-[profiles](archprofile.md).
-
-## Custom functional/resource model
+## Native replay path
 
 ```text
-ArchitectureSpec + SimtProgram
-  -> sim-arch::simt (functional state)
-  -> sim-arch::simt_pipeline (dependencies and resource tasks)
-  -> sim-sm::custom (resident groups and bounded shared barriers)
-  -> sim-engine::pipeline (issue/completion events)
-  -> custom-program-run JSON (functional state + model-relative timing)
+NVBit/SASS + sidecars
+        -> sim-trace (validated trace reader)
+        -> sim-sm (SMSP issue, warp, barrier, async state)
+        <-> sim-mem (L1/L2/DRAM event state)
+        -> sim-engine (event ordering)
+        -> sim/direct_run (reports and NCU joins)
 ```
 
-The custom frontend shares the event engine, not the native SM86 scoreboard or
-`sim-mem` cache hierarchy. It supports in-order per-group issue with independent
-resource overlap, latency/initiation/in-flight limits, and bounded residency.
-The `simt_u32_v1` instruction set is fixed; resource bindings do not define new
-instruction semantics. [Program contracts](../arch_profiles/programs/README.md)
-state address-space, barrier, atomic, and collective limits.
+NCU is read only after replay. Architecture cards choose assumptions; they are
+not inferred from NCU values.
 
-The separate `simt_its_v1` executor demonstrates per-lane control flow and
-reconvergence without a timing backend. Neither custom frontend promises
-arbitrary binary/ABI compatibility, vendor-equivalent timing, or RTL behavior.
+## Rust crate codemap
 
-## Counter attribution and locality analysis
+### `sim/trace`
 
-`sim/direct_run/src/metrics.rs` produces versioned native metrics after replay;
-counter-attribution reports do not add timing events. The locality observers in
-`sim/sm/src/metrics.rs` operate over declared trace order and remain separate
-from the live cache and timing models. The separate ITS dynamic JSON trace is
-not input to `sim-trace`. See
-[diagnostic contract](experimental_diagnostics.md) and
-[terminology](TERMINOLOGY.md).
+* `reader.rs` is the facade for trace lineage and directory loading.
+* `reader/error.rs`, `snapshot.rs`, `compact.rs`, `sampling.rs`, and
+  `preflight.rs` hold validation, artifact snapshots, compact instruction and
+  memory records, sampling provenance, and allocation preflight respectively.
+* `async_sidecars.rs`, `anchored.rs`, and `obligations.rs` retain producer
+  sidecars and trace-contract checks.
+* Invariant: malformed or incomplete trace contracts fail closed; no timing or
+  cache state is mutated by this crate.
+
+### `sim/sm`
+
+* `issue.rs` is the SMSP issue-model facade. `issue/diagnostics.rs`,
+  `requests.rs`, `frontend.rs`, `pipelines.rs`, `async_copy.rs`,
+  `warp_state.rs`, `core_init.rs`, and `core_step.rs` are lexical child
+  sections for diagnostics, request records, front end, readiness, async
+  copies, warp state, construction, and cycle progression.
+* `replay.rs` is the launch/replay facade. `replay/coverage.rs`, `fast_warp.rs`,
+  `results.rs`, `placement.rs`, and `session.rs` separate coverage, fast-path
+  execution, result records, placement, and stream sessions.
+* `system.rs` coordinates interleaved SM/L2/DRAM events. `system/queues.rs`,
+  `dram.rs`, `observers.rs`, and `execution.rs` isolate pending events,
+  service, observer accounting, and event coordination.
+* `metrics.rs` owns `TraceMetrics`; `metrics/locality_mrc.rs` contains
+  trace-local Fenwick/HOTL observers, `pipeline_activity.rs` contains activity
+  counters, and `tests.rs` contains metric tests.
+* Invariant: `SmCore`, residency, barriers, and issue timestamps mutate active
+  timing state; locality observers are shadow/report-only and cannot change it.
+
+### `sim/mem`
+
+* `l1.rs` is the sectored L1 facade. `l1/config_counters.rs`, `core.rs`, and
+  `accessors.rs` group configuration/counters, mutation, and access expansion.
+* `l2.rs` is the shared L2 facade. `l2/config_counters.rs` groups card/config
+  and counter types; `l2/core.rs` contains request, fill, and completion logic.
+* `payload.rs` and `l1_visibility.rs` define payload and visibility contracts.
+* Invariant: L1/L2/DRAM mutation occurs only at their event timestamps;
+  report-only counters are not allowed to change cache state.
+
+### `sim/semantics` and `sim/engine`
+
+* `semantics/state.rs` re-exports `state/cache_boundary.rs`,
+  `typed_events.rs`, and `core_boundary.rs`; these are typed report/state
+  contracts, not schedulers.
+* `sim-engine` supplies dependency/resource event ordering and does not own
+  architecture-specific cache policy.
+
+### `sim/direct_run`
+
+* `lib.rs` is the run/report facade; `lib/reports.rs` holds report structures.
+* `metrics.rs` is a compact facade over `metrics/l1.rs`, `l2_dram.rs`, and
+  `pipeline_ipc.rs`; all three are post-replay, report-only attribution.
+* `emit.rs`, `prepared.rs`, and `resources.rs` provide serialization, prepared
+  execution, and external launch-resource observations.
+* Invariant: metric emitters never feed NCU targets into replay.
+
+## State boundaries
+
+1. Trace records and architecture cards are immutable model inputs.
+2. `SmCore` and memory models own active cycle/cache state.
+3. Event queues define ordering and completion; issue, completion, and launch
+   observations are not collapsed into one timestamp.
+4. Locality/MRC observers consume declared trace/event streams and expose
+   uncertainty without mutating active state.
+5. `sim/direct_run` joins replay output with independent NCU profiles only after
+   execution and labels exact versus ordered-fallback joins.
+
+See [`COMPONENTS.md`](COMPONENTS.md) for the compact ownership table and
+[`TERMINOLOGY.md`](TERMINOLOGY.md) for metric definitions.

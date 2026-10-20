@@ -540,3 +540,22 @@ packet/L2 envelope reported by `tools/report_locality_mrc.py` covers 99.81% of
 all compared launches and 99.46% of nonzero-target launches with 0.4530%
 interval-distance Mean APE, satisfying all Milestone 7 and Section 5.2 closure
 gates under the 2026-10-14 Modeling Closure Criterion (`AGENTS.md`).
+
+## 8. Academic documentation and modularization closure (2026-10-20)
+
+The plan is closed for the current repository release. Active evaluation prose
+is consolidated in `docs/RESULTS.md`, `docs/RESIDUAL_FRONTIER.md`, and
+`docs/STATUS.md`; chronological experiments remain in `docs/HISTORY.md`.
+The Rust source is organized behind API-preserving parent facades with named
+child sections for issue/replay/system state, trace reading, semantic state,
+cache models, locality/pipeline metrics, and post-replay reports. No Rust file
+under `sim/` exceeds 2,500 lines.
+
+A fresh full `l1-l2` replay with twelve workers was run after the source split:
+SM120 completed 339/339 captures and 11,558 launches; SM86 completed 286
+`ok`, 62 `control_error`, and 8 `replay_error` captures and 12,392 launches.
+`FULL_NUMERIC_COMPARISON_MODULARIZATION.json` reports zero missing/extra rows,
+zero required-metadata differences, and zero common numeric differences against
+the M7 closure artifacts. Both reuse validators report zero errors. This source
+layout change is therefore accepted only as a behavior-preserving release;
+future metric changes still require the complete no-regression gate.

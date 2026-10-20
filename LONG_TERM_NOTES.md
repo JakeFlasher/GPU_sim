@@ -1,122 +1,52 @@
 # Long-term session notes
 
-The immutable session rules are in [`SESSION_RULES.md`](SESSION_RULES.md).
-This file is deliberately a current-state note rather than a duplicate.
+## Workspace and safety
 
-* Workspace: `unified_gpu_simulator`, Git branch `main`.
-* Source reference: `/home/jakeshea/5090_branch/` remains strictly read-only;
-  all builds, tests, and edits happen in this workspace.
-* Supported lanes: SM86 / RTX 3090 Ti and SM120 / RTX 5090, selected by card
-  and capture metadata.
-* Full replay: the required SM120 lane is the 339-capture DRAM-enabled/card
-  configuration; SM120 DRAM-disabled replay is out of scope. SM86 has 356
-  attempted captures with 286 successful rows. Complete runs use twelve
-  workers and compressed JSONL.
-* Latest audit: `FULL_NUMERIC_COMPARISON.json` reports zero missing/extra rows,
-  required-metadata differences, and common numeric differences in all three
-  campaigns.
-* Current docs: `docs/CONTRACT.md`, `docs/REPLAY.md`, `docs/RESULTS.md`, and
-  `docs/HISTORY.md`. Old plans and experiment diaries are not active policy.
-* Known limitation: SM120 effective geometry and completion boundaries are
-  typed conditional models, not proprietary RTL recovery; NCU remains an
-  independent post-replay target.
-* Operating split (user directive): GPT-6 Astra is executioner/orchestrator only—implements, runs, and code-reviews; Gemini 4 Argon High invoked through `agy --dangerously-skip-permissions --model gemini-4-argon-high` is the read-only brain for algorithms, ideas, and insight/adversarial review. Gemini must not code. Any blocker, ambiguity, or uncertainty requires consultation with Gemini before proceeding; do not rely on instinct.
-* Regression gate (user directive): normally reject changes that regress other
-  metrics. Only accept an exception when the targeted improvement is much,
-  much larger than the regressions and the trade-off is explicitly documented
-  and reviewed; never trade away correctness, status coverage, determinism, or
-  independent-target validity.
-* Active objective: reduce APE below 10% for major IPC and L1/L2-related NCU metrics across complete SM120 (339 captures) and successful SM86 (286 captures) full replays, preserving independent-target separation and twelve-worker replay.
-* Latest evidence: the required DRAM-enabled SM120 full lane remains green at
-  339/339 `ok` with twelve workers; historical disabled-mode artifacts are
-  retained but no new disabled replay is run. SM86 remains 286 `ok`/62
-  control/8 replay errors. The SM86 LDG.CONSTANT opcode scope fix reduced that
-  endpoint from 44.8% to 1.36% APE. Unified-L1, generic-L2, DRAM-client, and
-  timing residuals remain above 10% because their NCU endpoints include scope
-  or runtime state absent from the trace contract.
-* Do not promote a generic-L2 source-lane sum or clamp: Gemini's read-only review and the launch-66 accounting identity show the 96 excess store hits originate upstream in simulated L1/TEX-to-L2 store traffic, not in the report selector. Missing SM86 shared-memory carveout metadata is an explicit unidentifiable input gap.
-* Latest full-enabled progress: trace-semantic SM120 store-packet and TMA-store-cold-miss observers completed 339-capture and 286-successful-SM86 full replays with 12 workers. Generic SM120 L2 hit APE improved from ~57% to ~24.3%; operation-read, unified-L1, DRAM, and IPC residuals remain above 10%.
-* Replay scope directive: do not run fast replay. Accuracy and correctness work uses only complete full replay with all supported features enabled by default (integrated `l1-l2`, card-selected architecture behavior, and twelve workers); fast-mode artifacts are not required.
-* SM120 replay scope refinement: do not run the SM120 DRAM-disabled full replay. The required SM120 accuracy lane is the full DRAM-enabled/card-feature configuration; continue SM86 full replay as required.
-* 2026-10-18 reuse-model consultation: Gemini advised a shadow-only,
-  trace-derived reuse-distance/reuse-interval observer using 128-byte line
-  identities plus four 32-byte sector masks, with separate per-SM and L2
-  reference streams, explicit cold/pending/partial-sector states, and
-  report-only MRCs before any promotion. This is design advice, not hardware
-  truth: do not hard-code SM120 geometry/hash/replacement, MSHR windows, or
-  store/TMA policy; validate them against cards/traces and keep NCU out of
-  fitting. See `docs/REUSE_MRC_CONSULTATION.md` and the appended
-  `consultation_prompt.txt` for the full record and literature links.
-* Follow-up Gemini gate: do not promote the per-warp RI proxy or a sampled
-  fully-associative RD curve into active L1/L2 scoring/timing. The live
-  cycle-interleaved L1 and event-driven L2 models are more faithful; a future
-  SHARDS/Fenwick observer is capacity-bound diagnostic only until chronology,
-  TMA timing, carveout, and set/hash/replacement metadata are proven.
-* 2026-10-18 async-client scope slice: a trace-qualified SM120 report-only
-  exclusion of `l1_async_older_pending_merges_global` from external global-op_ld
-  L1 hit projections passed complete 12-worker full replays (SM120 339/339;
-  SM86 286/62/8). It slightly improved SM120 unified/global L1 APE while
-  leaving L2/DRAM/IPC unchanged; physical state/timing and SM86 were untouched.
-  Do not broaden it to ordinary pending merges or promote LTC128B/LDGSTS L2
-  sibling/volume corrections without a new Gemini-reviewed crosswalk.
-* 2026-10-18 typed L2 shadow: the event path now reports static client-scope
-  request/resident/pending/fill partitions and a non-promoted LTC128B
-  potential-sibling volume. The final refinement tags write, atomic,
-  reduction, and async-bypass requests at emission; unqualified bypasses stay
-  `Unknown`. It leaves physical L2/DRAM/timing intact and passed both
-  twelve-worker full lanes (SM120 339/339, SM86 286/62/8); see
-  `docs/L2_SCOPE_SHADOW.md` and `FULL_NUMERIC_COMPARISON_L2_SHADOW3.json`.
-  Read-scope masks conserve request sectors; write-class pending/fill arms are
-  zero by construction, and same-cycle folded sectors use the lead request's
-  diagnostic scope. These are attribution boundaries, not hardware-hit claims.
-  Gemini's closure gate freezes active L2/DRAM changes: remaining residuals
-  need unobservable SM120 geometry/fill-buffer/TMA/carveout or endpoint-scope
-  evidence, not NCU fitting or count balancing.
-* Follow-up candidate audit: TMA-shadow L2 misses must not replace raw TMA
-  payload DRAM demand (full-row evaluation worsened). A pure-LTC resident plus
-  older-pending L1 numerator is mechanistically plausible but remains
-  shadow-only: 300 zero-target rows and two false positives, plus unproven
-  sector-unit conservation, fail the promotion gate.
-* Gemini definitive stop gate: no remaining active trace-only IPC/L1/L2
-  projection is defensible. Resume only after TMA descriptor/coordinate and
-  launch-cache metadata, disaggregated tag/MSHR/fill/stall counters, or
-  isolated LTC128B/TMA microbenchmarks are obtained. Preserve complete
-  twelve-worker replay artifacts and report residuals/SM86 coverage boundaries
-  without tuning against NCU.
-* Follow-up unified-L1 numerator consistency is active only in the SM86
-  native-metrics path. It reuses the validated form-qualified global lookup
-  endpoint, leaves SM120 unchanged, passed both full status profiles, and
-  reduced joined SM86 unified-L1 mean APE from 29.04% to 12.15%. The <10%
-  objective remains open.
-* Accepted SM86 private-observer correction: the report-only write-tag table
-  is now one independent 256-set/2-slot table per traced SM actor, not one
-  GPU-wide shared table. The producer/consumer activation flag prevents
-  disabled launches from reading a structural zero and falls back to physical
-  store line-tag hits. Twelve-worker full replay preserved 286/62/8 statuses
-  and bit-identical IPC/L2/DRAM/timing; unified-L1 mean APE improved
-  43.71%→24.66% overall, 12.15%→9.87% exact joins, and 88.42%→45.61%
-  ordered fallback. A repeat full replay was numerically identical apart from
-  wall clocks; the required SM120 339/339 DRAM-enabled replay was unchanged.
-  This is report-only topology correction, not full objective closure.
-* Novel candidate-2 review: SM120 native metrics return from the alpha branch
-  before the later SM86-only L2 native block, so the claimed SM120 rank-0 L2
-  precedence bug is inapplicable. TMA-shadow-hit addition worsened retained
-  SM120 L2 APE and was rejected.
+* Work only in `unified_gpu_simulator`; `/home/jakeshea/5090_branch/` is
+  strictly read-only.
+* Supported cards are SM86 / RTX 3090 Ti and SM120 / RTX 5090. Card identity
+  keeps their modeling assumptions separate.
+* NCU profiles are independent targets joined after replay; never use them as
+  inputs, tuning values, or workload-specific exceptions.
 
-## Academic release refactor (2026-10-20)
+## Replay contract
 
-The current release objective is a human-readable academic overhaul of the
-unified simulator. The paper draft and the Chen Ding/Xiang HOTL and Huerta
-MICRO'25 terminology were studied read-only. The controlled vocabulary is in
-`docs/TERMINOLOGY.md`; the execution and no-regression plan is
-`docs/ACADEMIC_RELEASE_PLAN.md`; the literature/style decisions are in
-`docs/ACADEMIC_STYLE_REVIEW.md`.
+* Accuracy claims use full integrated `l1-l2` replay with all supported features
+  enabled, twelve workers, and compressed `.jsonl.zst` output.
+* Do not run fast replay for final accuracy. Do not run the SM120
+  DRAM-disabled full lane for acceptance.
+* Required status profiles are SM120 339/339 `ok` and SM86 286 `ok`, 62
+  `control_error`, 8 `replay_error` of 356 attempted.
 
-Use conventional terms such as footprint, lifetime, reuse distance, miss-ratio
-curve, compiler-guided greedy-then-youngest scheduling, hardware-counter
-attribution, conservative lookahead horizon, effective model, and scope
-limitation. Avoid presenting internal names such as “tap-point projection,”
-“unpriced miss,” “closed-loop calibration,” or an unqualified “frontier” in
-human-facing documentation. Do not rename machine-readable fields solely for
-style; preserve compatibility and verify every refactor against the complete
-12-worker full-replay artifacts.
+## Current verified result
+
+* SM120: global L1 hit 1.5567%, global L1 miss 0.5211%, unified L1 1.6386%,
+  operation-read L2 6.6859%, generic TEX-L2 17.7364% Mean APE with 51 point
+  zero-target FPs and a 99.81%/99.46% conditional packet envelope.
+* SM86: operation-read L2 4.3416%, generic L2 8.5239%, and unified L1 9.87%
+  on exact identity joins; ordered fallback is reported separately.
+* HOTL-vs-Fenwick WAPE is 0.8767%/0.4462% (SM120 line/sector) and
+  1.0223%/0.5324% (SM86 line/sector), with zero structural errors.
+* IPC residuals are SM120 active 9.45% / elapsed 13.60% and SM86 active
+  18.56% / elapsed 11.88%; see `docs/RESIDUAL_FRONTIER.md` for information
+  barriers rather than speculative fixes.
+
+## Scientific invariants
+
+* Active event state (`SmCore`, `L1Cache`, `L2Model`, `DramServer`) is separate
+  from report-only counter attribution and trace-locality observers.
+* Footprint, lifetime, reuse distance, and miss-ratio curve terms follow
+  Ding--Denning/Xiang terminology. A WAPE is weighted absolute error over
+  finite MRC points; MAPE excludes zero targets.
+* Conditional intervals are uncertainty-aware model outputs, not hardware
+  truth. No count balancing, clamping, or kernel-name rule is acceptable.
+* Normal policy rejects any regression in any metric. A trade-off requires a
+  much larger target improvement, explicit evidence, and review.
+
+## Release references
+
+`docs/RESULTS.md` is the authoritative evaluation table;
+`docs/ARCHITECTURE.md` and `docs/COMPONENTS.md` are the codemap;
+`docs/TERMINOLOGY.md` is the vocabulary contract; `docs/HISTORY.md` holds
+superseded campaign diaries. The closure plan is
+`CACHE_LOCALITY_EXECUTION_PLAN.md`.

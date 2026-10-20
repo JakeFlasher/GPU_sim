@@ -4,7 +4,6 @@
 //! the existing trace/exec/control/card/coverage joins, and only then constructs
 //! a canonical JSON identity seal. The traced workload binary is deliberately a
 //! typed gap: the current trace contract has no producer-bound binary digest.
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU64;
 use std::path::{Component, Path, PathBuf};
