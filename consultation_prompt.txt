@@ -788,3 +788,34 @@ exact Fenwick oracle. Determine whether a valid Ding--Denning/Xiang estimator
 can close this without copying the oracle or fitting NCU. Two follow-up agy
 calls timed out; treat this as an explicit scientific blocker unless new
 trace/PMU evidence resolves it.
+
+--- M7 residual consultation (2026-10-20) ---
+
+Current closure replay after implementing CACHE_LOCALITY_EXECUTION_PLAN.md
+Section 7:
+- Artifact: full_replay_runs/cache_locality_m7closure_sm120/full.jsonl.zst
+- 339 captures / 11,558 launches, full l1-l2, workers=12; all captures ok.
+- Generic TEX-L2 point: 17.7364% Mean APE, 51 zero-target FPs (strict target <=50).
+- Sole distinctive residual FP: capture `sol_l1_075_gqa_rope_sm120_adapted`, launch 4.
+  Trace-only counters: store_lookup_requests=64,
+  store_packet_candidate_sectors=64, store_packet_resident_lookup_hits=0,
+  store_packet_lookup_hits=16, client_scope_resident_hits[Store]=0,
+  physical L2 lookup_requests=70, physical lookup_hits=0, physical write_tag_hits=48,
+  opcodes include STG (32 warp instructions), no TMA sidecar traffic. NCU target
+  for `lts__t_sectors_srcunit_tex_lookup_hit.sum` is 0; model point is 16.
+- Section 7 deterministic regime B explicitly selects the upper write-tag arm
+  when candidate_sectors == store_lookup_requests OR resident store hits == 0,
+  so this row is intentionally 16 under the current contract. Forcing the
+  resident lower arm would remove the FP but is contrary to the stated regime
+  and worsens corpus weighted error in offline replay accounting.
+- Conditional envelope report (`tools/report_locality_mrc.py` with metric
+  comparisons) uses packet lower/upper arms plus symmetric trace-native
+  l2_system_locality_observer delta: 99.81% all-launch coverage,
+  99.46% nonzero coverage, 0.4530% interval-distance Mean APE.
+
+Question for Gemini: Is there any architecture/card/decoded-semantics rule,
+not using NCU targets or workload names, that can distinguish this exact STG
+write-only packet from the other regime-B packets and legitimately select a
+zero/low endpoint without violating the plan's no-fitting and conditional
+uncertainty contract? If not, document this as an unidentifiable client-scope
+residual and retain the interval as the valid result.
