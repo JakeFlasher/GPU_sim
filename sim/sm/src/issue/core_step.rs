@@ -1,3 +1,7 @@
-// SMSP cycle issue, barrier handling, and completion support. Mutates modeled timing state.
+//! Semantic submodule; report-only boundary state and serde contracts.
 
-include!("part_007.rs");
+use super::*;
+
+#[path = "core_step_schedule.rs"]
+mod core_step_schedule;
+pub(super) use self::core_step_schedule::*;

@@ -44,8 +44,21 @@
 //! original ready time. This is visibility/ABA state, not an invented finite L2
 //! MSHR capacity.
 
-// Child modules declared by the original public surface.
+use std::sync::atomic::{AtomicU64, Ordering};
 
-// Lexical sections share this parent module scope, preserving private fields and impl visibility.
-include!("l2/config_counters.rs");
-include!("l2/core.rs");
+use serde::Serialize;
+use sim_arch::{ArchError, ArchId, CapabilityError, L2Replacement as ArchL2Replacement};
+use sim_semantics::{
+    AddressDomain, CanonicalLineKey, L2AccessDisciplineState, L2AllocationState, L2BoundaryState,
+    L2CounterState, L2GeometryState, L2SectorOwnership, L2SectorStatus, L2SetState, L2StateError,
+    L2WayState, TYPED_STATE_SCHEMA_VERSION,
+};
+
+#[path = "l2/config_counters.rs"]
+mod config_counters;
+#[path = "l2/core.rs"]
+mod core;
+pub use self::config_counters::*;
+pub(crate) use self::config_counters::*;
+pub use self::core::*;
+pub(crate) use self::core::*;

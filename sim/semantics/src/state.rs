@@ -5,9 +5,21 @@
 //! virtual trace address is a physical cache address or that activity counts
 //! are measured watts.
 
-// Child modules declared by the original public surface.
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
 
-// Lexical sections share this parent module scope, preserving private fields and impl visibility.
-include!("state/cache_boundary.rs");
-include!("state/typed_events.rs");
-include!("state/core_boundary.rs");
+use crate::boundary::{BlockBoundaryState, WarpBoundaryState};
+use crate::dram::{DramBoundaryState, DramStateError};
+
+#[path = "state/cache_boundary.rs"]
+mod cache_boundary;
+#[path = "state/core_boundary.rs"]
+mod core_boundary;
+#[path = "state/typed_events.rs"]
+mod typed_events;
+pub use self::cache_boundary::*;
+pub(crate) use self::cache_boundary::*;
+pub use self::core_boundary::*;
+pub(crate) use self::core_boundary::*;
+pub use self::typed_events::*;
+pub(crate) use self::typed_events::*;

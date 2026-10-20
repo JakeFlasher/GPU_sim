@@ -1,4 +1,6 @@
-// L1/L1TEX counter attribution helpers; report-only, no timing/cache mutation.
+//! L1/TEX metric definitions and trace-derived helper rows. Report-only.
+
+use super::*;
 
 #[derive(Debug, Serialize)]
 pub struct Metric {
@@ -13,7 +15,7 @@ pub struct Metric {
 }
 
 impl Metric {
-    fn observed(
+    pub(crate) fn observed(
         ncu: Option<&str>,
         unit: &'static str,
         value: u128,
@@ -29,7 +31,7 @@ impl Metric {
             semantics,
         }
     }
-    fn ratio(
+    pub(crate) fn ratio(
         ncu: Option<&str>,
         unit: &'static str,
         num: u128,
@@ -53,10 +55,15 @@ impl Metric {
             semantics,
         }
     }
-    fn count(ncu: Option<&str>, unit: &'static str, value: u128, semantics: &'static str) -> Self {
+    pub(crate) fn count(
+        ncu: Option<&str>,
+        unit: &'static str,
+        value: u128,
+        semantics: &'static str,
+    ) -> Self {
         Self::ratio(ncu, unit, value, 1, false, semantics)
     }
-    fn approximate_count(
+    pub(crate) fn approximate_count(
         ncu: Option<&str>,
         unit: &'static str,
         value: u128,
@@ -64,7 +71,7 @@ impl Metric {
     ) -> Self {
         Self::ratio(ncu, unit, value, 1, true, semantics)
     }
-    fn unavailable(ncu: Option<&str>, unit: &'static str, reason: &'static str) -> Self {
+    pub(crate) fn unavailable(ncu: Option<&str>, unit: &'static str, reason: &'static str) -> Self {
         Self {
             ncu_metric: ncu.map(str::to_owned),
             unit,
@@ -90,7 +97,9 @@ pub struct NativeMetrics {
     pub metrics: BTreeMap<String, Metric>,
 }
 
-fn aggregate_readiness(result: &FullKernelReplayResult) -> Result<ReadinessDiagnostics, RunError> {
+pub(crate) fn aggregate_readiness(
+    result: &FullKernelReplayResult,
+) -> Result<ReadinessDiagnostics, RunError> {
     let mut readiness = ReadinessDiagnostics::default();
     for per_sm in result.per_sm().values() {
         readiness
@@ -100,7 +109,7 @@ fn aggregate_readiness(result: &FullKernelReplayResult) -> Result<ReadinessDiagn
     Ok(readiness)
 }
 
-fn add_count_row(
+pub(crate) fn add_count_row(
     metrics: &mut BTreeMap<String, Metric>,
     key: impl Into<String>,
     ncu_metric: Option<&str>,
@@ -114,7 +123,7 @@ fn add_count_row(
     );
 }
 
-fn add_count_row_u128(
+pub(crate) fn add_count_row_u128(
     metrics: &mut BTreeMap<String, Metric>,
     key: impl Into<String>,
     ncu_metric: Option<&str>,
@@ -146,7 +155,7 @@ fn add_count_row_u128(
 /// The rule uses no NCU values and does not touch L1/L2 state, MSHR ownership,
 /// DRAM demand, or any timing timestamp. `None` means that the baseline remains the
 /// selected endpoint.
-fn sm86_form_qualified_lookup_hits(
+pub(crate) fn sm86_form_qualified_lookup_hits(
     trace: &TraceMetrics,
     baseline_hits: u128,
 ) -> Option<(u128, &'static str)> {
@@ -271,3 +280,122 @@ fn sm86_form_qualified_lookup_hits(
     None
 }
 
+pub(crate) fn ensure_unavailable(
+    metrics: &mut BTreeMap<String, Metric>,
+    key: &'static str,
+    ncu_metric: Option<&str>,
+    unit: &'static str,
+    reason: &'static str,
+) {
+    metrics
+        .entry(key.to_owned())
+        .or_insert_with(|| Metric::unavailable(ncu_metric, unit, reason));
+}
+
+pub(crate) fn add_branch_rows(
+    metrics: &mut BTreeMap<String, Metric>,
+    trace: &sim_sm::TraceMetrics,
+) {
+    // NCU's SM86 metric description: CBU instructions except BMOV/BSSY.
+    // These are the CBU heads covered by this projection. Keep it separate
+    // from the older BRA/JMP-only count and from target-bearing events.
+    let instructions: u128 = [
+        "BRA", "BRX", "BRXU", "JMP", "JMX", "JMXU", "CALL", "RET", "EXIT", "BSYNC", "BREAK",
+    ]
+    .iter()
+    .filter_map(|head| trace.by_opcode.get(*head))
+    .map(|activity| u128::from(activity.warp_instructions))
+    .sum();
+    metrics.insert("branch_control_instructions".into(), Metric::approximate_count(
+        Some("smsp__inst_executed_op_branch.sum"), "inst", instructions,
+        "SM86 CBU opcode projection including calls, returns, EXIT, BSYNC and BREAK; excludes BMOV/BSSY; not the BRA/JMP-only count or a target-event denominator",
+    ));
+    let targets = &trace.branch_targets;
+    for (key, ncu, unit, count, meaning) in [
+        (
+            "branch_target_divergent_branches",
+            Some("smsp__branch_targets_threads_divergent"),
+            "branches",
+            targets.divergent_events,
+            "BRA/JMP/CALL/RET events with distinct first subsequent (function, PC) identities across active lanes, including fallthrough; not predicate disagreement",
+        ),
+        (
+            "branch_target_uniform_branches",
+            Some("smsp__sass_branch_targets_threads_uniform.sum"),
+            "branches",
+            targets.uniform_events,
+            "target-bearing events whose active lanes all have the same first subsequent (function, PC); includes all-predicated-off fallthrough",
+        ),
+        (
+            "branch_target_divergent_active_threads",
+            None,
+            "thread",
+            targets.divergent_threads,
+            "all active threads participating in resolved divergent target events; not an NCU branch count or minority-path size",
+        ),
+    ] {
+        metrics.insert(key.into(), if targets.unresolved_events == 0 {
+            Metric::approximate_count(ncu, unit, u128::from(count), meaning)
+        } else {
+            Metric::unavailable(ncu, unit, "some branch lanes have no successor in this trace; resolved subset retained in trace_metrics.branch_targets")
+        });
+    }
+    for (key, unit, count, meaning) in [
+        (
+            "branch_target_successor_active_threads",
+            "thread",
+            targets.successor_active_threads,
+            "sum of active lanes assigned a first successor across resolved target events",
+        ),
+        (
+            "branch_target_divergent_minority_threads",
+            "thread",
+            targets.divergent_minority_threads,
+            "sum of the smallest successor-path population across resolved divergent events",
+        ),
+        (
+            "branch_target_uniform_active_threads",
+            "thread",
+            targets.uniform_active_threads,
+            "active lanes in resolved uniform successor events",
+        ),
+    ] {
+        metrics.insert(
+            key.into(),
+            if targets.unresolved_events == 0 {
+                Metric::approximate_count(None, unit, u128::from(count), meaning)
+            } else {
+                Metric::unavailable(
+                    None,
+                    unit,
+                    "some branch lanes have no successor in this trace; resolved subset remains in trace_metrics.branch_targets",
+                )
+            },
+        );
+    }
+    metrics.insert(
+        "branch_target_unresolved_events".into(),
+        Metric::count(
+            None,
+            "branches",
+            u128::from(targets.unresolved_events),
+            "branch events with unobserved successors at warp trace end",
+        ),
+    );
+    metrics.insert(
+        "branch_target_unresolved_threads".into(),
+        Metric::count(
+            None,
+            "thread",
+            u128::from(targets.unresolved_threads),
+            "active lanes whose first successor was not observed before trace end",
+        ),
+    );
+    metrics.insert("branch_target_uniform_pct".into(), if targets.unresolved_events == 0 {
+        Metric::ratio(Some("smsp__sass_average_branch_targets_threads_uniform.pct"), "%",
+            u128::from(targets.uniform_events) * 100, u128::from(targets.events), true,
+            "uniform successor events / all target-bearing events; does not use the wider CBU-instruction denominator")
+    } else {
+        Metric::unavailable(Some("smsp__sass_average_branch_targets_threads_uniform.pct"), "%", "branch successor coverage is incomplete")
+    });
+}

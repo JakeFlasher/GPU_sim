@@ -33,8 +33,9 @@
 ## Public interfaces
 
 Parent facades retain the existing crate paths and serde field names. Child
-sections are lexical modules included at the original scope so private fields
-and split `impl` blocks preserve the previous API. Every active mutation is
+files are genuine Rust `mod` submodules with explicit re-exports. Split `impl`
+blocks use `pub(super)` or `pub(crate)` only for sibling access; public items
+remain public. Every active mutation is
 still performed by the original owner (`SmCore`, `L1Cache`, `L2Model`, or
 `DramServer`); observer modules cannot write those structures.
 

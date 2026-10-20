@@ -72,19 +72,129 @@
 //! separate architecture-scoped SM-active observation projection can add its
 //! measured launch boundary without contaminating event timestamps.
 
-// Child modules declared by the original public surface.
-mod candidates;
-mod config;
-mod memory_types;
-mod readiness;
+use std::cell::RefCell;
+use std::collections::hash_map::Entry;
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::num::{NonZeroU32, NonZeroU128};
+use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
-// Lexical sections share this parent module scope, preserving private fields and impl visibility.
-include!("issue/diagnostics.rs");
-include!("issue/requests.rs");
-include!("issue/frontend.rs");
-include!("issue/pipelines.rs");
-include!("issue/async_copy.rs");
-include!("issue/warp_state.rs");
-include!("issue/core_init.rs");
-include!("issue/core_mem.rs");
-include!("issue/core_step.rs");
+use serde::Serialize;
+use sim_arch::card::CalibError;
+use sim_arch::{
+    ArchId, CtaBarrierIssue, FixedL1TexWritebackPriority, ImmediateConstantCache,
+    InstructionFrontEnd, MemoryIssuePipeline, ScalarExecutionPipeline,
+};
+use sim_mem::{
+    AsyncCopyCompletion, CacheOpToken, EvAccess, EvAccessUnobserved, FillKey, L1AccessError,
+    L1Cache, L1Config, L1Counters, L1LookupBatch, L1LookupClient, L1MergeAudit, L1MutationBudget,
+    L1StorePolicy, L1WriteLookupObserver, L1WriteLookupObserverPlan, L2Source, LdgstsL1Policy,
+    MemRole, MemoryOrigin, decode_async_copy_completion, opcode_head,
+};
+#[cfg(feature = "reference")]
+use sim_semantics::{
+    AsyncCopyBoundaryState, AsyncCopyBypassObservationState, AsyncCopyCohortBoundaryState,
+    AsyncGroupBoundaryState, BlockBoundaryState, BoundarySnapshot, CanonicalLineKey,
+    InstructionCacheEntryState, InstructionCacheState, InstructionFrontEndBoundaryState,
+    InstructionStreamLineState, InstructionStreamState, L1BoundaryState, L2RequestKey,
+    L2RequestOwner, L2RequestState, MemoryPipelineBoundaryState, ScalarPipelineBoundaryState,
+    TypedEventTransition, TypedResponseKind, WarpBoundaryState,
+};
+#[cfg(feature = "reference")]
+use sim_semantics::{NativeBoundaryExecutionPath, NativeBoundaryExecutionResult};
+
+use crate::control_bits::{ControlDomainError, DepBarrier, WaitMask};
+use crate::metrics::{SmActivity, WarpLifetime};
+use crate::program::{
+    FunctionSchedule, IssueSlot, OpClass, PipelineClass,
+    sm120_alpha_scalar_control_stall_suppressed,
+};
+use crate::sass_operands::{
+    FixedLatencyOpcode, FixedLatencyOperandStatus, SassRegister, SassRegisterFile,
+    SassSourceOperand,
+};
+
+pub use sim_mem::AccessKind;
+
+#[path = "issue/config.rs"]
+mod config;
+pub use config::{IssueModelParams, IssueResourceSource, Sm120AlphaConfig};
+
+pub(crate) use config::{SharedMemoryResidency, checked_cycle_add};
+
+#[path = "issue/memory_types.rs"]
+mod memory_types;
+pub use memory_types::{MemoryOperation, TailFlags};
+
+#[path = "issue/readiness.rs"]
+mod readiness;
+pub use readiness::{
+    AsyncInstrumentationOrderDiagnostics, AsyncIssueOverlapDiagnostics, AsyncReadinessDiagnostics,
+    AsyncWaitPrefixDiagnostics, BarrierPipelineDiagnostics, BypassAsyncCopyDiagnostics,
+    ClockIssueDiagnostics, ControlPipelineDiagnostics, CtaBarrierDiagnostics,
+    GlobalMemoryIssueDiagnostics, ReadinessCauseCycles, ReadinessCounterError,
+    ResultWritebackDiagnostics,
+};
+
+use readiness::{
+    checked_readiness_add, dependency_origin, is_zero_u64, observe_readiness_constraint,
+    operand_read_dependency_origin, projected_global_memory_issue, projected_l1_write_lookup_hits,
+};
+
+#[path = "issue/candidates.rs"]
+mod candidates;
+pub use candidates::{
+    MAX_MEMORY_ADMISSION_CANDIDATES, MAX_MEMORY_ADMISSION_QUEUE_CAPACITY,
+    MAX_MEMORY_ADMISSION_SERVICE_WIDTH_SECTORS, MAX_MEMORY_SERVICE_CANDIDATES,
+    MemoryAdmissionCandidate, MemoryAdmissionCandidateDiagnostics, MemoryAdmissionCandidateError,
+    MemoryAdmissionCandidateResult, MemoryAdmissionFeedbackDiagnostics, MemoryServiceCandidate,
+    MemoryServiceCandidateDiagnostics, MemoryServiceCandidateError,
+    MemoryServiceCandidateOperation, MemoryServiceCandidateResult, MemoryServiceCandidateScope,
+    MemoryWriteAckDiagnostics,
+};
+
+pub(crate) use candidates::{
+    MemoryAdmissionCandidateState, validate_memory_admission_candidates,
+    validate_memory_service_candidates,
+};
+
+use candidates::{
+    MemoryAdmissionFeedbackIssue, MemoryAdmissionFeedbackState, MemoryServiceCandidateState,
+};
+
+#[path = "issue/async_copy.rs"]
+mod async_copy;
+#[path = "issue/core_init.rs"]
+mod core_init;
+#[path = "issue/core_mem.rs"]
+mod core_mem;
+#[path = "issue/core_step.rs"]
+mod core_step;
+#[path = "issue/diagnostics.rs"]
+mod diagnostics;
+#[path = "issue/frontend.rs"]
+mod frontend;
+#[path = "issue/pipelines.rs"]
+mod pipelines;
+#[path = "issue/requests.rs"]
+mod requests;
+#[path = "issue/warp_state.rs"]
+mod warp_state;
+pub use self::async_copy::*;
+pub(crate) use self::async_copy::*;
+pub use self::core_init::*;
+pub(crate) use self::core_init::*;
+pub use self::core_mem::*;
+pub(crate) use self::core_mem::*;
+pub use self::core_step::*;
+pub(crate) use self::core_step::*;
+pub use self::diagnostics::*;
+pub(crate) use self::diagnostics::*;
+pub use self::frontend::*;
+pub(crate) use self::frontend::*;
+pub use self::pipelines::*;
+pub(crate) use self::pipelines::*;
+pub use self::requests::*;
+pub(crate) use self::requests::*;
+pub use self::warp_state::*;
+pub(crate) use self::warp_state::*;

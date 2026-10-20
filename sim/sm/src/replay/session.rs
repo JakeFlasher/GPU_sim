@@ -1,3 +1,16 @@
-// Stream/L2 replay-session facade. Mutates event state through the parent replay implementation.
+//! Semantic submodule; report-only boundary state and serde contracts.
 
-// This grouping is intentionally empty when its implementation remains in the lexical section.
+use super::*;
+
+#[path = "session_fast.rs"]
+mod session_fast;
+#[path = "session_l2.rs"]
+mod session_l2;
+#[path = "session_results.rs"]
+mod session_results;
+#[path = "session_stream.rs"]
+mod session_stream;
+pub use self::session_fast::*;
+pub use self::session_l2::*;
+pub use self::session_results::*;
+pub use self::session_stream::*;

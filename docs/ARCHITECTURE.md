@@ -2,9 +2,7 @@
 
 The simulator follows the event-driven separation used by validated GPU
 simulators: trace input, SM issue state, sectored memory state, deterministic
-events, and post-replay attribution are separate boundaries. The Rust 2021
-parent files are small facades; named child sections are included in the parent
-scope where private fields and split `impl` blocks must remain compatible.
+events, and post-replay attribution are separate boundaries. The Rust 2021 parent files are small facades declaring real child modules. Child modules use explicit re-exports and visibility (`pub`, `pub(crate)`, or `pub(super)`) so split `impl` blocks retain the original APIs.
 
 ## Native replay path
 
@@ -37,15 +35,18 @@ not inferred from NCU values.
 
 * `issue.rs` is the SMSP issue-model facade. `issue/diagnostics.rs`,
   `requests.rs`, `frontend.rs`, `pipelines.rs`, `async_copy.rs`,
-  `warp_state.rs`, `core_init.rs`, and `core_step.rs` are lexical child
-  sections for diagnostics, request records, front end, readiness, async
-  copies, warp state, construction, and cycle progression.
+  `warp_state.rs`, `core_init.rs`, and `core_step.rs` are real child modules for diagnostics, request records, front end, readiness, async
+  copies, warp state, construction, memory, and cycle progression; large cycle
+  methods are further split into `core_step_schedule`, `schedule_frontend`,
+  `schedule_barriers`, and `schedule_control`.
 * `replay.rs` is the launch/replay facade. `replay/coverage.rs`, `fast_warp.rs`,
   `results.rs`, `placement.rs`, and `session.rs` separate coverage, fast-path
-  execution, result records, placement, and stream sessions.
+  execution, result records, placement, and stream sessions; the session module
+  owns `session_stream`, `session_fast`, `session_l2`, and `session_results`.
 * `system.rs` coordinates interleaved SM/L2/DRAM events. `system/queues.rs`,
   `dram.rs`, `observers.rs`, and `execution.rs` isolate pending events,
-  service, observer accounting, and event coordination.
+  service, observer accounting, and event coordination; execution is split into
+  `execution_loop`, `execution_completion`, and their focused child modules.
 * `metrics.rs` owns `TraceMetrics`; `metrics/locality_mrc.rs` contains
   trace-local Fenwick/HOTL observers, `pipeline_activity.rs` contains activity
   counters, and `tests.rs` contains metric tests.
@@ -64,17 +65,18 @@ not inferred from NCU values.
 
 ### `sim/semantics` and `sim/engine`
 
-* `semantics/state.rs` re-exports `state/cache_boundary.rs`,
-  `typed_events.rs`, and `core_boundary.rs`; these are typed report/state
-  contracts, not schedulers.
+* `semantics/state.rs` declares `cache_boundary`, `typed_events`, and
+  `core_boundary`; `typed_events` further separates serialization and
+  validation contracts. These are typed report/state contracts, not schedulers.
 * `sim-engine` supplies dependency/resource event ordering and does not own
   architecture-specific cache policy.
 
 ### `sim/direct_run`
 
 * `lib.rs` is the run/report facade; `lib/reports.rs` holds report structures.
-* `metrics.rs` is a compact facade over `metrics/l1.rs`, `l2_dram.rs`, and
-  `pipeline_ipc.rs`; all three are post-replay, report-only attribution.
+* `metrics.rs` declares `l1`, `l2_dram`, `launch_occupancy`, and `pipeline_ipc`;
+  the IPC module further separates SM86 pipeline helpers. All are post-replay,
+  report-only attribution.
 * `emit.rs`, `prepared.rs`, and `resources.rs` provide serialization, prepared
   execution, and external launch-resource observations.
 * Invariant: metric emitters never feed NCU targets into replay.
@@ -92,3 +94,12 @@ not inferred from NCU values.
 
 See [`COMPONENTS.md`](COMPONENTS.md) for the compact ownership table and
 [`TERMINOLOGY.md`](TERMINOLOGY.md) for metric definitions.
+
+## Nested module examples
+
+`sim/sm::issue::core_step` owns `schedule_frontend`, `schedule_barriers`, and
+`schedule_control`; `sim/sm::replay::session` owns stream, fast-path, L2, and
+result helpers; `sim/trace::reader::preflight` owns access, allocation, and
+validation modules; and `sim/direct_run::metrics::pipeline_ipc` owns the SM86
+pipeline helper modules. These are ordinary Rust modules, not textual source
+concatenation.

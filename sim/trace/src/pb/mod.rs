@@ -7,5 +7,4 @@
 
 #[allow(clippy::doc_lazy_continuation, clippy::doc_overindented_list_items)]
 mod dynamic_trace;
-
 pub use dynamic_trace::*;

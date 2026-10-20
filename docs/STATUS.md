@@ -35,7 +35,7 @@ validator errors.
 ## Engineering state
 
 The Rust workspace is modularized behind API-preserving facades. Large
-mechanisms are stored as named lexical child sections so private fields,
+mechanisms are stored as named Rust child modules so private fields,
 serialized names, and impl visibility are unchanged. No `sim/**/*.rs` file
 exceeds 2,500 lines. `docs/ARCHITECTURE.md`, `docs/COMPONENTS.md`, and
 `docs/TERMINOLOGY.md` define the public codemap and vocabulary.

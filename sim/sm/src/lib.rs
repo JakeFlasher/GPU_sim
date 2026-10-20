@@ -74,13 +74,14 @@ pub mod control_bits;
 pub mod custom;
 #[cfg(feature = "campaign")]
 pub mod evidence;
+#[path = "issue.rs"]
 mod issue;
 pub mod metrics;
 pub mod program;
 pub mod replay;
 pub mod sass_operands;
+#[path = "system.rs"]
 mod system;
-
 pub use causal_frontier::{
     CausalFrontierError, CausalFrontierEvidence, CausalFrontierInstruction, CausalFrontierReport,
     CausalFrontierResidency, CausalFrontierWitness, CausalFrontierWitnessOrigin, MacroEffect,

@@ -1,3 +1,10 @@
-// Replay request and response data types crossing the SMSP/memory boundary. Request construction is stateful only through the caller.
+//! Semantic submodule; report-only boundary state and serde contracts.
 
-include!("part_001.rs");
+use super::*;
+
+#[path = "requests_decode.rs"]
+mod requests_decode;
+#[path = "requests_validation.rs"]
+mod requests_validation;
+pub use self::requests_decode::*;
+pub use self::requests_validation::*;

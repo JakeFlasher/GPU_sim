@@ -45,10 +45,76 @@
 //! fill mutation occur only in their typed event handlers — two runs over the
 //! same inputs produce bit-identical schedules and counters.
 
-// Child modules declared by the original public surface.
+use std::cell::RefCell;
+use std::cmp::Reverse;
+#[cfg(feature = "reference")]
+use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BinaryHeap, HashMap};
+#[cfg(feature = "reference")]
+use std::fs::File;
+#[cfg(feature = "reference")]
+use std::io::{self, BufWriter, Write};
+use std::num::NonZeroU64;
+#[cfg(feature = "reference")]
+use std::path::PathBuf;
+use std::rc::Rc;
 
-// Lexical sections share this parent module scope, preserving private fields and impl visibility.
-include!("system/queues.rs");
-include!("system/dram.rs");
-include!("system/observers.rs");
-include!("system/execution.rs");
+use sim_arch::{ArchId, L2PendingReadSemantics};
+
+use sim_engine::{EngineError, EventQueue, TargetId};
+
+use sim_mem::{
+    CoherenceConfig, CoherencePlan, CoherenceQueue, CoherenceRequest, L1Config,
+    L1PayloadResidencyWitness, L1VisibilityConfig, L1VisibilityPlan, L1VisibilityQueue, L2Counters,
+    L2DirtyResidency, L2EventMaskPreview, L2Eviction, L2FillToken, L2Model, L2PendingSectorKey,
+    L2Source, MemoryOrigin, NativePayloadJoinKey, PayloadForwardingLedgerV1, SectorPayloadV1,
+    ServicePlan, ServiceRequest, WritebackQueue,
+};
+
+#[cfg(feature = "reference")]
+use sim_semantics::{
+    BoundaryStateError, DramBoundaryState, DramStateError, L2RequestKey,
+    NativeBoundaryExecutionResult, PowerBoundaryState, PowerStateError, QueueBoundaryState,
+    QueueStateError, TYPED_STATE_SCHEMA_VERSION, TypedAdmissionWitness, TypedCoreBoundaryState,
+    TypedEventBoundaryRecord, TypedEventIdentity, TypedEventPayload, TypedEventTransition,
+    TypedFillIdentity, TypedL2Source, TypedMemoryOperation, TypedMemoryOrigin, TypedMemoryRequest,
+    TypedObservationContract, TypedPendingEvent, TypedResponseIdentity, TypedResponseKind,
+    TypedScalarMacroSpec, compare_native_boundary_projection, compare_native_region_contract,
+    execute_typed_scalar_macro, native_boundary_execution_path,
+};
+
+#[cfg(feature = "reference")]
+use crate::issue::AdvanceDiagnostics;
+
+use crate::issue::{
+    AdmissionRequestWitness, Advance, BlockReplay, IssueError, IssueModelParams, L2ClientScope,
+    MemRequest, MemoryAdmissionCandidate, MemoryAdmissionCandidateState, MemoryOperation,
+    MemoryServiceCandidate, MemoryServiceCandidateOperation, MemoryWriteAck, PayloadStoreSite,
+    ReplayHorizon, ReplyTo, SharedMemoryResidency, SmCore, SmMemMode, SmSimResult, TailFlags,
+    checked_cycle_add, stateful_write_lookup_observer_enabled,
+    validate_memory_admission_candidates, validate_memory_service_candidates,
+};
+
+use crate::program::FunctionSchedule;
+
+#[cfg(feature = "reference")]
+use sim_mem::FillKey;
+
+use sim_mem::{L1WriteLookupObserver, MemRole};
+
+#[path = "system/dram.rs"]
+mod dram;
+#[path = "system/execution.rs"]
+mod execution;
+#[path = "system/observers.rs"]
+mod observers;
+#[path = "system/queues.rs"]
+mod queues;
+pub use self::dram::*;
+pub(crate) use self::dram::*;
+pub use self::execution::*;
+pub(crate) use self::execution::*;
+pub use self::observers::*;
+pub(crate) use self::observers::*;
+pub use self::queues::*;
+pub(crate) use self::queues::*;

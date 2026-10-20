@@ -119,7 +119,7 @@ checks MRC monotonicity, finite-boundary tails, line/sector conservation, and
 zero structural errors. These checks are implementation checks, not sources
 of hardware truth.
 
-The Rust modularization is a source-layout change only: lexical child sections
+The Rust modularization is a source-layout change only: named Rust child modules
 are included in their original parent scope, so private fields, checked
 arithmetic, serde names, and error paths remain unchanged. The release build
 and test commands above are run after formatting. Any future behavioral change

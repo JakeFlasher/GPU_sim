@@ -1,123 +1,8 @@
-// L2/DRAM and branch/stall attribution helpers; report-only post-replay projections.
+//! L2/DRAM and readiness attribution helpers. Report-only.
 
-fn ensure_unavailable(
-    metrics: &mut BTreeMap<String, Metric>,
-    key: &'static str,
-    ncu_metric: Option<&str>,
-    unit: &'static str,
-    reason: &'static str,
-) {
-    metrics
-        .entry(key.to_owned())
-        .or_insert_with(|| Metric::unavailable(ncu_metric, unit, reason));
-}
+use super::*;
 
-fn add_branch_rows(metrics: &mut BTreeMap<String, Metric>, trace: &sim_sm::TraceMetrics) {
-    // NCU's SM86 metric description: CBU instructions except BMOV/BSSY.
-    // These are the CBU heads covered by this projection. Keep it separate
-    // from the older BRA/JMP-only count and from target-bearing events.
-    let instructions: u128 = [
-        "BRA", "BRX", "BRXU", "JMP", "JMX", "JMXU", "CALL", "RET", "EXIT", "BSYNC", "BREAK",
-    ]
-    .iter()
-    .filter_map(|head| trace.by_opcode.get(*head))
-    .map(|activity| u128::from(activity.warp_instructions))
-    .sum();
-    metrics.insert("branch_control_instructions".into(), Metric::approximate_count(
-        Some("smsp__inst_executed_op_branch.sum"), "inst", instructions,
-        "SM86 CBU opcode projection including calls, returns, EXIT, BSYNC and BREAK; excludes BMOV/BSSY; not the BRA/JMP-only count or a target-event denominator",
-    ));
-    let targets = &trace.branch_targets;
-    for (key, ncu, unit, count, meaning) in [
-        (
-            "branch_target_divergent_branches",
-            Some("smsp__branch_targets_threads_divergent"),
-            "branches",
-            targets.divergent_events,
-            "BRA/JMP/CALL/RET events with distinct first subsequent (function, PC) identities across active lanes, including fallthrough; not predicate disagreement",
-        ),
-        (
-            "branch_target_uniform_branches",
-            Some("smsp__sass_branch_targets_threads_uniform.sum"),
-            "branches",
-            targets.uniform_events,
-            "target-bearing events whose active lanes all have the same first subsequent (function, PC); includes all-predicated-off fallthrough",
-        ),
-        (
-            "branch_target_divergent_active_threads",
-            None,
-            "thread",
-            targets.divergent_threads,
-            "all active threads participating in resolved divergent target events; not an NCU branch count or minority-path size",
-        ),
-    ] {
-        metrics.insert(key.into(), if targets.unresolved_events == 0 {
-            Metric::approximate_count(ncu, unit, u128::from(count), meaning)
-        } else {
-            Metric::unavailable(ncu, unit, "some branch lanes have no successor in this trace; resolved subset retained in trace_metrics.branch_targets")
-        });
-    }
-    for (key, unit, count, meaning) in [
-        (
-            "branch_target_successor_active_threads",
-            "thread",
-            targets.successor_active_threads,
-            "sum of active lanes assigned a first successor across resolved target events",
-        ),
-        (
-            "branch_target_divergent_minority_threads",
-            "thread",
-            targets.divergent_minority_threads,
-            "sum of the smallest successor-path population across resolved divergent events",
-        ),
-        (
-            "branch_target_uniform_active_threads",
-            "thread",
-            targets.uniform_active_threads,
-            "active lanes in resolved uniform successor events",
-        ),
-    ] {
-        metrics.insert(
-            key.into(),
-            if targets.unresolved_events == 0 {
-                Metric::approximate_count(None, unit, u128::from(count), meaning)
-            } else {
-                Metric::unavailable(
-                    None,
-                    unit,
-                    "some branch lanes have no successor in this trace; resolved subset remains in trace_metrics.branch_targets",
-                )
-            },
-        );
-    }
-    metrics.insert(
-        "branch_target_unresolved_events".into(),
-        Metric::count(
-            None,
-            "branches",
-            u128::from(targets.unresolved_events),
-            "branch events with unobserved successors at warp trace end",
-        ),
-    );
-    metrics.insert(
-        "branch_target_unresolved_threads".into(),
-        Metric::count(
-            None,
-            "thread",
-            u128::from(targets.unresolved_threads),
-            "active lanes whose first successor was not observed before trace end",
-        ),
-    );
-    metrics.insert("branch_target_uniform_pct".into(), if targets.unresolved_events == 0 {
-        Metric::ratio(Some("smsp__sass_average_branch_targets_threads_uniform.pct"), "%",
-            u128::from(targets.uniform_events) * 100, u128::from(targets.events), true,
-            "uniform successor events / all target-bearing events; does not use the wider CBU-instruction denominator")
-    } else {
-        Metric::unavailable(Some("smsp__sass_average_branch_targets_threads_uniform.pct"), "%", "branch successor coverage is incomplete")
-    });
-}
-
-fn add_cause_rows(
+pub(crate) fn add_cause_rows(
     metrics: &mut BTreeMap<String, Metric>,
     prefix: &str,
     causes: &ReadinessCauseCycles,
@@ -185,7 +70,7 @@ fn add_cause_rows(
     }
 }
 
-fn add_global_issue_rows(
+pub(crate) fn add_global_issue_rows(
     metrics: &mut BTreeMap<String, Metric>,
     issue: &GlobalMemoryIssueDiagnostics,
 ) {
@@ -254,3 +139,189 @@ fn add_global_issue_rows(
     }
 }
 
+/// Project the simulator's exclusive causal buckets into the vocabulary used
+/// by NCU's warp-sampling section. These are intentionally *proxy* rows: NCU
+/// samples a randomly selected active warp at hardware-defined intervals and
+/// can overlap states, while this model assigns one limiting cause to each
+/// delayed issue. Keeping the rows separate gives consumers a complete schema
+/// without pretending that sampled hardware counters were reconstructed.
+pub(crate) fn add_scheduler_proxy_rows(
+    metrics: &mut BTreeMap<String, Metric>,
+    readiness: &ReadinessDiagnostics,
+) {
+    let cause = &readiness.limiting_cycles;
+    let imc_miss = readiness
+        .immediate_constant_cache
+        .as_deref()
+        .map_or(0, |cache| cache.miss_wait_cycles);
+    let rows = [
+        (
+            "barrier",
+            cause
+                .cta_barrier_rendezvous
+                .saturating_add(cause.pipeline_barrier),
+            "CTA rendezvous plus barrier-pipeline limiting cycles; not sampled warp state",
+        ),
+        (
+            "branch_resolving",
+            cause.pipeline_branch,
+            "modeled branch-resolution limiting cycles; NCU samples PC-update waits",
+        ),
+        (
+            "dispatch_stall",
+            cause.instruction_front_end,
+            "modeled instruction-front-end limiting cycles; dispatch conflicts are not separately identified",
+        ),
+        (
+            "drain",
+            cause.memory_write_completion,
+            "modeled write-completion limiting cycles; physical EXIT drain is not modeled",
+        ),
+        (
+            "imc_miss",
+            imc_miss,
+            "modeled immediate-constant miss wait cycles",
+        ),
+        (
+            "lg_throttle",
+            cause
+                .memory_admission_queue
+                .saturating_add(cause.memory_issue_queue),
+            "modeled memory queue limiting cycles; not an NCU LG-throttle sample",
+        ),
+        (
+            "long_scoreboard",
+            cause
+                .dependence_counter_l1tex
+                .saturating_add(cause.dependence_counter_global_load_operand_read)
+                .saturating_add(cause.dependence_counter_global_store_operand_read)
+                .saturating_add(cause.dependence_counter_global_atomic_operand_read)
+                .saturating_add(cause.dependence_counter_global_reduction_operand_read),
+            "modeled L1TEX/global operand dependency cycles; NCU long-scoreboard samples overlap",
+        ),
+        (
+            "math_pipe_throttle",
+            cause
+                .pipeline_alu
+                .saturating_add(cause.pipeline_sfu)
+                .saturating_add(cause.pipeline_tensor),
+            "modeled compute-pipeline limiting cycles; not a sampled math-throttle state",
+        ),
+        ("membar", 0, "no independent modeled membar-sample state"),
+        (
+            "mio_throttle",
+            cause.dependence_counter_shared_write,
+            "modeled shared-write dependency cycles; MIO sampling includes additional causes",
+        ),
+        (
+            "misc",
+            cause.dependence_counter_unknown_origin,
+            "modeled unknown-origin dependency cycles",
+        ),
+        (
+            "no_instructions",
+            0,
+            "no independent sampled no-instructions state",
+        ),
+        (
+            "not_selected",
+            cause.eligible_not_selected,
+            "modeled eligible-but-not-selected cycles; NCU state samples are not identical",
+        ),
+        (
+            "selected",
+            0,
+            "scheduler selection is not reconstructed as a sampled warp state",
+        ),
+        ("sleeping", 0, "no independent sampled sleeping state"),
+        (
+            "tex_throttle",
+            cause.dependence_counter_l1tex,
+            "modeled L1TEX dependency cycles; TEX-throttle samples are distinct",
+        ),
+        (
+            "wait",
+            cause.control_stall,
+            "modeled control-stall cycles; NCU wait samples are broader",
+        ),
+    ];
+    for (suffix, value, semantics) in rows {
+        metrics.insert(
+            format!("scheduler_proxy_{suffix}_cycles"),
+            Metric::approximate_count(
+                Some(&format!("smsp__warps_issue_stalled_{suffix}.sum")),
+                "cycle",
+                u128::from(value),
+                semantics,
+            ),
+        );
+    }
+}
+
+pub(crate) fn add_sm86_register_read_rows(
+    metrics: &mut BTreeMap<String, Metric>,
+    readiness: &ReadinessDiagnostics,
+) {
+    let Some(rf) = readiness.sm86_register_read.as_deref() else {
+        return;
+    };
+    for (name, value, unit, semantics) in [
+        (
+            "reservations",
+            rf.reservations,
+            "inst",
+            "SM86 conditional full-mode register-read reservations; not a physical RF event count",
+        ),
+        (
+            "source_reads_bank0",
+            rf.source_reads[0],
+            "read",
+            "projected regular-register source reads assigned to effective bank 0",
+        ),
+        (
+            "source_reads_bank1",
+            rf.source_reads[1],
+            "read",
+            "projected regular-register source reads assigned to effective bank 1",
+        ),
+        (
+            "applied_wait_cycles",
+            rf.applied_wait_cycles,
+            "cycle",
+            "SM86 conditional register-read readiness cycles actually charged before issue",
+        ),
+        (
+            "port_conflict_cycles",
+            rf.port_conflict_cycles,
+            "cycle",
+            "conditional one-port-per-bank reservation conflict cycles; not NCU stall cycles",
+        ),
+        (
+            "rfc_hits",
+            rf.rfc_hits,
+            "hit",
+            "compiler-keyed reuse-cache hits in the bounded effective model",
+        ),
+        (
+            "rfc_misses",
+            rf.rfc_misses,
+            "miss",
+            "compiler-keyed reuse-cache misses in the bounded effective model",
+        ),
+        (
+            "unsupported_shapes",
+            rf.unsupported_shapes,
+            "inst",
+            "projected fixed-latency records whose vector/multi-cell shape was not modeled",
+        ),
+    ] {
+        add_count_row(
+            metrics,
+            format!("sm86_register_read_{name}"),
+            None,
+            unit,
+            value,
+            semantics,
+        );
+    }
+}

@@ -1,3 +1,10 @@
-// Cache-model core implementation. Mutates sectored cache state and modeled timing where the parent API requires it.
+//! Semantic submodule; report-only boundary state and serde contracts.
 
-include!("part_001.rs");
+use super::*;
+
+#[path = "core_access.rs"]
+mod core_access;
+#[path = "core_flush.rs"]
+mod core_flush;
+pub use self::core_access::*;
+pub(super) use self::core_flush::*;

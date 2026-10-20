@@ -39,9 +39,28 @@
 //! LDGSTS merges into allocations from older warp instructions are observed as
 //! lookup hits, while same-instruction sector coalescing remains a miss.
 
-// Child modules declared by the original public surface.
+use serde::Serialize;
+use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::num::NonZeroU32;
 
-// Lexical sections share this parent module scope, preserving private fields and impl visibility.
-include!("l1/config_counters.rs");
-include!("l1/core.rs");
-include!("l1/accessors.rs");
+use sim_arch::{ArchId, L1WriteLookupWindow};
+use sim_semantics::{
+    L1BoundaryState, L1CounterState, L1FillDueState, L1LineFillState, L1SectorFillState,
+    TYPED_STATE_SCHEMA_VERSION,
+};
+
+use crate::MemoryOrigin;
+use crate::SectorPayloadV1;
+
+#[path = "l1/accessors.rs"]
+mod accessors;
+#[path = "l1/config_counters.rs"]
+mod config_counters;
+#[path = "l1/core.rs"]
+mod core;
+pub use self::accessors::*;
+pub(crate) use self::accessors::*;
+pub use self::config_counters::*;
+pub(crate) use self::config_counters::*;
+pub use self::core::*;
+pub(crate) use self::core::*;

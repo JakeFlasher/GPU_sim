@@ -15,11 +15,44 @@
 //! loaders validate protobuf and simulator semantics before exposing replay
 //! inputs.
 
-// Child modules declared by the original public surface.
+use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, OnceLock};
 
-// Lexical sections share this parent module scope, preserving private fields and impl visibility.
-include!("reader/error.rs");
-include!("reader/snapshot.rs");
-include!("reader/compact.rs");
-include!("reader/sampling.rs");
-include!("reader/preflight.rs");
+use prost::Message;
+use serde::de::{DeserializeSeed, Error as _, MapAccess, SeqAccess, Visitor};
+
+#[cfg(feature = "campaign")]
+use crate::anchored::FileIdentity;
+use crate::anchored::{AnchoredDir, AnchoredFile, AnchoredReadError, FileGenerationIdentity};
+#[cfg(feature = "campaign")]
+use crate::digest::{Sha256, Sha256Digest, canonical_json};
+use crate::exec_info::ExecInfo;
+use crate::lanes::{self, LaneError};
+use crate::pb;
+use crate::wire_preflight::{self, WirePreflightError};
+
+#[path = "reader/compact.rs"]
+mod compact;
+#[path = "reader/directory.rs"]
+mod directory;
+#[path = "reader/error.rs"]
+mod error;
+#[path = "reader/preflight.rs"]
+mod preflight;
+#[path = "reader/sampling.rs"]
+mod sampling;
+#[path = "reader/snapshot.rs"]
+mod snapshot;
+pub use self::compact::*;
+pub(crate) use self::compact::*;
+pub use self::directory::*;
+pub(crate) use self::directory::*;
+pub use self::error::*;
+pub(crate) use self::error::*;
+pub use self::preflight::*;
+pub(crate) use self::preflight::*;
+pub use self::sampling::*;
+pub(crate) use self::sampling::*;
+pub use self::snapshot::*;
+pub(crate) use self::snapshot::*;

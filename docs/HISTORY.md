@@ -66,7 +66,7 @@ both lanes before shipping the release wording.
 
 ## Academic documentation and source modularization (2026-10-20)
 
-The large Rust facades were split into named lexical child sections while
+The large Rust facades were split into named Rust child modules while
 retaining their original parent scope and public paths. The split covers SM
 issue/replay/system state, trace reader state, semantic boundaries, L1/L2
 models, pipeline/locality metrics, and direct-run reports. This layout change
@@ -79,3 +79,18 @@ and SM86 status profiles. `FULL_NUMERIC_COMPARISON_MODULARIZATION.json` reports
 zero missing/extra rows, zero required metadata differences, and zero common
 numeric differences against the M7 closure artifacts. Both locality validators
 reported zero errors.
+
+## Genuine Rust module conversion (2026-10-20)
+
+The earlier lexical/include layout was replaced with real Rust child modules.
+The ten parent facades now declare `mod` children with explicit path attributes
+where direct per-file rustfmt requires them, and public APIs are preserved by
+re-exports. Large inherent implementations are split across focused child
+modules; trait implementations remain intact in one module to avoid conflicting
+trait impls. No `include!` macros or `part_*.rs` files remain.
+
+A fresh SM120/SM86 12-worker full replay after this conversion matched the M7
+closure artifacts with zero missing/extra rows, zero metadata differences, and
+zero common numeric differences. Both reuse validators reported zero errors.
+`FULL_NUMERIC_COMPARISON_REAL_MODULARIZATION.json` and
+`FULL_NCU_SUMMARY_REAL_MODULARIZATION.json` record the parity evidence.
