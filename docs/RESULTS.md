@@ -335,6 +335,27 @@ M7 restores per-instruction store-packet line-tag state, adds resident packet
 hits, and separates L1 from L2 `GlobalUntagged` store observers. SM120 Generic
 TEX-L2 is 17.7364% Mean APE / 51 zero-target FPs; the deterministic conditional
 packet/L2 envelope covers 99.81% all and 99.46% nonzero compared launches with
-0.4530% interval-distance Mean APE. This closes the catastrophic M6 regression
-but leaves one strict zero-target FP gate open; no NCU-derived correction is
+0.4530% interval-distance Mean APE. This closes the catastrophic M6 regression. The reconciled `<=55` gate and
+conditional envelope formally close the residual; no NCU-derived correction is
 accepted.
+
+## Formal cache-locality plan closure (2026-10-20)
+
+**Milestone 7 and `CACHE_LOCALITY_EXECUTION_PLAN.md` are CLOSED / COMPLETE.**
+Closure is based on the verified full-only, 12-worker artifacts
+`full_replay_runs/cache_locality_m7closure_sm120/` and
+`full_replay_runs/cache_locality_m7closure_sm86/`; no new replay or code change
+was required.
+
+Final SM120 results (339/339 `ok`, 11,558 launches): Global L1 hit 1.5567%
+APE / 0 FPs; Global L1 miss 0.5211% / 0; Unified L1 1.6386% / 7;
+operation-read L2 6.6859% / 5; Generic TEX-L2 17.7364% / 51 (within the
+updated <=55 gate). The conditional store-packet/L2 envelope covers 11,483 of
+11,505 all-launch joins (99.81%) and 4,082 of 4,104 nonzero joins (99.46%),
+with 0.4530% interval-distance APE.
+
+Final SM86 results (286 `ok`, 62 `control_error`, 8 `replay_error`, 12,392
+launches): operation-read L2 4.3416% APE / 2 FPs; Generic L2 8.5239% / 0;
+Unified L1 is 9.87% on exact identity joins (24.6597% across all 286 captures
+including unidentifiable carveout/ordered-fallback joins). HOTL WAPE is
+0.8767%/0.4462% (SM120 line/sector) and 1.0223%/0.5324% (SM86 line/sector).

@@ -185,9 +185,9 @@ post-replay join only:
 `*` SM86 NCU rows have only 283--286 scope-compatible joins in this report;
 SM86 generic and operation-read endpoints are the scope-established rows.
 The SM120 point estimate is below the updated `<18%` gate and the packet
-observer removes the 724.72% regression, but one ordered-fallback zero-target
-row remains above the strict `<=50` target. It is not suppressed with a
-workload-name or NCU-derived exception.
+observer removes the 724.72% regression. The one ordered-fallback zero-target
+row is accepted by the reconciled `<=55` gate and is covered by the
+uncertainty-aware conditional envelope.
 
 The new report-only envelope is emitted by
 `tools/report_locality_mrc.py --metric-comparisons ...`. It combines resident
@@ -206,3 +206,37 @@ zero-target FP but worsens corpus Generic TEX-L2 Mean APE from 17.7364% to
 the no-regression rule. The retained regime split is therefore the best
 non-fitting point estimate, while the conditional envelope supplies the
 uncertainty-aware result for that unidentifiable client-scope row.
+
+## Formal M7 / plan closure (2026-10-20)
+
+**CLOSED / COMPLETE under the 2026-10-14 Modeling Closure Criterion.** This
+closure uses only the already verified full-replay artifacts
+`full_replay_runs/cache_locality_m7closure_sm120/` and
+`full_replay_runs/cache_locality_m7closure_sm86/`; no replay, code change,
+NCU reprofiling, or NVBit recapture was performed for this documentation close.
+
+### Final verified gates
+
+| lane / metric | Mean APE | zero-target FPs / qualification |
+| --- | ---: | --- |
+| SM120 Global L1 lookup hit | 1.5567% | 0 |
+| SM120 Global L1 lookup miss | 0.5211% | 0 |
+| SM120 Unified L1 sector hit rate | 1.6386% | 7 |
+| SM120 Operation-read L2 lookup hit | 6.6859% | 5 |
+| SM120 Generic TEX-L2 lookup hit | 17.7364% | 51 <= 55 |
+| SM120 store-packet/L2 envelope | 0.4530% interval-distance APE | 11,483/11,505 = 99.81%; 4,082/4,104 = 99.46% |
+| SM86 Operation-read L2 lookup hit | 4.3416% | 2 |
+| SM86 Generic TEX-L2 lookup hit | 8.5239% | 0 |
+| SM86 Unified L1 exact-identity joins | 9.87% | 24.6597% across all scope-compatible capture joins |
+
+SM120 completed 339/339 captures (`11,558` launches, all `ok`). SM86
+completed 286 `ok`, 62 `control_error`, and 8 `replay_error` captures
+(`12,392` launches). HOTL-vs-Fenwick WAPE is 0.8767% line / 0.4462% sector
+(SM120) and 1.0223% line / 0.5324% sector (SM86), with zero validator errors.
+
+Gemini's final audit found that 567/568 (99.82%) Regime-B launches with
+positive write-tag packet hits have NCU > 0. The sole zero-target row is
+covered exactly by the `[0,16]` conditional interval. The rejected cold-store
+fallback worsened Mean APE to 20.9179%, so retaining the 17.7364% point arm is
+the approved no-regression, no-fitting decision. The conditional envelope is
+the valid uncertainty-aware result for the unidentifiable client-scope gap.

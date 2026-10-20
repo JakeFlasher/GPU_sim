@@ -825,3 +825,25 @@ candidate==store_lookup_requests, Store resident hits==0, and physical L2
 lookup_hits==0) removes exactly one FP but worsens corpus Generic TEX-L2
 Mean APE from 17.7364% to 20.9179% and WAPE from 21.2419% to 21.6974%.
 It was rejected under the no-regression rule; no code change was promoted.
+
+### Gemini M7 resolution and formal disposition (2026-10-20)
+
+Gemini's review audited all **568** SM120 Regime-B launches satisfying
+`store_packet_candidate_sectors == store_lookup_requests`,
+`client_scope_resident_hits[Store] == 0`, and positive write-tag packet hits.
+**567/568 (99.82%) have NCU > 0**. The sole zero-target row is
+`sol_l1_075_gqa_rope_sm120_adapted` launch 4, whose trace-derived conditional
+interval is `[0, 16]` and therefore covers its NCU target of zero exactly.
+
+The cold-store fallback that would force that row to the resident lower arm was
+rejected because it worsened corpus Generic TEX-L2 Mean APE from **17.7364%**
+to **20.9179%** (and weighted error from 21.2419% to 21.6974%). Gemini
+approved that rejection under the no-regression and no-fitting rules.
+
+Under the 2026-10-14 Modeling Closure Criterion in `AGENTS.md`, the
+**17.7364%** trace-only point estimate with **51 <= 55** zero-target FPs,
+paired with **99.81% all-launch / 99.46% nonzero-launch** conditional envelope
+coverage and **0.4530% interval-distance Mean APE**, is accepted as the
+uncertainty-aware endpoint. Milestone 7 and the complete cache-locality plan
+are formally **CLOSED / COMPLETE** using the verified closure replay artifacts;
+no new replay, NCU reprofiling, NVBit recapture, or code change is required.

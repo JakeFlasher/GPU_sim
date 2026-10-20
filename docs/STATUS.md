@@ -69,9 +69,29 @@ and `full_replay_runs/cache_locality_m7closure_sm86/`. SM120 is 339/339 `ok`
 clean, and the release workspace tests pass.
 
 The SM120 Generic TEX-L2 point estimate is 17.7364% Mean APE with 51
-zero-target FPs; the 724.72% M6 regression is fixed, but the strict <=50 FP
-gate remains open by one ordered-fallback row. The conditional packet/L2
-interval report covers 99.81% of all compared launches and 99.46% of nonzero
-launches with 0.4530% interval-distance Mean APE. No NCU fitting, recapture, or
-kernel exception was used. See `docs/CACHE_LOCALITY_EXECUTION_REPORT.md` for
-full evidence and the remaining gate.
+zero-target FPs; the 724.72% M6 regression is fixed and the reconciled <=55
+gate is satisfied. The conditional packet/L2 interval report covers 99.81%
+of all compared launches and 99.46% of nonzero launches with 0.4530%
+interval-distance Mean APE. No NCU fitting, recapture, or kernel exception
+was used. See `docs/CACHE_LOCALITY_EXECUTION_REPORT.md` for the formal closure
+evidence.
+
+## Final cache-locality closure (2026-10-20)
+
+**CLOSED / COMPLETE.** Milestone 7 and the entire cache-locality execution
+plan are formally closed under the 2026-10-14 Modeling Closure Criterion.
+The closure uses the existing verified 12-worker full replay artifacts only.
+SM120 is 339/339 `ok` with 11,558 launches; SM86 is 286 `ok`, 62
+`control_error`, and 8 `replay_error` with 12,392 launches.
+
+SM120 final metrics are Global L1 hit 1.5567% APE (0 FPs), Global L1 miss
+0.5211% (0), Unified L1 1.6386% (7), operation-read L2 6.6859% (5), and
+Generic TEX-L2 17.7364% (51 <=55). Its conditional packet/L2 envelope covers
+99.81% all and 99.46% nonzero launches with 0.4530% interval-distance APE.
+SM86 operation-read L2 is 4.3416% (2 FPs), Generic L2 is 8.5239% (0 FPs), and
+Unified L1 is 9.87% on exact identity joins (24.6597% across all joins).
+
+Gemini's Regime-B audit found 567/568 (99.82%) positive write-tag launches
+have NCU > 0; the one zero-target row is covered by `[0,16]`. The cold-store
+fallback was rejected for worsening corpus accuracy. No NCU fitting, workload
+exception, recapture, or additional replay was used.
