@@ -381,6 +381,7 @@ def _aggregate(path: Path, comparison_path: Path | None = None) -> dict[str, Any
         "sm120_generic_tex_l2_store_packet_envelope": envelope,
         "monotonicity_violations": monotonic_violations,
         "ncu_used": False,
+        "ncu_comparison_used_for_audit_only": comparison_path is not None,
         "hardware_mrc_claim": False,
     }
 
