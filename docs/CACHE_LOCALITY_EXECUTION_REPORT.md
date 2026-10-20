@@ -118,3 +118,16 @@ reduces the operation-read request projection to the observed target without
 changing physical timing. A later large-store packet-shape hypothesis was
 rejected by the complete-corpus experiment (generic L2 WAPE worsened to
 44.48%), so it was removed; no kernel-name or NCU-fitting exception remains.
+
+### Generic-L2 residual audit
+
+The final4 generic-L2 report was drilled down to its dominant rows. In the
+FFT launch `sol_l2_051_hyena_complete_sm120`/48, the trace has 48 LDG
+requests (280 sectors) and 24 STG requests (288 sectors); the packet shadow
+returns 179 hits while the joined target is 5. A trace-only rule that zeroed
+packet hits for large stores was run across the complete corpus and worsened
+generic-L2 WAPE to 44.48%, so it was rejected and removed. The retained model
+therefore does not silently relabel STG packets or use kernel names. The
+remaining generic-L2 discrepancy is an endpoint/client-scope ambiguity that
+cannot be resolved from the retained trace metadata without an independent
+scope crosswalk.
