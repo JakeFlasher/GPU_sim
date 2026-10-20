@@ -79,3 +79,28 @@ names would invent timing/state. The minimum unblocker is a typed `sync_trace`
 sidecar carrying runtime barrier address, count/transaction count, phase/state
 encoding, TRYWAIT result, memory scope/order, and deterministic per-launch
 sequence, plus completion linkage in TMA records.
+
+## Post-M7 residual audit (2026-10-20)
+
+The active post-closure objective was re-audited against the M7 closure
+artifacts. Major remaining Mean APE values are: SM120 elapsed IPC 13.60%,
+SM86 active IPC 18.56%, SM86 elapsed IPC 11.88%, and SM86 all-scope unified L1
+24.66% (exact identity joins 9.87%). The SM86 generic L2 (8.5239%) and
+operation-read L2 (4.3416%) are already below 10%; SM120 active IPC (9.455%)
+and all scope-established SM120 L1/read-L2 endpoints are also below their
+current gates.
+
+`tools/audit_driver_occupancy.py` on
+`full_replay_runs/cache_locality_m7closure_sm86/full.jsonl.zst` reports
+12,392 launches, zero observed peaks exceeding the recorded driver limit, and
+`no_op: true`. Therefore occupancy admission cannot safely improve IPC from
+existing traces. The remaining IPC gap requires launch-envelope/tail semantics,
+CTA residency and memory-stall chronology absent from the trace contract.
+The SM86 all-scope unified-L1 residual is dominated by ordered-fallback NCU
+joins; exact identity joins already meet 10% and the missing cross-surface
+launch identity cannot be reconstructed without fitting NCU rows.
+
+Gemini was consulted via `agy --dangerously-skip-permissions`; the read-only
+consultation timed out without actionable advice. No speculative code change or
+NCU-derived correction was promoted. The objective remains active pending new
+trace-side metadata or a defensible mechanism-local improvement.
