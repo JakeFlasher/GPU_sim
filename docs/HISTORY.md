@@ -54,3 +54,12 @@ promotion, large-store packet suppression, and NCU-derived count balancing—
 remain in Git history and dated research notes. They are not active model
 behavior and must not be revived without a new mechanism and a complete
 regression study.
+
+## Academic release pass (2026-10-20)
+
+The public vocabulary, metric definitions, architecture description, status
+contract, and persistent session notes were aligned with standard
+computer-architecture usage. Internal pending-bound terminology was renamed in
+the event scheduler without changing serialized replay semantics. Full
+12-worker replay parity against the M7 closure artifacts was confirmed for
+both lanes before shipping the release wording.
