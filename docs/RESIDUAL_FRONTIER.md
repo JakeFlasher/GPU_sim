@@ -104,3 +104,13 @@ Gemini was consulted via `agy --dangerously-skip-permissions`; the read-only
 consultation timed out without actionable advice. No speculative code change or
 NCU-derived correction was promoted. The objective remains active pending new
 trace-side metadata or a defensible mechanism-local improvement.
+
+### SM86 NCU join coverage audit
+
+The final SM86 comparison contains 286 successful captures and 12,392 launches,
+but only 107 identity joins and 179 ordered-fallback joins. The remaining
+12,106 launches are unmatched; no capture has more than one usable NCU row in
+the retained profiles. Thus deterministic kernel-name/grid/block matching
+cannot expand the exact join population: the profiles provide at most one
+profiled launch per capture while the traces contain multiple launches. Treating
+ordered fallback as exact would be NCU-label fitting, not simulator accuracy.
