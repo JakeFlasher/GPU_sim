@@ -141,3 +141,10 @@ remain a target-association residual; no NCU fitting or workload exception was
 added. Tier-2/Tier-3 conditional shadows are report-only, with Tier-3 marking
 global timestamp order unavailable. Future work must not call these residuals
 closed without new trace/PMU evidence.
+
+A subsequent full-corpus M2A/M2C correction uses the active SM120 per-SM
+write-tag observer for every cacheable store form and reports trace-qualified
+full-sector same-warp store-to-load forwarding. Final4 replay reduced SM120
+unified-L1 APE to ~1.63% and operation-read L2 APE to ~6.69% without changing
+physical timing. Generic L2 remains a client-scope residual; a large-store
+packet-shape hypothesis was fully replayed and rejected.

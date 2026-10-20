@@ -303,3 +303,13 @@ nonzero-target relative error, 39.58% unified-L1, 14.89% operation-read-L2,
 and 24.11% generic source-TEX-L2; four ordered-fallback global-L1 zero-target
 rows remain a target-association residual. See
 [`CACHE_LOCALITY_EXECUTION_REPORT.md`](CACHE_LOCALITY_EXECUTION_REPORT.md).
+
+### M2A/M2C follow-up
+
+The final4 full replay used the active SM120 write-tag observer for all
+cacheable store forms and added a shadow-only full-sector same-warp
+store-to-load forwarding subtraction. SM120 unified-L1 mean APE is ~1.63% and
+operation-read L2 mean APE is ~6.69%; physical cache, DRAM, IPC, and timing
+remain unchanged. Generic source-TEX L2 remains ~23.97%. A trace-only
+large-store packet-shape rule was evaluated on the complete corpus and
+rejected (generic-L2 WAPE increased to ~44.48%), so it is not retained.

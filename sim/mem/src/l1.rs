@@ -3166,13 +3166,8 @@ impl L1Cache {
         let line = sector_id >> 2;
         let sector = (sector_id & 3) as u8;
         let sector_bit = 1_u8 << sector;
-        let sector_already_known_before = self
-            .sectors
-            .get(&line)
-            .copied()
-            .unwrap_or(0)
-            & sector_bit
-            != 0;
+        let sector_already_known_before =
+            self.sectors.get(&line).copied().unwrap_or(0) & sector_bit != 0;
         self.record_constant_request(origin);
         self.record_wavefront_mask_lookup(origin, line, sector);
         self.record_unrequested_subline_miss(origin, line, sector);

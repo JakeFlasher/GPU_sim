@@ -1195,22 +1195,24 @@ pub(crate) fn l1_write_hit_terms(
             };
             [selected, 0]
         }
-        ArchId::Sm120
+        ArchId::Sm120 if trace.is_some_and(|metrics| metrics.l1_write_lookup_observer_active) => {
             if trace.is_some_and(|metrics| {
-                metrics
-                    .launch_resources
-                    .as_ref()
-                    .is_some_and(|resources| resources.block_threads <= 256)
-                    && metrics
-                        .memory
-                        .get("global_store")
-                        .is_none_or(|traffic| traffic.sectors == 0)
-                    && metrics
-                        .memory
-                        .get("unclassified_global")
-                        .is_some_and(|traffic| traffic.sectors != 0)
-            }) =>
-        {
+                (metrics.memory.contains_key("global_reduction")
+                    || metrics.memory.contains_key("global_atomic"))
+                    && !metrics.memory_scope.contains_key("global_load_ldg")
+            }) {
+                // Reduction/atomic-only global streams are operation-qualified
+                // L1TEX clients, not ordinary unified sector lookups.  Keep
+                // their write-tag accounting in the diagnostic counters but
+                // do not leak it into the unified endpoint when no ordinary
+                // global-load client is present.
+                return [0, 0];
+            }
+            // The SM120 write observer is a per-SM pre-instruction tag view;
+            // it applies to every cacheable store form, not only the legacy
+            // unclassified-global subset.  Cold single-instruction stores
+            // still contribute zero because plan_batch evaluates the tag
+            // before allocating it.
             [l1.write_lookup_hits, l1.reduction_hits]
         }
         ArchId::Sm120 => [l1.store_hits, l1.reduction_hits],

@@ -41,3 +41,10 @@ DRAM, IPC, or timing. The interval-derived HOTL approximation is **not** a
 fit NCU or fabricate cross-warp order. The four ordered-fallback SM120
 zero-target global-L1 rows likewise remain explicitly unresolved. Details and
 commands are in [`CACHE_LOCALITY_EXECUTION_REPORT.md`](CACHE_LOCALITY_EXECUTION_REPORT.md).
+
+A follow-up M2A/M2C correction is recorded in
+`CACHE_LOCALITY_EXECUTION_REPORT.md`: SM120 unified-L1 endpoint APE is ~1.63%
+and operation-read L2 is ~6.69% after using all active write-tag observations
+and trace-qualified store-to-load forwarding. Generic source-TEX L2 remains a
+scope residual (~23.97%); a large-store shape rule was tested across the full
+corpus and rejected because it regressed generic-L2 WAPE.

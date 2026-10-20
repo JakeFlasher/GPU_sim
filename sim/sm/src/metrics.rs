@@ -416,6 +416,10 @@ pub(crate) struct ReuseWarpStream {
     record_tick: u64,
     line_volume: u64,
     lines: BTreeMap<i64, ReuseLineState>,
+    /// Full-sector store candidates retained for the report-only same-SM
+    /// store-to-load forwarding observer.  This set never changes L1/L2
+    /// state or timing.
+    full_sector_store_sectors: BTreeSet<i64>,
     active: bool,
 }
 
@@ -1103,6 +1107,10 @@ pub struct TraceMetrics {
     /// arrival order is unavailable in the trace-local observer, so the
     /// unavailability count is explicit rather than silently ordering warps.
     pub l2_system_locality_observer: ConditionalLocalityObservation,
+    /// Trace-qualified full-sector store-to-load forwarding candidates.  This
+    /// is subtracted only from shadow L2 request projections; it never
+    /// suppresses a physical request or changes response timing.
+    pub store_to_load_forwardable_sectors: u64,
     #[serde(skip)]
     pub(crate) reuse_warp_stream: ReuseWarpStream,
     #[serde(skip)]
@@ -1769,11 +1777,7 @@ fn hotl_interval_bin(interval: u64) -> usize {
         exponent += 1;
     }
     let base = 1_u64 << exponent;
-    let sub_bin = (interval
-        .saturating_sub(base)
-        .saturating_mul(4)
-        / base)
-        .min(3) as usize;
+    let sub_bin = (interval.saturating_sub(base).saturating_mul(4) / base).min(3) as usize;
     (16 + (exponent as usize - 4) * 4 + sub_bin).min(HOTL_INTERVAL_HISTOGRAM_BINS - 1)
 }
 
@@ -1886,8 +1890,7 @@ impl TraceMetrics {
             .saturating_add(store_lookup_requests);
         for index in 0..observer.capacity_lines.len() {
             observer.lower_hits[index] = observer.lower_hits[index].saturating_add(lookup_hits);
-            observer.upper_hits[index] = observer.upper_hits[index]
-                .saturating_add(lookup_requests);
+            observer.upper_hits[index] = observer.upper_hits[index].saturating_add(lookup_requests);
             observer.lower_misses[index] = observer.lower_misses[index]
                 .saturating_add(lookup_requests.saturating_sub(lookup_hits));
         }
@@ -2000,19 +2003,21 @@ impl TraceMetrics {
 
         let tick = self.reuse_warp_stream.record_tick;
         let volume = self.reuse_warp_stream.line_volume;
-        let line_count = u64::try_from(lines.len()).map_err(|_| crate::IssueError::CounterOverflow {
-            counter: "reuse line volume clock",
-        })?;
+        let line_count =
+            u64::try_from(lines.len()).map_err(|_| crate::IssueError::CounterOverflow {
+                counter: "reuse line volume clock",
+            })?;
         self.reuse_warp_stream.record_tick =
             tick.checked_add(1)
                 .ok_or(crate::IssueError::CounterOverflow {
                     counter: "reuse record tick",
                 })?;
-        self.reuse_warp_stream.line_volume = volume
-            .checked_add(line_count)
-            .ok_or(crate::IssueError::CounterOverflow {
-                counter: "reuse line volume clock",
-            })?;
+        self.reuse_warp_stream.line_volume =
+            volume
+                .checked_add(line_count)
+                .ok_or(crate::IssueError::CounterOverflow {
+                    counter: "reuse line volume clock",
+                })?;
         self.reuse_interval.hotl_line_volume_clock = self
             .reuse_interval
             .hotl_line_volume_clock
@@ -2056,11 +2061,8 @@ impl TraceMetrics {
                                 .saturating_sub(1),
                         );
                         if let Some(previous_volume) = state.last_sector_volume[sector] {
-                            sector_volume_intervals[sector] = Some(
-                                volume
-                                    .saturating_sub(previous_volume)
-                                    .saturating_sub(1),
-                            );
+                            sector_volume_intervals[sector] =
+                                Some(volume.saturating_sub(previous_volume).saturating_sub(1));
                         }
                         sector_reused_mask |= bit;
                     }
@@ -2203,6 +2205,50 @@ impl TraceMetrics {
             }
         }
         Ok(())
+    }
+
+    /// Observe a byte-mask-qualified full-sector store followed by a load in
+    /// the same warp stream.  The candidate is deliberately shadow-only: the
+    /// native trace does not expose enough cross-warp ordering to justify a
+    /// live L1 installation.  A caller must prove full-sector coverage from
+    /// active/predicate masks and opcode width before setting `full_store`.
+    pub(crate) fn observe_store_to_load_forwarding(
+        &mut self,
+        kind: AccessKind,
+        sectors: &[i64],
+        full_store: bool,
+    ) {
+        let Some(span) = reuse_span(kind, sectors) else {
+            return;
+        };
+        let mut unique = BTreeSet::new();
+        for &sector in span {
+            unique.insert(sector);
+        }
+        if full_store
+            && matches!(
+                kind,
+                AccessKind::GlobalStore { .. } | AccessKind::LocalStore { .. }
+            )
+        {
+            self.reuse_warp_stream
+                .full_sector_store_sectors
+                .extend(unique);
+        } else if matches!(
+            kind,
+            AccessKind::GlobalEligible { .. } | AccessKind::LocalLoad { .. }
+        ) {
+            for sector in unique {
+                if self
+                    .reuse_warp_stream
+                    .full_sector_store_sectors
+                    .contains(&sector)
+                {
+                    self.store_to_load_forwardable_sectors =
+                        self.store_to_load_forwardable_sectors.saturating_add(1);
+                }
+            }
+        }
     }
 
     pub(crate) fn begin_warp_memory_stream(&mut self) {

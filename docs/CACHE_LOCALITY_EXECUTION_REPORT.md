@@ -99,3 +99,22 @@ not a hidden correction.
 expected observer-only differences against the accepted pre-locality lanes.
 After excluding observer fields and wall clocks, no physical cache, DRAM,
 IPC, or timing-frontier difference remains.
+
+## Follow-up observer correction (final4)
+
+A corpus-wide review found that the SM120 unified-L1 projection discarded
+`l1.write_lookup_hits` for ordinary `global_store` launches. The projection now
+uses the active per-SM write-tag observer for all cacheable store forms, while
+reduction/atomic-only streams remain outside the unified endpoint. The final4
+replay (`full_replay_runs/cache_locality_final4_sm120/` and `..._sm86/`) again
+passes the full status and MRC gates. SM120 unified-L1 mean APE is now about
+1.63%; operation-read L2 is about 6.69% (below the 8% gate). Global-L1 remains
+about 1.45% with four zero-target false positives. Generic source-TEX L2 remains
+about 23.97%.
+
+The M2C shadow observer additionally identifies trace-qualified full-sector
+same-warp store-to-load forwarding. On the required split-K reduction probe it
+reduces the operation-read request projection to the observed target without
+changing physical timing. A later large-store packet-shape hypothesis was
+rejected by the complete-corpus experiment (generic L2 WAPE worsened to
+44.48%), so it was removed; no kernel-name or NCU-fitting exception remains.

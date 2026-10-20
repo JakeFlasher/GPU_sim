@@ -4309,6 +4309,18 @@ fn extract_per_sm_blocks(
                 // or issue timing. The observer resets at each warp because
                 // cross-warp arrival order is not present in the trace.
                 trace_metrics.observe_reuse_memory(kind, &sectors)?;
+                let opcode_head = opcode.split('.').next().unwrap_or(opcode);
+                let narrow_store = opcode
+                    .split('.')
+                    .any(|modifier| matches!(modifier, "U8" | "S8" | "U16" | "S16"));
+                let full_sector_store = matches!(opcode_head, "STG" | "STL" | "ST")
+                    && !narrow_store
+                    && active_mask_present
+                    && predicate_mask_present
+                    && inst.active_lanes() == 32
+                    && inst.predicate_on_lanes() == 32
+                    && inst.data_width().is_some_and(|width| width >= 4);
+                trace_metrics.observe_store_to_load_forwarding(kind, &sectors, full_sector_store);
                 trace_metrics.observe_local_interleaved(
                     kind,
                     local_interleaved_sectors,

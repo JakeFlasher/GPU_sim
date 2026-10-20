@@ -2319,11 +2319,18 @@ fn cache_lookup_prediction_reports(
                         if let Some(split) = l2_by_source
                             && split.store_packet_candidate_sectors != 0
                         {
+                            let forwarded = trace
+                                .map(|metrics| metrics.store_to_load_forwardable_sectors)
+                                .unwrap_or(0);
                             let non_store_hits =
-                                counters.lookup_hits.saturating_sub(split.store_lookup_hits);
+                                counters
+                                    .lookup_hits
+                                    .saturating_sub(split.store_lookup_hits)
+                                    .saturating_sub(forwarded);
                             let non_store_requests = counters
                                 .lookup_requests
-                                .saturating_sub(split.store_lookup_requests);
+                                .saturating_sub(split.store_lookup_requests)
+                                .saturating_sub(forwarded);
                             (
                                 non_store_hits.saturating_add(
                                     split.store_packet_lookup_hits.min(
@@ -2627,8 +2634,12 @@ fn cache_lookup_prediction_reports(
         }
     } else if let Some(split) = l2_by_source {
         let (shadow_requests, shadow_hits, shadow_misses, _) = load_shadow.unwrap_or((0, 0, 0, 0));
-        let ordinary_hits = split.read_lookup_hits;
-        let ordinary_requests = split.read_lookup_requests;
+        let forwarded = trace
+            .map(|metrics| metrics.store_to_load_forwardable_sectors)
+            .unwrap_or(0)
+            .min(split.read_lookup_requests);
+        let ordinary_hits = split.read_lookup_hits.saturating_sub(forwarded);
+        let ordinary_requests = split.read_lookup_requests.saturating_sub(forwarded);
         let ordinary_misses = ordinary_requests
             .checked_sub(ordinary_hits)
             .ok_or_else(|| {
@@ -2666,6 +2677,8 @@ fn cache_lookup_prediction_reports(
                 observer_reclassified_lookups: 0,
                 role: if shadow_requests != 0 {
                     "operation_class_read_lookup_observer_plus_complete_tma_load_shadow"
+                } else if forwarded != 0 {
+                    "operation_class_read_lookup_observer_minus_trace_qualified_store_to_load_forwarding"
                 } else {
                     "operation_class_read_lookup_observer"
                 },

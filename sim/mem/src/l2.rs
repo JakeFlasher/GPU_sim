@@ -2001,9 +2001,7 @@ impl L2Model {
 
             if counted_hit {
                 counted_mask |= bit;
-                if class == L2OpClass::WriteAtomic
-                    && line_present_before_packet
-                    && !sector_present
+                if class == L2OpClass::WriteAtomic && line_present_before_packet && !sector_present
                 {
                     pre_packet_write_tag_hit_mask |= bit;
                 }
@@ -2216,9 +2214,7 @@ impl L2Model {
 
             if counted_hit {
                 counted_mask |= bit;
-                if class == L2OpClass::WriteAtomic
-                    && line_present_before_packet
-                    && !sector_present
+                if class == L2OpClass::WriteAtomic && line_present_before_packet && !sector_present
                 {
                     pre_packet_write_tag_hit_mask |= bit;
                 }
@@ -2313,10 +2309,7 @@ impl L2Model {
             if sector_present || (line_present && class == L2OpClass::WriteAtomic) {
                 counted_mask |= bit;
             }
-            if class == L2OpClass::WriteAtomic
-                && line_present_before_packet
-                && !sector_present
-            {
+            if class == L2OpClass::WriteAtomic && line_present_before_packet && !sector_present {
                 pre_packet_write_tag_hit_mask |= bit;
             }
             line_present = true;

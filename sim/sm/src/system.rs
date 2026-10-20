@@ -4337,13 +4337,10 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                                 0
                             };
                             store_packet_tag_was_present = store_packet_group.map(|group| {
-                                store_packet_line_tag_state
-                                    .get(&group)
-                                    .copied()
-                                    .unwrap_or(
-                                        preview.lookup.present_mask != 0
-                                            || preview.lookup.pre_packet_write_tag_hit_mask != 0,
-                                    )
+                                store_packet_line_tag_state.get(&group).copied().unwrap_or(
+                                    preview.lookup.present_mask != 0
+                                        || preview.lookup.pre_packet_write_tag_hit_mask != 0,
+                                )
                             });
                             let observer_operation = effective_observer_operation;
                             let lookup_for_operation =
