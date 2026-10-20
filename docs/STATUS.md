@@ -58,3 +58,20 @@ using `preview_mask` for effective operation attribution. Its complete SM120
 replay (`full_replay_runs/cache_locality_m6final_sm120/`) still reports
 724.72% generic TEX-L2 APE / 6,158 zero-target FPs, so the client-scope blocker
 is confirmed rather than hidden.
+
+## M7 closure replay (2026-10-20)
+
+M7's report-only store-packet split is implemented and verified with fresh
+12-worker full replays in `full_replay_runs/cache_locality_m7closure_sm120/`
+and `full_replay_runs/cache_locality_m7closure_sm86/`. SM120 is 339/339 `ok`
+(11,558 launches); SM86 retains the expected 286 `ok`, 62 `control_error`, and
+8 `replay_error` dispositions (12,392 launches). Both reuse validators are
+clean, and the release workspace tests pass.
+
+The SM120 Generic TEX-L2 point estimate is 17.7364% Mean APE with 51
+zero-target FPs; the 724.72% M6 regression is fixed, but the strict <=50 FP
+gate remains open by one ordered-fallback row. The conditional packet/L2
+interval report covers 99.81% of all compared launches and 99.46% of nonzero
+launches with 0.4530% interval-distance Mean APE. No NCU fitting, recapture, or
+kernel exception was used. See `docs/CACHE_LOCALITY_EXECUTION_REPORT.md` for
+full evidence and the remaining gate.

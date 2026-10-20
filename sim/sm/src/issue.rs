@@ -8810,7 +8810,8 @@ impl<'a> SmCore<'a> {
         constant_load: bool,
         constant_deep: bool,
         client_scope: L2ClientScope,
-        observer_store: bool,
+        l1_observer_store: bool,
+        l2_observer_store: bool,
         sectors: &'a [i64],
         write_barrier: Option<DepBarrier>,
         destination_wavefronts: u64,
@@ -9103,7 +9104,7 @@ impl<'a> SmCore<'a> {
                     }
                     _ => unreachable!("match arm admits only bypass, async-copy, or untagged"),
                 };
-                let observer_operation = if observer_store {
+                let observer_operation = if l2_observer_store {
                     Some(MemoryOperation::Store)
                 } else {
                     None
@@ -9134,7 +9135,7 @@ impl<'a> SmCore<'a> {
                     )?;
                 } else {
                     st.l1.count_untagged(origin, u64::from(len))?;
-                    if observer_store {
+                    if l1_observer_store {
                         if let Some(observer) = shared_write_lookup_observer.as_ref() {
                             staged_write_lookup_plan = Some(
                                 observer
@@ -14037,6 +14038,16 @@ impl<'a> SmCore<'a> {
                         .is_some_and(|slot| {
                             matches!(inst.kind, AccessKind::GlobalUntagged { .. })
                                 && opcode_head(slot.opcode_text()) == "ST"
+                        }),
+                    self.schedule
+                        .issue_slot(u64::from(inst.pc))
+                        .is_some_and(|slot| {
+                            matches!(inst.kind, AccessKind::GlobalUntagged { .. })
+                                && opcode_head(slot.opcode_text()) == "ST"
+                                && self
+                                    .block_states
+                                    .get(self.warps[wix].block)
+                                    .is_some_and(|state| state.admitted_warps <= 8)
                         }),
                     warp_sectors,
                     write_barrier,

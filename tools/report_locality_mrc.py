@@ -29,8 +29,39 @@ def _load(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
-def _aggregate(path: Path) -> dict[str, Any]:
+def _load_comparison_targets(path: Path | None) -> dict[tuple[str, int], float]:
+    """Load optional NCU joins for interval-coverage auditing only.
+
+    These values are never replay inputs and never select a model arm.
+    """
+    if path is None:
+        return {}
+    targets: dict[tuple[str, int], float] = {}
+    with open_jsonl_reader(path) as stream:
+        for line_number, line in enumerate(stream, 1):
+            value = json.loads(line)
+            if not isinstance(value, dict) or value.get("mode") != "full":
+                continue
+            capture = value.get("capture")
+            launch_index = value.get("launch_index")
+            if not isinstance(capture, str) or not isinstance(launch_index, int):
+                continue
+            for result in value.get("results", []):
+                if (
+                    isinstance(result, dict)
+                    and result.get("metric")
+                    == "lts__t_sectors_srcunit_tex_lookup_hit.sum"
+                    and result.get("status") == "compared"
+                    and isinstance(result.get("target"), (int, float))
+                ):
+                    targets[(capture, launch_index)] = float(result["target"])
+                    break
+    return targets
+
+
+def _aggregate(path: Path, comparison_path: Path | None = None) -> dict[str, Any]:
     rows = _load(path)
+    comparison_targets = _load_comparison_targets(comparison_path)
     statuses: dict[str, int] = {}
     successful_captures = 0
     launches = 0
@@ -48,16 +79,98 @@ def _aggregate(path: Path) -> dict[str, Any]:
     capacity_lines: list[int] | None = None
     monotonic_violations = 0
     checked_launches = 0
+    envelope = {
+        "schema": "sm120_generic_tex_l2_store_packet_envelope_v1",
+        "point": "cache_lookup_predictions.ncu_hit_metric.lts__t_sectors_srcunit_tex_lookup_hit.sum",
+        "lower_arm": "store_packet_resident_lookup_hits",
+        "upper_arm": "store_packet_lookup_hits",
+        "launches_with_packet_candidates": 0,
+        "launches_with_reported_interval": 0,
+        "all_launches_compared": 0,
+        "nonzero_target_launches_compared": 0,
+        "all_launches_covered": 0,
+        "nonzero_target_launches_covered": 0,
+        "interval_distance_mean_ape_pct": None,
+        "ncu_comparison_artifact": str(comparison_path) if comparison_path else None,
+    }
+    interval_ape_sum = 0.0
+    interval_ape_count = 0
     for capture in rows:
         status = str(capture.get("status", "missing"))
         statuses[status] = statuses.get(status, 0) + 1
         if status != "ok":
             continue
         successful_captures += 1
-        for launch in capture.get("launches", []):
+        for launch_index, launch in enumerate(capture.get("launches", [])):
             if not isinstance(launch, dict):
                 continue
             launches += 1
+            split = launch.get("counters", {}).get("l2_by_source", {})
+            if isinstance(split, dict) and int(split.get("store_packet_candidate_sectors", 0)):
+                envelope["launches_with_packet_candidates"] += 1
+            predictions = launch.get("cache_lookup_predictions", [])
+            generic = next(
+                (
+                    item
+                    for item in predictions
+                    if isinstance(item, dict)
+                    and item.get("ncu_hit_metric")
+                    == "lts__t_sectors_srcunit_tex_lookup_hit.sum"
+                    and item.get("status") == "predicted"
+                    and isinstance(item.get("observer"), dict)
+                    and isinstance(item["observer"].get("hits"), (int, float))
+                ),
+                None,
+            )
+            if generic is not None and isinstance(split, dict):
+                candidate = int(split.get("store_packet_candidate_sectors", 0))
+                resident = int(split.get("store_packet_resident_lookup_hits", 0))
+                upper = int(split.get("store_packet_lookup_hits", 0))
+                store_requests = int(split.get("store_lookup_requests", 0))
+                scope_hits = split.get("client_scope_resident_hits", [])
+                store_resident = int(scope_hits[6]) if len(scope_hits) > 6 else 0
+                use_resident = candidate < store_requests and store_resident != 0
+                selected = resident if use_resident else upper
+                point = float(generic["observer"]["hits"])
+                # The packet arm is joined with the report-only global L2
+                # locality observer.  Its upper/lower hit delta represents
+                # unresolved read/atomic interleaving.  It widens both
+                # endpoints without changing the point estimate.
+                l2_observer = launch.get("trace_metrics", {}).get(
+                    "l2_system_locality_observer", {}
+                )
+                locality_delta = sum(
+                    max(0, int(upper_hit) - int(lower_hit))
+                    for upper_hit, lower_hit in zip(
+                        l2_observer.get("upper_hits", []),
+                        l2_observer.get("lower_hits", []),
+                    )
+                )
+                lower_bound = point - selected + resident - locality_delta
+                upper_bound = point - selected + upper + locality_delta
+                envelope["launches_with_reported_interval"] += 1
+                target = comparison_targets.get(
+                    (str(capture.get("canonical_capture", "")), launch_index)
+                )
+                if target is not None:
+                    envelope["all_launches_compared"] += 1
+                    nonzero = target != 0
+                    envelope["nonzero_target_launches_compared"] += int(nonzero)
+                    covered = lower_bound <= target <= upper_bound
+                    envelope["all_launches_covered"] += int(covered)
+                    envelope["nonzero_target_launches_covered"] += int(covered and nonzero)
+                    if nonzero:
+                        distance = (
+                            0.0
+                            if covered
+                            else min(
+                                abs(target - lower_bound),
+                                abs(target - upper_bound),
+                            )
+                            / abs(target)
+                        )
+                        interval_ape_sum += distance
+                        interval_ape_count += 1
             trace = launch.get("trace_metrics", {})
             mrc = trace.get("locality_mrc") if isinstance(trace, dict) else None
             if not isinstance(mrc, dict):
@@ -197,6 +310,25 @@ def _aggregate(path: Path) -> dict[str, Any]:
         if sector_den
         else None
     )
+    if envelope["all_launches_compared"]:
+        envelope["all_launch_coverage_pct"] = (
+            100.0
+            * envelope["all_launches_covered"]
+            / envelope["all_launches_compared"]
+        )
+    else:
+        envelope["all_launch_coverage_pct"] = None
+    if envelope["nonzero_target_launches_compared"]:
+        envelope["nonzero_launch_coverage_pct"] = (
+            100.0
+            * envelope["nonzero_target_launches_covered"]
+            / envelope["nonzero_target_launches_compared"]
+        )
+    else:
+        envelope["nonzero_launch_coverage_pct"] = None
+    envelope["interval_distance_mean_ape_pct"] = (
+        100.0 * interval_ape_sum / interval_ape_count if interval_ape_count else None
+    )
     for row in origins.values():
         line_refs = row["line_references"]
         sector_refs = row["sector_references"]
@@ -246,6 +378,7 @@ def _aggregate(path: Path) -> dict[str, Any]:
         "origins": origins,
         "reuse_interval_hotl": hotl,
         "conditional_locality_observers": conditional,
+        "sm120_generic_tex_l2_store_packet_envelope": envelope,
         "monotonicity_violations": monotonic_violations,
         "ncu_used": False,
         "hardware_mrc_claim": False,
@@ -256,8 +389,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("full_jsonl", type=Path)
     parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--metric-comparisons",
+        type=Path,
+        help="optional compressed metric_comparisons.jsonl.zst for coverage auditing only",
+    )
     args = parser.parse_args()
-    report = _aggregate(args.full_jsonl)
+    report = _aggregate(args.full_jsonl, args.metric_comparisons)
     encoded = json.dumps(report, indent=2, sort_keys=True) + "\n"
     if args.output:
         args.output.write_text(encoded, encoding="utf-8")

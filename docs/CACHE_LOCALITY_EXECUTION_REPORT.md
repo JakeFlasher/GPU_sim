@@ -151,3 +151,49 @@ Global-L1 APE 1.5567% with zero false positives, operation-read L2 6.6859%,
 and generic TEX-L2 724.72% APE with 6,158 zero-target FPs. This preserves
 physical cache/DRAM/timing semantics but does not resolve the generic client
 scope; no further trace-only rule was promoted.
+
+## Milestone 7 closure replay (2026-10-20)
+
+M7's deterministic store-packet implementation is now present in the unified
+Rust path. `L2SourceSplit` exposes both resident packet hits and write-tag
+packet hits; `System::run_interleaved` restores the per-(SM, issue-cycle,
+128B-line) tag snapshot; and `SmCore` keeps the uncapped L1 write observer
+separate from the admission-capped L2 `GlobalUntagged` observer. Physical L2
+class, cache state, DRAM traffic, and timing continue to use the request's
+actual operation; packet counters are report-only.
+
+The final closure artifacts were rebuilt and replayed in full `l1-l2` mode with
+12 workers (no fast replay and no new NCU/NVBit capture):
+
+| lane | captures / launches | dispositions | artifact |
+| --- | ---: | --- | --- |
+| SM120 / RTX 5090 | 339 / 11,558 | 339 `ok` | `full_replay_runs/cache_locality_m7closure_sm120/full.jsonl.zst` |
+| SM86 / RTX 3090 Ti | 356 attempted / 12,392 | 286 `ok`, 62 `control_error`, 8 `replay_error` | `full_replay_runs/cache_locality_m7closure_sm86/full.jsonl.zst` |
+
+Both artifacts pass `tools/validate_reuse_mrc.py` with zero errors. Release
+build and the complete Rust workspace test suite pass. The NCU comparison is a
+post-replay join only:
+
+| metric | SM120 Mean APE | zero-target FPs | SM86 Mean APE | zero-target FPs |
+| --- | ---: | ---: | ---: | ---: |
+| Global L1 lookup hit | 1.5567% | 0 | 27.5757%* | 35* |
+| Global L1 lookup miss | 0.5211% | 0 | 12.3707%* | 0* |
+| Unified L1 sector hit rate | 1.6386% | 7 | 24.6597%* | 28* |
+| Generic TEX-L2 lookup hit | **17.7364%** | **51** | 8.5239% | 0 |
+| Operation-read L2 lookup hit | 6.6859% | 5 | 4.3416% | 2 |
+
+`*` SM86 NCU rows have only 283--286 scope-compatible joins in this report;
+SM86 generic and operation-read endpoints are the scope-established rows.
+The SM120 point estimate is below the updated `<18%` gate and the packet
+observer removes the 724.72% regression, but one ordered-fallback zero-target
+row remains above the strict `<=50` target. It is not suppressed with a
+workload-name or NCU-derived exception.
+
+The new report-only envelope is emitted by
+`tools/report_locality_mrc.py --metric-comparisons ...`. It combines resident
+packet lower/upper write-tag arms with the trace-native L2 interleaving delta:
+SM120 coverage is **99.81% all launches (11,483/11,505)** and **99.46% nonzero
+launches (4,082/4,104)**, with interval-distance Mean APE **0.4530%**. These
+are conditional trace-derived intervals, not capacity-indexed silicon MRC
+truth. HOTL WAPE remains **0.8767%/0.4462%** (SM120 line/sector) and
+**1.0223%/0.5324%** (SM86 line/sector).

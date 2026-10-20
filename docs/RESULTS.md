@@ -322,3 +322,19 @@ The subsequent observer-only ST.E preview experiment preserved physical cache
 semantics but left generic TEX-L2 at 724.72% APE with 6,158 zero-target FPs;
 this confirms that the retained trace cannot identify the missing NCU client
 scope without external metadata.
+
+## M7 full-replay evidence (2026-10-20)
+
+Fresh full-only, twelve-worker artifacts are `full_replay_runs/cache_locality_m7closure_sm120/`
+and `full_replay_runs/cache_locality_m7closure_sm86/`. They contain 11,558 and
+12,392 launches respectively; the SM86 status profile is 286 `ok`, 62
+`control_error`, and 8 `replay_error`. The reuse validator and Rust workspace
+tests pass.
+
+M7 restores per-instruction store-packet line-tag state, adds resident packet
+hits, and separates L1 from L2 `GlobalUntagged` store observers. SM120 Generic
+TEX-L2 is 17.7364% Mean APE / 51 zero-target FPs; the deterministic conditional
+packet/L2 envelope covers 99.81% all and 99.46% nonzero compared launches with
+0.4530% interval-distance Mean APE. This closes the catastrophic M6 regression
+but leaves one strict zero-target FP gate open; no NCU-derived correction is
+accepted.

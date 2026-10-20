@@ -351,6 +351,9 @@ pub struct L2SourceSplit {
     /// hit lane: repeated writes to one sector may hit the timed L2 model but
     /// are one source-TEX packet at the external client boundary.
     pub store_packet_lookup_hits: u64,
+    /// Resident-sector hits among packet candidates, before write-tag
+    /// coalescing. This is a report-only lower-bound observer.
+    pub store_packet_resident_lookup_hits: u64,
     /// Observer-only per-SM line/sector packet candidate. A second global
     /// store to the same sector within the bounded admission window is
     /// retained as one candidate packet; this never changes the L2 state,
@@ -659,6 +662,12 @@ impl L2SourceSplit {
                 .checked_add(other.store_packet_lookup_hits)
                 .ok_or(SystemCounterError::Overflow {
                     counter: "L2 store packet lookup hits",
+                })?,
+            store_packet_resident_lookup_hits: self
+                .store_packet_resident_lookup_hits
+                .checked_add(other.store_packet_resident_lookup_hits)
+                .ok_or(SystemCounterError::Overflow {
+                    counter: "L2 resident store packet lookup hits",
                 })?,
             store_packet_candidate_sectors: self
                 .store_packet_candidate_sectors
@@ -2718,6 +2727,7 @@ struct L2SystemCommit {
     store_lookup_requests: u64,
     store_lookup_hits: u64,
     store_packet_lookup_hits: u64,
+    store_packet_resident_lookup_hits: u64,
     atomic_lookup_requests: u64,
     atomic_lookup_hits: u64,
     reduction_lookup_requests: u64,
@@ -4010,6 +4020,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
     let mut store_lookup_hits = 0_u64;
     let mut store_lookup_requests = 0_u64;
     let mut store_packet_lookup_hits = 0_u64;
+    let mut store_packet_resident_lookup_hits = 0_u64;
     let mut atomic_lookup_hits = 0_u64;
     let mut atomic_lookup_requests = 0_u64;
     let mut reduction_lookup_hits = 0_u64;
@@ -4020,6 +4031,8 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
     // Remember whether the line tag was present before the first request at
     // one (SM, issue-cycle, line) boundary so later sectors cannot self-credit
     // as write-tag hits on a cold coalesced instruction.
+    let mut store_packet_line_tag_state: BTreeMap<(usize, u64, i64), bool> =
+        BTreeMap::new();
     let mut store_packet_candidate_sectors = 0_u64;
     let mut staged_l2 = l2.try_snapshot()?;
     while let Some(ev) = queue.pop()? {
@@ -4256,38 +4269,13 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                             }
                         }
                     }
-                    // The physical L2 preview is authoritative for each
-                    // request.  Packet candidates below are the only
-                    // sectors that may contribute to the report-only
-                    // coalesced-store endpoint; do not carry a per-group
-                    // `Some(false)` state across distinct requests because
-                    // that suppresses legitimate sub-line tag hits.
-                    // Keep the physical hierarchy operation unchanged for
-                    // generic `ST.E` (it is an untagged read-class request).
-                    // When its decoded observer tag is Store, obtain a
-                    // read-only WriteAtomic preview for operation-qualified
-                    // accounting without changing L2 state, DRAM demand, or
-                    // timing frontiers.
-                    let observer_write_preview = (arch == ArchId::Sm120
-                        && req.source == L2Source::Untagged
-                        && effective_observer_operation == MemoryOperation::Store)
-                        .then(|| {
-                            staged_l2
-                                .preview_mask(
-                                    line,
-                                    req.sector_mask,
-                                    effective_observer_operation.l2_class(),
-                                )
-                                .map_err(SystemError::from)
-                        })
-                        .transpose()?;
+                    let mut store_packet_tag_was_present = None;
                     let (l2_access, commit) = staged_l2.access_mask_event_coalesced_transactional(
                         line,
                         req.sector_mask,
                         req.operation.l2_class(),
                         |preview| -> Result<L2SystemCommit, SystemError> {
                             let lookup = preview.lookup;
-                            let observer_lookup = observer_write_preview.unwrap_or(lookup);
                             let merged_ready = pending_l2_ready.merged_ready(preview)?;
                             pending_l2_ready.preflight_register(preview)?;
                             let pending_pressure_sum = u64::try_from(pending_l2_ready.len())
@@ -4346,20 +4334,45 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                             } else {
                                 0
                             };
-                            let store_packet_lookup_hits = if store_packet_group.is_some() {
-                                // Restore the packet-candidate filter: a
-                                // sector coalesced into an earlier packet is
-                                // not a new source-TEX packet lookup.  The
-                                // pre-packet mask prevents a single cold
-                                // 128B request from self-crediting its own
-                                // write allocation, while a later distinct
-                                // request observes the real tag state.
-                                let packet_sector_mask = store_packet_keys
-                                    .iter()
-                                    .fold(0_u8, |mask, &(_, _, sector)| mask | (1_u8 << sector));
-                                let hit_mask = preview.lookup.present_mask
-                                    | preview.lookup.pre_packet_write_tag_hit_mask;
-                                u64::from((hit_mask & packet_sector_mask).count_ones())
+                            let store_packet_resident_lookup_hits =
+                                if store_packet_group.is_some() {
+                                    let packet_sector_mask = store_packet_keys
+                                        .iter()
+                                        .fold(0_u8, |mask, &(_, _, sector)| {
+                                            mask | (1_u8 << sector)
+                                        });
+                                    u64::from(
+                                        (preview.lookup.present_mask & packet_sector_mask)
+                                            .count_ones(),
+                                    )
+                                } else {
+                                    0
+                                };
+                            let store_packet_lookup_hits =
+                                if let Some(group) = store_packet_group {
+                                    let tag_was_present = store_packet_line_tag_state.get(&group);
+                                    let hit_mask = match tag_was_present {
+                                        Some(true) => {
+                                            preview.lookup.present_mask
+                                                | preview.lookup.pre_packet_write_tag_hit_mask
+                                        },
+                                        Some(false) => 0,
+                                        None => {
+                                            preview.lookup.present_mask
+                                                | preview.lookup.pre_packet_write_tag_hit_mask
+                                        }
+                                    };
+                                    store_packet_tag_was_present = Some(
+                                        store_packet_line_tag_state
+                                            .get(&group)
+                                            .copied()
+                                            .unwrap_or(
+                                                preview.lookup.present_mask != 0
+                                                    || preview.lookup.pre_packet_write_tag_hit_mask
+                                                        != 0,
+                                            ),
+                                    );
+                                    u64::from((hit_mask & req.sector_mask).count_ones())
                             } else {
                                 0
                             };
@@ -4397,15 +4410,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                                         // This is observer-only and never changes L2
                                         // state, DRAM demand, or completion timing.
                                         MemoryOperation::Store => {
-                                            if req.source == L2Source::Untagged
-                                                && effective_observer_operation
-                                                    == MemoryOperation::Store
-                                            {
-                                                (
-                                                    requested_sectors,
-                                                    u64::from(observer_lookup.counted_hits),
-                                                )
-                                            } else if arch == ArchId::Sm86 {
+                                            if arch == ArchId::Sm86 {
                                                 (requested_sectors, requested_sectors)
                                             } else {
                                                 (
@@ -4820,6 +4825,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                                     0
                                 },
                                 store_packet_lookup_hits,
+                                store_packet_resident_lookup_hits,
                                 atomic_lookup_requests: if matches!(
                                     observer_operation,
                                     MemoryOperation::Atomic
@@ -4907,6 +4913,11 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                     for key in &store_packet_keys {
                         store_packet_last.insert(*key, req.issue_time);
                     }
+                    if let (Some(group), Some(tag_was_present)) =
+                        (store_packet_group, store_packet_tag_was_present)
+                    {
+                        store_packet_line_tag_state.insert(group, tag_was_present);
+                    }
                     store_packet_candidate_sectors = store_packet_candidate_sectors
                         .checked_add(u64::try_from(store_packet_keys.len()).map_err(|_| {
                             SystemError::CounterOverflow {
@@ -4972,6 +4983,11 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                         .checked_add(commit.store_packet_lookup_hits)
                         .ok_or(SystemError::CounterOverflow {
                             counter: "L2 store packet lookup hits",
+                        })?;
+                    store_packet_resident_lookup_hits = store_packet_resident_lookup_hits
+                        .checked_add(commit.store_packet_resident_lookup_hits)
+                        .ok_or(SystemError::CounterOverflow {
+                            counter: "L2 resident store packet lookup hits",
                         })?;
                     atomic_lookup_requests = atomic_lookup_requests
                         .checked_add(commit.atomic_lookup_requests)
@@ -5714,6 +5730,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
     l2_by_source.store_lookup_requests = store_lookup_requests;
     l2_by_source.store_lookup_hits = store_lookup_hits;
     l2_by_source.store_packet_lookup_hits = store_packet_lookup_hits;
+    l2_by_source.store_packet_resident_lookup_hits = store_packet_resident_lookup_hits;
     l2_by_source.store_packet_candidate_sectors = store_packet_candidate_sectors;
     l2_by_source.atomic_lookup_requests = atomic_lookup_requests;
     l2_by_source.atomic_lookup_hits = atomic_lookup_hits;

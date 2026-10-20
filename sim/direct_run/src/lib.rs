@@ -1898,7 +1898,9 @@ pub struct L2SourceCounterReport {
     pub read_pending_merge_hits: u64,
     /// Observer-only resident hits among the launch-local coalesced store
     /// packet candidates. This is separate from the physical store lane.
+    pub store_lookup_requests: u64,
     pub store_packet_lookup_hits: u64,
+    pub store_packet_resident_lookup_hits: u64,
     pub store_packet_candidate_sectors: u64,
     pub client_scope_requests: [u64; 10],
     pub client_scope_resident_hits: [u64; 10],
@@ -1935,7 +1937,9 @@ fn l2_source_counter_report(value: &L2SourceSplit) -> L2SourceCounterReport {
             .read_lookup_hits
             .saturating_sub(value.read_pending_merge_hits),
         read_pending_merge_hits: value.read_pending_merge_hits,
+        store_lookup_requests: value.store_lookup_requests,
         store_packet_lookup_hits: value.store_packet_lookup_hits,
+        store_packet_resident_lookup_hits: value.store_packet_resident_lookup_hits,
         store_packet_candidate_sectors: value.store_packet_candidate_sectors,
         client_scope_requests: value.client_scope_requests,
         client_scope_resident_hits: value.client_scope_resident_hits,
@@ -2335,11 +2339,21 @@ fn cache_lookup_prediction_reports(
                                 .lookup_requests
                                 .saturating_sub(split.store_lookup_requests)
                                 .saturating_sub(forwarded);
+                            let use_resident_store_packets =
+                                split.store_packet_candidate_sectors
+                                    < split.store_lookup_requests
+                                    && split.client_scope_resident_hits
+                                        [6]
+                                        != 0;
+                            let store_packet_hits = if use_resident_store_packets {
+                                split.store_packet_resident_lookup_hits
+                            } else {
+                                split.store_packet_lookup_hits
+                            };
                             (
                                 non_store_hits.saturating_add(
-                                    split.store_packet_lookup_hits.min(
-                                        split.store_packet_candidate_sectors,
-                                    ),
+                                    store_packet_hits
+                                        .min(split.store_packet_candidate_sectors),
                                 ),
                                 non_store_requests
                                     .saturating_add(split.store_packet_candidate_sectors),
