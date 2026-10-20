@@ -56,8 +56,8 @@ issue_width`), while `peak_in_flight` follows completion events and therefore
 matches the `max_in_flight` capacity domain. This makes resource-level
 architecture studies reproducible instead of reducing a specification to one
 final-cycle scalar; these values are not hardware utilization counters.
-The JSON also carries schedule-level causal diagnostics: last issue and
-completion frontiers, the explicit dependency-path bound, the largest
+The JSON also carries schedule-level timing diagnostics: the last issue and
+completion timestamps, the explicit dependency-path bound, the largest
 serialized resource-work bound, their conservative lower-bound gap, and the
 declared bottleneck resource. The gap is an unattributed model interval, not
 an NCU or elapsed-silicon measurement.
