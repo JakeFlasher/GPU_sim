@@ -1,4 +1,4 @@
-//! Cohesive child mechanism extracted from the parent module.
+//! Trace-shape and semantic preflight validation; report-only.
 
 use super::*;
 

@@ -1,4 +1,4 @@
-//! Cohesive child mechanism extracted from the parent module.
+//! Core IPC and pipeline projections from replay counters; report-only and timing-neutral.
 
 use super::*;
 

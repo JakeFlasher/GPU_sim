@@ -1,4 +1,4 @@
-//! Semantic submodule; report-only boundary state and serde contracts.
+//! Interleaved execution-loop facade; child modules mutate event and service state.
 
 use super::*;
 

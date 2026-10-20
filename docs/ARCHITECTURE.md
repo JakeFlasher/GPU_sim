@@ -24,8 +24,13 @@ not inferred from NCU values.
 
 * `reader.rs` is the facade for trace lineage and directory loading.
 * `reader/error.rs`, `snapshot.rs`, `compact.rs`, `sampling.rs`, and
-  `preflight.rs` hold validation, artifact snapshots, compact instruction and
-  memory records, sampling provenance, and allocation preflight respectively.
+  `directory.rs` hold validation, artifact snapshots, compact instruction and
+  memory records, sampling provenance, and directory loading respectively.
+  `reader/preflight.rs` is a facade for the three preflight children
+  (`preflight_access.rs`, `preflight_allocation.rs`, and
+  `preflight_validation.rs`), which keep payload, allocation, and semantic
+  validation separate while retaining the existing `reader::preflight::*`
+  namespace.
 * `async_sidecars.rs`, `anchored.rs`, and `obligations.rs` retain producer
   sidecars and trace-contract checks.
 * Invariant: malformed or incomplete trace contracts fail closed; no timing or
@@ -73,7 +78,9 @@ not inferred from NCU values.
 
 ### `sim/direct_run`
 
-* `lib.rs` is the run/report facade; `lib/reports.rs` holds report structures.
+* `lib.rs` is the run/report facade; `reports.rs` holds report structures and
+  `runner.rs` owns the execution entry points (with `runner_config.rs` and
+  `runner_execute.rs` as its focused children).
 * `metrics.rs` declares `l1`, `l2_dram`, `launch_occupancy`, and `pipeline_ipc`;
   the IPC module further separates SM86 pipeline helpers. All are post-replay,
   report-only attribution.

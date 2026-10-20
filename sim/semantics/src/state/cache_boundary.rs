@@ -1,4 +1,4 @@
-//! Semantic submodule; report-only boundary state and serde contracts.
+//! Typed cache-boundary snapshots for L1/L2 and front-end state; report-only.
 
 use super::*;
 

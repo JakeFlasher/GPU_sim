@@ -1,4 +1,4 @@
-//! Semantic submodule; report-only boundary state and serde contracts.
+//! Post-replay report records and serde contracts; report-only with no cache or timing mutation.
 
 use super::*;
 

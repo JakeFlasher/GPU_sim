@@ -1,4 +1,4 @@
-//! Cohesive child mechanism extracted from the parent module.
+//! Shared-L2 replay session state; drives event timing and cache interactions.
 
 use super::*;
 

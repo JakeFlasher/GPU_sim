@@ -1,4 +1,4 @@
-//! Cohesive child mechanism extracted from the parent module.
+//! SM86 occupancy and service projections; report-only and timing-neutral.
 
 use super::*;
 

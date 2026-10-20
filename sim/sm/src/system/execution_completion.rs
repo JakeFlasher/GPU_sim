@@ -1,4 +1,4 @@
-//! Cohesive child mechanism extracted from the parent module.
+//! Event completion and response scheduling; mutates queues and cache-service timing.
 
 use super::*;
 

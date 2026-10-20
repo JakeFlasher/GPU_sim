@@ -1,4 +1,4 @@
-//! Semantic submodule; report-only boundary state and serde contracts.
+//! Trace preflight facade; child modules validate payload, allocation, and semantics.
 
 use super::*;
 

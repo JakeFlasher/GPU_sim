@@ -1,4 +1,4 @@
-//! Cohesive child mechanism extracted from the parent module.
+//! Replay result extraction and launch aggregation; report-only.
 
 use super::*;
 

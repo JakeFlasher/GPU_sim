@@ -1,4 +1,4 @@
-//! Semantic submodule; report-only boundary state and serde contracts.
+//! Fenwick MRC, HOTL, and shadow locality observers; report-only and cache/timing neutral.
 
 use super::*;
 

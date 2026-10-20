@@ -14,7 +14,7 @@
   },
   "cases": [
     {
-      "label": "sm120_mod2",
+      "label": "sm120_modularized_real",
       "baseline_path": "full_replay_runs/cache_locality_m7closure_sm120/full.jsonl.zst",
       "unified_path": "full_replay_runs/academic_mod2_sm120/full.jsonl.zst",
       "rows": 339,
@@ -40,7 +40,7 @@
       "ok": true
     },
     {
-      "label": "sm86_mod2",
+      "label": "sm86_modularized_real",
       "baseline_path": "full_replay_runs/cache_locality_m7closure_sm86/full.jsonl.zst",
       "unified_path": "full_replay_runs/academic_mod2_sm86/full.jsonl.zst",
       "rows": 356,

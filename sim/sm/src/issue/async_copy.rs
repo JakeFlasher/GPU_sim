@@ -1,4 +1,4 @@
-//! Semantic submodule; report-only boundary state and serde contracts.
+//! Async-copy cohorts and destination readiness; mutates SMSP timing and completion state.
 
 use super::*;
 

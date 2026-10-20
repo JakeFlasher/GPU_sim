@@ -1,4 +1,4 @@
-//! Semantic submodule; report-only boundary state and serde contracts.
+//! Replay request submodule facade; child files hold request records and validation.
 
 use super::*;
 

@@ -1,4 +1,4 @@
-//! Cohesive child mechanism extracted from the parent module.
+//! Control-flow, warp retirement, and cycle advancement; mutates SMSP timing state.
 
 use super::*;
 

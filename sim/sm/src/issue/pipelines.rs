@@ -1,4 +1,4 @@
-//! Semantic submodule; report-only boundary state and serde contracts.
+//! Scalar and memory-pipeline readiness state; mutates issue timing state.
 
 use super::*;
 

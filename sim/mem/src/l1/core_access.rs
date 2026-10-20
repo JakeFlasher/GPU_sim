@@ -1,4 +1,4 @@
-//! Cohesive child mechanism extracted from the parent module.
+//! L1 request admission and sector-hit handling; mutates L1 state and pending fills.
 
 use super::*;
 

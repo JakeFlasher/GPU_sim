@@ -1,4 +1,4 @@
-//! Cohesive child mechanism extracted from the parent module.
+//! Validation contracts for typed observations; report-only.
 
 use super::*;
 

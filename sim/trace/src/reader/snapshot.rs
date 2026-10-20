@@ -1,4 +1,4 @@
-//! Semantic submodule; report-only boundary state and serde contracts.
+//! Trace artifact snapshots and JSON-shape limits; report-only.
 
 use super::*;
 

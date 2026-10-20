@@ -1,4 +1,4 @@
-//! Cohesive child mechanism extracted from the parent module.
+//! Interleaved response and service processing; mutates active event state.
 
 use super::*;
 

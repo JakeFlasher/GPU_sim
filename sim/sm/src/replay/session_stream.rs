@@ -1,4 +1,4 @@
-//! Cohesive child mechanism extracted from the parent module.
+//! Trace-stream replay session state; drives active warp streams.
 
 use super::*;
 

@@ -1,4 +1,4 @@
-//! Semantic submodule; report-only boundary state and serde contracts.
+//! Typed event-contract facade for serialized observations; report-only.
 
 use super::*;
 

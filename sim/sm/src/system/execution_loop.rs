@@ -1,4 +1,4 @@
-//! Cohesive child mechanism extracted from the parent module.
+//! Interleaved event-loop facade; child modules mutate event ordering.
 
 use super::*;
 

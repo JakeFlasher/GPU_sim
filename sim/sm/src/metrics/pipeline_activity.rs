@@ -1,4 +1,4 @@
-//! Semantic submodule; report-only boundary state and serde contracts.
+//! Warp and pipeline activity attribution; report-only and timing-neutral.
 
 use super::*;
 

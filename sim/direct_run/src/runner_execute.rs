@@ -1,4 +1,4 @@
-//! Cohesive child mechanism extracted from the parent module.
+//! Replay execution and launch accounting; drives the active simulator but does not alter cache policy.
 
 use super::*;
 

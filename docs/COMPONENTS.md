@@ -5,13 +5,18 @@
 | `sim/trace::reader` | Protobuf/JSON trace loading, lineage, compact memory records | immutable input; fail-closed validation |
 | `sim/trace::reader::snapshot` | Artifact identity and JSON-shape limits | report-only |
 | `sim/trace::reader::compact` | Validated warp/instruction/memory representations | report-only |
+| `sim/trace::reader::preflight` | Access, allocation, and semantic preflight facade | report-only |
 | `sim/arch` | Architecture cards, scheduler resources, functional instruction domains | card-selected assumptions |
 | `sim/sm::issue` | SMSP issue, CGGTY selection, barriers, readiness, async copies | mutates issue/residency timing |
 | `sim/sm::issue::frontend` | I-cache, stream buffer, front-end admission | mutates instruction timing |
 | `sim/sm::issue::pipelines` | Scalar/memory pipeline readiness and fixed latencies | mutates issue timing |
 | `sim/sm::issue::core_mem` | Memory dispatch and observer hooks | mutates request/cache state |
+| `sim/sm::issue::core_step` | Cycle-step facade with front-end, barrier, and control schedulers | mutates issue/barrier timing |
+| `sim/sm::issue::requests` | Replay/request facade (`requests_decode`, `requests_validation`) | immutable request contracts |
 | `sim/sm::replay` | Launch placement, replay sessions, result records | mutates replay session state |
+| `sim/sm::replay::session` | Stream, fast-path, L2, and result session children | mutates the selected replay session |
 | `sim/sm::system` | Interleaved SM/L2/DRAM event loop | mutates event and service state |
+| `sim/sm::system::execution` | Event-loop and completion children | mutates event ordering and service state |
 | `sim/sm::system::queues` | Pending responses and due-time queues | mutates event queue state |
 | `sim/sm::system::dram` | Carded DRAM bandwidth/service accounting | mutates DRAM events |
 | `sim/sm::system::observers` | L2 source and admission observer records | report-only accounting |
@@ -23,9 +28,12 @@
 | `sim/semantics::state` | Typed cache/core/event boundary snapshots | report-only |
 | `sim/engine` | Dependency/resource event ordering | event ordering only |
 | `sim/direct_run::emit` | Stable JSON and counter emission | report-only serialization |
+| `sim/direct_run::reports` | Post-replay report structures | report-only |
+| `sim/direct_run::runner` | Replay configuration and execution children | orchestration state |
 | `sim/direct_run::metrics::l1` | L1/TEX counter attribution | report-only |
 | `sim/direct_run::metrics::l2_dram` | L2/DRAM and readiness attribution | report-only |
 | `sim/direct_run::metrics::pipeline_ipc` | IPC and pipeline projections | report-only |
+| `sim/direct_run::metrics::pipeline_ipc::*` | Focused SM86 pipeline projection helpers | report-only |
 | `tools/sm120_corpus_replay.py` | Twelve-worker full-corpus driver | orchestration only |
 | `tools/validate_reuse_mrc.py` | MRC structural/error report | post-replay analysis |
 | `arch_profiles/cards` | SM86/SM120 architecture parameters | immutable configuration |

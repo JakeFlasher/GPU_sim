@@ -1,4 +1,4 @@
-//! Semantic submodule; report-only boundary state and serde contracts.
+//! Instruction-cache, stream-buffer, and constant-cache state; mutates front-end timing state.
 
 use super::*;
 

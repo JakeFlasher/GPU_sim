@@ -1,3 +1,4 @@
+//! Prepared replay inputs and resource contracts; immutable execution inputs.
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 

@@ -1,4 +1,4 @@
-//! Semantic submodule; report-only boundary state and serde contracts.
+//! Trace sampling provenance and sidecar contracts; report-only.
 
 use super::*;
 

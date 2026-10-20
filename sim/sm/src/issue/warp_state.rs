@@ -1,4 +1,4 @@
-//! Semantic submodule; report-only boundary state and serde contracts.
+//! Warp, fill-waiter, and shared-L2 state; mutates issue and completion state.
 
 use super::*;
 

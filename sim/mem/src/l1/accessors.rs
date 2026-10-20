@@ -1,4 +1,4 @@
-//! Semantic submodule; report-only boundary state and serde contracts.
+//! L1 sector lookup and access expansion helpers; cache mutation occurs only through the core.
 
 use super::*;
 

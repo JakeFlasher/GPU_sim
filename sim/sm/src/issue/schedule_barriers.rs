@@ -1,4 +1,4 @@
-//! Cohesive child mechanism extracted from the parent module.
+//! Barrier, memory-readiness, and admission scheduling; mutates SMSP timing state.
 
 use super::*;
 

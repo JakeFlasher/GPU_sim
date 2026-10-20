@@ -1,3 +1,4 @@
+//! Readiness and pipeline diagnostic helpers; report-only timing attribution.
 use std::collections::{HashMap, HashSet};
 
 use serde::Serialize;

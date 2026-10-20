@@ -1,4 +1,4 @@
-//! Cohesive child mechanism extracted from the parent module.
+//! L1 visibility and dirty flush completion; mutates only L1 flush state.
 
 use super::*;
 

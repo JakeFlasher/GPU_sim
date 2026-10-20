@@ -1,4 +1,4 @@
-//! Semantic submodule; report-only boundary state and serde contracts.
+//! Launch placement and replay configuration; immutable placement inputs.
 
 use super::*;
 

@@ -1,4 +1,4 @@
-//! Semantic submodule; report-only boundary state and serde contracts.
+//! Replay-runner facade and execution helpers; owns orchestration state, not cache policy.
 
 use super::*;
 

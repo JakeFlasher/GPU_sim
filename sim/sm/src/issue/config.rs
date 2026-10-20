@@ -1,3 +1,4 @@
+//! SMSP issue-model configuration and architecture parameters; immutable inputs.
 use std::num::NonZeroU32;
 
 use serde::Serialize;

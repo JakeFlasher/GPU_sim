@@ -1,4 +1,4 @@
-//! Semantic submodule; report-only boundary state and serde contracts.
+//! SMSP memory dispatch, response handling, and L1 visibility; mutates timing/cache state.
 
 use super::*;
 

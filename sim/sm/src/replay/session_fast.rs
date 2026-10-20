@@ -1,4 +1,4 @@
-//! Cohesive child mechanism extracted from the parent module.
+//! Fast replay session state and completion helpers; active replay orchestration.
 
 use super::*;
 

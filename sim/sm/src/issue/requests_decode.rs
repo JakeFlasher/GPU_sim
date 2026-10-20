@@ -1,4 +1,4 @@
-//! Cohesive child mechanism extracted from the parent module.
+//! Replay record decoding and request-side projections; report-only data preparation.
 
 use super::*;
 

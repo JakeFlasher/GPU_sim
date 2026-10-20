@@ -1,4 +1,4 @@
-//! Semantic submodule; report-only boundary state and serde contracts.
+//! Trace-directory loading and lineage identity; report-only immutable input.
 
 use super::*;
 

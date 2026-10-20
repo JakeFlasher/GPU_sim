@@ -1,4 +1,4 @@
-//! Semantic submodule; report-only boundary state and serde contracts.
+//! L1 configuration, counters, and observer contracts; counters are report-only.
 
 use super::*;
 

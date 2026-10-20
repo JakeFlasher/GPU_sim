@@ -1,4 +1,4 @@
-//! Semantic submodule; report-only boundary state and serde contracts.
+//! Fast-path warp replay helpers; drives the fast execution path without changing full-mode cache semantics.
 
 use super::*;
 

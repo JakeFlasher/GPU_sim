@@ -1,4 +1,4 @@
-//! Cohesive child mechanism extracted from the parent module.
+//! Tail-latency and completion projections; report-only and timing-neutral.
 
 use super::*;
 

@@ -1,4 +1,4 @@
-//! Cohesive child mechanism extracted from the parent module.
+//! SMSP cycle scheduling facade; child schedulers mutate issue timing and barriers.
 
 use super::*;
 

@@ -1,4 +1,4 @@
-//! Semantic submodule; report-only boundary state and serde contracts.
+//! Typed core-boundary event records; report-only and timing-neutral.
 
 use super::*;
 

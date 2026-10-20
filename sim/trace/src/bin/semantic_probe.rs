@@ -1,3 +1,4 @@
+//! Inspect typed trace semantics from an existing capture; report-only.
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;

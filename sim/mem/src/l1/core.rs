@@ -1,4 +1,4 @@
-//! Semantic submodule; report-only boundary state and serde contracts.
+//! L1 mutation facade for sector tags, fills, and flushes; mutates cache state at event timestamps.
 
 use super::*;
 

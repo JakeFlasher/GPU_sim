@@ -1,4 +1,4 @@
-//! Semantic submodule; report-only boundary state and serde contracts.
+//! Issue, readiness, and pipeline diagnostics; report-only counters.
 
 use super::*;
 

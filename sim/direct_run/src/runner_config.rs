@@ -1,4 +1,4 @@
-//! Cohesive child mechanism extracted from the parent module.
+//! Replay configuration and architecture-card inputs; immutable model configuration.
 
 use super::*;
 

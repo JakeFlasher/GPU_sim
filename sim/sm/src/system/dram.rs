@@ -1,4 +1,4 @@
-//! Semantic submodule; report-only boundary state and serde contracts.
+//! Carded DRAM bandwidth and service state; mutates DRAM event timing.
 
 use super::*;
 

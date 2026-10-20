@@ -1,4 +1,4 @@
-//! Cohesive child mechanism extracted from the parent module.
+//! Interleaved SM/L2/DRAM event processing; mutates active event state.
 
 use super::*;
 

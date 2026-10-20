@@ -1,4 +1,4 @@
-//! Semantic submodule; report-only boundary state and serde contracts.
+//! L2 source attribution and admission observers; report-only and cache/timing neutral.
 
 use super::*;
 

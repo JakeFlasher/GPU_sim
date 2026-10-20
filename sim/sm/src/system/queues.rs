@@ -1,4 +1,4 @@
-//! Semantic submodule; report-only boundary state and serde contracts.
+//! Pending-response and due-time queue state; mutates event scheduling state.
 
 use super::*;
 

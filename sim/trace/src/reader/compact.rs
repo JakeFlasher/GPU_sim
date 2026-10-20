@@ -1,4 +1,4 @@
-//! Semantic submodule; report-only boundary state and serde contracts.
+//! Compact validated trace records and memory routes; report-only immutable input.
 
 use super::*;
 

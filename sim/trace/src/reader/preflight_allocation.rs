@@ -1,4 +1,4 @@
-//! Cohesive child mechanism extracted from the parent module.
+//! Allocation and manifest preflight validation; report-only.
 
 use super::*;
 

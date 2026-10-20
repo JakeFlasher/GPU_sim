@@ -1,4 +1,4 @@
-//! Semantic submodule; report-only boundary state and serde contracts.
+//! L2 card configuration and source-split counters; counters are report-only.
 
 use super::*;
 

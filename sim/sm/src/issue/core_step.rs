@@ -1,4 +1,4 @@
-//! Semantic submodule; report-only boundary state and serde contracts.
+//! SMSP cycle-step facade; child schedulers mutate issue timing and barrier state.
 
 use super::*;
 

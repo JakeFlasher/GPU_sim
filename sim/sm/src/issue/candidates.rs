@@ -1,3 +1,4 @@
+//! Memory-service and admission candidate types; report-only scheduling inputs.
 use std::collections::{HashMap, VecDeque};
 
 use serde::{Deserialize, Serialize};

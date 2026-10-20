@@ -1,3 +1,4 @@
+//! Command-line replay entry point; orchestrates execution and report emission.
 use std::ffi::{OsStr, OsString};
 use std::io::{self, Write};
 use std::path::PathBuf;

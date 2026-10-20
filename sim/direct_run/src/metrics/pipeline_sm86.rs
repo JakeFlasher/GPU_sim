@@ -1,4 +1,4 @@
-//! Cohesive child mechanism extracted from the parent module.
+//! SM86 pipeline-projection facade; report-only and timing/cache state is untouched.
 
 use super::*;
 

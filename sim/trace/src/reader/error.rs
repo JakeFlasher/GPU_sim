@@ -1,4 +1,4 @@
-//! Semantic submodule; report-only boundary state and serde contracts.
+//! Trace validation errors and summary records; report-only.
 
 use super::*;
 

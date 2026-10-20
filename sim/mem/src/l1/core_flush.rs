@@ -1,4 +1,4 @@
-//! Cohesive child mechanism extracted from the parent module.
+//! L1 dirty-data and visibility flush facade; mutates cache state at completion boundaries.
 
 use super::*;
 

@@ -1,4 +1,4 @@
-//! Semantic submodule; report-only boundary state and serde contracts.
+//! SMSP construction, block admission, and residency initialization; mutates issue state.
 
 use super::*;
 

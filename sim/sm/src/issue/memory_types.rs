@@ -1,3 +1,4 @@
+//! Memory-operation and tail classification types; report-only request metadata.
 use sim_mem::{AccessKind, CacheOpToken, L2OpClass};
 
 /// Memory-hierarchy effects deliberately outside the modeled event stream.

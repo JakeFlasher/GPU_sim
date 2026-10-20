@@ -1,4 +1,4 @@
-//! Cohesive child mechanism extracted from the parent module.
+//! Front-end issue selection and writeback scheduling; mutates SMSP timing state.
 
 use super::*;
 

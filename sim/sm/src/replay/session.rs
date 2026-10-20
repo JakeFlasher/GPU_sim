@@ -1,4 +1,4 @@
-//! Semantic submodule; report-only boundary state and serde contracts.
+//! Replay-session facade; child modules own stream, fast, L2, and result state.
 
 use super::*;
 

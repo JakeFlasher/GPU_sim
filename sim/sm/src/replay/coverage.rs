@@ -1,4 +1,4 @@
-//! Semantic submodule; report-only boundary state and serde contracts.
+//! Replay coverage bindings and completion frontiers; report-only launch accounting.
 
 use super::*;
 

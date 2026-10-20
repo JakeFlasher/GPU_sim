@@ -1,4 +1,4 @@
-//! Semantic submodule; report-only boundary state and serde contracts.
+//! Shared sectored L2 request, fill, and completion state; mutates L2 at event timestamps.
 
 use super::*;
 

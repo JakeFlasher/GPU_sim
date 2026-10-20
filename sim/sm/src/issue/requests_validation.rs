@@ -1,4 +1,4 @@
-//! Cohesive child mechanism extracted from the parent module.
+//! Replay request records, memory replies, and validation contracts; no cache mutation.
 
 use super::*;
 
