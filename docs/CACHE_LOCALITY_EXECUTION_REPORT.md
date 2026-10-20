@@ -197,3 +197,12 @@ launches (4,082/4,104)**, with interval-distance Mean APE **0.4530%**. These
 are conditional trace-derived intervals, not capacity-indexed silicon MRC
 truth. HOTL WAPE remains **0.8767%/0.4462%** (SM120 line/sector) and
 **1.0223%/0.5324%** (SM86 line/sector).
+
+A general trace-only fallback was also evaluated for the residual: selecting the
+resident lower arm when a packet is fully cold (`candidate == store requests`,
+no resident store hits, and zero physical L2 lookup hits). It removes one
+zero-target FP but worsens corpus Generic TEX-L2 Mean APE from 17.7364% to
+20.9179% and weighted error from 21.2419% to 21.6974%; it was rejected under
+the no-regression rule. The retained regime split is therefore the best
+non-fitting point estimate, while the conditional envelope supplies the
+uncertainty-aware result for that unidentifiable client-scope row.
