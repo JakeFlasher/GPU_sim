@@ -568,6 +568,18 @@ struct LocalityMrcOriginStream {
     lines: BTreeMap<i64, LocalityMrcLineState>,
     batches: BTreeMap<u64, LocalityMrcBatch>,
     next_batch_id: u64,
+    /// Ding–Denning/Xiang HOTL state for this exact origin-qualified warp
+    /// stream.  It is deliberately separate from the Fenwick oracle's stack
+    /// positions: HOTL uses the line-reference volume clock and is flushed at
+    /// warp boundaries, never mixed with stores/shared/atomic classes.
+    hotl_line_volume: u64,
+    hotl_line_last: BTreeMap<i64, u64>,
+    hotl_sector_last: BTreeMap<(i64, u8), u64>,
+    hotl_sector_max_gap: BTreeMap<(i64, u8), u64>,
+    hotl_line_intervals: Vec<u64>,
+    hotl_sector_intervals: Vec<u64>,
+    hotl_cold_lines: u64,
+    hotl_cold_sectors: u64,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -576,6 +588,126 @@ pub(crate) struct LocalityMrcWarpStream {
 }
 
 impl LocalityMrcOriginStream {
+    fn observe_hotl(
+        &mut self,
+        lines: &BTreeMap<i64, u8>,
+        report: &mut ReuseIntervalObservation,
+    ) -> Result<(), crate::IssueError> {
+        let line_count =
+            u64::try_from(lines.len()).map_err(|_| crate::IssueError::CounterOverflow {
+                counter: "HOTL line batch",
+            })?;
+        let start = self.hotl_line_volume;
+        for (offset, (&line, &mask)) in lines.iter().enumerate() {
+            let position = start
+                .checked_add(u64::try_from(offset).map_err(|_| {
+                    crate::IssueError::CounterOverflow {
+                        counter: "HOTL line position",
+                    }
+                })?)
+                .ok_or(crate::IssueError::CounterOverflow {
+                    counter: "HOTL line position",
+                })?;
+            let line_interval = self
+                .hotl_line_last
+                .get(&line)
+                .map(|previous| position.saturating_sub(*previous));
+            if let Some(interval) = line_interval {
+                self.hotl_line_intervals.push(interval);
+                add_hotl_interval(report, interval, false, false);
+                // Every previously observed sector on this line is exposed
+                // to the intervening line gap.  The largest such gap is the
+                // coupled sector bottleneck used at flush time.
+                for sector in 0..4_u8 {
+                    if let Some(gap) = self.hotl_sector_max_gap.get_mut(&(line, sector)) {
+                        *gap = (*gap).max(interval);
+                    }
+                }
+            } else {
+                self.hotl_cold_lines = self.hotl_cold_lines.saturating_add(1);
+                add_hotl_interval(report, LOCALITY_MRC_INF, false, false);
+            }
+            self.hotl_line_last.insert(line, position);
+
+            for sector in 0..4_u8 {
+                let bit = 1_u8 << sector;
+                if mask & bit == 0 {
+                    continue;
+                }
+                let key = (line, sector);
+                if self.hotl_sector_last.contains_key(&key) {
+                    let bottleneck = self.hotl_sector_max_gap.get(&key).copied().unwrap_or(0);
+                    self.hotl_sector_intervals.push(bottleneck);
+                    add_hotl_interval(report, bottleneck, true, false);
+                    self.hotl_sector_max_gap.insert(key, 0);
+                } else {
+                    self.hotl_cold_sectors = self.hotl_cold_sectors.saturating_add(1);
+                    add_hotl_interval(report, LOCALITY_MRC_INF, true, false);
+                    self.hotl_sector_max_gap.insert(key, 0);
+                }
+                self.hotl_sector_last.insert(key, position);
+            }
+        }
+        self.hotl_line_volume = self.hotl_line_volume.checked_add(line_count).ok_or(
+            crate::IssueError::CounterOverflow {
+                counter: "HOTL line volume clock",
+            },
+        )?;
+        report.hotl_line_volume_clock = report
+            .hotl_line_volume_clock
+            .checked_add(line_count)
+            .ok_or(crate::IssueError::CounterOverflow {
+                counter: "reuse HOTL volume clock",
+            })?;
+        Ok(())
+    }
+
+    fn flush_hotl(&self, report: &mut ReuseIntervalObservation) {
+        if self.hotl_line_volume == 0 {
+            return;
+        }
+        // Right-censored tails remain histogram evidence only.  They are not
+        // additional misses: each cold reference was already counted once,
+        // and an unobserved future reuse cannot be charged as a second miss.
+        for (&line, &last) in &self.hotl_line_last {
+            add_hotl_interval(
+                report,
+                self.hotl_line_volume.saturating_sub(last),
+                false,
+                true,
+            );
+            for sector in 0..4_u8 {
+                if let Some(previous) = self.hotl_sector_last.get(&(line, sector)) {
+                    add_hotl_interval(
+                        report,
+                        self.hotl_line_volume.saturating_sub(*previous),
+                        true,
+                        true,
+                    );
+                }
+            }
+        }
+
+        for (index, &capacity) in LOCALITY_MRC_CAPACITY_LINES.iter().enumerate() {
+            report.hotl_line_miss_references[index] = report.hotl_line_miss_references[index]
+                .saturating_add(hotl_miss_count(
+                    self.hotl_cold_lines,
+                    &self.hotl_line_intervals,
+                    self.hotl_line_volume,
+                    capacity,
+                ));
+            report.hotl_sector_miss_references[index] = report.hotl_sector_miss_references[index]
+                .saturating_add(hotl_miss_count(
+                    self.hotl_cold_sectors,
+                    &self.hotl_sector_intervals,
+                    self.hotl_cold_sectors.saturating_add(
+                        u64::try_from(self.hotl_sector_intervals.len()).unwrap_or(u64::MAX),
+                    ),
+                    capacity,
+                ));
+        }
+    }
+
     fn observe(
         &mut self,
         lines: &BTreeMap<i64, u8>,
@@ -850,6 +982,14 @@ impl LocalityMrcOriginStream {
                     counter: "locality MRC next position",
                 })?;
         Ok(())
+    }
+}
+
+impl LocalityMrcWarpStream {
+    fn flush_hotl(&self, report: &mut ReuseIntervalObservation) {
+        for origin in self.origins.values() {
+            origin.flush_hotl(report);
+        }
     }
 }
 
@@ -1808,16 +1948,53 @@ fn add_hotl_interval(
     };
     counts[bin] = counts[bin].saturating_add(1);
     sums[bin] = sums[bin].saturating_add(interval);
-    let misses = if sector {
-        &mut observation.hotl_sector_miss_references
-    } else {
-        &mut observation.hotl_line_miss_references
-    };
-    for (index, &capacity) in LOCALITY_MRC_CAPACITY_LINES.iter().enumerate() {
-        if capacity == 0 || interval >= capacity {
-            misses[index] = misses[index].saturating_add(1);
+    // Miss curves are emitted only when an origin stream is flushed through
+    // the Ding–Denning/Xiang footprint inversion.  In particular, censored
+    // tails are histogram-only evidence and must never increment a miss
+    // counter a second time.
+    let _ = sector;
+}
+
+/// Return the HOTL miss count for one capacity using the finite-boundary
+/// Ding–Denning footprint inversion.  `intervals` contains only interior
+/// references; `cold` is the number of first touches.  The integer window is
+/// the smallest reference volume whose footprint reaches the capacity, which
+/// gives a deterministic conservative boundary for `tau > w*`.
+fn hotl_miss_count(cold: u64, intervals: &[u64], references: u64, capacity: u64) -> u64 {
+    if references == 0 {
+        return 0;
+    }
+    if capacity == 0 {
+        return references;
+    }
+    if capacity >= cold || intervals.is_empty() {
+        return cold;
+    }
+    let target = u128::from(capacity).saturating_mul(u128::from(references));
+    let mut lower = 0_u64;
+    let mut upper = references.max(1);
+    while lower < upper {
+        let window = lower.saturating_add(upper.saturating_sub(lower) / 2);
+        let mut numerator = u128::from(cold).saturating_mul(u128::from(window));
+        for &interval in intervals {
+            numerator = numerator.saturating_add(u128::from(interval.min(window)));
+        }
+        if numerator >= target {
+            upper = window;
+        } else {
+            lower = window.saturating_add(1);
         }
     }
+    let window = lower;
+    cold.saturating_add(
+        u64::try_from(
+            intervals
+                .iter()
+                .filter(|&&interval| interval > window)
+                .count(),
+        )
+        .unwrap_or(u64::MAX),
+    )
 }
 
 fn add_proxy_misses(misses: &mut [u64; 8], interval: Option<u64>) -> Result<(), crate::IssueError> {
@@ -1900,28 +2077,13 @@ impl TraceMetrics {
     /// authoritative order only inside one warp, so state is never carried
     /// from one warp to another.
     pub(crate) fn begin_reuse_warp_stream(&mut self) {
-        let previous = std::mem::take(&mut self.reuse_warp_stream);
-        if previous.active {
-            let end = previous.line_volume;
-            for state in previous.lines.values() {
-                add_hotl_interval(
-                    &mut self.reuse_interval,
-                    end.saturating_sub(state.last_line_volume),
-                    false,
-                    true,
-                );
-                for sector in 0..4 {
-                    if let Some(last) = state.last_sector_volume[sector] {
-                        add_hotl_interval(
-                            &mut self.reuse_interval,
-                            end.saturating_sub(last),
-                            true,
-                            true,
-                        );
-                    }
-                }
-            }
-        }
+        self.locality_mrc_warp_stream
+            .flush_hotl(&mut self.reuse_interval);
+        // The legacy unified reuse stream is retained for interval and
+        // forwarding diagnostics, but its cross-class tails are not HOTL
+        // evidence.  Only the origin-qualified streams above feed the HOTL
+        // histograms and finite-boundary miss curves.
+        let _previous = std::mem::take(&mut self.reuse_warp_stream);
         self.reuse_warp_stream = ReuseWarpStream::default();
         self.locality_mrc_warp_stream = LocalityMrcWarpStream::default();
     }
@@ -1977,6 +2139,11 @@ impl TraceMetrics {
                 .entry(origin)
                 .or_default()
                 .observe(&lines, class_observation)?;
+            self.locality_mrc_warp_stream
+                .origins
+                .get_mut(&origin)
+                .expect("origin stream inserted above")
+                .observe_hotl(&lines, &mut self.reuse_interval)?;
         }
 
         if !self.reuse_warp_stream.active {
@@ -2018,21 +2185,12 @@ impl TraceMetrics {
                 .ok_or(crate::IssueError::CounterOverflow {
                     counter: "reuse line volume clock",
                 })?;
-        self.reuse_interval.hotl_line_volume_clock = self
-            .reuse_interval
-            .hotl_line_volume_clock
-            .checked_add(line_count)
-            .ok_or(crate::IssueError::CounterOverflow {
-                counter: "reuse HOTL volume clock",
-            })?;
-        let mut hotl_intervals: Vec<(u64, bool)> = Vec::new();
         let mut conditional_intervals: Vec<Option<u64>> = Vec::new();
         for (line, mask) in lines {
             let requested_sectors = u64::from(mask.count_ones());
             let mut line_interval = None;
             let mut sector_intervals = [None; 4];
             let mut line_volume_interval = None;
-            let mut sector_volume_intervals = [None; 4];
             let mut sector_reused_mask = 0_u8;
             let is_new_line = if let Some(state) = self.reuse_warp_stream.lines.get_mut(&line) {
                 line_interval = Some(
@@ -2060,10 +2218,6 @@ impl TraceMetrics {
                                 })?
                                 .saturating_sub(1),
                         );
-                        if let Some(previous_volume) = state.last_sector_volume[sector] {
-                            sector_volume_intervals[sector] =
-                                Some(volume.saturating_sub(previous_volume).saturating_sub(1));
-                        }
                         sector_reused_mask |= bit;
                     }
                     state.last_sector_tick[sector] = Some(tick);
@@ -2090,20 +2244,13 @@ impl TraceMetrics {
             };
 
             if let Some(interval) = line_volume_interval {
-                hotl_intervals.push((interval, false));
                 conditional_intervals.push(Some(interval));
             } else {
-                hotl_intervals.push((LOCALITY_MRC_INF, false));
                 conditional_intervals.push(None);
             }
             for sector in 0..4 {
                 if mask & (1_u8 << sector) == 0 {
                     continue;
-                }
-                if let Some(interval) = sector_volume_intervals[sector] {
-                    hotl_intervals.push((interval, true));
-                } else {
-                    hotl_intervals.push((LOCALITY_MRC_INF, true));
                 }
             }
 
@@ -2184,9 +2331,6 @@ impl TraceMetrics {
                     })?,
                 );
         }
-        for (interval, sector) in hotl_intervals {
-            add_hotl_interval(&mut self.reuse_interval, interval, sector, false);
-        }
         for interval in conditional_intervals {
             let observer = &mut self.sm_l1_locality_observer;
             if observer.capacity_lines.is_empty() {
@@ -2255,6 +2399,14 @@ impl TraceMetrics {
         self.begin_reuse_warp_stream();
         self.global_store_previous_sectors.clear();
         self.global_store_previous_effective_lanes = 0;
+    }
+
+    /// Flush the final origin-qualified warp stream at launch completion.
+    /// Native traces do not provide a synthetic next warp boundary, so this
+    /// explicit call is required for the last stream's HOTL tails and MRC
+    /// contribution to be reported exactly once.
+    pub(crate) fn finalize_reuse_observer(&mut self) {
+        self.begin_reuse_warp_stream();
     }
 
     pub(crate) fn finalize_shared_load_observer(&mut self) {
@@ -4263,6 +4415,7 @@ mod tests {
             lines: BTreeMap::new(),
             batches: BTreeMap::new(),
             next_batch_id: 0,
+            ..LocalityMrcOriginStream::default()
         };
         let mut report = LocalityMrcClassObservation::default();
         for line in 0_i64..5000 {

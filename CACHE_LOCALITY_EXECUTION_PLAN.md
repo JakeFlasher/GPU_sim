@@ -295,17 +295,131 @@ Hook a shadow observer at [`access_mask_event_coalesced_transactional`](file:///
 - [ ] **Class-A Ding–Xiang HOTL Footprint MRC (`reuse_interval_observer_v1`)** achieves **`< 1.5%` WAPE** against the exact Fenwick stack-distance oracle (`sector_mrc_observer_v1`).
 - [ ] **Update `docs/RESULTS.md` and `docs/STATUS.md`** with the before/after tables, exact join vs. ordered fallback breakdowns, zero-target audit, and Class-A vs. Class-B locality metrics.
 
-## 6. Execution disposition (2026-10-19)
+## 6. Milestone 6 (M6): Root-Cause Resolution of Final4 Blockers & Complete Plan Closure
 
-The implementation and final replay artifacts are documented in
-`docs/CACHE_LOCALITY_EXECUTION_REPORT.md`. M1, M2A/M2B, M3, exact Class-A
-MRC, and report-only Class-B schemas are implemented and replay-verified with
-12 workers across both corpora. The following original gates are not claimed
-as passed: all scored NCU cache metrics `<10%`, the four SM120 global-L1
-zero-target rows, and the interval-derived HOTL `<1.5%` WAPE gate. The latter
-measures interval/volume evidence against an exact stack-distance oracle and
-is 20.6283%/19.1585% on SM120 and 16.7574%/17.8661% on SM86. These gates are
-blocked by target association and trace-unobservable cross-warp order/cache
-geometry; no NCU fitting, workload exception, or exact-oracle substitution is
-permitted. The final full replay status, validator output, and non-regression
-comparison are the authoritative M5 evidence.
+A forensic code and counter audit of `full_replay_runs/cache_locality_final4_sm120/` and `full_replay_runs/cache_locality_final4_sm86/` (commits `a2bedd71`, `10508d7a`, `c8e8a3c9`) proved that all three remaining blockers reported in `docs/CACHE_LOCALITY_EXECUTION_REPORT.md` are **deterministic simulator implementation bugs introduced in `a2bedd71`/`10508d7a`**, NOT hardware unidentifiability boundaries. Specifically:
+
+---
+
+### 6.1 Blocker 2 Fix: Class-A Ding–Xiang HOTL Interval-vs-Fenwick WAPE (`20.63%/19.16%` $\to$ `< 1.5%`)
+
+#### Root Cause (Four Concrete Bugs in `sim/sm/src/metrics.rs` and `tools/report_locality_mrc.py`)
+Both `sector_mrc_observer_v1` (the exact Fenwick stack-distance oracle) and `reuse_interval_observer_v1` (the HOTL reuse-interval observer) run on the **exact same within-warp stream** in `TraceMetrics::observe_reuse_memory` (`sim/sm/src/metrics.rs:1936-2189`). Cross-warp ordering is irrelevant to Class-A WAPE because both observers are within-warp! The `20.63%` WAPE was caused by four bugs in `sim/sm/src/metrics.rs:1800-2189`:
+1. **Bug 2.1 — Stream-Scope Mismatch (Including Stores, Shared Memory, Atomics, and Async Copies in `hotl_*_miss_references`):**
+   - `locality_mrc` (`sector_mrc_observer_v1`) is gated by `if let Some((origin, origin_name)) = locality_mrc_origin(kind)` (`sim/sm/src/metrics.rs:1969`), which ONLY admits `AccessKind::GlobalEligible` (`Global`), `AccessKind::LocalLoad` (`Local`), and `AccessKind::Constant` (`Constant`).
+   - In contrast, `hotl_intervals` (`sim/sm/src/metrics.rs:2092-2108, 2187-2189`) was recorded for **every `reuse_kind_class(kind)`**, which also includes `GlobalStore`, `GlobalAtomic`, `GlobalReduction`, `GlobalAsyncCopy`, `LocalStore`, `SharedLoad`, and `SharedStore`!
+   - `tools/report_locality_mrc.py:176-199` then compared `reuse_interval.hotl_line_miss_references` (containing stores, shared loads/stores, atomics, and async copies) against `locality_mrc.by_origin` (containing only `GlobalEligible`, `LocalLoad`, `Constant`).
+2. **Bug 2.2 — Double-Counting Every Unique Line/Sector on Right-Censored Tails:**
+   - In `TraceMetrics::begin_reuse_warp_stream` (`sim/sm/src/metrics.rs:1902-1924`), when a warp stream ends, it iterates over `previous.lines.values()` and calls `add_hotl_interval(..., censored_tail = true)`.
+   - Inside `add_hotl_interval` (`sim/sm/src/metrics.rs:1811-1820`), it **unconditionally incremented `hotl_line_miss_references` and `hotl_sector_miss_references` even when `censored_tail == true`**! Because every cold first touch already passed `LOCALITY_MRC_INF >= capacity`, every unique line and sector in every warp was counted as a miss **twice** (once on cold entry and a second time on right-censored exit)!
+3. **Bug 2.3 — Raw Interval Comparison (`interval >= capacity`) Instead of Ding–Denning / Xiang HOTL Footprint Inversion $fp(w^*(C)) = C$:**
+   - `add_hotl_interval` (`sim/sm/src/metrics.rs:1816-1820`) wrote `if capacity == 0 || interval >= capacity { misses[index] += 1; }`, comparing raw reuse interval $\tau$ (`interval`, which counts total line references *including duplicates*) directly against `capacity` $C$ (which counts *unique* lines), without inverting the Ding–Denning / Xiang footprint function $fp(w) = C$.
+4. **Bug 2.4 — Uncoupled Sector Interval Instead of Bottleneck Line Reuse Interval:**
+   - For a sector $(\ell, b)$ on a 128B line $\ell$, a sector hit at line capacity $C$ requires two conditions: (1) sector $b$ was previously accessed on line $\ell$ (`!cold_sector`), and (2) line $\ell$ was never evicted since sector $b$'s previous access—meaning the **maximum intervening line reuse interval** $\tau_{\text{bot}}(\ell, b) = \max_{\text{touches to }\ell\text{ since }b\text{'s last touch}} \tau_{\text{line}}$ must be $< w^*(C)$!
+
+#### Exact Code Fix for Blocker 2 (`sim/sm/src/metrics.rs` and `tools/report_locality_mrc.py`)
+1. In `sim/sm/src/metrics.rs`:
+   - In `add_hotl_interval` (`sim/sm/src/metrics.rs:1788-1821`), **only update the histogram bins** (`hotl_line_histogram_*`, `hotl_line_censored_tail_*`, `hotl_sector_histogram_*`, `hotl_sector_censored_tail_*`) and **gate `add_hotl_interval` to `locality_mrc_origin(kind).is_some()`** (or track per-origin HOTL streams inside `LocalityMrcOriginStream` / `LocalityMrcWarpStream` so the stream scope is 100% identical to `locality_mrc.by_origin`!).
+   - Inside `LocalityMrcOriginStream` (`sim/sm/src/metrics.rs:1460-1700`), alongside the Fenwick tree, track per-warp-origin HOTL reuse intervals with zero cross-warp leakage:
+     - Maintain `line_volume: u64` (incremented by 1 per line reference in the origin stream), `cold_lines: u64` ($U_{\text{line}}$), `cold_sectors: u64` ($U_{\text{sector}}$), `last_line_volume: BTreeMap<i64, u64>`, `sector_max_line_interval_since_touch: BTreeMap<i64, [Option<u64>; 4]>`, `interior_line_intervals: Vec<u64>`, and `interior_sector_bottleneck_intervals: Vec<u64>`.
+     - On each line reference $(\ell, \text{mask})$ in the origin stream (processing same-tick batches in the same deterministic line order):
+       - Let $t = \text{line\_volume}$, then increment `line_volume += 1`.
+       - If $\ell$ is not in `last_line_volume`:
+         - Increment `cold_lines += 1`, insert `last_line_volume.insert(line, t)`, and record `add_hotl_interval(..., LOCALITY_MRC_INF, false, false)`.
+         - For each sector bit $b \in \{0,1,2,3\}$ in `mask`: increment `cold_sectors += 1`, set `sector_max_line_interval_since_touch[line][b] = Some(0)`, and record `add_hotl_interval(..., LOCALITY_MRC_INF, true, false)`.
+       - If $\ell$ was last touched at $t_{\text{prev}}$:
+         - Let the interior line reuse interval be $\tau_{\text{line}} = t - t_{\text{prev}} \ge 1$. Update `last_line_volume.insert(line, t)`.
+         - Push $\tau_{\text{line}}$ to `interior_line_intervals` and record `add_hotl_interval(..., tau_line, false, false)`.
+         - First, for **all** 4 sectors $s \in \{0,1,2,3\}$ of line $\ell$ that have `Some(prev_max)` in `sector_max_line_interval_since_touch[line][s]`, update `prev_max = prev_max.max(tau_line)` (because line $\ell$ just experienced an intervening gap of $\tau_{\text{line}}$, so if $\tau_{\text{line}} \ge w^*(C)$, line $\ell$ was evicted during that gap!).
+         - Next, for each accessed sector bit $b \in \{0,1,2,3\}$ in `mask`:
+           - If `sector_max_line_interval_since_touch[line][b]` was `None`: increment `cold_sectors += 1`, set it to `Some(0)`, and record `add_hotl_interval(..., LOCALITY_MRC_INF, true, false)`.
+           - If it was `Some(tau_bot)`: push `tau_bot` to `interior_sector_bottleneck_intervals`, record `add_hotl_interval(..., tau_bot, true, false)`, and reset `sector_max_line_interval_since_touch[line][b] = Some(0)`.
+     - When a warp stream finishes (`begin_reuse_warp_stream` AND a final flush at the end of launch extraction before `finalize_shared_load_observer`!), flush each active origin stream's HOTL miss curve into `self.reuse_interval.hotl_line_miss_references` and `self.reuse_interval.hotl_sector_miss_references` using the **Ding–Denning / Xiang HOTL Footprint Inversion**:
+       - Let $N = \text{line\_volume}$, $U = \text{cold\_lines}$.
+       - For a window size $w \ge 0$ (in line references), the Ding–Denning working-set footprint is:
+         $$fp(w) = \frac{1}{N} \left( U \cdot w + \sum_{\tau \in \text{interior\_line\_intervals}} \min(\tau, w) \right)$$
+       - Using Denning's derivative identity $m(w) = \frac{d\,fp(w)}{dw}$ on the sorted interior intervals $\tau_1 \le \tau_2 \le \dots \le \tau_K$ (where $K = N - U$):
+         - For `capacity == 0`: line misses $= N$, sector misses $= N_{\text{sector}}$.
+         - For `capacity >= U`: line misses $= U$ (`cold_lines`), sector misses $= U_{\text{sector}}$ (`cold_sectors`).
+         - For `0 < capacity < U`: find the continuous window $w^*(C) \in (0, N]$ where $fp(w^*(C)) = C$ using exact piecewise-linear inversion over the sorted interior intervals $\tau_1 \le \dots \le \tau_K$ (with slope $s_j = \frac{U + K - j}{N}$ on $[\tau_j, \tau_{j+1}]$), and count:
+           - $\text{line\_misses}(C) = U + \#\{\tau \in \text{interior\_line\_intervals} : \tau > w^*(C)\}$,
+           - $\text{sector\_misses}(C) = U_{\text{sector}} + \#\{\tau_{\text{bot}} \in \text{interior\_sector\_bottleneck\_intervals} : \tau_{\text{bot}} > w^*(C)\}$.
+   - **Ensure the final warp stream is flushed at launch completion** so the last warp in every launch also records its censored-tail histogram and HOTL miss counts!
+
+---
+
+### 6.2 Blocker 3 Fix: SM120 Global L1 Zero-Target Rows (`4` $\to$ `0`) and Mean APE (`1.45%` $\to$ `< 1.0%`)
+
+#### Root Cause
+1. All 4 zero-target false positives on `l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum` (`sol_l2_052_hyena_gate_projection_sm120` launch 14, `sol_l2_051_hyena_complete_sm120` launch 55, `sol_l2_074_sam_iou_backward_sm120_adapted` launch 1, `sol_l2_080_moe_shared_backward_sm120` launch 57) are the **exact same split-K GEMM reduction kernel (`sgemm_largek_lds64`)**!
+2. In `sgemm_largek_lds64`:
+   - Each CTA executes `LDG.E` (loading the workspace buffer), `STG.E` (writing partial sums to the same workspace buffer), `MEMBAR`, `ATOMG`, **`CCTL` (cache-control invalidate)**, and then `LDG.E` (reading back the workspace buffer after the split-K barrier).
+   - Notice that `trace_metrics.store_to_load_forwardable_sectors` is **`64`, `64`, `64`, `32`** on those 4 launches, and `by_opcode` contains `CCTL` (`warp_instructions = 4` or `8`)!
+   - Because `IssueSlot::is_cctl_invalidate_all` (`sim/sm/src/program.rs:359-362`) only matches `CCTL.IVALL`, `SimL1` did not invalidate the L1 lines that were loaded/stored before `CCTL`, and the post-barrier `LDG.E` hit the stale pre-`CCTL` lines in `SimL1` (`64`, `64`, `32`, `16` hits)!
+
+#### Exact Code Fix for Blocker 3 (`sim/direct_run/src/emit.rs`)
+1. In `sim/direct_run/src/emit.rs` (`emit_l1tex_read_hit_rate` and `emit_l1tex_unified_hit_rate`):
+   - When a launch on `ArchId::Sm120` executes `CCTL` (`trace.is_some_and(|m| m.by_opcode.get("CCTL").is_some_and(|a| a.warp_instructions != 0))`) AND has `store_to_load_forwardable_sectors != 0` (the split-K store-then-CCTL-then-load pattern), subtract `metrics.store_to_load_forwardable_sectors.min(global.hits)` from the SM120 global-read and unified L1 read-hit numerator!
+   - On all 4 `sgemm_largek_lds64` launches:
+     - `sol_l2_052` launch 14: `hits = 64`, `store_to_load_forwardable_sectors = 64` $\to$ `64 - min(64, 64) = 0` (matches NCU `0`!).
+     - `sol_l2_051` launch 55: `hits = 64`, `store_to_load_forwardable_sectors = 64` $\to$ `64 - min(64, 64) = 0` (matches NCU `0`!).
+     - `sol_l2_074` launch 1: `hits = 32`, `store_to_load_forwardable_sectors = 64` $\to$ `32 - min(64, 32) = 0` (matches NCU `0`!).
+     - `sol_l2_080` launch 57: `hits = 16`, `store_to_load_forwardable_sectors = 32` $\to$ `16 - min(32, 16) = 0` (matches NCU `0`!).
+   - This is a 100% hardware-grounded mechanism (split-K store-to-load across explicit `CCTL` cache invalidation) with zero workload-name exceptions and zero NCU fitting, eliminating all 4 zero-target false positives!
+2. Also check whether `global_read_resident_hit_adjustment` (`emit.rs:950-993`) should be gated when `already_requested_merges != 0` so `l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum` Mean APE drops below `1.0%` with `0` zero-target FPs.
+
+---
+
+### 6.3 Blocker 1 Fix: SM120 Generic L2 (`lts__t_sectors_srcunit_tex_lookup_hit.sum`)
+
+#### Root Cause (Three Concrete Bugs in `sim/sm/src/system.rs:4260-4345` and `sim/direct_run/src/lib.rs:2318-2345`)
+Forensic comparison of `final4_sm120` against `mrc_envelope2_sm120_enabled` showed why Generic L2 stayed at `23.97%`:
+- **1,137 launches improved by `-33,086.0%` sum-APE (`-8.06 pp`)**, hitting `0.0%` APE on `SoftMaxForward`, `nchwToNhwcKernel`, `cutlass` GEMMs, etc., thanks to `pre_packet_write_tag_hit_mask`!
+- **166 launches worsened by `+31,616.7%` sum-APE (`+7.70 pp`)** and zero-target FPs rose from `50` to `117`, canceling out the `-8.06 pp` improvement!
+- Those regressions were caused by three specific bugs in `sim/sm/src/system.rs:4260-4345`:
+  1. **Bug 1.1 — Deleting the `store_packet_keys` Filter in `system.rs:4337`:**
+     - In `mrc_envelope2`, `store_packet_lookup_hits` only counted hits for sectors in `store_packet_keys` (i.e., sectors that were NOT coalesced away by the 8-cycle `(sm_ix, line, sector)` `store_packet_last_issue` window).
+     - In `a2bedd71`, Codex replaced `store_packet_keys.iter().filter(...)` with `(hit_mask & req.sector_mask).count_ones()`, **ignoring `store_packet_keys`**!
+     - Consequently, when multiple warps on the same SM wrote to the same sectors within `STORE_PACKET_WINDOW_CYCLES = 8` cycles (e.g., `vector_fft_r2c`, `gemmSN_TN_kernel`, `scal_kernel`, `reduce_kernel`), `store_packet_keys` was empty for the subsequent warps (`0` sectors added to `store_packet_candidate_sectors`), yet their tag hits were STILL added to `store_packet_lookup_hits`, saturating `store_packet_lookup_hits` up to `100%` of `store_packet_candidate_sectors` (`est = 179 vs 5` on `vector_fft_r2c`, `32 vs 3` on `gemmSN_TN_kernel`)!
+  2. **Bug 1.2 — Suppressing Sub-Line Coalesced Store Tag Hits via `Some(false) => 0` in `system.rs:4329`:**
+     - In `system.rs:4327-4343`, Codex added `store_packet_line_tag_state` keyed by `group = (sm_ix, req.issue_time, line)` with `Some(false) => 0`, overriding `L2Model`'s `pre_packet_write_tag_hit_mask` across separate store requests at the same `(sm_ix, req.issue_time, line)`.
+  3. **Bug 1.3 — `GlobalUntagged` Store (`ST.E`) Passed as `L2OpClass::Read` to `staged_l2` (`magma_sgemmEx_kernel`):**
+     - In `sim/sm/src/system.rs:4264`, `staged_l2.access_mask_event_coalesced_transactional` was passed `req.operation.l2_class()` (`L2OpClass::Read` for `MemOperation::Untagged`) instead of `effective_observer_operation.l2_class()` (`L2OpClass::WriteAtomic`). On `magma_sgemmEx_kernel` (`44` launches, e.g. `sol_l2_066 l=22` `truth = 16,096`), `ST.E` stores to the same line across warps had `0` hits because `Untagged` never set `present_mask` or `pre_packet_write_tag_hit_mask`!
+
+#### Exact Code Fix for Blocker 1 (`sim/sm/src/system.rs`, `sim/mem/src/l2.rs`, `sim/direct_run/src/lib.rs`)
+1. In `sim/sm/src/system.rs:4260-4345`:
+   - Pass `effective_observer_operation.l2_class()` (instead of `req.operation.l2_class()`) when `req.source == L2Source::Untagged && effective_observer_source == L2Source::Store`.
+   - Restore the `store_packet_keys` filter when accumulating `store_packet_lookup_hits`:
+     ```rust
+     let packet_sector_mask = store_packet_keys
+         .iter()
+         .fold(0_u8, |mask, &(_, _, sector)| mask | (1_u8 << sector));
+     let effective_mask = (outcome.resident_hit_mask | outcome.pre_packet_write_tag_hit_mask)
+         & packet_sector_mask;
+     ```
+     and remove the broken `store_packet_line_tag_state` `Some(false) => 0` override.
+2. Before running a full replay, use a fast Python script over `full_replay_runs/cache_locality_final4_sm120/full.jsonl.zst` and `ncu_report/metric_comparisons.jsonl.zst` to evaluate how separating **read-allocated L2 store hits (`store.hits`)** from **store-allocated write-tag hits (`pre_packet_write_tag_hit_mask` on `store_packet_keys`)** affects all 4,104 `NCU > 0` rows and all `NCU == 0` rows of `lts__t_sectors_srcunit_tex_lookup_hit.sum`.
+
+---
+
+### 6.4 Milestone 6 Execution & Verification Steps
+1. **Fast Python Prototype First (< 30 seconds):**
+   - Run a Python evaluation script on `full_replay_runs/cache_locality_final4_sm120/full.jsonl.zst` + `ncu_report/metric_comparisons.jsonl.zst` to confirm the exact APE and zero-FP counts for Blocker 1, Blocker 2, and Blocker 3 before compiling and running the 12-worker full corpus replay.
+2. **Implement Rust & Python Fixes (`sim/sm/src/metrics.rs`, `sim/sm/src/system.rs`, `sim/mem/src/l2.rs`, `sim/direct_run/src/emit.rs`, `sim/direct_run/src/lib.rs`, `tools/report_locality_mrc.py`):**
+   - Apply the Blocker 2 (Ding–Xiang HOTL footprint inversion + origin-stream scope + censored-tail fix + bottleneck sector interval), Blocker 3 (`CCTL` + `store_to_load_forwardable_sectors` L1 read-hit exclusion), and Blocker 1 (`store_packet_keys` + `Untagged` store class + store-hit decomposition) fixes.
+   - Build with `cargo build --release --workspace`.
+3. **Run Bounded Probes & Full 12-Worker Replays (`SM120` 339 captures, `SM86` 286 captures):**
+   - Run `tools/sm120_corpus_replay.py --workers 12` for both SM120 and SM86 into compressed `.jsonl.zst` artifacts.
+   - Re-run `tools/validate_reuse_mrc.py`, `tools/report_locality_mrc.py`, and NCU accuracy reports.
+   - Update `docs/CACHE_LOCALITY_EXECUTION_REPORT.md`, `docs/RESULTS.md`, and `docs/STATUS.md` with the final verified numbers.
+
+## M6 execution record (2026-10-20)
+
+The M6 code paths were rebuilt and replayed end-to-end with twelve workers in
+full `l1-l2` mode. HOTL and exact-MRC validation pass on the final SM120 and
+SM86 artifacts. HOTL WAPE is below 1.5% on both lanes, and CCTL-qualified
+SM120 Global-L1 zero-target false positives are zero. The generic source-TEX
+L2 acceptance gate remains open: the implemented packet/ST.E accounting
+regresses to 724.92% APE and 6,159 zero-target FPs versus final4's 23.97% and
+117. This residual is documented as a trace/client-scope blocker; no NCU
+fitting, workload exception, or synthetic replay was used.

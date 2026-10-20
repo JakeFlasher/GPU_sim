@@ -131,3 +131,11 @@ therefore does not silently relabel STG packets or use kernel names. The
 remaining generic-L2 discrepancy is an endpoint/client-scope ambiguity that
 cannot be resolved from the retained trace metadata without an independent
 scope crosswalk.
+
+## Milestone 6 replay and forensic disposition (2026-10-20)
+
+The M6 implementation was rebuilt with `cargo build --release --workspace`, and the required real-capture probes were rerun in full mode with twelve workers. Final fresh full-only artifacts are `full_replay_runs/cache_locality_m6r_sm120/full.jsonl.zst` (339 captures, 11,558 launches) and `full_replay_runs/cache_locality_m6r_sm86/full.jsonl.zst` (356 captures, 12,392 launches; 286 `ok`, 62 `control_error`, 8 `replay_error`). Both pass `tools/validate_reuse_mrc.py` with zero errors.
+
+The origin-qualified Ding–Denning/Xiang HOTL observer now gates the same streams as the Fenwick oracle, excludes censored tails from miss counts, performs finite-boundary footprint inversion, couples sector bottlenecks to line gaps, and flushes the final warp stream. Corpus WAPE is **0.8767% line / 0.4462% sector (SM120)** and **1.0223% line / 0.5324% sector (SM86)**.
+
+The SM120 CCTL/forwarding projection removes all four previously identified Global-L1 zero-target false positives. The full SM120 comparison reports Global-L1 APE **1.5567%**, zero-target FPs **0**; unified-L1 APE **1.6386%**; operation-read L2 APE **6.6859%**. Generic source-TEX L2 remains unresolved: the current store-packet/effective-ST.E implementation reports **724.92%** mean APE and **6,159** zero-target false positives, versus final4's 23.97% / 117. This reproducible regression is retained as forensic evidence, not claimed as a closed gate; the retained trace lacks an independent generic-TEX client crosswalk and no NCU-shaped correction was applied.

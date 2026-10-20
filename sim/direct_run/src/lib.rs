@@ -1896,6 +1896,9 @@ pub struct L2SourceCounterReport {
     /// Read-class lookup hits not arising solely from a pending-fill merge.
     pub read_lookup_hits_without_pending_merges: u64,
     pub read_pending_merge_hits: u64,
+    /// Observer-only resident hits among the launch-local coalesced store
+    /// packet candidates. This is separate from the physical store lane.
+    pub store_packet_lookup_hits: u64,
     pub store_packet_candidate_sectors: u64,
     pub client_scope_requests: [u64; 10],
     pub client_scope_resident_hits: [u64; 10],
@@ -1932,6 +1935,7 @@ fn l2_source_counter_report(value: &L2SourceSplit) -> L2SourceCounterReport {
             .read_lookup_hits
             .saturating_sub(value.read_pending_merge_hits),
         read_pending_merge_hits: value.read_pending_merge_hits,
+        store_packet_lookup_hits: value.store_packet_lookup_hits,
         store_packet_candidate_sectors: value.store_packet_candidate_sectors,
         client_scope_requests: value.client_scope_requests,
         client_scope_resident_hits: value.client_scope_resident_hits,

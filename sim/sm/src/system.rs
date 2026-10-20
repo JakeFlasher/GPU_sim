@@ -4020,7 +4020,6 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
     // Remember whether the line tag was present before the first request at
     // one (SM, issue-cycle, line) boundary so later sectors cannot self-credit
     // as write-tag hits on a cold coalesced instruction.
-    let mut store_packet_line_tag_state: HashMap<(usize, u64, i64), bool> = HashMap::new();
     let mut store_packet_candidate_sectors = 0_u64;
     let mut staged_l2 = l2.try_snapshot()?;
     while let Some(ev) = queue.pop()? {
@@ -4257,11 +4256,21 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                             }
                         }
                     }
-                    let mut store_packet_tag_was_present = None;
+                    // The physical L2 preview is authoritative for each
+                    // request.  Packet candidates below are the only
+                    // sectors that may contribute to the report-only
+                    // coalesced-store endpoint; do not carry a per-group
+                    // `Some(false)` state across distinct requests because
+                    // that suppresses legitimate sub-line tag hits.
+                    let store_packet_l2_class = (arch == ArchId::Sm120
+                        && req.source == L2Source::Untagged
+                        && effective_observer_operation == MemoryOperation::Store)
+                        .then_some(effective_observer_operation.l2_class())
+                        .unwrap_or_else(|| req.operation.l2_class());
                     let (l2_access, commit) = staged_l2.access_mask_event_coalesced_transactional(
                         line,
                         req.sector_mask,
-                        req.operation.l2_class(),
+                        store_packet_l2_class,
                         |preview| -> Result<L2SystemCommit, SystemError> {
                             let lookup = preview.lookup;
                             let merged_ready = pending_l2_ready.merged_ready(preview)?;
@@ -4322,26 +4331,23 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                             } else {
                                 0
                             };
-                            let store_packet_lookup_hits = if let Some(group) = store_packet_group {
-                                let tag_was_present = store_packet_line_tag_state.get(&group);
-                                let hit_mask = match tag_was_present {
-                                    Some(true) => req.sector_mask,
-                                    Some(false) => 0,
-                                    None => {
-                                        preview.lookup.present_mask
-                                            | preview.lookup.pre_packet_write_tag_hit_mask
-                                    }
-                                };
-                                u64::from((hit_mask & req.sector_mask).count_ones())
+                            let store_packet_lookup_hits = if store_packet_group.is_some() {
+                                // Restore the packet-candidate filter: a
+                                // sector coalesced into an earlier packet is
+                                // not a new source-TEX packet lookup.  The
+                                // pre-packet mask prevents a single cold
+                                // 128B request from self-crediting its own
+                                // write allocation, while a later distinct
+                                // request observes the real tag state.
+                                let packet_sector_mask = store_packet_keys
+                                    .iter()
+                                    .fold(0_u8, |mask, &(_, _, sector)| mask | (1_u8 << sector));
+                                let hit_mask = preview.lookup.present_mask
+                                    | preview.lookup.pre_packet_write_tag_hit_mask;
+                                u64::from((hit_mask & packet_sector_mask).count_ones())
                             } else {
                                 0
                             };
-                            store_packet_tag_was_present = store_packet_group.map(|group| {
-                                store_packet_line_tag_state.get(&group).copied().unwrap_or(
-                                    preview.lookup.present_mask != 0
-                                        || preview.lookup.pre_packet_write_tag_hit_mask != 0,
-                                )
-                            });
                             let observer_operation = effective_observer_operation;
                             let lookup_for_operation =
                                 |operation| -> Result<(u64, u64), SystemError> {
@@ -4877,11 +4883,6 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
 
                     for key in &store_packet_keys {
                         store_packet_last.insert(*key, req.issue_time);
-                    }
-                    if let (Some(group), Some(tag_was_present)) =
-                        (store_packet_group, store_packet_tag_was_present)
-                    {
-                        store_packet_line_tag_state.insert(group, tag_was_present);
                     }
                     store_packet_candidate_sectors = store_packet_candidate_sectors
                         .checked_add(u64::try_from(store_packet_keys.len()).map_err(|_| {

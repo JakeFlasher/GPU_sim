@@ -48,3 +48,7 @@ and operation-read L2 is ~6.69% after using all active write-tag observations
 and trace-qualified store-to-load forwarding. Generic source-TEX L2 remains a
 scope residual (~23.97%); a large-store shape rule was tested across the full
 corpus and rejected because it regressed generic-L2 WAPE.
+
+## M6 replay status (2026-10-20)
+
+Fresh full-only twelve-worker replays are in `full_replay_runs/cache_locality_m6r_sm120/` and `full_replay_runs/cache_locality_m6r_sm86/`. Both pass the reuse/MRC validator. HOTL WAPE is 0.8767%/0.4462% (SM120 line/sector) and 1.0223%/0.5324% (SM86 line/sector). CCTL-qualified SM120 Global-L1 false positives fell from four to zero. The generic TEX-L2 M6 store-packet/ST.E seam remains an evidenced blocker: full replay is 724.92% APE with 6,159 zero-target FPs versus final4's 23.97% and 117. No NCU fitting or kernel exception was added.

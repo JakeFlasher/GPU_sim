@@ -313,3 +313,7 @@ operation-read L2 mean APE is ~6.69%; physical cache, DRAM, IPC, and timing
 remain unchanged. Generic source-TEX L2 remains ~23.97%. A trace-only
 large-store packet-shape rule was evaluated on the complete corpus and
 rejected (generic-L2 WAPE increased to ~44.48%), so it is not retained.
+
+### Milestone 6 full replay (2026-10-20)
+
+M6 fresh full-only artifacts are `full_replay_runs/cache_locality_m6r_sm120/full.jsonl.zst` (339/339 captures, 11,558 launches) and `full_replay_runs/cache_locality_m6r_sm86/full.jsonl.zst` (286 `ok`, 62 `control_error`, 8 `replay_error`, 12,392 launches), all with `--workers 12`. `validate_reuse_mrc.py` passes both lanes. HOTL WAPE is below 1.5% on both lanes. SM120 Global-L1 CCTL correction gives zero zero-target false positives; unified L1 is 1.6386% APE and operation-read L2 is 6.6859%. The generic TEX-L2 gate is not closed: M6 packet/ST.E accounting regresses to 724.92% APE / 6,159 zero-target FPs, retained as forensic evidence rather than a claimed improvement.

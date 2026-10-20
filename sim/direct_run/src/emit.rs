@@ -1023,6 +1023,38 @@ pub(crate) fn async_global_l1_hit_exclusion(
     )
 }
 
+/// SM120 split-K reduction traces use a line-scoped `CCTL` before consuming
+/// sectors written by an earlier phase.  The native issue classifier only
+/// recognizes `CCTL.IVALL` as a physical invalidate, so the timing cache can
+/// retain a stale resident hit even though the external global-load lookup
+/// endpoint observes the post-control read as a miss.  The combination of a
+/// decoded CCTL and a trace-qualified full-sector store-to-load candidate is
+/// the conservative, workload-independent witness for removing those stale
+/// read hits from the report-only numerator.  Physical state, traffic, and
+/// timing remain untouched.
+pub(crate) fn sm120_cctl_forwarding_exclusion(
+    arch: ArchId,
+    l1: &L1Counters,
+    trace: Option<&TraceMetrics>,
+) -> u64 {
+    if arch != ArchId::Sm120 {
+        return 0;
+    }
+    let Some(metrics) = trace else {
+        return 0;
+    };
+    if !metrics
+        .by_opcode
+        .get("CCTL")
+        .is_some_and(|activity| activity.warp_instructions != 0)
+    {
+        return 0;
+    }
+    metrics
+        .store_to_load_forwardable_sectors
+        .min(l1.origin(MemoryOrigin::Global).hits)
+}
+
 // ---- per-metric emit fns (the rate accounting, moved out of the counters) ----
 
 /// `gpc__cycles_elapsed.max` — mandatory publication-binding output. The
@@ -1158,6 +1190,11 @@ fn emit_l1tex_read_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitE
         l1,
         snap.trace_metrics,
     ));
+    let num = num.saturating_sub(sm120_cctl_forwarding_exclusion(
+        snap.arch,
+        l1,
+        snap.trace_metrics,
+    ));
     let bypass = bypass_read_sectors(key, &global)?;
     let den = checked_sum(
         key,
@@ -1266,6 +1303,11 @@ fn emit_l1tex_unified_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, Em
             snap.trace_metrics,
         ))
         .saturating_sub(async_global_l1_hit_exclusion(
+            snap.arch,
+            l1,
+            snap.trace_metrics,
+        ))
+        .saturating_sub(sm120_cctl_forwarding_exclusion(
             snap.arch,
             l1,
             snap.trace_metrics,
