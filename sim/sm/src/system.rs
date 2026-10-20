@@ -4262,17 +4262,32 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                     // coalesced-store endpoint; do not carry a per-group
                     // `Some(false)` state across distinct requests because
                     // that suppresses legitimate sub-line tag hits.
-                    let store_packet_l2_class = (arch == ArchId::Sm120
+                    // Keep the physical hierarchy operation unchanged for
+                    // generic `ST.E` (it is an untagged read-class request).
+                    // When its decoded observer tag is Store, obtain a
+                    // read-only WriteAtomic preview for operation-qualified
+                    // accounting without changing L2 state, DRAM demand, or
+                    // timing frontiers.
+                    let observer_write_preview = (arch == ArchId::Sm120
                         && req.source == L2Source::Untagged
                         && effective_observer_operation == MemoryOperation::Store)
-                        .then_some(effective_observer_operation.l2_class())
-                        .unwrap_or_else(|| req.operation.l2_class());
+                        .then(|| {
+                            staged_l2
+                                .preview_mask(
+                                    line,
+                                    req.sector_mask,
+                                    effective_observer_operation.l2_class(),
+                                )
+                                .map_err(SystemError::from)
+                        })
+                        .transpose()?;
                     let (l2_access, commit) = staged_l2.access_mask_event_coalesced_transactional(
                         line,
                         req.sector_mask,
-                        store_packet_l2_class,
+                        req.operation.l2_class(),
                         |preview| -> Result<L2SystemCommit, SystemError> {
                             let lookup = preview.lookup;
+                            let observer_lookup = observer_write_preview.unwrap_or(lookup);
                             let merged_ready = pending_l2_ready.merged_ready(preview)?;
                             pending_l2_ready.preflight_register(preview)?;
                             let pending_pressure_sum = u64::try_from(pending_l2_ready.len())
@@ -4382,7 +4397,15 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                                         // This is observer-only and never changes L2
                                         // state, DRAM demand, or completion timing.
                                         MemoryOperation::Store => {
-                                            if arch == ArchId::Sm86 {
+                                            if req.source == L2Source::Untagged
+                                                && effective_observer_operation
+                                                    == MemoryOperation::Store
+                                            {
+                                                (
+                                                    requested_sectors,
+                                                    u64::from(observer_lookup.counted_hits),
+                                                )
+                                            } else if arch == ArchId::Sm86 {
                                                 (requested_sectors, requested_sectors)
                                             } else {
                                                 (

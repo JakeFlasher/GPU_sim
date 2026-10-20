@@ -139,3 +139,15 @@ The M6 implementation was rebuilt with `cargo build --release --workspace`, and 
 The origin-qualified Ding–Denning/Xiang HOTL observer now gates the same streams as the Fenwick oracle, excludes censored tails from miss counts, performs finite-boundary footprint inversion, couples sector bottlenecks to line gaps, and flushes the final warp stream. Corpus WAPE is **0.8767% line / 0.4462% sector (SM120)** and **1.0223% line / 0.5324% sector (SM86)**.
 
 The SM120 CCTL/forwarding projection removes all four previously identified Global-L1 zero-target false positives. The full SM120 comparison reports Global-L1 APE **1.5567%**, zero-target FPs **0**; unified-L1 APE **1.6386%**; operation-read L2 APE **6.6859%**. Generic source-TEX L2 remains unresolved: the current store-packet/effective-ST.E implementation reports **724.92%** mean APE and **6,159** zero-target false positives, versus final4's 23.97% / 117. This reproducible regression is retained as forensic evidence, not claimed as a closed gate; the retained trace lacks an independent generic-TEX client crosswalk and no NCU-shaped correction was applied.
+
+### M6 observer-only ST.E follow-up (2026-10-20)
+
+A second implementation keeps the physical L2 class on `GlobalUntagged` requests
+unchanged and obtains the effective `WriteAtomic` class through the public
+read-only `preview_mask` seam. Bounded real probes passed; the complete SM120
+replay is `full_replay_runs/cache_locality_m6final_sm120/full.jsonl.zst` and
+passes the reuse validator. Its NCU report remains materially unchanged:
+Global-L1 APE 1.5567% with zero false positives, operation-read L2 6.6859%,
+and generic TEX-L2 724.72% APE with 6,158 zero-target FPs. This preserves
+physical cache/DRAM/timing semantics but does not resolve the generic client
+scope; no further trace-only rule was promoted.
