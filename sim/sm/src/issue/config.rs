@@ -64,7 +64,7 @@ pub enum IssueResourceSource {
 /// capability table.  Values are an executable, deliberately provisional
 /// envelope assembled from retained dependency, barrier, and control
 /// observations. The alpha lane supplies the effective SM120 timing
-/// envelope for integrated full replay and the complementary fast frontier; it
+/// envelope for integrated full replay and the complementary core-only diagnostic; it
 /// is not a calibrated Blackwell silicon model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct Sm120AlphaConfig {
@@ -762,7 +762,7 @@ impl IssueModelParams {
             resource_source: IssueResourceSource::Sm120Alpha,
             // The alpha lane deliberately does not instantiate any SM86
             // front-end, memory-pipeline, IMC, or constant-return capability.
-            // The flat fast frontier therefore uses only the explicit
+            // The flat core-only diagnostic therefore uses only the explicit
             // scalar/barrier envelope below; cache/async lanes are supplied by
             // the integrated full replay path.
             instruction_front_end: None,

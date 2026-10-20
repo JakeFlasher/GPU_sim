@@ -102,3 +102,21 @@ This file is deliberately a current-state note rather than a duplicate.
   before the later SM86-only L2 native block, so the claimed SM120 rank-0 L2
   precedence bug is inapplicable. TMA-shadow-hit addition worsened retained
   SM120 L2 APE and was rejected.
+
+## Academic release refactor (2026-10-20)
+
+The current release objective is a human-readable academic overhaul of the
+unified simulator. The paper draft and the Chen Ding/Xiang HOTL and Huerta
+MICRO'25 terminology were studied read-only. The controlled vocabulary is in
+`docs/TERMINOLOGY.md`; the execution and no-regression plan is
+`docs/ACADEMIC_RELEASE_PLAN.md`; the literature/style decisions are in
+`docs/ACADEMIC_STYLE_REVIEW.md`.
+
+Use conventional terms such as footprint, lifetime, reuse distance, miss-ratio
+curve, compiler-guided greedy-then-youngest scheduling, hardware-counter
+attribution, conservative lookahead horizon, effective model, and scope
+limitation. Avoid presenting internal names such as “tap-point projection,”
+“unpriced miss,” “closed-loop calibration,” or an unqualified “frontier” in
+human-facing documentation. Do not rename machine-readable fields solely for
+style; preserve compatibility and verify every refactor against the complete
+12-worker full-replay artifacts.

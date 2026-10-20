@@ -27,6 +27,9 @@ common numeric replay fields.
 The current campaign summary is in [`docs/RESULTS.md`](docs/RESULTS.md).
 Architecture and scientific boundaries are in [`docs/CONTRACT.md`](docs/CONTRACT.md)
 and [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+Public terminology and release work are defined in
+[`docs/TERMINOLOGY.md`](docs/TERMINOLOGY.md) and
+[`docs/ACADEMIC_RELEASE_PLAN.md`](docs/ACADEMIC_RELEASE_PLAN.md).
 
 ## Source and session boundaries
 

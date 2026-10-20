@@ -580,7 +580,7 @@ fn alpha_op_class(opcode_text: &str) -> OpClass {
     match opcode_head(opcode_text) {
         "BAR" => OpClass::BlockBarrier,
         // Full-replay-only alpha async protocol. Keep the existing explicit
-        // group/DEPBAR parser; the fast frontier is frozen and does not use
+        // group/DEPBAR parser; the core-only diagnostic is frozen and does not use
         // this schedule path.
         "LDGDEPBAR" => OpClass::AsyncCopyCommit,
         // Blackwell TMA command forms are submissions/flushes, not the

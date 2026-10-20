@@ -640,14 +640,14 @@ pub enum ReplayError {
     },
     #[error("opt-in dirty writeback service requires complete unsampled launch coverage")]
     WritebackRequiresFullCoverage,
-    #[error("fast frontier requires complete unsampled trace coverage")]
+    #[error("core-only diagnostic requires complete unsampled trace coverage")]
     FastFrontierRequiresFullCoverage,
     #[error(
-        "fast frontier requires a single launch with no concurrent stream context; launches={launches}"
+        "core-only diagnostic requires a single launch with no concurrent stream context; launches={launches}"
     )]
     FastFrontierLaunchScopeUnknown { launches: usize },
     #[error(
-        "fast frontier requires active and predicate-mask presence on every dynamic record; active_missing={active_missing}, predicate_missing={predicate_missing}"
+        "core-only diagnostic requires active and predicate-mask presence on every dynamic record; active_missing={active_missing}, predicate_missing={predicate_missing}"
     )]
     FastFrontierMasksIncomplete {
         active_missing: u64,
@@ -1057,7 +1057,7 @@ pub enum ReplayError {
     GridSizeOverflow { grid: (u32, u32, u32) },
     #[error("incomplete trace: {seen}/{grid_total} launch blocks present")]
     IncompleteTrace { seen: u64, grid_total: u64 },
-    #[error("fast frontier analysis failed: {detail}")]
+    #[error("core-only diagnostic analysis failed: {detail}")]
     FastFrontier { detail: String },
     #[cfg(feature = "campaign")]
     #[error(
@@ -2074,7 +2074,7 @@ fn increment_fast_reason(
     Ok(())
 }
 
-/// Build a conservative fast-frontier report from a real compact trace. The
+/// Build a conservative core-only diagnostic report from a real compact trace. The
 /// producer bridge intentionally refuses memory, barriers, dynamic pipelines,
 /// unknown register dependencies, and incomplete/slot-reused residency;
 /// callers can use the summary to decide which ranges are safe to summarize

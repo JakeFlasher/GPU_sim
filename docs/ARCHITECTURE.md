@@ -9,16 +9,16 @@ NVBit -> enhanced protobuf + control sidecars
                          \-> sim-run JSON -> independent NCU comparison
 ```
 
-`sim-trace` reads trace evidence; `sim-sm` handles scheduling, dependencies,
-barriers, and async operations; `sim-mem` models cache and memory service.
-`sim-engine` supplies deterministic event ordering. Native replay does not
-execute the original CUDA program again.
+`sim-trace` reads trace evidence; `sim-sm` handles warp scheduling,
+dependencies, barriers, and asynchronous operations; `sim-mem` models cache
+and memory service; and `sim-engine` supplies deterministic event ordering.
+Native replay does not execute the original CUDA program again.
 
-Native architecture cards select supported geometry/timing. Direct and prepared
-replay consume the carded scheduler-resource blocks. Resource-less legacy
-trace input has an explicit compatibility path; partial blocks reject. An
-optional scalar/profile override changes issue width, labels it hypothetical,
-and disables independent dual-issue widening. It cannot alter traced semantics.
+Architecture cards select the supported geometry and timing assumptions.
+Direct and prepared replay consume the card's scheduler-resource blocks.
+Resource-less legacy trace input has an explicit compatibility path; partial
+blocks are rejected. An optional scalar/profile override changes issue width,
+is labeled hypothetical, and cannot alter traced semantics.
 
 Package `sim-run` (`sim/direct_run`) provides the direct CLI and `sim_direct_run`
 library, including the native metric emitter. NCU joins add observations after
@@ -47,9 +47,12 @@ The separate `simt_its_v1` executor demonstrates per-lane control flow and
 reconvergence without a timing backend. Neither custom frontend promises
 arbitrary binary/ABI compatibility, vendor-equivalent timing, or RTL behavior.
 
-## Observation-only extensions
+## Counter attribution and locality analysis
 
 `sim/direct_run/src/metrics.rs` produces versioned native metrics after replay;
-completion scenarios do not add events. `sim/sm/src/metrics.rs` selects candidate
-pipe labels in extraction order, not issue order. The separate ITS dynamic JSON
-trace is not input to `sim-trace`. See [diagnostic contract](experimental_diagnostics.md).
+counter-attribution reports do not add timing events. The locality observers in
+`sim/sm/src/metrics.rs` operate over declared trace order and remain separate
+from the live cache and timing models. The separate ITS dynamic JSON trace is
+not input to `sim-trace`. See
+[diagnostic contract](experimental_diagnostics.md) and
+[terminology](TERMINOLOGY.md).

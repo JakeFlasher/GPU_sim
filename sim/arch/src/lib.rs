@@ -145,7 +145,7 @@ impl ArchId {
 
     /// SM86 GPC-observation envelope measured with an unscored control sweep.
     /// This is a separate front-end observation boundary, not a replacement
-    /// for the physical SM/event frontier and not the scored-workload timing
+    /// for the physical SM/event timestamp bound and not the scored-workload timing
     /// crosswalk.  The grid term captures the small dispatch/startup increase
     /// observed as the block population grows; unsupported architectures keep
     /// the capability as an explicit research gap.
@@ -170,7 +170,7 @@ impl ArchId {
     /// launch/activation and sampler interval that is present in
     /// `sm__cycles_active.max` but is not part of an SM-local issue/event
     /// lower bound.  It is emitted as a separate physical-observation
-    /// frontier; callers must retain the unadjusted lower bound alongside it.
+    /// timestamp bound; callers must retain the unadjusted lower bound alongside it.
     pub const fn sm_active_observation_envelope(self) -> Capability<SmActiveObservationEnvelope> {
         match self {
             Self::Sm86 => Capability::available(
@@ -512,7 +512,7 @@ impl ArchId {
 
     /// Bank-local arbitration between exact fixed-latency results and scalar
     /// L1TEX load results. The completion and visibility offsets are separate:
-    /// the compiler-visible dependence frontier trails the physical load
+    /// the compiler-visible dependence timestamp trails the physical load
     /// writeback. A same-cycle HADD2 completion has priority and defers the load
     /// result by one cycle.
     pub const fn fixed_l1tex_writeback_priority(self) -> Capability<FixedL1TexWritebackPriority> {
@@ -978,7 +978,7 @@ pub struct L1WriteLookupWindow {
 
 /// Architecture-local approximation of the front-end/semaphore boundary that
 /// separates NCU's GPC elapsed-cycle observation from an SM-local modeled
-/// event frontier.  It is deliberately exposed as a diagnostic component so
+/// event timestamp bound. It is deliberately exposed as a diagnostic component so
 /// callers can retain the unadjusted lower bound alongside it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GpcObservationEnvelope {
@@ -987,7 +987,7 @@ pub struct GpcObservationEnvelope {
 }
 
 /// Fixed SM-clock observation boundary used to expose a physical active-cycle
-/// frontier without rewriting the simulator's raw issue/event lower bounds.
+/// timestamp bound without rewriting the simulator's raw issue/event lower bounds.
 /// The value is a protocol-specific architecture capability, not an NCU target
 /// and not a workload correction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

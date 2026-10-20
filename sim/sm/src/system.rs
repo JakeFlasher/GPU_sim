@@ -70,16 +70,16 @@ use std::rc::Rc;
 /// by the gate's event-vs-constant differential, seed 133).
 /// A `BTreeMap<bound, count>` rather than a heap because entries leave
 /// in L2Access-processing order, which is not bound order.
-struct UnpricedBounds(Vec<BTreeMap<u64, u32>>);
+struct PendingBounds(Vec<BTreeMap<u64, u32>>);
 
 #[derive(Debug, Clone, Copy)]
-enum UnpricedRemoval {
+enum PendingRemoval {
     Decrement { sm: usize, bound: u64, next: u32 },
     Remove { sm: usize, bound: u64 },
 }
 
-impl UnpricedRemoval {
-    fn commit(self, bounds: &mut UnpricedBounds) {
+impl PendingRemoval {
+    fn commit(self, bounds: &mut PendingBounds) {
         match self {
             Self::Decrement { sm, bound, next } => {
                 bounds.0[sm].insert(bound, next);
@@ -91,7 +91,7 @@ impl UnpricedRemoval {
     }
 }
 
-impl UnpricedBounds {
+impl PendingBounds {
     fn insert(&mut self, sm: usize, bound: u64) -> Result<(), SystemError> {
         let next = self.0[sm]
             .get(&bound)
@@ -99,21 +99,21 @@ impl UnpricedBounds {
             .unwrap_or(0)
             .checked_add(1)
             .ok_or(SystemError::CounterOverflow {
-                counter: "unpriced response-bound multiplicity",
+                counter: "pending response-bound multiplicity",
             })?;
         self.0[sm].insert(bound, next);
         Ok(())
     }
 
-    fn prepare_remove(&self, sm: usize, bound: u64) -> Result<UnpricedRemoval, SystemError> {
+    fn prepare_remove(&self, sm: usize, bound: u64) -> Result<PendingRemoval, SystemError> {
         match self.0[sm].get(&bound).copied() {
-            Some(n) if n > 1 => Ok(UnpricedRemoval::Decrement {
+            Some(n) if n > 1 => Ok(PendingRemoval::Decrement {
                 sm,
                 bound,
                 next: n - 1,
             }),
-            Some(_) => Ok(UnpricedRemoval::Remove { sm, bound }),
-            None => Err(SystemError::UnpricedBoundMissing { sm, bound }),
+            Some(_) => Ok(PendingRemoval::Remove { sm, bound }),
+            None => Err(SystemError::PendingBoundMissing { sm, bound }),
         }
     }
 
@@ -1017,8 +1017,8 @@ pub enum SystemError {
     WakeDueNotDrained { entries: usize },
     #[error("event queue drained with {entries} pending L1 payload-admission due-time entries")]
     PayloadAdmissionDueNotDrained { entries: usize },
-    #[error("event queue drained with {entries} unpriced response-bound entries")]
-    UnpricedBoundsNotDrained { entries: usize },
+    #[error("event queue drained with {entries} pending response-bound entries")]
+    PendingBoundsNotDrained { entries: usize },
     #[error("event queue drained with sm {sm_id} still owning {outstanding} response(s)")]
     ResponseNotDrained { sm_id: i32, outstanding: usize },
     #[error(
@@ -1029,8 +1029,8 @@ pub enum SystemError {
         has_token: bool,
         has_ready: bool,
     },
-    #[error("unpriced response bound {bound} for SM index {sm} is absent")]
-    UnpricedBoundMissing { sm: usize, bound: u64 },
+    #[error("pending response bound {bound} for SM index {sm} is absent")]
+    PendingBoundMissing { sm: usize, bound: u64 },
     #[error("response ready time {ready} precedes lower bound {bound} for SM index {sm}")]
     ResponseBeforeBound { sm: usize, ready: u64, bound: u64 },
     #[error(
@@ -2547,7 +2547,7 @@ struct L2ResponseCommit {
     origin_ix: usize,
     next_delayed: u64,
     next_origin_delayed: u64,
-    unpriced_removal: UnpricedRemoval,
+    pending_bounds_removal: PendingRemoval,
 }
 
 #[derive(Debug, Clone)]
@@ -3911,7 +3911,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
     // would bounce off each other's wake events forever.)
     let mut response_due = DueTimes::new(cores.len());
     // Opt-in STORE/RED completions are self-affecting external events: a
-    // matching MEMBAR remains unpriced until the event is processed, and the
+    // matching MEMBAR remains pending until the event is processed, and the
     // actor must not run past the earliest pending acknowledgement.
     let mut write_ack_due = DueTimes::new(cores.len());
     // Pending wake times PER SM, deduplicating at the source: a wake is
@@ -3927,7 +3927,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
     // keep their due frontier separate from responses, write acknowledgements,
     // and ordinary wakes so an actor cannot run past the mutation.
     let mut payload_due = DueTimes::new(cores.len());
-    let mut unpriced = UnpricedBounds((0..cores.len()).map(|_| BTreeMap::new()).collect());
+    let mut pending_bounds = PendingBounds((0..cores.len()).map(|_| BTreeMap::new()).collect());
     let mut pending_l2_ready = PendingL2Ready::default();
     let mut l2_by_source = L2SourceSplit::for_arch(arch);
     let mut dram_server = DramServer::new(dram);
@@ -4031,8 +4031,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
     // Remember whether the line tag was present before the first request at
     // one (SM, issue-cycle, line) boundary so later sectors cannot self-credit
     // as write-tag hits on a cold coalesced instruction.
-    let mut store_packet_line_tag_state: BTreeMap<(usize, u64, i64), bool> =
-        BTreeMap::new();
+    let mut store_packet_line_tag_state: BTreeMap<(usize, u64, i64), bool> = BTreeMap::new();
     let mut store_packet_candidate_sectors = 0_u64;
     let mut staged_l2 = l2.try_snapshot()?;
     while let Some(ev) = queue.pop()? {
@@ -4136,7 +4135,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                         &mut response_due,
                         &mut write_ack_due,
                         &mut wake_due,
-                        &mut unpriced,
+                        &mut pending_bounds,
                         &payload_due,
                         batch_replyless_writes,
                         &mut scratch,
@@ -4171,7 +4170,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                     &mut response_due,
                     &mut write_ack_due,
                     &mut wake_due,
-                    &mut unpriced,
+                    &mut pending_bounds,
                     &payload_due,
                     batch_replyless_writes,
                     &mut scratch,
@@ -4228,9 +4227,9 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                             reply: req.reply,
                         });
                     }
-                    let feedback_unpriced_removal =
+                    let feedback_pending_bounds_removal =
                         feedback_prices_request(memory_admission_feedback, req)
-                            .then(|| unpriced.prepare_remove(sm_ix, req.issue_time))
+                            .then(|| pending_bounds.prepare_remove(sm_ix, req.issue_time))
                             .transpose()?;
                     // Prepare the exact ascending mask walk against a private copy
                     // of its set. The callback completes every fallible timing and
@@ -4334,45 +4333,37 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                             } else {
                                 0
                             };
-                            let store_packet_resident_lookup_hits =
-                                if store_packet_group.is_some() {
-                                    let packet_sector_mask = store_packet_keys
-                                        .iter()
-                                        .fold(0_u8, |mask, &(_, _, sector)| {
-                                            mask | (1_u8 << sector)
-                                        });
-                                    u64::from(
-                                        (preview.lookup.present_mask & packet_sector_mask)
-                                            .count_ones(),
-                                    )
-                                } else {
-                                    0
+                            let store_packet_resident_lookup_hits = if store_packet_group.is_some()
+                            {
+                                let packet_sector_mask = store_packet_keys
+                                    .iter()
+                                    .fold(0_u8, |mask, &(_, _, sector)| mask | (1_u8 << sector));
+                                u64::from(
+                                    (preview.lookup.present_mask & packet_sector_mask).count_ones(),
+                                )
+                            } else {
+                                0
+                            };
+                            let store_packet_lookup_hits = if let Some(group) = store_packet_group {
+                                let tag_was_present = store_packet_line_tag_state.get(&group);
+                                let hit_mask = match tag_was_present {
+                                    Some(true) => {
+                                        preview.lookup.present_mask
+                                            | preview.lookup.pre_packet_write_tag_hit_mask
+                                    }
+                                    Some(false) => 0,
+                                    None => {
+                                        preview.lookup.present_mask
+                                            | preview.lookup.pre_packet_write_tag_hit_mask
+                                    }
                                 };
-                            let store_packet_lookup_hits =
-                                if let Some(group) = store_packet_group {
-                                    let tag_was_present = store_packet_line_tag_state.get(&group);
-                                    let hit_mask = match tag_was_present {
-                                        Some(true) => {
-                                            preview.lookup.present_mask
-                                                | preview.lookup.pre_packet_write_tag_hit_mask
-                                        },
-                                        Some(false) => 0,
-                                        None => {
-                                            preview.lookup.present_mask
-                                                | preview.lookup.pre_packet_write_tag_hit_mask
-                                        }
-                                    };
-                                    store_packet_tag_was_present = Some(
-                                        store_packet_line_tag_state
-                                            .get(&group)
-                                            .copied()
-                                            .unwrap_or(
-                                                preview.lookup.present_mask != 0
-                                                    || preview.lookup.pre_packet_write_tag_hit_mask
-                                                        != 0,
-                                            ),
-                                    );
-                                    u64::from((hit_mask & req.sector_mask).count_ones())
+                                store_packet_tag_was_present = Some(
+                                    store_packet_line_tag_state.get(&group).copied().unwrap_or(
+                                        preview.lookup.present_mask != 0
+                                            || preview.lookup.pre_packet_write_tag_hit_mask != 0,
+                                    ),
+                                );
+                                u64::from((hit_mask & req.sector_mask).count_ones())
                             } else {
                                 0
                             };
@@ -4669,11 +4660,12 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                             let response = if req.reply != ReplyTo::None {
                                 let response_origin_ix = req.origin.index();
                                 let bound = checked_cycle_add(
-                                    "unpriced L2-hit response bound",
+                                    "pending L2-hit response bound",
                                     req.issue_time,
                                     params.l1_miss_latency,
                                 )?;
-                                let unpriced_removal = unpriced.prepare_remove(sm_ix, bound)?;
+                                let pending_bounds_removal =
+                                    pending_bounds.prepare_remove(sm_ix, bound)?;
                                 let latency_ready = bound
                                     .max(fetch_latency_ready.unwrap_or(0))
                                     .max(merged_ready.unwrap_or(0))
@@ -4713,7 +4705,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                                     origin_ix: response_origin_ix,
                                     next_delayed,
                                     next_origin_delayed,
-                                    unpriced_removal,
+                                    pending_bounds_removal,
                                 })
                             } else {
                                 None
@@ -5241,10 +5233,10 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                             req.reply.response_id().map(|id| id.boundary_identity()),
                             commit.response_l2_allocation_generation,
                         )?;
-                        response.unpriced_removal.commit(&mut unpriced);
+                        response.pending_bounds_removal.commit(&mut pending_bounds);
                     }
-                    if let Some(removal) = feedback_unpriced_removal {
-                        removal.commit(&mut unpriced);
+                    if let Some(removal) = feedback_pending_bounds_removal {
+                        removal.commit(&mut pending_bounds);
                     }
                     spin.on_progress_event(ev.time);
                     Ok(())
@@ -5331,7 +5323,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                     sm_ix,
                     plan,
                     &mut queue,
-                    &mut unpriced,
+                    &mut pending_bounds,
                     &wake_due,
                     &sm_ids,
                     cores.len(),
@@ -5392,15 +5384,15 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                 }
                 for &target_ix in &affected {
                     let bound = plan.service_done_cycle();
-                    match unpriced.0[target_ix].get(&bound).copied() {
+                    match pending_bounds.0[target_ix].get(&bound).copied() {
                         Some(1) => {
-                            unpriced.0[target_ix].remove(&bound);
+                            pending_bounds.0[target_ix].remove(&bound);
                         }
                         Some(count) => {
-                            unpriced.0[target_ix].insert(bound, count - 1);
+                            pending_bounds.0[target_ix].insert(bound, count - 1);
                         }
                         None => {
-                            return Err(SystemError::UnpricedBoundMissing {
+                            return Err(SystemError::PendingBoundMissing {
                                 sm: target_ix,
                                 bound,
                             });
@@ -5415,7 +5407,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                         &mut response_due,
                         &mut write_ack_due,
                         &mut wake_due,
-                        &mut unpriced,
+                        &mut pending_bounds,
                         &payload_due,
                         batch_replyless_writes,
                         &mut scratch,
@@ -5440,7 +5432,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                     &mut response_due,
                     &mut write_ack_due,
                     &mut wake_due,
-                    &mut unpriced,
+                    &mut pending_bounds,
                     &payload_due,
                     batch_replyless_writes,
                     &mut scratch,
@@ -5479,7 +5471,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                     sm_ix,
                     ev.target,
                     &mut queue,
-                    &mut unpriced,
+                    &mut pending_bounds,
                     &mut scratch,
                     params.l1_miss_latency,
                     batch_replyless_writes,
@@ -5492,7 +5484,7 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
                     &mut response_due,
                     &mut write_ack_due,
                     &mut wake_due,
-                    &mut unpriced,
+                    &mut pending_bounds,
                     &payload_due,
                     batch_replyless_writes,
                     &mut scratch,
@@ -5689,9 +5681,9 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
             entries: payload_due.pending_entries(),
         });
     }
-    if !unpriced.is_empty() {
-        return Err(SystemError::UnpricedBoundsNotDrained {
-            entries: unpriced.pending_entries(),
+    if !pending_bounds.is_empty() {
+        return Err(SystemError::PendingBoundsNotDrained {
+            entries: pending_bounds.pending_entries(),
         });
     }
     if observe_admission_groups {
@@ -5870,8 +5862,8 @@ pub(crate) fn simulate_kernel_shared_with_residency_and_candidates_with_coherenc
     Ok(result)
 }
 
-fn replay_horizon(response: Option<u64>, unpriced: Option<u64>) -> ReplayHorizon {
-    match (response, unpriced) {
+fn replay_horizon(response: Option<u64>, pending_bounds: Option<u64>) -> ReplayHorizon {
+    match (response, pending_bounds) {
         (Some(left), Some(right)) => ReplayHorizon::Bounded(left.min(right)),
         (Some(bound), None) | (None, Some(bound)) => ReplayHorizon::Bounded(bound),
         (None, None) => ReplayHorizon::Unbounded,
@@ -5899,7 +5891,7 @@ fn schedule_emitted_requests(
     sm: usize,
     target: TargetId,
     queue: &mut EventQueue<Ev>,
-    unpriced: &mut UnpricedBounds,
+    pending_bounds: &mut PendingBounds,
     scratch: &mut Vec<MemRequest>,
     l2_hit_latency: u64,
     batch_replyless_writes: bool,
@@ -5919,7 +5911,7 @@ fn schedule_emitted_requests(
             if end - index > 1 {
                 for batched in &scratch[index..end] {
                     if feedback_prices_request(memory_admission_feedback, *batched) {
-                        unpriced.insert(sm, batched.issue_time)?;
+                        pending_bounds.insert(sm, batched.issue_time)?;
                     }
                 }
                 let requests = end - index;
@@ -5941,20 +5933,20 @@ fn schedule_emitted_requests(
         }
         if request.reply != ReplyTo::None {
             let bound = checked_cycle_add(
-                "unpriced L2-hit response bound",
+                "pending L2-hit response bound",
                 request.issue_time,
                 l2_hit_latency,
             )?;
-            unpriced.insert(sm, bound)?;
+            pending_bounds.insert(sm, bound)?;
         }
         // A timing-active write candidate cannot be priced until this future
         // L2 access is processed.  The memory issue pipeline may emit the
         // request several cycles ahead of the actor clock, so retain that
-        // access timestamp as a self-affecting bound just like an unpriced
+        // access timestamp as a self-affecting bound just like an pending_bounds
         // read response.  Otherwise an unrelated wake can let the SM run past
         // the event that releases its feedback queue or schedules its ack.
         if feedback_prices_request(memory_admission_feedback, request) {
-            unpriced.insert(sm, request.issue_time)?;
+            pending_bounds.insert(sm, request.issue_time)?;
         }
         queue.schedule_at(request.issue_time, target, Ev::L2Access(request))?;
         index += 1;
@@ -6073,7 +6065,7 @@ fn run_sm(
     response_due: &mut DueTimes,
     write_ack_due: &mut DueTimes,
     wake_due: &mut DueTimes,
-    unpriced: &mut UnpricedBounds,
+    pending_bounds: &mut PendingBounds,
     payload_due: &DueTimes,
     batch_replyless_writes: bool,
     scratch: &mut Vec<MemRequest>,
@@ -6086,9 +6078,9 @@ fn run_sm(
     memory_admission_feedback: Option<MemoryAdmissionCandidate>,
 ) -> Result<bool, SystemError> {
     scratch.clear();
-    let write_or_unpriced = [
+    let write_or_pending_bounds = [
         write_ack_due.next(ix),
-        unpriced.min(ix),
+        pending_bounds.min(ix),
         payload_due.next(ix),
     ]
     .into_iter()
@@ -6104,7 +6096,7 @@ fn run_sm(
         l1_fill_visibility_observations,
         cores.len(),
     )?;
-    let actor_horizon = replay_horizon(response_due.next(ix), write_or_unpriced);
+    let actor_horizon = replay_horizon(response_due.next(ix), write_or_pending_bounds);
     // The opt-in visibility protocol cannot safely run an actor past an
     // already queued cross-SM invalidation/fill event: its trace-local cache
     // state was generated before that event and cannot be retracted.  Keep
@@ -6142,7 +6134,7 @@ fn run_sm(
         ix,
         TargetId(target),
         queue,
-        unpriced,
+        pending_bounds,
         scratch,
         l2_hit_latency,
         batch_replyless_writes,
@@ -6222,7 +6214,7 @@ fn schedule_l1_visibility_completion(
     ix: usize,
     plan: L1VisibilityPlan,
     queue: &mut EventQueue<Ev>,
-    unpriced: &mut UnpricedBounds,
+    pending_bounds: &mut PendingBounds,
     wake_due: &DueTimes,
     sm_ids: &[i32],
     actor_count: usize,
@@ -6252,7 +6244,7 @@ fn schedule_l1_visibility_completion(
         Ev::L1VisibilityComplete { plan: plan.clone() },
     )?;
     for target_ix in affected {
-        unpriced.insert(target_ix, plan.service_done_cycle())?;
+        pending_bounds.insert(target_ix, plan.service_done_cycle())?;
         if wake_due
             .next(target_ix)
             .is_some_and(|time| time <= plan.service_done_cycle())

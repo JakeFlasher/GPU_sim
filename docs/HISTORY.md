@@ -1,102 +1,56 @@
-# Merge history
+# Project History
 
-The repository combines the SM86/RTX 3090 Ti lane and the SM120/RTX 5090
-lane from the read-only source checkout. The merge keeps one Rust trace → SM →
-memory → event-engine → direct-run pipeline and selects architecture-specific
-behavior from the card and validated capture metadata.
+This file records architectural changes and accepted evidence. It is not an
+execution procedure; current commands and boundaries are in `CONTRACT.md`,
+`REPLAY.md`, and `STATUS.md`.
 
-## Resolved merge drifts
+## Repository merge
 
-The full-corpus loop exposed and fixed six non-random differences:
+The repository combines the SM86/RTX 3090 Ti and SM120/RTX 5090 lanes in one
+card-selected Rust replay path:
 
-1. SM86 L1 lookup projection was incorrectly reused for SM120.
-2. SM86 store lookup accounting was incorrectly reused for SM120.
-3. Shared bank-wavefront totals were incremented twice after aggregation.
-4. The SM120 extended branch list was incorrectly applied to SM86.
-5. SM86 received SM120 global-load scope and phase-local shared corrections.
-6. SM120 and SM86 shared-wavefront projections were separated explicitly.
+```text
+trace + sidecars -> sim-trace -> sim-sm/sim-mem/sim-engine -> sim-run
+```
 
-The final three-campaign comparison is recorded in `docs/RESULTS.md` and the
-machine-readable `FULL_NUMERIC_COMPARISON.json`.
+The merge separated architecture-specific L1/L2 attribution, shared-memory
+wavefront accounting, opcode scope, and candidate documents. Complete replays
+use the integrated `l1-l2` path, compressed JSONL, and twelve workers.
 
-The adversarial review also made the verification surface fail closed: the
-runner strips inherited `SIM_*` behavior overrides, enforces complete-corpus
-status counts, rejects architecture-free candidate lanes on both public and
-direct replay paths, and refuses malformed/non-regular preferred sidecars.
-The comparator detects duplicate/missing IDs, missing status-specific schema
-fields, non-finite values, and baseline numeric fields dropped by a unified row.
+## Accepted simulator changes
 
-The final typed L2 client-scope observer is deliberately a report-only seam.
-Its refinement tags write/atomic/reduction and async-bypass requests where
-their static request kind is known, while preserving `Unknown` for
-unqualified bypasses. The twelve-worker full replay comparison records no
-SM86 common numeric differences and only the already-approved SM120 async-L1
-projection differences; no physical hierarchy, DRAM, or timing path was
-changed.
+The following changes were accepted only after full-corpus comparison:
 
-The 2026-10-19 Blackwell deep-research review is recorded in
-[`BLACKWELL_RESEARCH.md`](BLACKWELL_RESEARCH.md). It confirms that the TMA
-sidecars already contain decoded descriptor/coordinate/address evidence, but
-adjudicates all proposed new active projections against full-corpus results:
-TMA-shadow DRAM substitution, unconditional write hits, LTC128B promotion,
-default 96-slice/carveout changes, and post-hoc IPC scaling remain rejected or
-experiment-only. The validated replay state is unchanged.
+1. architecture-specific L1 and store lookup attribution;
+2. exact pending-sector and already-requested merge accounting;
+3. sub-warp shared-memory wavefront aggregation;
+4. per-SM SM86 write-tag observation;
+5. SM120 write-tag and `GlobalUntagged` operation attribution;
+6. pre-packet L2 write-tag accounting and same-instruction store grouping;
+7. report-only sector-aware locality observers;
+8. the SM120 conditional store-packet interval for the mixed-client TEX-L2
+   endpoint.
 
-The subsequent SM86 native unified-L1 correction is the one accepted follow-up:
-it reuses the validated form-qualified global lookup endpoint, leaves SM120's
-alpha path unchanged, and reduced joined SM86 unified-L1 APE from 29.04% to
-12.15%. It does not yet satisfy the <10% objective.
+These observers preserve cache state, DRAM demand, issue timing, and
+completion timestamps unless a change is explicitly described as behavioral.
 
-The accepted follow-up after that correction fixes the observer topology rather
-than tuning a score: SM86 report-only write-tag state is now private per traced
-SM (256 sets × 2 slots), with explicit producer/consumer activation metadata
-and physical store-tag fallback when disabled. Complete twelve-worker replay
-preserved the 286/62/8 status profile and bit-identical IPC, L2, DRAM, and
-timing; unified-L1 mean APE moved 43.71%→24.66% overall, 12.15%→9.87% on
-exact joins, and 88.42%→45.61% on ordered fallback joins. A repeated full lane
-was numerically identical apart from wall-clock fields, and a fresh SM120
-339/339 DRAM-enabled lane was unchanged. The residual objective remains open.
+## Current release evidence
 
-The 2026-10-19 locality phase adds a report-only exact sector-aware MRC
-observer. A dynamic Fenwick/Mattson index computes line reuse distance per
-within-warp origin stream; same-tick batches are queried before insertion, and
-sector validity follows line-tag eviction rather than an independent sector
-recency. Full replay completed with twelve workers for SM120 (339/339,
-11,558 launches) and SM86 (286/62/8, 12,392 launches). The new invariant
-checker passed every launch, and the numeric comparator found zero common
-field differences against the accepted pre-MRC lanes. The MRC is scored only
-against its exact trace-locality reference; no universal NCU MRC claim is
-made.
+The current closure artifacts are:
 
-Gemini's follow-up same-tick review required an interval envelope rather than
-an implicit address-order tie-break. The observer now emits batch-first lower
-and conservative upper line/sector MRC curves, including the line-tag versus
-resident-fill decomposition at both endpoints. The final envelope2 corpora
-passed all MRC invariants and preserved every existing common numeric field.
+- SM120: `full_replay_runs/cache_locality_m7closure_sm120/`
+  (339 captures, 11,558 launches, all `ok`);
+- SM86: `full_replay_runs/cache_locality_m7closure_sm86/`
+  (286 `ok`, 62 `control_error`, 8 `replay_error`, 12,392 launches).
 
-The final adversarial code review rechecked Fenwick resizing, batch-history
-lifetime, same-tick envelope bounds, sector decomposition, deterministic
-ordering, and the intervening-line eviction case. A regression test now
-covers a reused sector after two intervening lines; all seven `sim-sm` tests
-and the complete workspace test suite pass.
+The cache-locality plan is closed under the project's effective-model
+criterion. The final point and interval metrics, join populations, and known
+scope limitations are in `RESULTS.md` and `RESIDUAL_FRONTIER.md`.
 
-## Repository cleanup
+## Historical experiments
 
-The active tree no longer treats branch-specific plans, H/S milestone diaries,
-generated patch bundles, transient profiler dumps, or copied replay outputs as
-execution instructions. Those artifacts remain recoverable through Git history
-when historical archaeology is needed. Current behavior is documented only by
-the contract, architecture, replay, results, and session-memory files linked
-from [`README.md`](../README.md).
-
-## Cache-locality plan execution (2026-10-19)
-
-The cache-locality plan was executed through final 12-worker full replay. L1
-pending-merge classes, SM120 write-tag observation, generic-store operation
-attribution, L2 pre-packet store tags, HOTL finite-boundary evidence, and
-Class-B conditional shadow schemas were added as report-only seams. Final
-corpora passed status and exact-MRC invariants with no physical hierarchy or
-timing regression. The interval HOTL WAPE gate remains open because reuse
-interval lacks reuse distance/cross-warp order; the residual and the four
-ordered-fallback zero-target L1 rows are recorded in
-`docs/CACHE_LOCALITY_EXECUTION_REPORT.md` rather than hidden by fitting.
+Rejected alternatives—including TMA-shadow DRAM substitution, pure-LTC
+promotion, large-store packet suppression, and NCU-derived count balancing—
+remain in Git history and dated research notes. They are not active model
+behavior and must not be revived without a new mechanism and a complete
+regression study.

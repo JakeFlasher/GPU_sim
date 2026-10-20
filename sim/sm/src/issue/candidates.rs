@@ -1192,7 +1192,7 @@ impl MemoryAdmissionFeedbackState {
         if !self.candidate.membar_waits_for_service_completion || !is_gpu_membar_issue(slot) {
             return Some(0);
         }
-        if self.has_unpriced_for_warp(warp)
+        if self.has_pending_bounds_for_warp(warp)
             || self.warp_pending_write_acks.get(warp).copied().unwrap_or(0) != 0
         {
             return None;
@@ -1201,10 +1201,10 @@ impl MemoryAdmissionFeedbackState {
     }
 
     /// Earliest timestamp at which a terminal EXIT may issue. `None` means
-    /// that this warp still owns an unpriced store admission or a pending
+    /// that this warp still owns a pending store admission or a pending
     /// acknowledgement; the shared event loop will wake the SM when the
     /// typed acknowledgement is processed. No DRAM, dirty-writeback, or
-    /// coherence frontier is invented by this arm.
+    /// coherence timestamp is invented by this arm.
     pub(super) fn exit_ready_at(
         &self,
         warp: usize,
@@ -1218,7 +1218,7 @@ impl MemoryAdmissionFeedbackState {
         {
             return Some(0);
         }
-        if self.has_unpriced_for_warp(warp) {
+        if self.has_pending_bounds_for_warp(warp) {
             return None;
         }
         if self.candidate.exit_waits_for_service_completion
@@ -1720,14 +1720,14 @@ impl MemoryAdmissionFeedbackState {
         Ok(())
     }
 
-    pub(super) fn has_unpriced(&self) -> bool {
+    pub(super) fn has_pending_bounds(&self) -> bool {
         self.queues
             .iter()
             .flatten()
             .any(|entry| entry.release_at.is_none())
     }
 
-    pub(super) fn has_unpriced_for_warp(&self, warp: usize) -> bool {
+    pub(super) fn has_pending_bounds_for_warp(&self, warp: usize) -> bool {
         let warp = u32::try_from(warp).ok();
         self.queues
             .iter()

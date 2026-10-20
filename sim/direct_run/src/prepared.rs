@@ -98,7 +98,7 @@ impl PreparedReplay {
         if config.fast_frontier_only {
             return Err(RunError::new(
                 "prepared replay",
-                "prepared replay executes full timing; use the direct fast-frontier path instead",
+                "prepared replay executes full timing; use the direct core-only diagnostic path instead",
             ));
         }
         let arch_card = load_arch_card(&config.arch_card)?;

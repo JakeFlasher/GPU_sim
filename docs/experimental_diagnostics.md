@@ -5,7 +5,8 @@
 The native path consumes real NVBit traces, static control sidecars, and typed
 async observations. It reports issue/readiness, dependency, memory, async,
 launch, and replay-process counters without inventing unobserved hardware events.
-Full replay is primary; the fast frontier is a complementary diagnostic.
+Full replay is primary; the core-only fixed-latency mode is a complementary
+diagnostic.
 
 Optional Rust seams expose carded L1/L2/DRAM service, resident-L1 visibility,
 TMA/LDGSTS payload and barrier semantics, and bounded functional SIMT programs.
@@ -14,7 +15,8 @@ unsupported inputs fail closed in production code.
 
 Keep these timing domains separate:
 
-1. model cycles and frontiers under the declared architecture card;
+1. model cycles and named completion timestamps under the declared architecture
+   card;
 2. replay-process wall time (host parsing, scheduling, and serialization);
 3. uninstrumented CUDA-event time for the same launch scope;
 4. independent NCU duration and counters.

@@ -11943,7 +11943,7 @@ impl<'a> SmCore<'a> {
                         .memory_admission_feedback
                         .as_ref()
                         .is_some_and(|state| {
-                            state.has_unpriced() || state.has_pending_write_acks()
+                            state.has_pending_bounds() || state.has_pending_write_acks()
                         }) =>
                 {
                     if let Some(bound) = horizon.bounded_time() {

@@ -158,7 +158,7 @@ fn add_count_row_u128(
 ///   producer crosswalk exists.
 ///
 /// The rule uses no NCU values and does not touch L1/L2 state, MSHR ownership,
-/// DRAM demand, or any frontier.  `None` means that the baseline remains the
+/// DRAM demand, or any timing timestamp. `None` means that the baseline remains the
 /// selected endpoint.
 fn sm86_form_qualified_lookup_hits(
     trace: &TraceMetrics,

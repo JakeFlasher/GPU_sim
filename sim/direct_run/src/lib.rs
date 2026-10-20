@@ -195,8 +195,9 @@ pub struct RunConfig {
     /// Include the registry-bound simulator projections used for NCU joins.
     /// Always enabled for SM120 full replay; optional for compatibility targets.
     pub ncu_shaped_metrics: bool,
-    /// Run only the conservative trace-derived fast-frontier analyzer. This
-    /// skips native timing replay and emits no silicon timing claim.
+    /// Run only the conservative trace-derived core-only analyzer. This skips
+    /// native timing replay and emits no silicon timing claim. The historical
+    /// `fast_frontier_only` field name is retained for schema compatibility.
     pub fast_frontier_only: bool,
     /// Optional schema-1 bounded candidate document. Candidate evaluation is
     /// observational and available only for launch-scoped full-hierarchy replay.
@@ -224,7 +225,7 @@ pub struct RunConfig {
     /// Optional strict JSON event document (`native_l1_payload_events_v1`).
     /// This is mutually exclusive with the programmatic event vector.
     pub native_payload_events_path: Option<PathBuf>,
-    /// Emit the opt-in factorized route/class/frontier envelope. This is a
+    /// Emit the opt-in factorized route/class/timestamp envelope. This is a
     /// diagnostic contract and does not alter replay scheduling or scoring.
     pub latent_envelope: bool,
     /// Optional abstract service-rate profile used only by the opt-in
@@ -275,13 +276,13 @@ impl Default for Sm120EffectiveL2Config {
 
 impl RunConfig {
     /// Resolve the integrated SM120 model once, before dispatch and reporting.
-    /// Flat memory is only the separate fast-frontier representation; it must
+    /// Flat memory is only the separate core-only representation; it must
     /// never silently stand in for full SM120 replay.
     fn with_architecture_defaults(&self, arch: sim_arch::ArchId) -> Result<Self, RunError> {
         let mut config = self.clone();
         if !config.fast_frontier_only {
             // Full replay projections are part of the unified baseline for both
-            // architecture lanes. Fast frontier mode remains trace-only.
+            // architecture lanes. The core-only diagnostic remains trace-only.
             config.ncu_shaped_metrics = true;
         }
         if arch == sim_arch::ArchId::Sm120 {
@@ -290,7 +291,7 @@ impl RunConfig {
                 if config.memory_mode != MemoryMode::L1L2 {
                     return Err(RunError::new(
                         "arguments",
-                        "SM120 full replay requires --mode l1-l2; flat and l1-only full replay are forbidden (flat is fast-frontier-only)",
+                        "SM120 full replay requires --mode l1-l2; flat and l1-only full replay are forbidden (flat is core-only diagnostic)",
                     ));
                 }
                 config
@@ -3555,7 +3556,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
                 .get(&loc.kernel().function_unique_id)
                 .ok_or_else(|| {
                     RunError::new(
-                        "fast frontier",
+                        "core-only diagnostic",
                         format!(
                             "no schedule for function_unique_id {}",
                             loc.kernel().function_unique_id
@@ -3573,7 +3574,7 @@ pub fn run(config: &RunConfig) -> Result<RunReport, RunError> {
             } else {
                 sim_sm::fast_frontier_for_trace(&trace, &loc, schedule, &arch_card)
             }
-            .map_err(at("fast frontier"))?;
+            .map_err(at("core-only diagnostic"))?;
             fast_frontier.push(FastFrontierLaunchReport {
                 device_id: loc.device_id(),
                 stream_id: loc.stream_id(),

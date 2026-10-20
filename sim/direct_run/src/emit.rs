@@ -39,7 +39,8 @@ struct CounterSnapshot<'a> {
 impl<'a> CounterSnapshot<'a> {
     fn from_full_launch(result: &'a FullKernelReplayResult) -> Result<Self, EmitError> {
         // A binding cycle is a publication-facing timing value.  The replay
-        // can still expose its lower-bound and architecture-scoped frontiers
+        // can still expose lower-bound and architecture-scoped completion
+        // timestamps
         // diagnostically, but dirty writeback/coherence (or any other typed
         // tail) means the launch is not a complete timing observation.
         let binding_cycles = if result.unmodeled_tails().is_empty() {
@@ -187,7 +188,7 @@ pub enum MetricValue {
     /// An exact non-negative integer count within simulator scope. This does not
     /// assert that the value is exact relative to silicon.
     Exact(u64),
-    /// A binding-cycle value produced only by checked replay-frontier
+    /// A binding-cycle value produced only by checked completion-bound
     /// aggregation.
     BindingCycles(BindingCycles),
     /// A `[0, 1]` fraction. `value` is `None` iff `denominator == 0` (NCU
@@ -1058,7 +1059,7 @@ pub(crate) fn sm120_cctl_forwarding_exclusion(
 // ---- per-metric emit fns (the rate accounting, moved out of the counters) ----
 
 /// `gpc__cycles_elapsed.max` — mandatory publication-binding output. The
-/// counter snapshot carries only the checked launch-frontier aggregate.
+/// counter snapshot carries only the checked launch-completion aggregate.
 fn emit_exec_cycles_gpc_max(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitError> {
     match snap.binding_cycles {
         Some(value) => Ok(EmitOutcome::Predicted(MetricValue::BindingCycles(value))),
@@ -1068,11 +1069,12 @@ fn emit_exec_cycles_gpc_max(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitE
     }
 }
 
-/// Compose the publication binding cycle from the checked temporal frontiers.
-/// The launch-set rule is an explicit max over independent launch frontiers;
+/// Compose the publication binding cycle from checked temporal completion
+/// bounds. The launch-set rule is an explicit max over independent launch
+/// bounds;
 /// it never sums launches and never substitutes a wall-clock or hardware
 /// measurement.  A terminal event is a timestamp, so its elapsed-cycle
-/// contribution is `timestamp + 1`; completion frontiers are already cycle
+/// contribution is `timestamp + 1`; completion bounds are already cycle
 /// counts.
 fn aggregate_binding_cycles(
     diagnostics: &[FullLaunchTimingDiagnostic],

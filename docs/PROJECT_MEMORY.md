@@ -50,7 +50,7 @@ by using decoded store-packet identity and treating complete TMA-store payload
 sectors as cold misses; replay timing, cache state, and DRAM demand were not
 changed. This is a real full-replay improvement, but the <10% objective is not
 yet met because ordinary operation-read/client scope, unified-L1 scope, DRAM
-clients, and IPC frontiers remain unresolved.
+clients, and IPC completion timestamps remain unresolved.
 
 The current SM86 write-tag observer correction is per-SM rather than GPU-wide:
 each traced SM actor owns an independent 256-set/2-slot report-only table,

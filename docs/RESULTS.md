@@ -359,3 +359,18 @@ launches): operation-read L2 4.3416% APE / 2 FPs; Generic L2 8.5239% / 0;
 Unified L1 is 9.87% on exact identity joins (24.6597% across all 286 captures
 including unidentifiable carveout/ordered-fallback joins). HOTL WAPE is
 0.8767%/0.4462% (SM120 line/sector) and 1.0223%/0.5324% (SM86 line/sector).
+
+## Academic release refactor verification (2026-10-20)
+
+The terminology and comment refactor adopts standard architecture terms for
+footprint, lifetime, reuse distance, miss-ratio curves, CGGTY scheduling,
+hardware-counter attribution, conservative lookahead, effective models, and
+scope limitations. Machine-readable field names remain compatible where
+necessary.
+
+Fresh 12-worker full replays (`full_replay_runs/academic_release2_sm120/` and
+`academic_release2_sm86/`) pass the expected status profiles. Numeric comparison
+against the M7 closure artifacts reports zero missing/extra rows, zero metadata
+differences, and zero common numeric differences in both lanes. Therefore the
+release-language changes caused no performance, cache, DRAM, IPC, or timing
+regression.

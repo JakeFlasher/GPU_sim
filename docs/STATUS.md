@@ -16,14 +16,18 @@ dispositions are in [`RESULTS.md`](RESULTS.md).
 NCU data is joined after replay and never selects a model. SM86 controls and
 substitutes are not relabeled as SM120 features. Effective SM120 values are
 conditional scenarios, not proprietary topology recovery. Unsupported behavior
-remains a typed gap. Full replay must use `l1-l2`, compressed `.jsonl.zst`
-outputs, and twelve workers; the fast frontier is separate.
+remains an explicit scope limitation. Full replay must use `l1-l2`,
+compressed `.jsonl.zst` outputs, and twelve workers; core-only fixed-latency
+diagnostics are separate.
 
 ## Maintenance
 
 Build/test commands and the portable replay recipe are in the root
 [`README.md`](../README.md) and [`REPLAY.md`](REPLAY.md). This page is the
 current status contract; historical experiment notes are not execution policy.
+Public vocabulary and the release rewrite are maintained in
+[`TERMINOLOGY.md`](TERMINOLOGY.md) and
+[`ACADEMIC_RELEASE_PLAN.md`](ACADEMIC_RELEASE_PLAN.md).
 
 ## Cache-locality execution plan status (2026-10-19)
 
@@ -95,3 +99,17 @@ Gemini's Regime-B audit found 567/568 (99.82%) positive write-tag launches
 have NCU > 0; the one zero-target row is covered by `[0,16]`. The cold-store
 fallback was rejected for worsening corpus accuracy. No NCU fitting, workload
 exception, recapture, or additional replay was used.
+
+## Academic release terminology pass (2026-10-20)
+
+The simulator's human-facing terminology, metric definitions, history, and
+persistent continuation notes were rewritten using conventional computer
+architecture language. See `TERMINOLOGY.md`, `ACADEMIC_STYLE_REVIEW.md`, and
+`ACADEMIC_RELEASE_PLAN.md`.
+
+The refactor was verified with fresh full integrated replays using twelve
+workers: SM120 339/339 `ok` and 11,558 launches; SM86 286 `ok`, 62
+`control_error`, 8 `replay_error`, and 12,392 launches. Both reuse validators
+pass, and `compare_numeric_full.py` reports zero common numeric differences
+against the M7 closure artifacts. No performance metric or timing output
+changed.

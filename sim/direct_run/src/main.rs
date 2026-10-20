@@ -21,7 +21,7 @@ const USAGE: &str = "Usage: sim-run --trace DIR --control FILE --arch-card FILE 
 [--l1-resident-writeback] \
 [--hypothetical-issue-ports N] \
 [--architecture-spec FILE] \
-[--fast-frontier-only] \
+[--fast-frontier-only] (core-only diagnostic; compatibility flag) \
 [--sm120-effective-l1 CAPACITY:MSHR|none:HIT:MISS] \
 [--sm120-effective-l2 CAPACITY:SLICES:ASSOCIATIVITY] \
 [--latent-envelope] \
