@@ -94,3 +94,18 @@ closure artifacts with zero missing/extra rows, zero metadata differences, and
 zero common numeric differences. Both reuse validators reported zero errors.
 `FULL_NUMERIC_COMPARISON_REAL_MODULARIZATION.json` and
 `FULL_NCU_SUMMARY_REAL_MODULARIZATION.json` record the parity evidence.
+
+## Descriptive module hierarchy closure (2026-10-21)
+
+The remaining suffix-split and pass-through files were replaced with cohesive
+names: `l1/cache_state.rs` and `cache_ops.rs`, `system/event_loop.rs` and
+`event_helpers.rs`, `issue/request_types.rs` and `core_state.rs`, and named
+SM86 pipeline projection modules. Parent facades now declare direct children;
+there are no `_a.rs`, `_b.rs`, `part_*.rs`, or textual `include!` fragments.
+
+The release workspace passes direct per-file `rustfmt` and
+`RUSTFLAGS=-D warnings cargo check --workspace --all-targets`. Fresh 12-worker
+full `l1-l2` replays over 339 SM120 captures (11,558 launches) and 356 SM86
+captures (12,392 launches) match the retained closure artifacts with zero
+common numeric differences; reuse/MRC validation reports zero errors.
+The detailed parity record is `FULL_NUMERIC_COMPARISON_DESCRIPTIVE_REFACTOR.json`.

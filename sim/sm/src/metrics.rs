@@ -19,6 +19,4 @@ mod locality_mrc;
 #[path = "metrics/pipeline_activity.rs"]
 mod pipeline_activity;
 pub use self::locality_mrc::*;
-pub(crate) use self::locality_mrc::*;
 pub use self::pipeline_activity::*;
-pub(crate) use self::pipeline_activity::*;

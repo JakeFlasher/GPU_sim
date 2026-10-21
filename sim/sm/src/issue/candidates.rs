@@ -206,7 +206,7 @@ pub(super) struct MemoryServiceCandidateRuntime {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(super) struct MemoryServiceCandidateState {
+pub(crate) struct MemoryServiceCandidateState {
     count: u8,
     entries: Option<Box<[MemoryServiceCandidateRuntime; MAX_MEMORY_SERVICE_CANDIDATES]>>,
 }

@@ -113,15 +113,34 @@ mod fast_warp;
 mod placement;
 #[path = "replay/results.rs"]
 mod results;
-#[path = "replay/session.rs"]
-mod session;
+#[path = "replay/session_fast.rs"]
+mod session_fast;
+#[path = "replay/session_l2.rs"]
+mod session_l2;
+#[path = "replay/session_results.rs"]
+mod session_results;
+#[path = "replay/session_stream.rs"]
+mod session_stream;
 pub use self::coverage::*;
+#[allow(unused_imports)]
 pub(crate) use self::coverage::*;
-pub use self::fast_warp::*;
+#[allow(unused_imports)]
 pub(crate) use self::fast_warp::*;
 pub use self::placement::*;
+#[allow(unused_imports)]
 pub(crate) use self::placement::*;
 pub use self::results::*;
+#[allow(unused_imports)]
 pub(crate) use self::results::*;
-pub use self::session::*;
-pub(crate) use self::session::*;
+#[allow(unused_imports)]
+pub(crate) use self::session_fast::*;
+pub use self::session_fast::*;
+#[allow(unused_imports)]
+pub(crate) use self::session_l2::*;
+pub use self::session_l2::*;
+#[allow(unused_imports)]
+pub(crate) use self::session_results::*;
+pub use self::session_results::*;
+#[allow(unused_imports)]
+pub(crate) use self::session_stream::*;
+pub use self::session_stream::*;

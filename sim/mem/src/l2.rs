@@ -59,6 +59,4 @@ mod config_counters;
 #[path = "l2/core.rs"]
 mod core;
 pub use self::config_counters::*;
-pub(crate) use self::config_counters::*;
 pub use self::core::*;
-pub(crate) use self::core::*;

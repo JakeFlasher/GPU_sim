@@ -5,32 +5,32 @@ use super::*;
 impl<'a> Sm86MetricState<'a> {
     pub(crate) fn add_sm86_tail(&mut self) -> Result<(), RunError> {
         let result = self.result;
-        let external = self.external;
+        let _external = self.external;
         let card = self.card;
         let trace = result.trace_metrics();
         let sm_count = self.sm_count;
-        let active_sm_count = self.active_sm_count;
+        let _active_sm_count = self.active_sm_count;
         let clock = self.clock;
         let mut m = &mut self.metrics;
         let instructions = &trace.instructions;
         let inst = u128::from(instructions.warp_instructions);
-        let active: u128 = result
+        let _active: u128 = result
             .per_sm()
             .values()
             .map(|s| u128::from(s.activity.sm_active_cycles))
             .sum();
-        let warp_cycles: u128 = result
+        let _warp_cycles: u128 = result
             .per_sm()
             .values()
             .map(|s| s.activity.warp_active_cycles)
             .sum();
-        let smsp_cycles: u128 = result
+        let _smsp_cycles: u128 = result
             .per_sm()
             .values()
             .flat_map(|s| s.activity.smsp_active_cycles)
             .map(u128::from)
             .sum();
-        let issue_cycles: u128 = result
+        let _issue_cycles: u128 = result
             .per_sm()
             .values()
             .flat_map(|s| s.activity.issue_active_cycles_per_smsp)

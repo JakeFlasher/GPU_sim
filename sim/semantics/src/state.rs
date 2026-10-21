@@ -15,11 +15,11 @@ use crate::dram::{DramBoundaryState, DramStateError};
 mod cache_boundary;
 #[path = "state/core_boundary.rs"]
 mod core_boundary;
-#[path = "state/typed_events.rs"]
-mod typed_events;
+#[path = "state/typed_events_serialization.rs"]
+mod typed_events_serialization;
+#[path = "state/typed_events_validation.rs"]
+mod typed_events_validation;
 pub use self::cache_boundary::*;
-pub(crate) use self::cache_boundary::*;
 pub use self::core_boundary::*;
-pub(crate) use self::core_boundary::*;
-pub use self::typed_events::*;
-pub(crate) use self::typed_events::*;
+pub use self::typed_events_serialization::*;
+pub use self::typed_events_validation::*;

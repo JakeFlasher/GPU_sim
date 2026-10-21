@@ -38,21 +38,20 @@ mod compact;
 mod directory;
 #[path = "reader/error.rs"]
 mod error;
-#[path = "reader/preflight.rs"]
-mod preflight;
+#[path = "reader/preflight_access.rs"]
+mod preflight_access;
+#[path = "reader/preflight_allocation.rs"]
+mod preflight_allocation;
+#[path = "reader/preflight_validation.rs"]
+mod preflight_validation;
 #[path = "reader/sampling.rs"]
 mod sampling;
 #[path = "reader/snapshot.rs"]
 mod snapshot;
 pub use self::compact::*;
-pub(crate) use self::compact::*;
 pub use self::directory::*;
-pub(crate) use self::directory::*;
 pub use self::error::*;
-pub(crate) use self::error::*;
-pub use self::preflight::*;
-pub(crate) use self::preflight::*;
-pub use self::sampling::*;
-pub(crate) use self::sampling::*;
+pub use self::preflight_access::*;
+pub use self::preflight_allocation::*;
+pub use self::preflight_validation::*;
 pub use self::snapshot::*;
-pub(crate) use self::snapshot::*;

@@ -2,7 +2,7 @@
 
 use super::*;
 
-pub(super) struct WarpState<'a> {
+pub(crate) struct WarpState<'a> {
     pub(super) insts: &'a [ReplayInst],
     pub(super) sectors: &'a [i64],
     pub(super) async_copy_cohorts: Option<&'a AsyncCopyCohortReplay>,
@@ -71,7 +71,7 @@ pub(super) struct WarpState<'a> {
 /// observe a dependence barrier; cacheable asynchronous-copy sources also retain
 /// their open group while optionally preserving an ordinary barrier.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum FillTarget {
+pub(crate) enum FillTarget {
     Barrier(DepBarrier),
     AsyncCopy {
         group: AsyncCopyGroupId,
@@ -161,7 +161,7 @@ impl Waiters {
 /// State that EXISTS only in the shared-L2 mode — carrying it inside
 /// the [`MemModel`] variant makes a mispaired construction
 /// unrepresentable instead of an `expect()` deep in the memory step.
-pub(super) struct SharedL2State {
+pub(crate) struct SharedL2State {
     pub(super) l1: L1Cache,
     /// Monotonic tie-breaker for the per-SM visibility stream. Memory cycle
     /// timestamps alone cannot order equal-cycle fences and accesses.
@@ -226,7 +226,7 @@ impl SharedL2State {
 
 /// The typed memory model an [`SmCore`] runs under (the public
 /// [`SmMemMode`] resolved into owned state).
-pub(super) enum MemModel {
+pub(crate) enum MemModel {
     Flat,
     L1Const(L1Cache),
     L1Shared(SharedL2State),

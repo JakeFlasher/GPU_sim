@@ -57,9 +57,10 @@ use sim_trace::{AnchoredDir, ExecInfo, TraceDir, kernel_grid, strict_json_from_s
 
 #[path = "reports.rs"]
 mod reports;
-#[path = "runner.rs"]
-mod runner;
+#[path = "runner_config.rs"]
+mod runner_config;
+#[path = "runner_execute.rs"]
+mod runner_execute;
 pub use self::reports::*;
-pub(crate) use self::reports::*;
-pub use self::runner::*;
-pub(crate) use self::runner::*;
+pub use self::runner_config::*;
+pub use self::runner_execute::*;

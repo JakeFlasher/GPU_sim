@@ -3,7 +3,7 @@
 use super::*;
 
 #[derive(Debug, Clone)]
-pub(super) struct MemoryIssuePipelineState {
+pub(crate) struct MemoryIssuePipelineState {
     pub(super) config: MemoryIssuePipeline,
     pub(super) queue_release_times: [VecDeque<u64>; SUB_CORES],
     pub(super) local_completion_ready: [u64; SUB_CORES],
@@ -23,7 +23,7 @@ pub(super) struct MemoryIssuePipelineState {
 /// reproducible without silently changing the deployed lane.
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
-pub(super) struct ScalarExecutionPipelineState {
+pub(crate) struct ScalarExecutionPipelineState {
     pub(super) config: ScalarExecutionPipeline,
     pub(super) release_times: [VecDeque<u64>; SUB_CORES],
     pub(super) next_service: [u64; SUB_CORES],
@@ -252,7 +252,7 @@ impl MemoryIssuePipelineState {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) enum ReadinessCause {
+pub(crate) enum ReadinessCause {
     InstructionFrontEnd,
     DependenceCounterRead,
     DependenceCounterGlobalLoadOperandRead,
@@ -414,7 +414,7 @@ impl ReadinessCauseCycles {
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-pub(super) struct FixedRegisterReady {
+pub(crate) struct FixedRegisterReady {
     /// Data-register RAW readiness.
     pub(super) raw: u64,
     /// Predicate-register readiness is tracked independently of data RAW.

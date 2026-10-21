@@ -1,4 +1,4 @@
-//! L1 visibility and dirty flush completion; mutates only L1 flush state.
+//! L1 visibility, merge accounting, and dirty-flush operations; mutates cache state at event boundaries.
 
 use super::*;
 

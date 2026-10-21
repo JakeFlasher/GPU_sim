@@ -8,9 +8,9 @@ impl<'a> Sm86MetricState<'a> {
         let external = self.external;
         let card = self.card;
         let trace = result.trace_metrics();
-        let sm_count = self.sm_count;
-        let active_sm_count = self.active_sm_count;
-        let clock = self.clock;
+        let _sm_count = self.sm_count;
+        let _active_sm_count = self.active_sm_count;
+        let _clock = self.clock;
         let mut m = &mut self.metrics;
         let max_warps = result
             .per_sm()

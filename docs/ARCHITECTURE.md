@@ -26,11 +26,10 @@ not inferred from NCU values.
 * `reader/error.rs`, `snapshot.rs`, `compact.rs`, `sampling.rs`, and
   `directory.rs` hold validation, artifact snapshots, compact instruction and
   memory records, sampling provenance, and directory loading respectively.
-  `reader/preflight.rs` is a facade for the three preflight children
-  (`preflight_access.rs`, `preflight_allocation.rs`, and
-  `preflight_validation.rs`), which keep payload, allocation, and semantic
-  validation separate while retaining the existing `reader::preflight::*`
-  namespace.
+  `reader/preflight_access.rs`, `preflight_allocation.rs`, and
+  `preflight_validation.rs` are direct children of `reader`; they keep
+  payload, allocation, and semantic validation separate without a pass-through
+  module.
 * `async_sidecars.rs`, `anchored.rs`, and `obligations.rs` retain producer
   sidecars and trace-contract checks.
 * Invariant: malformed or incomplete trace contracts fail closed; no timing or
@@ -39,19 +38,20 @@ not inferred from NCU values.
 ### `sim/sm`
 
 * `issue.rs` is the SMSP issue-model facade. `issue/diagnostics.rs`,
-  `requests.rs`, `frontend.rs`, `pipelines.rs`, `async_copy.rs`,
-  `warp_state.rs`, `core_init.rs`, and `core_step.rs` are real child modules for diagnostics, request records, front end, readiness, async
-  copies, warp state, construction, memory, and cycle progression; large cycle
-  methods are further split into `core_step_schedule`, `schedule_frontend`,
-  `schedule_barriers`, and `schedule_control`.
+  `request_types.rs`, `core_state.rs`, `frontend.rs`, `pipelines.rs`,
+  `async_copy.rs`, `warp_state.rs`, `core_init.rs`, and `core_mem.rs` are
+  direct child modules for diagnostics, request records, `SmCore` state, the
+  front end, readiness, async copies, warp state, construction, and memory.
+  Cycle scheduling is implemented directly in the named children
+  `schedule_frontend.rs`, `schedule_barriers.rs`, and `schedule_control.rs`.
 * `replay.rs` is the launch/replay facade. `replay/coverage.rs`, `fast_warp.rs`,
-  `results.rs`, `placement.rs`, and `session.rs` separate coverage, fast-path
-  execution, result records, placement, and stream sessions; the session module
-  owns `session_stream`, `session_fast`, `session_l2`, and `session_results`.
+  `results.rs`, and `placement.rs` separate coverage, fast-path execution,
+  result records, and placement. `session_fast.rs`, `session_l2.rs`,
+  `session_results.rs`, and `session_stream.rs` are direct session children.
 * `system.rs` coordinates interleaved SM/L2/DRAM events. `system/queues.rs`,
-  `dram.rs`, `observers.rs`, and `execution.rs` isolate pending events,
-  service, observer accounting, and event coordination; execution is split into
-  `execution_loop`, `execution_completion`, and their focused child modules.
+  `dram.rs`, `observers.rs`, `event_loop.rs`, `event_helpers.rs`, and
+  `execution_completion.rs` directly isolate pending events, service, observer
+  accounting, event processing, helper validation, and completion.
 * `metrics.rs` owns `TraceMetrics`; `metrics/locality_mrc.rs` contains
   trace-local Fenwick/HOTL observers, `pipeline_activity.rs` contains activity
   counters, and `tests.rs` contains metric tests.
@@ -60,8 +60,10 @@ not inferred from NCU values.
 
 ### `sim/mem`
 
-* `l1.rs` is the sectored L1 facade. `l1/config_counters.rs`, `core.rs`, and
-  `accessors.rs` group configuration/counters, mutation, and access expansion.
+* `l1.rs` is the sectored L1 facade. `l1/config_counters.rs`,
+  `cache_state.rs`, `cache_ops.rs`, and `accessors.rs` group
+  configuration/counters, cache state and lookup/fill mutation, visibility and
+  merge operations, and access expansion.
 * `l2.rs` is the shared L2 facade. `l2/config_counters.rs` groups card/config
   and counter types; `l2/core.rs` contains request, fill, and completion logic.
 * `payload.rs` and `l1_visibility.rs` define payload and visibility contracts.
@@ -70,17 +72,17 @@ not inferred from NCU values.
 
 ### `sim/semantics` and `sim/engine`
 
-* `semantics/state.rs` declares `cache_boundary`, `typed_events`, and
-  `core_boundary`; `typed_events` further separates serialization and
-  validation contracts. These are typed report/state contracts, not schedulers.
+* `semantics/state.rs` declares `cache_boundary`, `core_boundary`,
+  `typed_events_serialization`, and `typed_events_validation`. These are typed
+  report/state contracts, not schedulers.
 * `sim-engine` supplies dependency/resource event ordering and does not own
   architecture-specific cache policy.
 
 ### `sim/direct_run`
 
 * `lib.rs` is the run/report facade; `reports.rs` holds report structures and
-  `runner.rs` owns the execution entry points (with `runner_config.rs` and
-  `runner_execute.rs` as its focused children).
+  `runner_config.rs` plus `runner_execute.rs` hold configuration and execution
+  entry points directly.
 * `metrics.rs` declares `l1`, `l2_dram`, `launch_occupancy`, and `pipeline_ipc`;
   the IPC module further separates SM86 pipeline helpers. All are post-replay,
   report-only attribution.
@@ -104,9 +106,10 @@ See [`COMPONENTS.md`](COMPONENTS.md) for the compact ownership table and
 
 ## Nested module examples
 
-`sim/sm::issue::core_step` owns `schedule_frontend`, `schedule_barriers`, and
-`schedule_control`; `sim/sm::replay::session` owns stream, fast-path, L2, and
-result helpers; `sim/trace::reader::preflight` owns access, allocation, and
-validation modules; and `sim/direct_run::metrics::pipeline_ipc` owns the SM86
-pipeline helper modules. These are ordinary Rust modules, not textual source
-concatenation.
+`sim/sm::issue` directly owns `schedule_frontend`, `schedule_barriers`, and
+`schedule_control`; `sim/sm::replay` directly owns stream, fast-path, L2, and
+result session modules; `sim/trace::reader` directly owns access, allocation,
+and semantic preflight modules; and `sim/direct_run::metrics::pipeline_ipc`
+contains the common projection plus descriptively named SM86 helper modules.
+These are ordinary Rust modules, not textual source concatenation or
+pass-through wrappers.

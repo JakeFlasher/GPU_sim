@@ -168,33 +168,38 @@ mod async_copy;
 mod core_init;
 #[path = "issue/core_mem.rs"]
 mod core_mem;
-#[path = "issue/core_step.rs"]
-mod core_step;
+#[path = "issue/core_state.rs"]
+mod core_state;
 #[path = "issue/diagnostics.rs"]
 mod diagnostics;
 #[path = "issue/frontend.rs"]
 mod frontend;
 #[path = "issue/pipelines.rs"]
 mod pipelines;
-#[path = "issue/requests.rs"]
-mod requests;
+#[path = "issue/request_types.rs"]
+mod request_types;
+#[path = "issue/schedule_barriers.rs"]
+mod schedule_barriers;
+#[path = "issue/schedule_control.rs"]
+mod schedule_control;
+#[path = "issue/schedule_frontend.rs"]
+mod schedule_frontend;
 #[path = "issue/warp_state.rs"]
 mod warp_state;
-pub use self::async_copy::*;
+#[allow(unused_imports)]
 pub(crate) use self::async_copy::*;
-pub use self::core_init::*;
-pub(crate) use self::core_init::*;
-pub use self::core_mem::*;
-pub(crate) use self::core_mem::*;
-pub use self::core_step::*;
-pub(crate) use self::core_step::*;
+pub use self::core_state::*;
+#[allow(unused_imports)]
+pub(crate) use self::core_state::*;
 pub use self::diagnostics::*;
+#[allow(unused_imports)]
 pub(crate) use self::diagnostics::*;
-pub use self::frontend::*;
+#[allow(unused_imports)]
 pub(crate) use self::frontend::*;
-pub use self::pipelines::*;
+#[allow(unused_imports)]
 pub(crate) use self::pipelines::*;
-pub use self::requests::*;
-pub(crate) use self::requests::*;
-pub use self::warp_state::*;
+pub use self::request_types::*;
+#[allow(unused_imports)]
+pub(crate) use self::request_types::*;
+#[allow(unused_imports)]
 pub(crate) use self::warp_state::*;

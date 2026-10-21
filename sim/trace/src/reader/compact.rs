@@ -1327,7 +1327,7 @@ impl<'a> ValidatedInstructionRef<'a> {
     }
 }
 
-pub(super) struct ValidatedPayload {
+pub(crate) struct ValidatedPayload {
     pub(super) block_index: i64,
     pub(super) records: u64,
     pub(super) block: ValidatedThreadblock,

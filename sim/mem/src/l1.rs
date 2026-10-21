@@ -54,13 +54,12 @@ use crate::SectorPayloadV1;
 
 #[path = "l1/accessors.rs"]
 mod accessors;
+#[path = "l1/cache_ops.rs"]
+mod cache_ops;
+#[path = "l1/cache_state.rs"]
+mod cache_state;
 #[path = "l1/config_counters.rs"]
 mod config_counters;
-#[path = "l1/core.rs"]
-mod core;
 pub use self::accessors::*;
-pub(crate) use self::accessors::*;
+pub use self::cache_state::*;
 pub use self::config_counters::*;
-pub(crate) use self::config_counters::*;
-pub use self::core::*;
-pub(crate) use self::core::*;

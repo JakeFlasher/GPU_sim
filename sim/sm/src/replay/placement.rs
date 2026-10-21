@@ -5,7 +5,7 @@ use super::*;
 /// Card-derived spatial-placement parameters. Only the architecture/SKU-local SM
 /// range crosses into replay; no label or target value is a simulator input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct PlacementConfig {
+pub(crate) struct PlacementConfig {
     pub(super) arch: ArchId,
     pub(super) sku: Sku,
     pub(super) sm_count: u32,

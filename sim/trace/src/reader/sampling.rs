@@ -1,5 +1,6 @@
 //! Trace sampling provenance and sidecar contracts; report-only.
 
+#[cfg(feature = "campaign")]
 use super::*;
 
 /// Method-specific provenance retained from a supported v2 sampling sidecar.

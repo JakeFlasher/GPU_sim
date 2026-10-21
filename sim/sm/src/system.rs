@@ -104,17 +104,29 @@ use sim_mem::{L1WriteLookupObserver, MemRole};
 
 #[path = "system/dram.rs"]
 mod dram;
-#[path = "system/execution.rs"]
-mod execution;
+#[path = "system/event_helpers.rs"]
+mod event_helpers;
+#[path = "system/event_loop.rs"]
+mod event_loop;
+#[path = "system/execution_completion.rs"]
+mod execution_completion;
 #[path = "system/observers.rs"]
 mod observers;
 #[path = "system/queues.rs"]
 mod queues;
 pub use self::dram::*;
+#[allow(unused_imports)]
 pub(crate) use self::dram::*;
-pub use self::execution::*;
-pub(crate) use self::execution::*;
+#[allow(unused_imports)]
+pub(crate) use self::event_helpers::*;
+pub use self::event_loop::*;
+#[allow(unused_imports)]
+pub(crate) use self::event_loop::*;
+pub use self::execution_completion::*;
+#[allow(unused_imports)]
+pub(crate) use self::execution_completion::*;
 pub use self::observers::*;
+#[allow(unused_imports)]
 pub(crate) use self::observers::*;
-pub use self::queues::*;
+#[allow(unused_imports)]
 pub(crate) use self::queues::*;

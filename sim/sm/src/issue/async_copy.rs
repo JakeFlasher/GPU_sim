@@ -170,7 +170,7 @@ impl AsyncCopyState {
 /// of [`WarpState`] preserves that structure's pre-async stride for scheduler
 /// scans while retaining direct, deterministic lookup for source responses.
 #[derive(Debug, Default)]
-pub(super) struct AsyncCopySlot {
+pub(crate) struct AsyncCopySlot {
     pub(super) state: Option<Box<AsyncCopyState>>,
 }
 

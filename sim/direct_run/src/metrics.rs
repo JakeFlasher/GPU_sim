@@ -24,12 +24,13 @@ mod launch_occupancy;
 #[path = "metrics/pipeline_ipc.rs"]
 mod pipeline_ipc;
 pub use self::l1::*;
+#[allow(unused_imports)]
 pub(crate) use self::l1::*;
-pub use self::l2_dram::*;
+#[allow(unused_imports)]
 pub(crate) use self::l2_dram::*;
-pub use self::launch_occupancy::*;
+#[allow(unused_imports)]
 pub(crate) use self::launch_occupancy::*;
-pub use self::pipeline_ipc::*;
+#[allow(unused_imports)]
 pub(crate) use self::pipeline_ipc::*;
 
 pub(super) struct Sm86MetricState<'a> {

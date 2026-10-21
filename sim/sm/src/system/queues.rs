@@ -13,10 +13,10 @@ use super::*;
 /// by the gate's event-vs-constant differential, seed 133).
 /// A `BTreeMap<bound, count>` rather than a heap because entries leave
 /// in L2Access-processing order, which is not bound order.
-pub(super) struct PendingBounds(pub(super) Vec<BTreeMap<u64, u32>>);
+pub(crate) struct PendingBounds(pub(super) Vec<BTreeMap<u64, u32>>);
 
 #[derive(Debug, Clone, Copy)]
-pub(super) enum PendingRemoval {
+pub(crate) enum PendingRemoval {
     Decrement { sm: usize, bound: u64, next: u32 },
     Remove { sm: usize, bound: u64 },
 }
@@ -101,7 +101,7 @@ impl PartialOrd for DueEntry {
 /// for responses and wakes. Response entries retain their semantic identity,
 /// so a typed snapshot can normalize an exact due cycle and delivery checks
 /// cannot accidentally pair two same-cycle responses by timestamp alone.
-pub(super) struct DueTimes {
+pub(crate) struct DueTimes {
     pub(super) entries: Vec<BinaryHeap<Reverse<DueEntry>>>,
     pub(super) next_insertion: u64,
 }

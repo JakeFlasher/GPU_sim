@@ -3,7 +3,7 @@
 use super::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(super) struct InstructionLineKey {
+pub(crate) struct InstructionLineKey {
     pub(super) function_unique_id: i32,
     pub(super) line: u64,
 }
@@ -203,7 +203,7 @@ impl InstructionStreamBuffer {
 /// independently carded dependent-DRAM latency; L0/L1 geometry and transport
 /// come from the architecture capability above.
 #[derive(Debug, Clone)]
-pub(super) struct InstructionFrontEndState {
+pub(crate) struct InstructionFrontEndState {
     pub(super) config: InstructionFrontEnd,
     pub(super) l0: [SetAssociativeInstructionCache; SUB_CORES],
     pub(super) l1: SetAssociativeInstructionCache,
@@ -715,7 +715,7 @@ impl InstructionFrontEndState {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct ImmediateConstantCacheState {
+pub(crate) struct ImmediateConstantCacheState {
     pub(super) config: ImmediateConstantCache,
     /// Per-set LRU tags, oldest at the front.  A line key is used as its tag
     /// identity after the set index has been derived; this is sufficient for
